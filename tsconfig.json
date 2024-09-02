@@ -4,6 +4,8 @@
 		"strict": true,
 		"noImplicitAny": true,
 		"noImplicitOverride": true,
+		"noUncheckedIndexedAccess": true,
+		"noPropertyAccessFromIndexSignature": true,
 		"types": ["@types/dom-webcodecs"]
 	},
 	"include": [
