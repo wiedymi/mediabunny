@@ -10,8 +10,31 @@ class StreamTarget extends Target {
 
 }
 
+abstract class OutputFormat {
+    
+}
+
+class Mp4OutputFormat extends OutputFormat {
+    constructor(options: {
+        fastStart: false | 'in-memory' | 'fragmented' | {
+            expectedVideoChunks?: number,
+            expectedAudioChunks?: number
+        },
+    }) {
+        super();
+    }
+}
+
+class WebMOutputFormat extends OutputFormat {
+
+}
+
+class MkvOutputFormat extends OutputFormat {
+
+}
+
 type OutputOptions = {
-    format: 'mp4' | 'webm' | 'mkv',
+    format: OutputFormat,
     target: Target
 };
 
@@ -41,7 +64,16 @@ abstract class InputSource {
 
 }
 
+class InputFormat {
+    constructor(format: string) {}
+}
+
+const MP4_INPUT_FORMAT = new InputFormat('mp4');
+const WEB_M_INPUT_FORMAT = new InputFormat('webm');
+const MKV_INPUT_FORMAT = new InputFormat('mkv');
+
 type InputOptions = {
+    formats: InputFormat[],
     source: InputSource
 };
 
@@ -114,7 +146,9 @@ class MediaStreamTrackAudioSource extends AudioSource {
 }
 
 let output = new Output({
-    format: 'mp4',
+    format: new Mp4OutputFormat({
+        fastStart: false
+    }),
     target: new ArrayBufferTarget()
 });
 
