@@ -5,8 +5,7 @@
 		"noImplicitAny": true,
 		"noImplicitOverride": true,
 		"noUncheckedIndexedAccess": true,
-		"noPropertyAccessFromIndexSignature": true,
-		"types": ["@types/dom-webcodecs"]
+		"noPropertyAccessFromIndexSignature": true
 	},
 	"include": [
 		"src/**/*"

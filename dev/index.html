@@ -1,0 +1,76 @@
+<script src="../dist/metamuxer.js"></script>
+
+<script type="module">
+	function download(blob, filename) {
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = filename;
+		a.click();
+		URL.revokeObjectURL(url);
+	}
+
+	function sliceAudioBuffer(audioBuffer, newLengthInSeconds, audioContext) {
+		const sampleRate = audioBuffer.sampleRate;
+		const sliceLength = Math.min(newLengthInSeconds * sampleRate, audioBuffer.length);
+
+		// Create a new buffer with the desired duration and the same sample rate
+		const slicedBuffer = audioContext.createBuffer(
+			audioBuffer.numberOfChannels,
+			sliceLength,
+			sampleRate
+		);
+
+		// Copy the data from each channel of the original buffer to the new buffer
+		for (let channel = 0; channel < audioBuffer.numberOfChannels; channel++) {
+			const channelData = audioBuffer.getChannelData(channel);
+			const slicedChannelData = slicedBuffer.getChannelData(channel);
+			slicedChannelData.set(channelData.subarray(0, sliceLength));
+		}
+
+		return slicedBuffer;
+	}
+
+	const canvas = document.createElement('canvas');
+	canvas.width = 1280;
+	canvas.height = 720;
+	const context = canvas.getContext('2d');
+
+	let format = new Metamuxer.Mp4OutputFormat({ fastStart: false });
+	let target = new Metamuxer.ArrayBufferTarget();
+
+	let output = new Metamuxer.Output({ format, target });
+
+	let videoSource = new Metamuxer.CanvasSource(canvas, {
+		codec: 'vp8',
+		bitrate: 1e6
+	});
+	let audioSource = new Metamuxer.AudioBufferSource({
+		codec: 'aac',
+		bitrate: 128e3,
+	});
+
+	output.addTrack(videoSource);
+	output.addTrack(audioSource);
+
+	output.start();
+
+	for (let i = 0; i < 100; i++) {
+		context.fillStyle = ['red', 'green', 'blue', 'yellow'][i % 4];
+		context.fillRect(canvas.width * Math.random(), canvas.height * Math.random(), canvas.width * Math.random(), canvas.height * Math.random());
+
+		videoSource.digest(i / 10, 1 / 10);
+	}
+
+	let audioContext = new AudioContext();
+	let audioBuffer = await audioContext.decodeAudioData(await (await fetch('./CantinaBand60.wav')).arrayBuffer());
+	let length = 10;
+	let slicedAudioBuffer = sliceAudioBuffer(audioBuffer, length, audioContext);
+
+	audioSource.digest(slicedAudioBuffer);
+
+	await output.finalize();
+
+	console.log(target);
+	download(new Blob([target.buffer]), 'test.mp4');
+</script>
