@@ -11,4 +11,6 @@ export abstract class Muxer {
 	abstract addEncodedVideoChunk(track: OutputVideoTrack, chunk: EncodedVideoChunk, meta?: EncodedVideoChunkMetadata, compositionTimeOffset?: number): void;
 	abstract addEncodedAudioChunk(track: OutputAudioTrack, chunk: EncodedAudioChunk, meta?: EncodedAudioChunkMetadata): void;
 	abstract finalize(): void;
+
+	beforeTrackAdd(track: OutputTrack) {}
 }

@@ -177,12 +177,9 @@ export class IsobmffMuxer extends Muxer {
 	}
 
 	start() {
-		this.#writeHeader();
-	}
-
-	#writeHeader() {
 		const holdsAvc = this.output.tracks.some(x => x.type === 'video' && x.source.codec === 'avc');
-
+		
+		// Write the header
 		this.writeBox(ftyp({
 			holdsAvc: holdsAvc,
 			fragmented: this.#format.options.fastStart === 'fragmented'
@@ -248,8 +245,8 @@ export class IsobmffMuxer extends Muxer {
 		// TODO Make proper errors for these
 		assert(meta);
 		assert(meta.decoderConfig);
-		assert(meta.decoderConfig.codedWidth);
-		assert(meta.decoderConfig.codedHeight);
+		assert(meta.decoderConfig.codedWidth !== undefined);
+		assert(meta.decoderConfig.codedHeight !== undefined);
 
 		const newTrackData: IsobmffTrackData = {
 			track,
@@ -509,6 +506,10 @@ export class IsobmffMuxer extends Muxer {
 	}
 
 	#validateTimestamp(trackData: IsobmffTrackData, presentationTimestamp: number, decodeTimestamp: number) {
+		if (decodeTimestamp < 0) {
+			throw new Error(`Timestamps must be non-negative (got ${decodeTimestamp}s).`);
+		}
+
 		if (trackData.firstDecodeTimestamp === null) {
 			trackData.firstDecodeTimestamp = decodeTimestamp;
 		}

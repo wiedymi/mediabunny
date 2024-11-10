@@ -50,6 +50,8 @@ export class Output {
 			source
 		} as OutputTrack;
 
+		this.muxer.beforeTrackAdd(track);
+
 		this.tracks.push(track);
 		source.connectedTrack = track;
 	}

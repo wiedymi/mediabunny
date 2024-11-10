@@ -1,4 +1,4 @@
-import { assert, isU32, last, TransformationMatrix } from '../misc';
+import { toUint8Array, assert, isU32, last, TransformationMatrix } from '../misc';
 import { AudioCodec, AudioSource, VideoCodec, VideoSource } from '../source';
 import { GLOBAL_TIMESCALE, intoTimescale, IsobmffAudioTrackData, IsobmffTrackData, IsobmffVideoTrackData, Sample } from './isobmff_muxer';
 
@@ -295,6 +295,7 @@ export const hdlr = (componentSubtype: string) => fullBox('hdlr', 0, 0, [
 	u32(0), // Component manufacturer
 	u32(0), // Component flags
 	u32(0), // Component flags mask
+	// TODO:
 	ascii('mp4-muxer-hdlr', true) // Component name
 ]);
 
@@ -401,16 +402,19 @@ export const videoSampleDescription = (
 	VIDEO_CODEC_TO_CONFIGURATION_BOX[trackData.track.source.codec](trackData)
 ]);
 
+// TODO: All muxers should ensure that the decoder config description is provided for the codecs that require it. This
+// is relevant when the user skips WebCodecs and uses their own encoder.
+
 /** AVC Configuration Box: Provides additional information to the decoder. */
 export const avcC = (trackData: IsobmffVideoTrackData) => trackData.info.decoderConfig && box('avcC', [
 	// For AVC, description is an AVCDecoderConfigurationRecord, so nothing else to do here
-	...new Uint8Array(trackData.info.decoderConfig.description as ArrayBuffer)
+	...toUint8Array(trackData.info.decoderConfig.description!)
 ]);
 
 /** HEVC Configuration Box: Provides additional information to the decoder. */
 export const hvcC = (trackData: IsobmffVideoTrackData) => trackData.info.decoderConfig && box('hvcC', [
 	// For HEVC, description is a HEVCDecoderConfigurationRecord, so nothing else to do here
-	...new Uint8Array(trackData.info.decoderConfig.description as ArrayBuffer)
+	...toUint8Array(trackData.info.decoderConfig.description!)
 ]);
 
 /** VP Configuration Box: Provides additional information to the decoder. */
@@ -489,7 +493,7 @@ export const soundSampleDescription = (
 
 /** MPEG-4 Elementary Stream Descriptor Box. */
 export const esds = (trackData: IsobmffAudioTrackData) => {
-	let description = new Uint8Array(trackData.info.decoderConfig.description as ArrayBuffer);
+	let description = toUint8Array(trackData.info.decoderConfig.description ?? new ArrayBuffer(0));
 
 	// TODO Compact the 808080 stuff, it's superfluous
 
