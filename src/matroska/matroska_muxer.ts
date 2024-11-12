@@ -17,7 +17,7 @@ type InternalMediaChunk = {
 	data: Uint8Array,
 	type: 'key' | 'delta',
 	timestamp: number,
-	duration: number | null,
+	duration: number,
 	additions: Uint8Array | null,
 };
 
@@ -42,7 +42,7 @@ type MatroskaTrackData = {
 
 	firstTimestamp: number | null,
 	lastKeyFrameTimestamp: number | null,
-	lastWrittenTimestamp: number | null
+	lastWrittenMsTimestamp: number | null
 } & ({
 	track: OutputVideoTrack,
 	type: 'video',
@@ -75,7 +75,6 @@ const CODEC_STRING_MAP: Record<VideoCodec | AudioCodec, string> = {
 	vorbis: 'A_VORBIS',
 };
 
-// TODO: Unify the timestamps in this. Some timestamps are in us, some are in ms, yuck.
 // TODO: Perhaps we can make this muxer always be streamable. We can do it similar to the MP4 muxer, where for each 
 // cluster, we hold onto all of the chunks (called sample there), until it's done, and then we write it out in one go.
 // This way, we can set proper headers. Will just mean a bit more memory usage.
@@ -106,7 +105,7 @@ export class MatroskaMuxer extends Muxer {
 	#cues: EBMLElement | null = null;
 
 	#currentCluster: EBMLElement | null = null;
-	#currentClusterTimestamp: number | null = null;
+	#currentClusterMsTimestamp: number | null = null;
 	#trackDatasInCurrentCluster = new Set<MatroskaTrackData>();
 
 	#duration = 0;
@@ -465,7 +464,7 @@ export class MatroskaMuxer extends Muxer {
 		return this.dataOffsets.get(this.#segment)!;
 	}
 
-	#getVideoTrackData(track: OutputVideoTrack, chunk: EncodedVideoChunk, meta?: EncodedVideoChunkMetadata) {
+	#getVideoTrackData(track: OutputVideoTrack, meta?: EncodedVideoChunkMetadata) {
 		const existingTrackData = this.#trackDatas.find(x => x.track === track);
 		if (existingTrackData) {
 			return existingTrackData as MatroskaVideoTrackData;
@@ -488,7 +487,7 @@ export class MatroskaMuxer extends Muxer {
 			chunkQueue: [],
 			firstTimestamp: null,
 			lastKeyFrameTimestamp: null,
-			lastWrittenTimestamp: null
+			lastWrittenMsTimestamp: null
 		};
 
 		this.#trackDatas.push(newTrackData);
@@ -497,7 +496,7 @@ export class MatroskaMuxer extends Muxer {
 		return newTrackData;
 	}
 
-	#getAudioTrackData(track: OutputAudioTrack, chunk: EncodedAudioChunk, meta?: EncodedAudioChunkMetadata) {
+	#getAudioTrackData(track: OutputAudioTrack, meta?: EncodedAudioChunkMetadata) {
 		const existingTrackData = this.#trackDatas.find(x => x.track === track);
 		if (existingTrackData) {
 			return existingTrackData as MatroskaAudioTrackData;
@@ -518,7 +517,7 @@ export class MatroskaMuxer extends Muxer {
 			chunkQueue: [],
 			firstTimestamp: null,
 			lastKeyFrameTimestamp: null,
-			lastWrittenTimestamp: null
+			lastWrittenMsTimestamp: null
 		};
 
 		this.#trackDatas.push(newTrackData);
@@ -528,7 +527,7 @@ export class MatroskaMuxer extends Muxer {
 	}
 	
 	addEncodedVideoChunk(track: OutputVideoTrack, chunk: EncodedVideoChunk, meta?: EncodedVideoChunkMetadata) {
-		const trackData = this.#getVideoTrackData(track, chunk, meta);
+		const trackData = this.#getVideoTrackData(track, meta);
 
 		let videoChunk = this.#createInternalChunk(trackData, chunk);
 		if (track.source.codec === 'vp9') this.#fixVP9ColorSpace(trackData, videoChunk);
@@ -541,7 +540,7 @@ export class MatroskaMuxer extends Muxer {
 	}
 
 	addEncodedAudioChunk(track: OutputAudioTrack, chunk: EncodedAudioChunk, meta?: EncodedAudioChunkMetadata) {
-		const trackData = this.#getAudioTrackData(track, chunk, meta);
+		const trackData = this.#getAudioTrackData(track, meta);
 
 		let audioChunk = this.#createInternalChunk(trackData, chunk);
 
@@ -702,7 +701,7 @@ export class MatroskaMuxer extends Muxer {
 			data,
 			type: chunk.type,
 			timestamp: adjustedTimestamp,
-			duration: chunk.duration,
+			duration: (chunk.duration ?? 0) / 1e6,
 			additions: null
 		};
 
@@ -710,27 +709,27 @@ export class MatroskaMuxer extends Muxer {
 	}
 
 	#validateTimestamp(trackData: MatroskaTrackData, chunk: EncodedVideoChunk | EncodedAudioChunk) {
-		let timestamp = chunk.timestamp;
+		let timestampInSeconds = chunk.timestamp / 1e6;
 
-		if (timestamp < 0) {
-			throw new Error(`Timestamps must be non-negative (got ${timestamp}s).`);
+		if (timestampInSeconds < 0) {
+			throw new Error(`Timestamps must be non-negative (got ${timestampInSeconds}s).`);
 		}
 
 		if (trackData.firstTimestamp === null) {
-			trackData.firstTimestamp = timestamp;
+			trackData.firstTimestamp = timestampInSeconds;
 		}
 
-		timestamp -= trackData.firstTimestamp;
+		timestampInSeconds -= trackData.firstTimestamp;
 
-		if (trackData.lastKeyFrameTimestamp !== null && timestamp < trackData.lastKeyFrameTimestamp) {
-			throw new Error(`Timestamp cannot be before last key frame's timestamp (got ${timestamp / 1e6}s, last key frame at ${trackData.lastKeyFrameTimestamp / 1e6}s).`);
+		if (trackData.lastKeyFrameTimestamp !== null && timestampInSeconds < trackData.lastKeyFrameTimestamp) {
+			throw new Error(`Timestamp cannot be before last key frame's timestamp (got ${timestampInSeconds}s, last key frame at ${trackData.lastKeyFrameTimestamp}s).`);
 		}
 
 		if (chunk.type === 'key') {
-			trackData.lastKeyFrameTimestamp = timestamp;
+			trackData.lastKeyFrameTimestamp = timestampInSeconds;
 		}
 
-		return timestamp;
+		return timestampInSeconds;
 	}
 
 	/** Writes a block containing media data to the file. */
@@ -743,7 +742,7 @@ export class MatroskaMuxer extends Muxer {
 			this.#createSegment();
 		}
 
-		let msTimestamp = Math.floor(chunk.timestamp / 1000);
+		let msTimestamp = Math.floor(1000 * chunk.timestamp);
 		// We can only finalize this fragment (and begin a new one) if we know that each track will be able to
 		// start the new one with a key frame.
 		const keyFrameQueuedEverywhere = this.#trackDatas.every(otherTrackData => {
@@ -757,12 +756,12 @@ export class MatroskaMuxer extends Muxer {
 
 		if (
 			!this.#currentCluster ||
-			(keyFrameQueuedEverywhere && msTimestamp - this.#currentClusterTimestamp! >= 1000)
+			(keyFrameQueuedEverywhere && msTimestamp - this.#currentClusterMsTimestamp! >= 1000)
 		) {
 			this.#createNewCluster(msTimestamp);
 		}
 
-		let relativeTimestamp = msTimestamp - this.#currentClusterTimestamp!;
+		let relativeTimestamp = msTimestamp - this.#currentClusterMsTimestamp!;
 		if (relativeTimestamp < 0) {
 			// The chunk lies outside of the current cluster
 			return;
@@ -783,7 +782,7 @@ export class MatroskaMuxer extends Muxer {
 		view.setUint8(0, 0x80 | trackData.track.id);
 		view.setInt16(1, relativeTimestamp, false);
 
-		let msDuration = Math.floor((chunk.duration ?? 0) / 1000);
+		let msDuration = Math.floor(1000 * chunk.duration);
 
 		if (msDuration === 0 && !chunk.additions) {
 			// No duration or additions, we can write out a SimpleBlock
@@ -800,21 +799,21 @@ export class MatroskaMuxer extends Muxer {
 					prelude,
 					chunk.data
 				] },
-				chunk.type === 'delta' ? { id: EBMLId.ReferenceBlock, data: new EBMLSignedInt(trackData.lastWrittenTimestamp! - msTimestamp) } : null,
-				chunk.duration !== null ? { id: EBMLId.BlockDuration, data: msDuration } : null,
+				chunk.type === 'delta' ? { id: EBMLId.ReferenceBlock, data: new EBMLSignedInt(trackData.lastWrittenMsTimestamp! - msTimestamp) } : null,
+				msDuration > 0 ? { id: EBMLId.BlockDuration, data: msDuration } : null,
 				chunk.additions ? { id: EBMLId.BlockAdditions, data: chunk.additions } : null
 			] };
 			this.writeEBML(blockGroup);
 		}
 
 		this.#duration = Math.max(this.#duration, msTimestamp + msDuration);
-		trackData.lastWrittenTimestamp = msTimestamp;
+		trackData.lastWrittenMsTimestamp = msTimestamp;
 
 		this.#trackDatasInCurrentCluster.add(trackData);
 	}
 
 	/** Creates a new Cluster element to contain media chunks. */
-	#createNewCluster(timestamp: number) {
+	#createNewCluster(msTimestamp: number) {
 		if (this.#currentCluster && !this.#format.options.streaming) {
 			this.#finalizeCurrentCluster();
 		}
@@ -829,12 +828,12 @@ export class MatroskaMuxer extends Muxer {
 			id: EBMLId.Cluster,
 			size: this.#format.options.streaming ? -1 : CLUSTER_SIZE_BYTES,
 			data: [
-				{ id: EBMLId.Timestamp, data: timestamp }
+				{ id: EBMLId.Timestamp, data: msTimestamp }
 			]
 		};
 		this.writeEBML(this.#currentCluster);
 
-		this.#currentClusterTimestamp = timestamp;
+		this.#currentClusterMsTimestamp = msTimestamp;
 		this.#trackDatasInCurrentCluster.clear();
 	}
 
@@ -863,7 +862,7 @@ export class MatroskaMuxer extends Muxer {
 		// Add a CuePoint to the Cues element for better seeking
 		// TODO: Should this include subtitle tracks?
 		(this.#cues.data as EBML[]).push({ id: EBMLId.CuePoint, data: [
-			{ id: EBMLId.CueTime, data: this.#currentClusterTimestamp! },
+			{ id: EBMLId.CueTime, data: this.#currentClusterMsTimestamp! },
 			// We only write out cues for tracks that have at least one chunk in this cluster
 			...[...this.#trackDatasInCurrentCluster].map(trackData => {
 				return { id: EBMLId.CueTrackPositions, data: [

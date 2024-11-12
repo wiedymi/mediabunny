@@ -1370,7 +1370,7 @@ var Metamuxer = (() => {
       upperBound += 4096;
       return upperBound;
     }
-    #getVideoTrackData(track, chunk, meta) {
+    #getVideoTrackData(track, meta) {
       const existingTrackData = this.#trackDatas.find((x) => x.track === track);
       if (existingTrackData) {
         return existingTrackData;
@@ -1405,7 +1405,7 @@ var Metamuxer = (() => {
       this.#trackDatas.sort((a, b) => a.track.id - b.track.id);
       return newTrackData;
     }
-    #getAudioTrackData(track, chunk, meta) {
+    #getAudioTrackData(track, meta) {
       const existingTrackData = this.#trackDatas.find((x) => x.track === track);
       if (existingTrackData) {
         return existingTrackData;
@@ -1439,7 +1439,7 @@ var Metamuxer = (() => {
       return newTrackData;
     }
     addEncodedVideoChunk(track, chunk, meta) {
-      const trackData = this.#getVideoTrackData(track, chunk, meta);
+      const trackData = this.#getVideoTrackData(track, meta);
       if (typeof this.#format.options.fastStart === "object" && trackData.samples.length === this.#format.options.fastStart.expectedVideoChunks) {
         throw new Error(`Cannot add more video chunks than specified in 'fastStart' (${this.#format.options.fastStart.expectedVideoChunks}).`);
       }
@@ -1452,7 +1452,7 @@ var Metamuxer = (() => {
       }
     }
     addEncodedAudioChunk(track, chunk, meta) {
-      const trackData = this.#getAudioTrackData(track, chunk, meta);
+      const trackData = this.#getAudioTrackData(track, meta);
       if (typeof this.#format.options.fastStart === "object" && trackData.samples.length === this.#format.options.fastStart.expectedAudioChunks) {
         throw new Error(`Cannot add more audio chunks than specified in 'fastStart' (${this.#format.options.fastStart.expectedAudioChunks}).`);
       }
@@ -1874,7 +1874,7 @@ var Metamuxer = (() => {
       this.#segmentDuration = null;
       this.#cues = null;
       this.#currentCluster = null;
-      this.#currentClusterTimestamp = null;
+      this.#currentClusterMsTimestamp = null;
       this.#trackDatasInCurrentCluster = /* @__PURE__ */ new Set();
       this.#duration = 0;
       this.#writer = output.writer;
@@ -1892,7 +1892,7 @@ var Metamuxer = (() => {
     #segmentDuration;
     #cues;
     #currentCluster;
-    #currentClusterTimestamp;
+    #currentClusterMsTimestamp;
     #trackDatasInCurrentCluster;
     #duration;
     #writeByte(value) {
@@ -2177,7 +2177,7 @@ var Metamuxer = (() => {
       assert(this.#segment);
       return this.dataOffsets.get(this.#segment);
     }
-    #getVideoTrackData(track, chunk, meta) {
+    #getVideoTrackData(track, meta) {
       const existingTrackData = this.#trackDatas.find((x) => x.track === track);
       if (existingTrackData) {
         return existingTrackData;
@@ -2197,13 +2197,13 @@ var Metamuxer = (() => {
         chunkQueue: [],
         firstTimestamp: null,
         lastKeyFrameTimestamp: null,
-        lastWrittenTimestamp: null
+        lastWrittenMsTimestamp: null
       };
       this.#trackDatas.push(newTrackData);
       this.#trackDatas.sort((a, b) => a.track.id - b.track.id);
       return newTrackData;
     }
-    #getAudioTrackData(track, chunk, meta) {
+    #getAudioTrackData(track, meta) {
       const existingTrackData = this.#trackDatas.find((x) => x.track === track);
       if (existingTrackData) {
         return existingTrackData;
@@ -2221,14 +2221,14 @@ var Metamuxer = (() => {
         chunkQueue: [],
         firstTimestamp: null,
         lastKeyFrameTimestamp: null,
-        lastWrittenTimestamp: null
+        lastWrittenMsTimestamp: null
       };
       this.#trackDatas.push(newTrackData);
       this.#trackDatas.sort((a, b) => a.track.id - b.track.id);
       return newTrackData;
     }
     addEncodedVideoChunk(track, chunk, meta) {
-      const trackData = this.#getVideoTrackData(track, chunk, meta);
+      const trackData = this.#getVideoTrackData(track, meta);
       let videoChunk = this.#createInternalChunk(trackData, chunk);
       if (track.source.codec === "vp9") this.#fixVP9ColorSpace(trackData, videoChunk);
       trackData.chunkQueue.push(videoChunk);
@@ -2236,7 +2236,7 @@ var Metamuxer = (() => {
       this.#writer.flush();
     }
     addEncodedAudioChunk(track, chunk, meta) {
-      const trackData = this.#getAudioTrackData(track, chunk, meta);
+      const trackData = this.#getAudioTrackData(track, meta);
       let audioChunk = this.#createInternalChunk(trackData, chunk);
       trackData.chunkQueue.push(audioChunk);
       this.#interleaveChunks();
@@ -2375,27 +2375,27 @@ var Metamuxer = (() => {
         data,
         type: chunk.type,
         timestamp: adjustedTimestamp,
-        duration: chunk.duration,
+        duration: (chunk.duration ?? 0) / 1e6,
         additions: null
       };
       return internalChunk;
     }
     #validateTimestamp(trackData, chunk) {
-      let timestamp = chunk.timestamp;
-      if (timestamp < 0) {
-        throw new Error(`Timestamps must be non-negative (got ${timestamp}s).`);
+      let timestampInSeconds = chunk.timestamp / 1e6;
+      if (timestampInSeconds < 0) {
+        throw new Error(`Timestamps must be non-negative (got ${timestampInSeconds}s).`);
       }
       if (trackData.firstTimestamp === null) {
-        trackData.firstTimestamp = timestamp;
+        trackData.firstTimestamp = timestampInSeconds;
       }
-      timestamp -= trackData.firstTimestamp;
-      if (trackData.lastKeyFrameTimestamp !== null && timestamp < trackData.lastKeyFrameTimestamp) {
-        throw new Error(`Timestamp cannot be before last key frame's timestamp (got ${timestamp / 1e6}s, last key frame at ${trackData.lastKeyFrameTimestamp / 1e6}s).`);
+      timestampInSeconds -= trackData.firstTimestamp;
+      if (trackData.lastKeyFrameTimestamp !== null && timestampInSeconds < trackData.lastKeyFrameTimestamp) {
+        throw new Error(`Timestamp cannot be before last key frame's timestamp (got ${timestampInSeconds}s, last key frame at ${trackData.lastKeyFrameTimestamp}s).`);
       }
       if (chunk.type === "key") {
-        trackData.lastKeyFrameTimestamp = timestamp;
+        trackData.lastKeyFrameTimestamp = timestampInSeconds;
       }
-      return timestamp;
+      return timestampInSeconds;
     }
     /** Writes a block containing media data to the file. */
     #writeBlock(trackData, chunk) {
@@ -2403,7 +2403,7 @@ var Metamuxer = (() => {
         this.#createTracks();
         this.#createSegment();
       }
-      let msTimestamp = Math.floor(chunk.timestamp / 1e3);
+      let msTimestamp = Math.floor(1e3 * chunk.timestamp);
       const keyFrameQueuedEverywhere = this.#trackDatas.every((otherTrackData) => {
         if (trackData === otherTrackData) {
           return chunk.type === "key";
@@ -2411,10 +2411,10 @@ var Metamuxer = (() => {
         const firstQueuedSample = otherTrackData.chunkQueue[0];
         return firstQueuedSample && firstQueuedSample.type === "key";
       });
-      if (!this.#currentCluster || keyFrameQueuedEverywhere && msTimestamp - this.#currentClusterTimestamp >= 1e3) {
+      if (!this.#currentCluster || keyFrameQueuedEverywhere && msTimestamp - this.#currentClusterMsTimestamp >= 1e3) {
         this.#createNewCluster(msTimestamp);
       }
-      let relativeTimestamp = msTimestamp - this.#currentClusterTimestamp;
+      let relativeTimestamp = msTimestamp - this.#currentClusterMsTimestamp;
       if (relativeTimestamp < 0) {
         return;
       }
@@ -2428,7 +2428,7 @@ var Metamuxer = (() => {
       let view2 = new DataView(prelude.buffer);
       view2.setUint8(0, 128 | trackData.track.id);
       view2.setInt16(1, relativeTimestamp, false);
-      let msDuration = Math.floor((chunk.duration ?? 0) / 1e3);
+      let msDuration = Math.floor(1e3 * chunk.duration);
       if (msDuration === 0 && !chunk.additions) {
         view2.setUint8(3, Number(chunk.type === "key") << 7);
         let simpleBlock = { id: 163 /* SimpleBlock */, data: [
@@ -2442,18 +2442,18 @@ var Metamuxer = (() => {
             prelude,
             chunk.data
           ] },
-          chunk.type === "delta" ? { id: 251 /* ReferenceBlock */, data: new EBMLSignedInt(trackData.lastWrittenTimestamp - msTimestamp) } : null,
-          chunk.duration !== null ? { id: 155 /* BlockDuration */, data: msDuration } : null,
+          chunk.type === "delta" ? { id: 251 /* ReferenceBlock */, data: new EBMLSignedInt(trackData.lastWrittenMsTimestamp - msTimestamp) } : null,
+          msDuration > 0 ? { id: 155 /* BlockDuration */, data: msDuration } : null,
           chunk.additions ? { id: 30113 /* BlockAdditions */, data: chunk.additions } : null
         ] };
         this.writeEBML(blockGroup);
       }
       this.#duration = Math.max(this.#duration, msTimestamp + msDuration);
-      trackData.lastWrittenTimestamp = msTimestamp;
+      trackData.lastWrittenMsTimestamp = msTimestamp;
       this.#trackDatasInCurrentCluster.add(trackData);
     }
     /** Creates a new Cluster element to contain media chunks. */
-    #createNewCluster(timestamp) {
+    #createNewCluster(msTimestamp) {
       if (this.#currentCluster && !this.#format.options.streaming) {
         this.#finalizeCurrentCluster();
       }
@@ -2461,11 +2461,11 @@ var Metamuxer = (() => {
         id: 524531317 /* Cluster */,
         size: this.#format.options.streaming ? -1 : CLUSTER_SIZE_BYTES,
         data: [
-          { id: 231 /* Timestamp */, data: timestamp }
+          { id: 231 /* Timestamp */, data: msTimestamp }
         ]
       };
       this.writeEBML(this.#currentCluster);
-      this.#currentClusterTimestamp = timestamp;
+      this.#currentClusterMsTimestamp = msTimestamp;
       this.#trackDatasInCurrentCluster.clear();
     }
     #finalizeCurrentCluster() {
@@ -2478,7 +2478,7 @@ var Metamuxer = (() => {
       let clusterOffsetFromSegment = this.offsets.get(this.#currentCluster) - this.#segmentDataOffset;
       assert(this.#cues);
       this.#cues.data.push({ id: 187 /* CuePoint */, data: [
-        { id: 179 /* CueTime */, data: this.#currentClusterTimestamp },
+        { id: 179 /* CueTime */, data: this.#currentClusterMsTimestamp },
         // We only write out cues for tracks that have at least one chunk in this cluster
         ...[...this.#trackDatasInCurrentCluster].map((trackData) => {
           return { id: 183 /* CueTrackPositions */, data: [

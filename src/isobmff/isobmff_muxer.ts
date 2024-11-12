@@ -237,7 +237,7 @@ export class IsobmffMuxer extends Muxer {
 		return upperBound;
 	}
 
-	#getVideoTrackData(track: OutputVideoTrack, chunk: EncodedVideoChunk, meta?: EncodedVideoChunkMetadata) {
+	#getVideoTrackData(track: OutputVideoTrack, meta?: EncodedVideoChunkMetadata) {
 		const existingTrackData = this.#trackDatas.find(x => x.track === track);
 		if (existingTrackData) {
 			return existingTrackData;
@@ -278,7 +278,7 @@ export class IsobmffMuxer extends Muxer {
 		return newTrackData;
 	}
 
-	#getAudioTrackData(track: OutputAudioTrack, chunk: EncodedAudioChunk, meta?: EncodedAudioChunkMetadata) {
+	#getAudioTrackData(track: OutputAudioTrack, meta?: EncodedAudioChunkMetadata) {
 		const existingTrackData = this.#trackDatas.find(x => x.track === track);
 		if (existingTrackData) {
 			return existingTrackData;
@@ -318,7 +318,7 @@ export class IsobmffMuxer extends Muxer {
 	}
 
 	addEncodedVideoChunk(track: OutputVideoTrack, chunk: EncodedVideoChunk, meta?: EncodedVideoChunkMetadata) {
-		const trackData = this.#getVideoTrackData(track, chunk, meta);
+		const trackData = this.#getVideoTrackData(track, meta);
 
 		if (
 			typeof this.#format.options.fastStart === 'object' &&
@@ -341,7 +341,7 @@ export class IsobmffMuxer extends Muxer {
 	}
 
 	addEncodedAudioChunk(track: OutputAudioTrack, chunk: EncodedAudioChunk, meta?: EncodedAudioChunkMetadata) {
-		const trackData = this.#getAudioTrackData(track, chunk, meta);
+		const trackData = this.#getAudioTrackData(track, meta);
 
 		if (
 			typeof this.#format.options.fastStart === 'object' &&
