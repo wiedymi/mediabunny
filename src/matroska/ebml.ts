@@ -1,7 +1,7 @@
 export interface EBMLElement {
 	id: number,
 	size?: number,
-	data: number | string | Uint8Array | EBMLFloat32 | EBMLFloat64 | (EBML | null)[]
+	data: number | string | Uint8Array | EBMLFloat32 | EBMLFloat64 | EBMLSignedInt | (EBML | null)[]
 }
 
 export type EBML = EBMLElement | Uint8Array | (EBML | null)[];
@@ -17,6 +17,15 @@ export class EBMLFloat32 {
 
 /** Wrapper around a number to be able to differentiate it in the writer. */
 export class EBMLFloat64 {
+	value: number;
+
+	constructor(value: number) {
+		this.value = value;
+	}
+}
+
+/** Wrapper around a number to be able to differentiate it in the writer. */
+export class EBMLSignedInt {
 	value: number;
 
 	constructor(value: number) {
@@ -83,7 +92,6 @@ export enum EBMLId {
 }
 
 export const measureUnsignedInt = (value: number) => {
-	// Force to 32-bit unsigned integer
 	if (value < (1 << 8)) {
 		return 1;
 	} else if (value < (1 << 16)) {
@@ -93,6 +101,22 @@ export const measureUnsignedInt = (value: number) => {
 	} else if (value < 2**32) {
 		return 4;
 	} else if (value < 2**40) {
+		return 5;
+	} else {
+		return 6;
+	}
+};
+
+export const measureSignedInt = (value: number) => {
+	if (value >= -(1 << 6) && value < (1 << 6)) {
+		return 1;
+	} else if (value >= -(1 << 13) && value < (1 << 13)) {
+		return 2;
+	} else if (value >= -(1 << 20) && value < (1 << 20)) {
+		return 3;
+	} else if (value >= -(1 << 27) && value < (1 << 27)) {
+		return 4;
+	} else if (value >= -(2**34) && value < 2**34) {
 		return 5;
 	} else {
 		return 6;

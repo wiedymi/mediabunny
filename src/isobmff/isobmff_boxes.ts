@@ -65,7 +65,7 @@ const lastPresentedSample = (samples: Sample[]) => {
 	let result: Sample | null = null;
 
 	for (let sample of samples) {
-		if (!result || sample.presentationTimestamp > result.presentationTimestamp) {
+		if (!result || sample.timestamp > result.timestamp) {
 			result = sample;
 		}
 	}
@@ -185,7 +185,7 @@ export const mvhd = (
 			filter(x => x.samples.length > 0).
 			map(x => {
 				const lastSample = lastPresentedSample(x.samples)!;
-				return lastSample.presentationTimestamp + lastSample.duration;
+				return lastSample.timestamp + lastSample.duration;
 			})
 	), GLOBAL_TIMESCALE);
 	let nextTrackId = Math.max(...trackDatas.map(x => x.track.id)) + 1;
@@ -225,7 +225,7 @@ export const tkhd = (
 ) => {
 	let lastSample = lastPresentedSample(trackData.samples);
 	let durationInGlobalTimescale = intoTimescale(
-		lastSample ? lastSample.presentationTimestamp + lastSample.duration : 0,
+		lastSample ? lastSample.timestamp + lastSample.duration : 0,
 		GLOBAL_TIMESCALE
 	);
 
@@ -234,7 +234,7 @@ export const tkhd = (
 
 	let matrix: TransformationMatrix;
 	if (trackData.type === 'video') {
-		const rotation = trackData.track.source.metadata.rotation;
+		const rotation = trackData.track.metadata.rotation;
 		matrix = rotation === undefined || typeof rotation === 'number' ? rotationMatrix(rotation ?? 0) : rotation;
 	} else {
 		matrix = IDENTITY_MATRIX;
@@ -271,7 +271,7 @@ export const mdhd = (
 ) => {
 	let lastSample = lastPresentedSample(trackData.samples);
 	let localDuration = intoTimescale(
-		lastSample ? lastSample.presentationTimestamp + lastSample.duration : 0,
+		lastSample ? lastSample.timestamp + lastSample.duration : 0,
 		trackData.timescale
 	);
 
@@ -740,7 +740,7 @@ export const trun = (trackData: IsobmffTrackData) => {
 	let allSampleSizes = trackData.currentChunk.samples.map(x => x.size);
 	let allSampleFlags = trackData.currentChunk.samples.map(fragmentSampleFlags);
 	let allSampleCompositionTimeOffsets = trackData.currentChunk.samples.
-		map(x => intoTimescale(x.presentationTimestamp - x.decodeTimestamp, trackData.timescale));
+		map(x => intoTimescale(x.timestamp - x.decodeTimestamp, trackData.timescale));
 
 	let uniqueSampleDurations = new Set(allSampleDurations);
 	let uniqueSampleSizes = new Set(allSampleSizes);

@@ -25,6 +25,8 @@ var Metamuxer = (() => {
     AudioBufferSource: () => AudioBufferSource,
     AudioDataSource: () => AudioDataSource,
     CanvasSource: () => CanvasSource,
+    EncodedAudioChunkSource: () => EncodedAudioChunkSource,
+    EncodedVideoChunkSource: () => EncodedVideoChunkSource,
     FileSystemWritableFileStreamTarget: () => FileSystemWritableFileStreamTarget2,
     MediaStreamAudioTrackSource: () => MediaStreamAudioTrackSource,
     MediaStreamVideoTrackSource: () => MediaStreamVideoTrackSource,
@@ -172,10 +174,30 @@ var Metamuxer = (() => {
 
   // src/source.ts
   var VideoSource = class {
-    constructor(codec, metadata) {
+    constructor(codec) {
       this.connectedTrack = null;
       this.codec = codec;
-      this.metadata = metadata;
+    }
+    ensureValidDigest() {
+      if (!this.connectedTrack) {
+        throw new Error("Cannot call digest without connecting the source to an output track.");
+      }
+      if (!this.connectedTrack.output.started) {
+        throw new Error("Cannot call digest before output has been started.");
+      }
+      if (this.connectedTrack.output.finalizing) {
+        throw new Error("Cannot call digest after output has started finalizing.");
+      }
+    }
+    start() {
+    }
+    async flush() {
+    }
+  };
+  var AudioSource = class {
+    constructor(codec) {
+      this.connectedTrack = null;
+      this.codec = codec;
     }
     ensureNotFinalizing() {
       if (this.connectedTrack?.output.finalizing) {
@@ -187,20 +209,14 @@ var Metamuxer = (() => {
     async flush() {
     }
   };
-  var AudioSource = class {
-    constructor(codec, metadata) {
-      this.connectedTrack = null;
-      this.codec = codec;
-      this.metadata = metadata;
+  var EncodedVideoChunkSource = class extends VideoSource {
+    constructor(codec) {
+      super(codec);
     }
-    ensureNotFinalizing() {
-      if (this.connectedTrack?.output.finalizing) {
-        throw new Error("Cannot call digest after output has started finalizing.");
-      }
-    }
-    start() {
-    }
-    async flush() {
+    // TODO: Ensure that the first chunk is a key frame (same for the audio case)
+    digest(chunk, meta) {
+      this.ensureValidDigest();
+      this.connectedTrack?.output.muxer.addEncodedVideoChunk(this.connectedTrack, chunk, meta);
     }
   };
   var KEY_FRAME_INTERVAL = 5;
@@ -211,8 +227,9 @@ var Metamuxer = (() => {
       this.encoder = null;
       this.lastMultipleOfKeyFrameInterval = -1;
     }
+    // TODO: Ensure video frame size remains constant
     digest(videoFrame) {
-      this.source.ensureNotFinalizing();
+      this.source.ensureValidDigest();
       this.ensureEncoder(videoFrame);
       assert(this.encoder);
       const multipleOfKeyFrameInterval = Math.floor(videoFrame.timestamp / 1e6 / KEY_FRAME_INTERVAL);
@@ -240,8 +257,8 @@ var Metamuxer = (() => {
     }
   };
   var VideoFrameSource = class extends VideoSource {
-    constructor(codecConfig, options = {}) {
-      super(codecConfig.codec, options);
+    constructor(codecConfig) {
+      super(codecConfig.codec);
       this.encoder = new VideoEncoderWrapper(this, codecConfig);
     }
     digest(videoFrame) {
@@ -252,8 +269,8 @@ var Metamuxer = (() => {
     }
   };
   var CanvasSource = class extends VideoSource {
-    constructor(canvas, codecConfig, options = {}) {
-      super(codecConfig.codec, options);
+    constructor(canvas, codecConfig) {
+      super(codecConfig.codec);
       this.canvas = canvas;
       this.encoder = new VideoEncoderWrapper(this, codecConfig);
     }
@@ -270,8 +287,8 @@ var Metamuxer = (() => {
     }
   };
   var MediaStreamVideoTrackSource = class extends VideoSource {
-    constructor(track, codecConfig, options = {}) {
-      super(codecConfig.codec, options);
+    constructor(track, codecConfig) {
+      super(codecConfig.codec);
       this.track = track;
       this.abortController = null;
       this.encoder = new VideoEncoderWrapper(this, codecConfig);
@@ -300,12 +317,22 @@ var Metamuxer = (() => {
       await this.encoder.flush();
     }
   };
+  var EncodedAudioChunkSource = class extends AudioSource {
+    constructor(codec) {
+      super(codec);
+    }
+    digest(chunk, meta) {
+      this.ensureNotFinalizing();
+      this.connectedTrack?.output.muxer.addEncodedAudioChunk(this.connectedTrack, chunk, meta);
+    }
+  };
   var AudioEncoderWrapper = class {
     constructor(source, codecConfig) {
       this.source = source;
       this.codecConfig = codecConfig;
       this.encoder = null;
     }
+    // TODO: Ensure audio parameters remain constant
     digest(audioData) {
       this.source.ensureNotFinalizing();
       this.ensureEncoder(audioData);
@@ -333,8 +360,8 @@ var Metamuxer = (() => {
     }
   };
   var AudioDataSource = class extends AudioSource {
-    constructor(codecConfig, options = {}) {
-      super(codecConfig.codec, options);
+    constructor(codecConfig) {
+      super(codecConfig.codec);
       this.encoder = new AudioEncoderWrapper(this, codecConfig);
     }
     digest(audioData) {
@@ -345,8 +372,8 @@ var Metamuxer = (() => {
     }
   };
   var AudioBufferSource = class extends AudioSource {
-    constructor(codecConfig, options = {}) {
-      super(codecConfig.codec, options);
+    constructor(codecConfig) {
+      super(codecConfig.codec);
       this.accumulatedFrameCount = 0;
       this.encoder = new AudioEncoderWrapper(this, codecConfig);
     }
@@ -376,8 +403,8 @@ var Metamuxer = (() => {
     }
   };
   var MediaStreamAudioTrackSource = class extends AudioSource {
-    constructor(track, codecConfig, options = {}) {
-      super(codecConfig.codec, options);
+    constructor(track, codecConfig) {
+      super(codecConfig.codec);
       this.track = track;
       this.abortController = null;
       this.encoder = new AudioEncoderWrapper(this, codecConfig);
@@ -416,7 +443,7 @@ var Metamuxer = (() => {
       this.writer = options.target.createWriter();
       this.muxer = options.format.createMuxer(this);
     }
-    addTrack(source) {
+    addTrack(source, metadata = {}) {
       if (this.started) {
         throw new Error("Cannot add track after output has started.");
       }
@@ -427,7 +454,8 @@ var Metamuxer = (() => {
         id: this.tracks.length + 1,
         output: this,
         type: source instanceof VideoSource ? "video" : "audio",
-        source
+        source,
+        metadata
       };
       this.muxer.beforeTrackAdd(track);
       this.tracks.push(track);
@@ -507,7 +535,7 @@ var Metamuxer = (() => {
   var lastPresentedSample = (samples) => {
     let result = null;
     for (let sample of samples) {
-      if (!result || sample.presentationTimestamp > result.presentationTimestamp) {
+      if (!result || sample.timestamp > result.timestamp) {
         result = sample;
       }
     }
@@ -588,7 +616,7 @@ var Metamuxer = (() => {
       0,
       ...trackDatas.filter((x) => x.samples.length > 0).map((x) => {
         const lastSample = lastPresentedSample(x.samples);
-        return lastSample.presentationTimestamp + lastSample.duration;
+        return lastSample.timestamp + lastSample.duration;
       })
     ), GLOBAL_TIMESCALE);
     let nextTrackId = Math.max(...trackDatas.map((x) => x.track.id)) + 1;
@@ -624,14 +652,14 @@ var Metamuxer = (() => {
   var tkhd = (trackData, creationTime) => {
     let lastSample = lastPresentedSample(trackData.samples);
     let durationInGlobalTimescale = intoTimescale(
-      lastSample ? lastSample.presentationTimestamp + lastSample.duration : 0,
+      lastSample ? lastSample.timestamp + lastSample.duration : 0,
       GLOBAL_TIMESCALE
     );
     let needsU64 = !isU32(creationTime) || !isU32(durationInGlobalTimescale);
     let u32OrU64 = needsU64 ? u64 : u32;
     let matrix;
     if (trackData.type === "video") {
-      const rotation = trackData.track.source.metadata.rotation;
+      const rotation = trackData.track.metadata.rotation;
       matrix = rotation === void 0 || typeof rotation === "number" ? rotationMatrix(rotation ?? 0) : rotation;
     } else {
       matrix = IDENTITY_MATRIX;
@@ -673,7 +701,7 @@ var Metamuxer = (() => {
   var mdhd = (trackData, creationTime) => {
     let lastSample = lastPresentedSample(trackData.samples);
     let localDuration = intoTimescale(
-      lastSample ? lastSample.presentationTimestamp + lastSample.duration : 0,
+      lastSample ? lastSample.timestamp + lastSample.duration : 0,
       trackData.timescale
     );
     let needsU64 = !isU32(creationTime) || !isU32(localDuration);
@@ -1098,7 +1126,7 @@ var Metamuxer = (() => {
     let allSampleDurations = trackData.currentChunk.samples.map((x) => x.timescaleUnitsToNextSample);
     let allSampleSizes = trackData.currentChunk.samples.map((x) => x.size);
     let allSampleFlags = trackData.currentChunk.samples.map(fragmentSampleFlags);
-    let allSampleCompositionTimeOffsets = trackData.currentChunk.samples.map((x) => intoTimescale(x.presentationTimestamp - x.decodeTimestamp, trackData.timescale));
+    let allSampleCompositionTimeOffsets = trackData.currentChunk.samples.map((x) => intoTimescale(x.timestamp - x.decodeTimestamp, trackData.timescale));
     let uniqueSampleDurations = new Set(allSampleDurations);
     let uniqueSampleSizes = new Set(allSampleSizes);
     let uniqueSampleFlags = new Set(allSampleFlags);
@@ -1359,11 +1387,12 @@ var Metamuxer = (() => {
           height: meta.decoderConfig.codedHeight,
           decoderConfig: meta.decoderConfig
         },
-        timescale: track.source.metadata.frameRate ?? 57600,
+        timescale: track.metadata.frameRate ?? 57600,
         samples: [],
         sampleQueue: [],
-        firstDecodeTimestamp: null,
-        lastDecodeTimestamp: -1,
+        timestampProcessingQueue: [],
+        firstTimestamp: null,
+        lastKeyFrameTimestamp: null,
         timeToSampleTable: [],
         compositionTimeOffsetTable: [],
         lastTimescaleUnits: null,
@@ -1394,8 +1423,9 @@ var Metamuxer = (() => {
         timescale: meta.decoderConfig.sampleRate,
         samples: [],
         sampleQueue: [],
-        firstDecodeTimestamp: null,
-        lastDecodeTimestamp: -1,
+        timestampProcessingQueue: [],
+        firstTimestamp: null,
+        lastKeyFrameTimestamp: null,
         timeToSampleTable: [],
         compositionTimeOffsetTable: [],
         lastTimescaleUnits: null,
@@ -1408,12 +1438,12 @@ var Metamuxer = (() => {
       this.#trackDatas.sort((a, b) => a.track.id - b.track.id);
       return newTrackData;
     }
-    addEncodedVideoChunk(track, chunk, meta, compositionTimeOffset) {
+    addEncodedVideoChunk(track, chunk, meta) {
       const trackData = this.#getVideoTrackData(track, chunk, meta);
       if (typeof this.#format.options.fastStart === "object" && trackData.samples.length === this.#format.options.fastStart.expectedVideoChunks) {
         throw new Error(`Cannot add more video chunks than specified in 'fastStart' (${this.#format.options.fastStart.expectedVideoChunks}).`);
       }
-      let videoSample = this.#createSampleForTrack(trackData, chunk, compositionTimeOffset);
+      let videoSample = this.#createSampleForTrack(trackData, chunk);
       if (this.#format.options.fastStart === "fragmented") {
         trackData.sampleQueue.push(videoSample);
         this.#interleaveSamples();
@@ -1434,18 +1464,15 @@ var Metamuxer = (() => {
         this.#addSampleToTrack(trackData, audioSample);
       }
     }
-    #createSampleForTrack(trackData, chunk, compositionTimeOffset) {
-      let presentationTimestampInSeconds = chunk.timestamp / 1e6;
-      let decodeTimestampInSeconds = (chunk.timestamp - (compositionTimeOffset ?? 0)) / 1e6;
+    #createSampleForTrack(trackData, chunk) {
+      let timestampInSeconds = this.#validateTimestamp(trackData, chunk);
       let durationInSeconds = (chunk.duration ?? 0) / 1e6;
-      let adjusted = this.#validateTimestamp(trackData, presentationTimestampInSeconds, decodeTimestampInSeconds);
-      presentationTimestampInSeconds = adjusted.presentationTimestamp;
-      decodeTimestampInSeconds = adjusted.decodeTimestamp;
       let data = new Uint8Array(chunk.byteLength);
       chunk.copyTo(data);
       let sample = {
-        presentationTimestamp: presentationTimestampInSeconds,
-        decodeTimestamp: decodeTimestampInSeconds,
+        timestamp: timestampInSeconds,
+        decodeTimestamp: timestampInSeconds,
+        // We may refine this later
         duration: durationInSeconds,
         data,
         size: data.byteLength,
@@ -1455,62 +1482,76 @@ var Metamuxer = (() => {
       };
       return sample;
     }
-    #addSampleToTrack(trackData, sample) {
-      if (this.#format.options.fastStart !== "fragmented") {
-        trackData.samples.push(sample);
+    #processTimestamps(trackData) {
+      if (trackData.timestampProcessingQueue.length === 0) {
+        return;
       }
-      const sampleCompositionTimeOffset = intoTimescale(sample.presentationTimestamp - sample.decodeTimestamp, trackData.timescale);
-      if (trackData.lastTimescaleUnits !== null) {
-        assert(trackData.lastSample);
-        let timescaleUnits = intoTimescale(sample.decodeTimestamp, trackData.timescale, false);
-        let delta = Math.round(timescaleUnits - trackData.lastTimescaleUnits);
-        trackData.lastTimescaleUnits += delta;
-        trackData.lastSample.timescaleUnitsToNextSample = delta;
-        if (this.#format.options.fastStart !== "fragmented") {
-          let lastTableEntry = last(trackData.timeToSampleTable);
-          assert(lastTableEntry);
-          if (lastTableEntry.sampleCount === 1) {
-            lastTableEntry.sampleDelta = delta;
-            lastTableEntry.sampleCount++;
-          } else if (lastTableEntry.sampleDelta === delta) {
-            lastTableEntry.sampleCount++;
-          } else {
-            lastTableEntry.sampleCount--;
-            trackData.timeToSampleTable.push({
-              sampleCount: 2,
-              sampleDelta: delta
-            });
+      const sortedTimestamps = trackData.timestampProcessingQueue.map((x) => x.timestamp).sort((a, b) => a - b);
+      for (let i = 0; i < trackData.timestampProcessingQueue.length; i++) {
+        const sample = trackData.timestampProcessingQueue[i];
+        sample.decodeTimestamp = sortedTimestamps[i];
+        const sampleCompositionTimeOffset = intoTimescale(sample.timestamp - sample.decodeTimestamp, trackData.timescale);
+        if (trackData.lastTimescaleUnits !== null) {
+          assert(trackData.lastSample);
+          let timescaleUnits = intoTimescale(sample.decodeTimestamp, trackData.timescale, false);
+          let delta = Math.round(timescaleUnits - trackData.lastTimescaleUnits);
+          trackData.lastTimescaleUnits += delta;
+          trackData.lastSample.timescaleUnitsToNextSample = delta;
+          if (this.#format.options.fastStart !== "fragmented") {
+            let lastTableEntry = last(trackData.timeToSampleTable);
+            assert(lastTableEntry);
+            if (lastTableEntry.sampleCount === 1) {
+              lastTableEntry.sampleDelta = delta;
+              lastTableEntry.sampleCount++;
+            } else if (lastTableEntry.sampleDelta === delta) {
+              lastTableEntry.sampleCount++;
+            } else {
+              lastTableEntry.sampleCount--;
+              trackData.timeToSampleTable.push({
+                sampleCount: 2,
+                sampleDelta: delta
+              });
+            }
+            const lastCompositionTimeOffsetTableEntry = last(trackData.compositionTimeOffsetTable);
+            assert(lastCompositionTimeOffsetTableEntry);
+            if (lastCompositionTimeOffsetTableEntry.sampleCompositionTimeOffset === sampleCompositionTimeOffset) {
+              lastCompositionTimeOffsetTableEntry.sampleCount++;
+            } else {
+              trackData.compositionTimeOffsetTable.push({
+                sampleCount: 1,
+                sampleCompositionTimeOffset
+              });
+            }
           }
-          const lastCompositionTimeOffsetTableEntry = last(trackData.compositionTimeOffsetTable);
-          assert(lastCompositionTimeOffsetTableEntry);
-          if (lastCompositionTimeOffsetTableEntry.sampleCompositionTimeOffset === sampleCompositionTimeOffset) {
-            lastCompositionTimeOffsetTableEntry.sampleCount++;
-          } else {
+        } else {
+          trackData.lastTimescaleUnits = 0;
+          if (this.#format.options.fastStart !== "fragmented") {
+            trackData.timeToSampleTable.push({
+              sampleCount: 1,
+              sampleDelta: intoTimescale(sample.duration, trackData.timescale)
+            });
             trackData.compositionTimeOffsetTable.push({
               sampleCount: 1,
               sampleCompositionTimeOffset
             });
           }
         }
-      } else {
-        trackData.lastTimescaleUnits = 0;
-        if (this.#format.options.fastStart !== "fragmented") {
-          trackData.timeToSampleTable.push({
-            sampleCount: 1,
-            sampleDelta: intoTimescale(sample.duration, trackData.timescale)
-          });
-          trackData.compositionTimeOffsetTable.push({
-            sampleCount: 1,
-            sampleCompositionTimeOffset
-          });
-        }
+        trackData.lastSample = sample;
       }
-      trackData.lastSample = sample;
+      trackData.timestampProcessingQueue.length = 0;
+    }
+    #addSampleToTrack(trackData, sample) {
+      if (sample.type === "key") {
+        this.#processTimestamps(trackData);
+      }
+      if (this.#format.options.fastStart !== "fragmented") {
+        trackData.samples.push(sample);
+      }
       let beginNewChunk = false;
       if (!trackData.currentChunk) {
         beginNewChunk = true;
       } else {
-        let currentChunkDuration = sample.presentationTimestamp - trackData.currentChunk.startTimestamp;
+        let currentChunkDuration = sample.timestamp - trackData.currentChunk.startTimestamp;
         if (this.#format.options.fastStart === "fragmented") {
           const keyFrameQueuedEverywhere = this.#trackDatas.every((otherTrackData) => {
             if (trackData === otherTrackData) {
@@ -1532,7 +1573,7 @@ var Metamuxer = (() => {
           this.#finalizeCurrentChunk(trackData);
         }
         trackData.currentChunk = {
-          startTimestamp: sample.presentationTimestamp,
+          startTimestamp: sample.timestamp,
           samples: [],
           offset: null,
           moofOffset: null
@@ -1540,23 +1581,24 @@ var Metamuxer = (() => {
       }
       assert(trackData.currentChunk);
       trackData.currentChunk.samples.push(sample);
+      trackData.timestampProcessingQueue.push(sample);
     }
-    #validateTimestamp(trackData, presentationTimestamp, decodeTimestamp) {
-      if (decodeTimestamp < 0) {
-        throw new Error(`Timestamps must be non-negative (got ${decodeTimestamp}s).`);
+    #validateTimestamp(trackData, chunk) {
+      let timestampInSeconds = chunk.timestamp / 1e6;
+      if (timestampInSeconds < 0) {
+        throw new Error(`Timestamps must be non-negative (got ${timestampInSeconds}s).`);
       }
-      if (trackData.firstDecodeTimestamp === null) {
-        trackData.firstDecodeTimestamp = decodeTimestamp;
+      if (trackData.firstTimestamp === null) {
+        trackData.firstTimestamp = timestampInSeconds;
       }
-      decodeTimestamp -= trackData.firstDecodeTimestamp;
-      presentationTimestamp -= trackData.firstDecodeTimestamp;
-      if (decodeTimestamp < trackData.lastDecodeTimestamp) {
-        throw new Error(
-          `Timestamps must be monotonically increasing (timestamp went from ${trackData.lastDecodeTimestamp}s to ${decodeTimestamp}s).`
-        );
+      timestampInSeconds -= trackData.firstTimestamp;
+      if (trackData.lastKeyFrameTimestamp !== null && timestampInSeconds < trackData.lastKeyFrameTimestamp) {
+        throw new Error(`Timestamp cannot be before last key frame's timestamp (got ${timestampInSeconds}s, last key frame at ${trackData.lastKeyFrameTimestamp}s).`);
       }
-      trackData.lastDecodeTimestamp = decodeTimestamp;
-      return { presentationTimestamp, decodeTimestamp };
+      if (chunk.type === "key") {
+        trackData.lastKeyFrameTimestamp = timestampInSeconds;
+      }
+      return timestampInSeconds;
     }
     #finalizeCurrentChunk(trackData) {
       assert(this.#format.options.fastStart !== "fragmented");
@@ -1589,22 +1631,22 @@ var Metamuxer = (() => {
       }
       outer:
         while (true) {
-          let trackWithMinDecodeTimestamp = null;
-          let minDecodeTimestamp = Infinity;
+          let trackWithMinTimestamp = null;
+          let minTimestamp = Infinity;
           for (let trackData of this.#trackDatas) {
             if (trackData.sampleQueue.length === 0) {
               break outer;
             }
-            if (trackData.sampleQueue[0].decodeTimestamp < minDecodeTimestamp) {
-              trackWithMinDecodeTimestamp = trackData;
-              minDecodeTimestamp = trackData.sampleQueue[0].decodeTimestamp;
+            if (trackData.sampleQueue[0].timestamp < minTimestamp) {
+              trackWithMinTimestamp = trackData;
+              minTimestamp = trackData.sampleQueue[0].timestamp;
             }
           }
-          if (!trackWithMinDecodeTimestamp) {
+          if (!trackWithMinTimestamp) {
             break;
           }
-          let sample = trackWithMinDecodeTimestamp.sampleQueue.shift();
-          this.#addSampleToTrack(trackWithMinDecodeTimestamp, sample);
+          let sample = trackWithMinTimestamp.sampleQueue.shift();
+          this.#addSampleToTrack(trackWithMinTimestamp, sample);
         }
     }
     #finalizeFragment(flushWriter = true) {
@@ -1663,10 +1705,12 @@ var Metamuxer = (() => {
           for (let sample of trackData.sampleQueue) {
             this.#addSampleToTrack(trackData, sample);
           }
+          this.#processTimestamps(trackData);
         }
         this.#finalizeFragment(false);
       } else {
         for (let trackData of this.#trackDatas) {
+          this.#processTimestamps(trackData);
           this.#finalizeCurrentChunk(trackData);
         }
       }
@@ -1740,6 +1784,11 @@ var Metamuxer = (() => {
       this.value = value;
     }
   };
+  var EBMLSignedInt = class {
+    constructor(value) {
+      this.value = value;
+    }
+  };
   var measureUnsignedInt = (value) => {
     if (value < 1 << 8) {
       return 1;
@@ -1750,6 +1799,21 @@ var Metamuxer = (() => {
     } else if (value < 2 ** 32) {
       return 4;
     } else if (value < 2 ** 40) {
+      return 5;
+    } else {
+      return 6;
+    }
+  };
+  var measureSignedInt = (value) => {
+    if (value >= -(1 << 6) && value < 1 << 6) {
+      return 1;
+    } else if (value >= -(1 << 13) && value < 1 << 13) {
+      return 2;
+    } else if (value >= -(1 << 20) && value < 1 << 20) {
+      return 3;
+    } else if (value >= -(1 << 27) && value < 1 << 27) {
+      return 4;
+    } else if (value >= -(2 ** 34) && value < 2 ** 34) {
       return 5;
     } else {
       return 6;
@@ -1864,6 +1928,12 @@ var Metamuxer = (() => {
       }
       this.#writer.write(this.#helper.subarray(0, pos));
     }
+    #writeSignedInt(value, width = measureSignedInt(value)) {
+      if (value < 0) {
+        value += 2 ** (width * 8);
+      }
+      this.#writeUnsignedInt(value, width);
+    }
     writeEBMLVarInt(value, width = measureEBMLVarInt(value)) {
       let pos = 0;
       switch (width) {
@@ -1954,6 +2024,10 @@ var Metamuxer = (() => {
         } else if (data.data instanceof EBMLFloat64) {
           this.writeEBMLVarInt(8);
           this.#writeFloat64(data.data.value);
+        } else if (data.data instanceof EBMLSignedInt) {
+          let size = data.size ?? measureSignedInt(data.data.value);
+          this.writeEBMLVarInt(size);
+          this.#writeSignedInt(data.data.value, size);
         }
       }
     }
@@ -2039,7 +2113,7 @@ var Metamuxer = (() => {
           { id: 134 /* CodecID */, data: CODEC_STRING_MAP[trackData.track.source.codec] },
           trackData.info.decoderConfig.description ? { id: 25506 /* CodecPrivate */, data: toUint8Array(trackData.info.decoderConfig.description) } : null,
           ...trackData.type === "video" ? [
-            trackData.track.source.metadata.frameRate ? { id: 2352003 /* DefaultDuration */, data: 1e9 / trackData.track.source.metadata.frameRate } : null,
+            trackData.track.metadata.frameRate ? { id: 2352003 /* DefaultDuration */, data: 1e9 / trackData.track.metadata.frameRate } : null,
             { id: 224 /* Video */, data: [
               { id: 176 /* PixelWidth */, data: trackData.info.width },
               { id: 186 /* PixelHeight */, data: trackData.info.height },
@@ -2122,7 +2196,7 @@ var Metamuxer = (() => {
         },
         chunkQueue: [],
         firstTimestamp: null,
-        lastTimestamp: null,
+        lastKeyFrameTimestamp: null,
         lastWrittenTimestamp: null
       };
       this.#trackDatas.push(newTrackData);
@@ -2146,18 +2220,17 @@ var Metamuxer = (() => {
         },
         chunkQueue: [],
         firstTimestamp: null,
-        lastTimestamp: null,
+        lastKeyFrameTimestamp: null,
         lastWrittenTimestamp: null
       };
       this.#trackDatas.push(newTrackData);
       this.#trackDatas.sort((a, b) => a.track.id - b.track.id);
       return newTrackData;
     }
-    addEncodedVideoChunk(track, chunk, meta, compositionTimeOffset) {
+    addEncodedVideoChunk(track, chunk, meta) {
       const trackData = this.#getVideoTrackData(track, chunk, meta);
       let videoChunk = this.#createInternalChunk(trackData, chunk);
       if (track.source.codec === "vp9") this.#fixVP9ColorSpace(trackData, videoChunk);
-      trackData.lastTimestamp = videoChunk.timestamp;
       trackData.chunkQueue.push(videoChunk);
       this.#interleaveChunks();
       this.#writer.flush();
@@ -2165,7 +2238,6 @@ var Metamuxer = (() => {
     addEncodedAudioChunk(track, chunk, meta) {
       const trackData = this.#getAudioTrackData(track, chunk, meta);
       let audioChunk = this.#createInternalChunk(trackData, chunk);
-      trackData.lastTimestamp = audioChunk.timestamp;
       trackData.chunkQueue.push(audioChunk);
       this.#interleaveChunks();
       this.#writer.flush();
@@ -2296,7 +2368,7 @@ var Metamuxer = (() => {
     	*/
     /** Converts a read-only external chunk into an internal one for easier use. */
     #createInternalChunk(trackData, chunk) {
-      let adjustedTimestamp = this.#validateTimestamp(trackData, chunk.timestamp);
+      let adjustedTimestamp = this.#validateTimestamp(trackData, chunk);
       let data = new Uint8Array(chunk.byteLength);
       chunk.copyTo(data);
       let internalChunk = {
@@ -2308,7 +2380,8 @@ var Metamuxer = (() => {
       };
       return internalChunk;
     }
-    #validateTimestamp(trackData, timestamp) {
+    #validateTimestamp(trackData, chunk) {
+      let timestamp = chunk.timestamp;
       if (timestamp < 0) {
         throw new Error(`Timestamps must be non-negative (got ${timestamp}s).`);
       }
@@ -2316,10 +2389,11 @@ var Metamuxer = (() => {
         trackData.firstTimestamp = timestamp;
       }
       timestamp -= trackData.firstTimestamp;
-      if (trackData.lastTimestamp !== null && timestamp < trackData.lastTimestamp) {
-        throw new Error(
-          `Timestamps must be monotonically increasing (timestamp went from ${trackData.lastTimestamp}s to ${timestamp}s).`
-        );
+      if (trackData.lastKeyFrameTimestamp !== null && timestamp < trackData.lastKeyFrameTimestamp) {
+        throw new Error(`Timestamp cannot be before last key frame's timestamp (got ${timestamp / 1e6}s, last key frame at ${trackData.lastKeyFrameTimestamp / 1e6}s).`);
+      }
+      if (chunk.type === "key") {
+        trackData.lastKeyFrameTimestamp = timestamp;
       }
       return timestamp;
     }
@@ -2368,7 +2442,7 @@ var Metamuxer = (() => {
             prelude,
             chunk.data
           ] },
-          chunk.type === "delta" ? { id: 251 /* ReferenceBlock */, data: trackData.lastWrittenTimestamp - msTimestamp } : null,
+          chunk.type === "delta" ? { id: 251 /* ReferenceBlock */, data: new EBMLSignedInt(trackData.lastWrittenTimestamp - msTimestamp) } : null,
           chunk.duration !== null ? { id: 155 /* BlockDuration */, data: msDuration } : null,
           chunk.additions ? { id: 30113 /* BlockAdditions */, data: chunk.additions } : null
         ] };

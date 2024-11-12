@@ -9,7 +9,7 @@ export const GLOBAL_TIMESCALE = 1000;
 const TIMESTAMP_OFFSET = 2_082_844_800; // Seconds between Jan 1 1904 and Jan 1 1970
 
 export type Sample = {
-	presentationTimestamp: number,
+	timestamp: number,
 	decodeTimestamp: number,
 	duration: number,
 	data: Uint8Array | null,
@@ -30,9 +30,10 @@ export type IsobmffTrackData = {
 	timescale: number,
 	samples: Sample[],
 	sampleQueue: Sample[], // For fragmented files
+	timestampProcessingQueue: Sample[],
 
-	firstDecodeTimestamp: number | null,
-	lastDecodeTimestamp: number,
+	firstTimestamp: number | null,
+	lastKeyFrameTimestamp: number | null,
 
 	timeToSampleTable: { sampleCount: number, sampleDelta: number }[];
 	compositionTimeOffsetTable: { sampleCount: number, sampleCompositionTimeOffset: number }[];
@@ -256,11 +257,12 @@ export class IsobmffMuxer extends Muxer {
 				height: meta.decoderConfig.codedHeight,
 				decoderConfig: meta.decoderConfig
 			},
-			timescale: track.source.metadata.frameRate ?? 57600,
+			timescale: track.metadata.frameRate ?? 57600,
 			samples: [],
 			sampleQueue: [],
-			firstDecodeTimestamp: null,
-			lastDecodeTimestamp: -1,
+			timestampProcessingQueue: [],
+			firstTimestamp: null,
+			lastKeyFrameTimestamp: null,
 			timeToSampleTable: [],
 			compositionTimeOffsetTable: [],
 			lastTimescaleUnits: null,
@@ -297,8 +299,9 @@ export class IsobmffMuxer extends Muxer {
 			timescale: meta.decoderConfig.sampleRate,
 			samples: [],
 			sampleQueue: [],
-			firstDecodeTimestamp: null,
-			lastDecodeTimestamp: -1,
+			timestampProcessingQueue: [],
+			firstTimestamp: null,
+			lastKeyFrameTimestamp: null,
 			timeToSampleTable: [],
 			compositionTimeOffsetTable: [],
 			lastTimescaleUnits: null,
@@ -314,7 +317,7 @@ export class IsobmffMuxer extends Muxer {
 		return newTrackData;
 	}
 
-	addEncodedVideoChunk(track: OutputVideoTrack, chunk: EncodedVideoChunk, meta?: EncodedVideoChunkMetadata, compositionTimeOffset?: number) {
+	addEncodedVideoChunk(track: OutputVideoTrack, chunk: EncodedVideoChunk, meta?: EncodedVideoChunkMetadata) {
 		const trackData = this.#getVideoTrackData(track, chunk, meta);
 
 		if (
@@ -327,7 +330,7 @@ export class IsobmffMuxer extends Muxer {
 			}).`);
 		}
 
-		let videoSample = this.#createSampleForTrack(trackData, chunk, compositionTimeOffset);
+		let videoSample = this.#createSampleForTrack(trackData, chunk);
 
 		if (this.#format.options.fastStart === 'fragmented') {
 			trackData.sampleQueue.push(videoSample);
@@ -362,23 +365,17 @@ export class IsobmffMuxer extends Muxer {
 
 	#createSampleForTrack(
 		trackData: IsobmffTrackData,
-		chunk: EncodedVideoChunk | EncodedAudioChunk,
-		compositionTimeOffset?: number
+		chunk: EncodedVideoChunk | EncodedAudioChunk
 	) {
-		let presentationTimestampInSeconds = chunk.timestamp / 1e6;
-		let decodeTimestampInSeconds = (chunk.timestamp - (compositionTimeOffset ?? 0)) / 1e6;
+		let timestampInSeconds = this.#validateTimestamp(trackData, chunk);
 		let durationInSeconds = (chunk.duration ?? 0) / 1e6;
-
-		let adjusted = this.#validateTimestamp(trackData, presentationTimestampInSeconds, decodeTimestampInSeconds);
-		presentationTimestampInSeconds = adjusted.presentationTimestamp;
-		decodeTimestampInSeconds = adjusted.decodeTimestamp;
 
 		let data = new Uint8Array(chunk.byteLength);
 		chunk.copyTo(data);
 
 		let sample: Sample = {
-			presentationTimestamp: presentationTimestampInSeconds,
-			decodeTimestamp: decodeTimestampInSeconds,
+			timestamp: timestampInSeconds,
+			decodeTimestamp: timestampInSeconds, // We may refine this later
 			duration: durationInSeconds,
 			data: data,
 			size: data.byteLength,
@@ -390,82 +387,106 @@ export class IsobmffMuxer extends Muxer {
 		return sample;
 	}
 
-	#addSampleToTrack(
-		trackData: IsobmffTrackData,
-		sample: Sample
-	) {
-		if (this.#format.options.fastStart !== 'fragmented') {
-			trackData.samples.push(sample);
+	#processTimestamps(trackData: IsobmffTrackData) {
+		if (trackData.timestampProcessingQueue.length === 0) {
+			return;
 		}
 
-		const sampleCompositionTimeOffset =
-			intoTimescale(sample.presentationTimestamp - sample.decodeTimestamp, trackData.timescale);
+		const sortedTimestamps = trackData.timestampProcessingQueue.map(x => x.timestamp).sort((a, b) => a - b);
 
-		if (trackData.lastTimescaleUnits !== null) {
-			assert(trackData.lastSample);
+		for (let i = 0; i < trackData.timestampProcessingQueue.length; i++) {
+			const sample = trackData.timestampProcessingQueue[i]!;
 
-			let timescaleUnits = intoTimescale(sample.decodeTimestamp, trackData.timescale, false);
-			let delta = Math.round(timescaleUnits - trackData.lastTimescaleUnits);
-			trackData.lastTimescaleUnits += delta;
-			trackData.lastSample.timescaleUnitsToNextSample = delta;
+			// Since the user only supplies presentation time, but these may be out of order, we reverse-engineer from
+			// that a sensible decode timestamp. The notion of a decode timestamp doesn't really make sense
+			// (presentation timestamp & decode order are all you need), but it is a concept in ISOBMFF so we need to
+			// model it.
+			sample.decodeTimestamp = sortedTimestamps[i]!;
 
-			if (this.#format.options.fastStart !== 'fragmented') {
-				let lastTableEntry = last(trackData.timeToSampleTable);
-				assert(lastTableEntry);
+			const sampleCompositionTimeOffset =
+				intoTimescale(sample.timestamp - sample.decodeTimestamp, trackData.timescale);
 
-				if (lastTableEntry.sampleCount === 1) {
-					// If we hit this case, we're the second sample
-					lastTableEntry.sampleDelta = delta;
-					lastTableEntry.sampleCount++;
-				} else if (lastTableEntry.sampleDelta === delta) {
-					// Simply increment the count
-					lastTableEntry.sampleCount++;
-				} else {
-					// The delta has changed, subtract one from the previous run and create a new run with the new delta
-					lastTableEntry.sampleCount--;
-					trackData.timeToSampleTable.push({
-						sampleCount: 2,
-						sampleDelta: delta
-					});
+			if (trackData.lastTimescaleUnits !== null) {
+				assert(trackData.lastSample);
+	
+				let timescaleUnits = intoTimescale(sample.decodeTimestamp, trackData.timescale, false);
+				let delta = Math.round(timescaleUnits - trackData.lastTimescaleUnits);
+				trackData.lastTimescaleUnits += delta;
+				trackData.lastSample.timescaleUnitsToNextSample = delta;
+	
+				if (this.#format.options.fastStart !== 'fragmented') {
+					let lastTableEntry = last(trackData.timeToSampleTable);
+					assert(lastTableEntry);
+	
+					if (lastTableEntry.sampleCount === 1) {
+						// If we hit this case, we're the second sample
+						lastTableEntry.sampleDelta = delta;
+						lastTableEntry.sampleCount++;
+					} else if (lastTableEntry.sampleDelta === delta) {
+						// Simply increment the count
+						lastTableEntry.sampleCount++;
+					} else {
+						// The delta has changed, subtract one from the previous run and create a new run with the new delta
+						lastTableEntry.sampleCount--;
+						trackData.timeToSampleTable.push({
+							sampleCount: 2,
+							sampleDelta: delta
+						});
+					}
+	
+					const lastCompositionTimeOffsetTableEntry = last(trackData.compositionTimeOffsetTable);
+					assert(lastCompositionTimeOffsetTableEntry);
+	
+					if (lastCompositionTimeOffsetTableEntry.sampleCompositionTimeOffset === sampleCompositionTimeOffset) {
+						// Simply increment the count
+						lastCompositionTimeOffsetTableEntry.sampleCount++;
+					} else {
+						// The composition time offset has changed, so create a new entry with the new composition time
+						// offset
+						trackData.compositionTimeOffsetTable.push({
+							sampleCount: 1,
+							sampleCompositionTimeOffset: sampleCompositionTimeOffset
+						});
+					}
 				}
-
-				const lastCompositionTimeOffsetTableEntry = last(trackData.compositionTimeOffsetTable);
-				assert(lastCompositionTimeOffsetTableEntry);
-
-				if (lastCompositionTimeOffsetTableEntry.sampleCompositionTimeOffset === sampleCompositionTimeOffset) {
-					// Simply increment the count
-					lastCompositionTimeOffsetTableEntry.sampleCount++;
-				} else {
-					// The composition time offset has changed, so create a new entry with the new composition time
-					// offset
+			} else {
+				trackData.lastTimescaleUnits = 0;
+	
+				if (this.#format.options.fastStart !== 'fragmented') {
+					trackData.timeToSampleTable.push({
+						sampleCount: 1,
+						sampleDelta: intoTimescale(sample.duration, trackData.timescale)
+					});
 					trackData.compositionTimeOffsetTable.push({
 						sampleCount: 1,
 						sampleCompositionTimeOffset: sampleCompositionTimeOffset
 					});
 				}
 			}
-		} else {
-			trackData.lastTimescaleUnits = 0;
 
-			if (this.#format.options.fastStart !== 'fragmented') {
-				trackData.timeToSampleTable.push({
-					sampleCount: 1,
-					sampleDelta: intoTimescale(sample.duration, trackData.timescale)
-				});
-				trackData.compositionTimeOffsetTable.push({
-					sampleCount: 1,
-					sampleCompositionTimeOffset: sampleCompositionTimeOffset
-				});
-			}
+			trackData.lastSample = sample;
 		}
 
-		trackData.lastSample = sample;
+		trackData.timestampProcessingQueue.length = 0;
+	}
+
+	#addSampleToTrack(
+		trackData: IsobmffTrackData,
+		sample: Sample
+	) {
+		if (sample.type === 'key') {
+			this.#processTimestamps(trackData);
+		}
+
+		if (this.#format.options.fastStart !== 'fragmented') {
+			trackData.samples.push(sample);
+		}
 
 		let beginNewChunk = false;
 		if (!trackData.currentChunk) {
 			beginNewChunk = true;
 		} else {
-			let currentChunkDuration = sample.presentationTimestamp - trackData.currentChunk.startTimestamp;
+			let currentChunkDuration = sample.timestamp - trackData.currentChunk.startTimestamp;
 
 			if (this.#format.options.fastStart === 'fragmented') {
 				// We can only finalize this fragment (and begin a new one) if we know that each track will be able to
@@ -494,7 +515,7 @@ export class IsobmffMuxer extends Muxer {
 			}
 
 			trackData.currentChunk = {
-				startTimestamp: sample.presentationTimestamp,
+				startTimestamp: sample.timestamp,
 				samples: [],
 				offset: null,
 				moofOffset: null
@@ -503,30 +524,31 @@ export class IsobmffMuxer extends Muxer {
 
 		assert(trackData.currentChunk);
 		trackData.currentChunk.samples.push(sample);
+		trackData.timestampProcessingQueue.push(sample);
 	}
 
-	#validateTimestamp(trackData: IsobmffTrackData, presentationTimestamp: number, decodeTimestamp: number) {
-		if (decodeTimestamp < 0) {
-			throw new Error(`Timestamps must be non-negative (got ${decodeTimestamp}s).`);
+	#validateTimestamp(trackData: IsobmffTrackData, chunk: EncodedVideoChunk | EncodedAudioChunk) {
+		let timestampInSeconds = chunk.timestamp / 1e6;
+
+		if (timestampInSeconds < 0) {
+			throw new Error(`Timestamps must be non-negative (got ${timestampInSeconds}s).`);
 		}
 
-		if (trackData.firstDecodeTimestamp === null) {
-			trackData.firstDecodeTimestamp = decodeTimestamp;
+		if (trackData.firstTimestamp === null) {
+			trackData.firstTimestamp = timestampInSeconds;
 		}
 
-		decodeTimestamp -= trackData.firstDecodeTimestamp;
-		presentationTimestamp -= trackData.firstDecodeTimestamp;
+		timestampInSeconds -= trackData.firstTimestamp;
 
-		if (decodeTimestamp < trackData.lastDecodeTimestamp) {
-			throw new Error(
-				`Timestamps must be monotonically increasing ` +
-				`(timestamp went from ${trackData.lastDecodeTimestamp}s to ${decodeTimestamp}s).`
-			);
+		if (trackData.lastKeyFrameTimestamp !== null && timestampInSeconds < trackData.lastKeyFrameTimestamp) {
+			throw new Error(`Timestamp cannot be before last key frame's timestamp (got ${timestampInSeconds}s, last key frame at ${trackData.lastKeyFrameTimestamp}s).`);
 		}
 
-		trackData.lastDecodeTimestamp = decodeTimestamp;
+		if (chunk.type === 'key') {
+			trackData.lastKeyFrameTimestamp = timestampInSeconds;
+		}
 
-		return { presentationTimestamp, decodeTimestamp };
+		return timestampInSeconds;
 	}
 
 	#finalizeCurrentChunk(trackData: IsobmffTrackData) {
@@ -572,26 +594,26 @@ export class IsobmffMuxer extends Muxer {
 
 		outer:
 		while (true) {
-			let trackWithMinDecodeTimestamp: IsobmffTrackData | null = null;
-			let minDecodeTimestamp = Infinity;
+			let trackWithMinTimestamp: IsobmffTrackData | null = null;
+			let minTimestamp = Infinity;
 
 			for (let trackData of this.#trackDatas) {
 				if (trackData.sampleQueue.length === 0) {
 					break outer;
 				}
 
-				if (trackData.sampleQueue[0]!.decodeTimestamp < minDecodeTimestamp) {
-					trackWithMinDecodeTimestamp = trackData;
-					minDecodeTimestamp = trackData.sampleQueue[0]!.decodeTimestamp;
+				if (trackData.sampleQueue[0]!.timestamp < minTimestamp) {
+					trackWithMinTimestamp = trackData;
+					minTimestamp = trackData.sampleQueue[0]!.timestamp;
 				}
 			}
 
-			if (!trackWithMinDecodeTimestamp) {
+			if (!trackWithMinTimestamp) {
 				break;
 			}
 
-			let sample = trackWithMinDecodeTimestamp.sampleQueue.shift()!;
-			this.#addSampleToTrack(trackWithMinDecodeTimestamp, sample);
+			let sample = trackWithMinTimestamp.sampleQueue.shift()!;
+			this.#addSampleToTrack(trackWithMinTimestamp, sample);
 		}
 	}
 
@@ -671,11 +693,14 @@ export class IsobmffMuxer extends Muxer {
 				for (let sample of trackData.sampleQueue) {
 					this.#addSampleToTrack(trackData, sample);
 				}
+
+				this.#processTimestamps(trackData);
 			}
 
 			this.#finalizeFragment(false); // Don't flush the last fragment as we will flush it with the mfra box soon
 		} else {
 		 	for (let trackData of this.#trackDatas) {
+				this.#processTimestamps(trackData);
 				this.#finalizeCurrentChunk(trackData);
 			}
 		}

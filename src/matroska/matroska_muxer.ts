@@ -4,7 +4,7 @@ import { Output, OutputAudioTrack, OutputTrack, OutputVideoTrack } from '../outp
 import { MkvOutputFormat, WebMOutputFormat } from '../output_format';
 import { AudioCodec, VideoCodec } from '../source';
 import { Writer } from '../writer';
-import { EBML, EBMLElement, EBMLFloat32, EBMLFloat64, EBMLId, measureEBMLVarInt, measureUnsignedInt } from './ebml';
+import { EBML, EBMLElement, EBMLFloat32, EBMLFloat64, EBMLId, EBMLSignedInt, measureEBMLVarInt, measureSignedInt, measureUnsignedInt } from './ebml';
 
 const VIDEO_TRACK_TYPE = 1;
 const AUDIO_TRACK_TYPE = 2;
@@ -41,7 +41,7 @@ type MatroskaTrackData = {
 	chunkQueue: InternalMediaChunk[],
 
 	firstTimestamp: number | null,
-	lastTimestamp: number | null,
+	lastKeyFrameTimestamp: number | null,
 	lastWrittenTimestamp: number | null
 } & ({
 	track: OutputVideoTrack,
@@ -133,7 +133,7 @@ export class MatroskaMuxer extends Muxer {
 		this.#writer.write(this.#helper);
 	}
 
-	#writeUnsignedInt(value: number, width: number = measureUnsignedInt(value)) {
+	#writeUnsignedInt(value: number, width = measureUnsignedInt(value)) {
 		let pos = 0;
 
 		// Each case falls through:
@@ -159,7 +159,16 @@ export class MatroskaMuxer extends Muxer {
 		this.#writer.write(this.#helper.subarray(0, pos));
 	}
 
-	writeEBMLVarInt(value: number, width: number = measureEBMLVarInt(value)) {
+	#writeSignedInt(value: number, width = measureSignedInt(value)) {
+		if (value < 0) {
+			// Two's complement stuff
+			value += 2 ** (width * 8);
+		}
+
+		this.#writeUnsignedInt(value, width);
+	}
+
+	writeEBMLVarInt(value: number, width = measureEBMLVarInt(value)) {
 		let pos = 0;
 
 		switch (width) {
@@ -265,6 +274,10 @@ export class MatroskaMuxer extends Muxer {
 			} else if (data.data instanceof EBMLFloat64) {
 				this.writeEBMLVarInt(8);
 				this.#writeFloat64(data.data.value);
+			} else if (data.data instanceof EBMLSignedInt) {
+				let size = data.size ?? measureSignedInt(data.data.value);
+				this.writeEBMLVarInt(size);
+				this.#writeSignedInt(data.data.value, size);
 			}
 		}
 	}
@@ -362,7 +375,7 @@ export class MatroskaMuxer extends Muxer {
 				{ id: EBMLId.CodecID, data: CODEC_STRING_MAP[trackData.track.source.codec] },
 				(trackData.info.decoderConfig.description ? { id: EBMLId.CodecPrivate, data: toUint8Array(trackData.info.decoderConfig.description) } : null),
 				...(trackData.type === 'video' ? [
-					(trackData.track.source.metadata.frameRate ? { id: EBMLId.DefaultDuration, data: 1e9 / trackData.track.source.metadata.frameRate } : null),
+					(trackData.track.metadata.frameRate ? { id: EBMLId.DefaultDuration, data: 1e9 / trackData.track.metadata.frameRate } : null),
 					{ id: EBMLId.Video, data: [
 						{ id: EBMLId.PixelWidth, data: trackData.info.width },
 						{ id: EBMLId.PixelHeight, data: trackData.info.height },
@@ -474,7 +487,7 @@ export class MatroskaMuxer extends Muxer {
 			},
 			chunkQueue: [],
 			firstTimestamp: null,
-			lastTimestamp: null,
+			lastKeyFrameTimestamp: null,
 			lastWrittenTimestamp: null
 		};
 
@@ -504,7 +517,7 @@ export class MatroskaMuxer extends Muxer {
 			},
 			chunkQueue: [],
 			firstTimestamp: null,
-			lastTimestamp: null,
+			lastKeyFrameTimestamp: null,
 			lastWrittenTimestamp: null
 		};
 
@@ -514,13 +527,11 @@ export class MatroskaMuxer extends Muxer {
 		return newTrackData;
 	}
 	
-	addEncodedVideoChunk(track: OutputVideoTrack, chunk: EncodedVideoChunk, meta?: EncodedVideoChunkMetadata, compositionTimeOffset?: number) {
+	addEncodedVideoChunk(track: OutputVideoTrack, chunk: EncodedVideoChunk, meta?: EncodedVideoChunkMetadata) {
 		const trackData = this.#getVideoTrackData(track, chunk, meta);
 
 		let videoChunk = this.#createInternalChunk(trackData, chunk);
 		if (track.source.codec === 'vp9') this.#fixVP9ColorSpace(trackData, videoChunk);
-
-		trackData.lastTimestamp = videoChunk.timestamp;
 
 		trackData.chunkQueue.push(videoChunk);	
 		this.#interleaveChunks();
@@ -533,7 +544,6 @@ export class MatroskaMuxer extends Muxer {
 		const trackData = this.#getAudioTrackData(track, chunk, meta);
 
 		let audioChunk = this.#createInternalChunk(trackData, chunk);
-		trackData.lastTimestamp = audioChunk.timestamp;
 
 		trackData.chunkQueue.push(audioChunk);
 		this.#interleaveChunks();
@@ -683,7 +693,7 @@ export class MatroskaMuxer extends Muxer {
 		trackData: MatroskaTrackData,
 		chunk: EncodedVideoChunk | EncodedAudioChunk
 	) {
-		let adjustedTimestamp = this.#validateTimestamp(trackData, chunk.timestamp);
+		let adjustedTimestamp = this.#validateTimestamp(trackData, chunk);
 
 		let data = new Uint8Array(chunk.byteLength);
 		chunk.copyTo(data);
@@ -699,7 +709,9 @@ export class MatroskaMuxer extends Muxer {
 		return internalChunk;
 	}
 
-	#validateTimestamp(trackData: MatroskaTrackData, timestamp: number) {
+	#validateTimestamp(trackData: MatroskaTrackData, chunk: EncodedVideoChunk | EncodedAudioChunk) {
+		let timestamp = chunk.timestamp;
+
 		if (timestamp < 0) {
 			throw new Error(`Timestamps must be non-negative (got ${timestamp}s).`);
 		}
@@ -710,11 +722,12 @@ export class MatroskaMuxer extends Muxer {
 
 		timestamp -= trackData.firstTimestamp;
 
-		if (trackData.lastTimestamp !== null && timestamp < trackData.lastTimestamp) {
-			throw new Error(
-				`Timestamps must be monotonically increasing ` +
-				`(timestamp went from ${trackData.lastTimestamp}s to ${timestamp}s).`
-			);
+		if (trackData.lastKeyFrameTimestamp !== null && timestamp < trackData.lastKeyFrameTimestamp) {
+			throw new Error(`Timestamp cannot be before last key frame's timestamp (got ${timestamp / 1e6}s, last key frame at ${trackData.lastKeyFrameTimestamp / 1e6}s).`);
+		}
+
+		if (chunk.type === 'key') {
+			trackData.lastKeyFrameTimestamp = timestamp;
 		}
 
 		return timestamp;
@@ -787,7 +800,7 @@ export class MatroskaMuxer extends Muxer {
 					prelude,
 					chunk.data
 				] },
-				chunk.type === 'delta' ? { id: EBMLId.ReferenceBlock, data: trackData.lastWrittenTimestamp! - msTimestamp } : null,
+				chunk.type === 'delta' ? { id: EBMLId.ReferenceBlock, data: new EBMLSignedInt(trackData.lastWrittenTimestamp! - msTimestamp) } : null,
 				chunk.duration !== null ? { id: EBMLId.BlockDuration, data: msDuration } : null,
 				chunk.additions ? { id: EBMLId.BlockAdditions, data: chunk.additions } : null
 			] };

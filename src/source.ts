@@ -5,24 +5,24 @@ import { OutputAudioTrack, OutputTrack, OutputVideoTrack } from "./output";
 export type VideoCodec = 'avc' | 'hevc' | 'vp8' | 'vp9' | 'av1';
 export type AudioCodec = 'aac' | 'opus' | 'vorbis'; // TODO add the rest
 
-type VideoSourceMetadata = {
-	rotation?: 0 | 90 | 180 | 270 | TransformationMatrix,
-	frameRate?: number
-};
-type AudioSourceMetadata = {};
-
 export abstract class VideoSource {
 	connectedTrack: OutputVideoTrack | null = null;
 	codec: VideoCodec;
-	metadata: VideoSourceMetadata;
 
-	constructor(codec: VideoCodec, metadata: VideoSourceMetadata) {
+	constructor(codec: VideoCodec) {
 		this.codec = codec;
-		this.metadata = metadata;
 	}
 
-	ensureNotFinalizing() {
-		if (this.connectedTrack?.output.finalizing) {
+	ensureValidDigest() {
+		if (!this.connectedTrack) {
+			throw new Error('Cannot call digest without connecting the source to an output track.');
+		}
+
+		if (!this.connectedTrack.output.started) {
+			throw new Error('Cannot call digest before output has been started.');
+		}
+
+		if (this.connectedTrack.output.finalizing) {
 			throw new Error('Cannot call digest after output has started finalizing.');
 		}
 	}
@@ -34,11 +34,9 @@ export abstract class VideoSource {
 export abstract class AudioSource {
 	connectedTrack: OutputAudioTrack | null = null;
 	codec: AudioCodec;
-	metadata: AudioSourceMetadata;
 
-	constructor(codec: AudioCodec, metadata: AudioSourceMetadata) {
+	constructor(codec: AudioCodec) {
 		this.codec = codec;
-		this.metadata = metadata;
 	}
 
 	ensureNotFinalizing() {
@@ -62,13 +60,15 @@ export type AudioCodecConfig = {
 };
 
 export class EncodedVideoChunkSource extends VideoSource {
-	constructor(codec: VideoCodec, options: VideoSourceMetadata = {}) {
-		super(codec, options);
+	constructor(codec: VideoCodec) {
+		super(codec);
 	}
 
-	digest(chunk: EncodedVideoChunk, meta?: EncodedVideoChunkMetadata, compositionTimeOffset?: number) {
-		this.ensureNotFinalizing();
-		this.connectedTrack?.output.muxer.addEncodedVideoChunk(this.connectedTrack, chunk, meta, compositionTimeOffset);
+	// TODO: Ensure that the first chunk is a key frame (same for the audio case)
+
+	digest(chunk: EncodedVideoChunk, meta?: EncodedVideoChunkMetadata) {
+		this.ensureValidDigest();
+		this.connectedTrack?.output.muxer.addEncodedVideoChunk(this.connectedTrack, chunk, meta);
 	}
 }
 
@@ -80,8 +80,9 @@ class VideoEncoderWrapper {
 
 	constructor(private source: VideoSource, private codecConfig: VideoCodecConfig) {}
 
+	// TODO: Ensure video frame size remains constant
 	digest(videoFrame: VideoFrame) {
-		this.source.ensureNotFinalizing();
+		this.source.ensureValidDigest();
 
 		this.ensureEncoder(videoFrame);
 		assert(this.encoder);
@@ -122,8 +123,8 @@ class VideoEncoderWrapper {
 export class VideoFrameSource extends VideoSource {
 	private encoder: VideoEncoderWrapper;
 
-	constructor(codecConfig: VideoCodecConfig, options: VideoSourceMetadata = {}) {
-		super(codecConfig.codec, options);
+	constructor(codecConfig: VideoCodecConfig) {
+		super(codecConfig.codec);
 		this.encoder = new VideoEncoderWrapper(this, codecConfig);
 	}
 
@@ -139,8 +140,8 @@ export class VideoFrameSource extends VideoSource {
 export class CanvasSource extends VideoSource {
 	private encoder: VideoEncoderWrapper;
 
-	constructor(private canvas: HTMLCanvasElement, codecConfig: VideoCodecConfig, options: VideoSourceMetadata = {}) {
-		super(codecConfig.codec, options);
+	constructor(private canvas: HTMLCanvasElement, codecConfig: VideoCodecConfig) {
+		super(codecConfig.codec);
 		this.encoder = new VideoEncoderWrapper(this, codecConfig);
 	}
 
@@ -163,8 +164,8 @@ export class MediaStreamVideoTrackSource extends VideoSource {
     private encoder: VideoEncoderWrapper;
     private abortController: AbortController | null = null;
 
-    constructor(private track: MediaStreamVideoTrack, codecConfig: VideoCodecConfig, options: VideoSourceMetadata = {}) {
-        super(codecConfig.codec, options);
+    constructor(private track: MediaStreamVideoTrack, codecConfig: VideoCodecConfig) {
+        super(codecConfig.codec);
         this.encoder = new VideoEncoderWrapper(this, codecConfig);
     }
 
@@ -201,7 +202,7 @@ export class MediaStreamVideoTrackSource extends VideoSource {
 
 export class EncodedAudioChunkSource extends AudioSource {
 	constructor(codec: AudioCodec) {
-		super(codec, {});
+		super(codec);
 	}
 
 	digest(chunk: EncodedAudioChunk, meta?: EncodedAudioChunkMetadata) {
@@ -215,6 +216,7 @@ class AudioEncoderWrapper {
 
     constructor(private source: AudioSource, private codecConfig: AudioCodecConfig) {}
 
+	// TODO: Ensure audio parameters remain constant
     digest(audioData: AudioData) {
         this.source.ensureNotFinalizing();
 
@@ -250,8 +252,8 @@ class AudioEncoderWrapper {
 export class AudioDataSource extends AudioSource {
     private encoder: AudioEncoderWrapper;
 
-    constructor(codecConfig: AudioCodecConfig, options: AudioSourceMetadata = {}) {
-        super(codecConfig.codec, options);
+    constructor(codecConfig: AudioCodecConfig) {
+        super(codecConfig.codec);
         this.encoder = new AudioEncoderWrapper(this, codecConfig);
     }
 
@@ -268,8 +270,8 @@ export class AudioBufferSource extends AudioSource {
     private encoder: AudioEncoderWrapper;
     private accumulatedFrameCount = 0;
 
-    constructor(codecConfig: AudioCodecConfig, options: AudioSourceMetadata = {}) {
-        super(codecConfig.codec, options);
+    constructor(codecConfig: AudioCodecConfig) {
+        super(codecConfig.codec);
         this.encoder = new AudioEncoderWrapper(this, codecConfig);
     }
 
@@ -309,8 +311,8 @@ export class MediaStreamAudioTrackSource extends AudioSource {
     private encoder: AudioEncoderWrapper;
     private abortController: AbortController | null = null;
 
-    constructor(private track: MediaStreamAudioTrack, codecConfig: AudioCodecConfig, options: AudioSourceMetadata = {}) {
-        super(codecConfig.codec, options);
+    constructor(private track: MediaStreamAudioTrack, codecConfig: AudioCodecConfig) {
+        super(codecConfig.codec);
         this.encoder = new AudioEncoderWrapper(this, codecConfig);
     }
 

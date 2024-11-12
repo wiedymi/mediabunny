@@ -1,3 +1,4 @@
+import { TransformationMatrix } from "./misc";
 import { Muxer } from "./muxer";
 import { OutputFormat } from "./output_format";
 import { AudioSource, VideoSource } from "./source";
@@ -14,14 +15,22 @@ export type OutputTrack = {
 	output: Output
 } & ({
 	type: 'video',
-	source: VideoSource
+	source: VideoSource,
+	metadata: VideoTrackMetadata
 } | {
 	type: 'audio',
-	source: AudioSource
+	source: AudioSource,
+	metadata: AudioTrackMetadata
 });
 
 export type OutputVideoTrack = OutputTrack & { type: 'video' };
 export type OutputAudioTrack = OutputTrack & { type: 'audio' };
+
+type VideoTrackMetadata = {
+	rotation?: 0 | 90 | 180 | 270 | TransformationMatrix,
+	frameRate?: number
+};
+type AudioTrackMetadata = {};
 
 export class Output {
 	muxer: Muxer;
@@ -35,7 +44,7 @@ export class Output {
 		this.muxer = options.format.createMuxer(this);
 	}
 
-	addTrack(source: VideoSource | AudioSource) {
+	addTrack(source: VideoSource | AudioSource, metadata: VideoTrackMetadata | AudioTrackMetadata = {}) {
 		if (this.started) {
 			throw new Error('Cannot add track after output has started.');
 		}
@@ -47,7 +56,8 @@ export class Output {
 			id: this.tracks.length + 1,
 			output: this,
 			type: source instanceof VideoSource ? 'video' : 'audio',
-			source
+			source,
+			metadata
 		} as OutputTrack;
 
 		this.muxer.beforeTrackAdd(track);
@@ -57,6 +67,8 @@ export class Output {
 	}
 
 	start() {
+		// TODO: Warn / throw if there are no sources
+
 		if (this.started) {
 			throw new Error('Output already started.');
 		}
@@ -70,6 +82,8 @@ export class Output {
 	}
 
 	async finalize() {
+		// TODO: Test what happens when finalizing without a single chunk of media
+
 		if (this.finalizing) {
 			throw new Error('Cannot call finalize twice.');
 		}
