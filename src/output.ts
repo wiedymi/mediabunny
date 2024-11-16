@@ -1,7 +1,7 @@
 import { TransformationMatrix } from "./misc";
 import { Muxer } from "./muxer";
 import { OutputFormat } from "./output_format";
-import { AudioSource, VideoSource } from "./source";
+import { AudioSource, MediaSource, SubtitleSource, VideoSource } from "./source";
 import { Target } from "./target";
 import { Writer } from "./writer";
 
@@ -21,16 +21,22 @@ export type OutputTrack = {
 	type: 'audio',
 	source: AudioSource,
 	metadata: AudioTrackMetadata
+} | {
+	type: 'subtitle',
+	source: SubtitleSource,
+	metadata: SubtitleTrackMetadata
 });
 
 export type OutputVideoTrack = OutputTrack & { type: 'video' };
 export type OutputAudioTrack = OutputTrack & { type: 'audio' };
+export type OutputSubtitleTrack = OutputTrack & { type: 'subtitle' };
 
 type VideoTrackMetadata = {
 	rotation?: 0 | 90 | 180 | 270 | TransformationMatrix,
 	frameRate?: number
 };
 type AudioTrackMetadata = {};
+type SubtitleTrackMetadata = {};
 
 export class Output {
 	muxer: Muxer;
@@ -40,11 +46,28 @@ export class Output {
 	finalizing = false;
 
 	constructor(options: OutputOptions) {
+		if (options.target.output) {
+			throw new Error('Target is already used for another output.');
+		}
+		options.target.output = this;
+
 		this.writer = options.target.createWriter();
 		this.muxer = options.format.createMuxer(this);
 	}
 
-	addTrack(source: VideoSource | AudioSource, metadata: VideoTrackMetadata | AudioTrackMetadata = {}) {
+	addVideoTrack(source: VideoSource, metadata: VideoTrackMetadata = {}) {
+		this.addTrack('video', source, metadata);
+	}
+
+	addAudioTrack(source: AudioSource, metadata: AudioTrackMetadata = {}) {
+		this.addTrack('audio', source, metadata);
+	}
+
+	addSubtitleTrack(source: SubtitleSource, metadata: SubtitleTrackMetadata = {}) {
+		this.addTrack('subtitle', source, metadata);
+	}
+
+	private addTrack(type: OutputTrack['type'], source: MediaSource, metadata: object) {
 		if (this.started) {
 			throw new Error('Cannot add track after output has started.');
 		}
@@ -55,8 +78,8 @@ export class Output {
 		const track = {
 			id: this.tracks.length + 1,
 			output: this,
-			type: source instanceof VideoSource ? 'video' : 'audio',
-			source,
+			type,
+			source: source as any,
 			metadata
 		} as OutputTrack;
 

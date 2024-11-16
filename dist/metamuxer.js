@@ -35,99 +35,72 @@ var Metamuxer = (() => {
     Output: () => Output,
     StreamTarget: () => StreamTarget,
     Target: () => Target,
+    TextSubtitleSource: () => TextSubtitleSource,
     VideoFrameSource: () => VideoFrameSource,
     WebMOutputFormat: () => WebMOutputFormat
   });
 
-  // src/codec.ts
-  var buildVideoCodecString = (codec, width, height) => {
-    if (codec === "avc") {
-      let profileIndication = 100;
-      if (width <= 768 && height <= 432) {
-        profileIndication = 66;
-      } else if (width <= 1920 && height <= 1080) {
-        profileIndication = 77;
+  // src/output.ts
+  var Output = class {
+    constructor(options) {
+      this.tracks = [];
+      this.started = false;
+      this.finalizing = false;
+      if (options.target.output) {
+        throw new Error("Target is already used for another output.");
       }
-      const profileCompatibility = 0;
-      const levelIndication = width > 1920 || height > 1080 ? 50 : 41;
-      const hexProfileIndication = profileIndication.toString(16).padStart(2, "0");
-      const hexProfileCompatibility = profileCompatibility.toString(16).padStart(2, "0");
-      const hexLevelIndication = levelIndication.toString(16).padStart(2, "0");
-      return `avc1.${hexProfileIndication}${hexProfileCompatibility}${hexLevelIndication}`;
-    } else if (codec === "hevc") {
-      let profileSpace = 0;
-      let profileIdc = 1;
-      const compatibilityFlags = Array(32).fill(0);
-      compatibilityFlags[profileIdc] = 1;
-      const compatibilityHex = parseInt(compatibilityFlags.reverse().join(""), 2).toString(16).replace(/^0+/, "");
-      let tier = "L";
-      let level = 120;
-      if (width <= 1280 && height <= 720) {
-        level = 93;
-      } else if (width <= 1920 && height <= 1080) {
-        level = 120;
-      } else if (width <= 3840 && height <= 2160) {
-        level = 150;
-      } else {
-        tier = "H";
-        level = 180;
-      }
-      const constraintFlags = "B0";
-      const profilePrefix = profileSpace === 0 ? "" : String.fromCharCode(65 + profileSpace - 1);
-      return `hev1.${profilePrefix}${profileIdc}.${compatibilityHex}.${tier}${level}.${constraintFlags}`;
-    } else if (codec === "vp8") {
-      return "vp8";
-    } else if (codec === "vp9") {
-      const profile = "00";
-      let level;
-      if (width <= 854 && height <= 480) {
-        level = "21";
-      } else if (width <= 1280 && height <= 720) {
-        level = "31";
-      } else if (width <= 1920 && height <= 1080) {
-        level = "41";
-      } else if (width <= 3840 && height <= 2160) {
-        level = "51";
-      } else {
-        level = "61";
-      }
-      const bitDepth = "08";
-      return `vp09.${profile}.${level}.${bitDepth}`;
-    } else if (codec === "av1") {
-      const profile = 0;
-      let level;
-      if (width <= 854 && height <= 480) {
-        level = "01";
-      } else if (width <= 1280 && height <= 720) {
-        level = "03";
-      } else if (width <= 1920 && height <= 1080) {
-        level = "04";
-      } else if (width <= 3840 && height <= 2160) {
-        level = "07";
-      } else {
-        level = "09";
-      }
-      const tier = "M";
-      const bitDepth = "08";
-      return `av01.${profile}.${level}${tier}.${bitDepth}`;
+      options.target.output = this;
+      this.writer = options.target.createWriter();
+      this.muxer = options.format.createMuxer(this);
     }
-    throw new Error(`Unhandled codec '${codec}'.`);
-  };
-  var buildAudioCodecString = (codec, numberOfChannels, sampleRate) => {
-    if (codec === "aac") {
-      if (numberOfChannels >= 2 && sampleRate <= 24e3) {
-        return "mp4a.40.29";
-      }
-      if (sampleRate <= 24e3) {
-        return "mp4a.40.5";
-      }
-      return "mp4a.40.2";
-    } else if (codec === "opus") {
-      return "opus";
-    } else if (codec === "vorbis") {
-      return "vorbis";
+    addVideoTrack(source, metadata = {}) {
+      this.addTrack("video", source, metadata);
     }
-    throw new Error(`Unhandled codec '${codec}'.`);
+    addAudioTrack(source, metadata = {}) {
+      this.addTrack("audio", source, metadata);
+    }
+    addSubtitleTrack(source, metadata = {}) {
+      this.addTrack("subtitle", source, metadata);
+    }
+    addTrack(type, source, metadata) {
+      if (this.started) {
+        throw new Error("Cannot add track after output has started.");
+      }
+      if (source.connectedTrack) {
+        throw new Error("Source is already used for a track.");
+      }
+      const track = {
+        id: this.tracks.length + 1,
+        output: this,
+        type,
+        source,
+        metadata
+      };
+      this.muxer.beforeTrackAdd(track);
+      this.tracks.push(track);
+      source.connectedTrack = track;
+    }
+    start() {
+      if (this.started) {
+        throw new Error("Output already started.");
+      }
+      this.started = true;
+      this.muxer.start();
+      for (const track of this.tracks) {
+        track.source.start();
+      }
+    }
+    async finalize() {
+      if (this.finalizing) {
+        throw new Error("Cannot call finalize twice.");
+      }
+      this.finalizing = true;
+      const promises = this.tracks.map((x) => x.source.flush());
+      await Promise.all(promises);
+      this.muxer.finalize();
+      this.writer.flush();
+      this.writer.finalize();
+    }
   };
 
   // src/misc.ts
@@ -169,318 +142,6 @@ var Metamuxer = (() => {
       return new Uint8Array(source);
     } else {
       return new Uint8Array(source.buffer, source.byteOffset, source.byteLength);
-    }
-  };
-
-  // src/source.ts
-  var VideoSource = class {
-    constructor(codec) {
-      this.connectedTrack = null;
-      this.codec = codec;
-    }
-    ensureValidDigest() {
-      if (!this.connectedTrack) {
-        throw new Error("Cannot call digest without connecting the source to an output track.");
-      }
-      if (!this.connectedTrack.output.started) {
-        throw new Error("Cannot call digest before output has been started.");
-      }
-      if (this.connectedTrack.output.finalizing) {
-        throw new Error("Cannot call digest after output has started finalizing.");
-      }
-    }
-    start() {
-    }
-    async flush() {
-    }
-  };
-  var AudioSource = class {
-    constructor(codec) {
-      this.connectedTrack = null;
-      this.codec = codec;
-    }
-    ensureNotFinalizing() {
-      if (this.connectedTrack?.output.finalizing) {
-        throw new Error("Cannot call digest after output has started finalizing.");
-      }
-    }
-    start() {
-    }
-    async flush() {
-    }
-  };
-  var EncodedVideoChunkSource = class extends VideoSource {
-    constructor(codec) {
-      super(codec);
-    }
-    // TODO: Ensure that the first chunk is a key frame (same for the audio case)
-    digest(chunk, meta) {
-      this.ensureValidDigest();
-      this.connectedTrack?.output.muxer.addEncodedVideoChunk(this.connectedTrack, chunk, meta);
-    }
-  };
-  var KEY_FRAME_INTERVAL = 5;
-  var VideoEncoderWrapper = class {
-    constructor(source, codecConfig) {
-      this.source = source;
-      this.codecConfig = codecConfig;
-      this.encoder = null;
-      this.lastMultipleOfKeyFrameInterval = -1;
-    }
-    // TODO: Ensure video frame size remains constant
-    digest(videoFrame) {
-      this.source.ensureValidDigest();
-      this.ensureEncoder(videoFrame);
-      assert(this.encoder);
-      const multipleOfKeyFrameInterval = Math.floor(videoFrame.timestamp / 1e6 / KEY_FRAME_INTERVAL);
-      this.encoder.encode(videoFrame, { keyFrame: multipleOfKeyFrameInterval !== this.lastMultipleOfKeyFrameInterval });
-      this.lastMultipleOfKeyFrameInterval = multipleOfKeyFrameInterval;
-    }
-    ensureEncoder(videoFrame) {
-      if (this.encoder) {
-        return;
-      }
-      this.encoder = new VideoEncoder({
-        output: (chunk, meta) => this.source.connectedTrack?.output.muxer.addEncodedVideoChunk(this.source.connectedTrack, chunk, meta),
-        error: (error) => console.error(error)
-        // TODO
-      });
-      this.encoder.configure({
-        codec: buildVideoCodecString(this.codecConfig.codec, videoFrame.codedWidth, videoFrame.codedHeight),
-        width: videoFrame.codedWidth,
-        height: videoFrame.codedHeight,
-        bitrate: this.codecConfig.bitrate
-      });
-    }
-    async flush() {
-      return this.encoder?.flush();
-    }
-  };
-  var VideoFrameSource = class extends VideoSource {
-    constructor(codecConfig) {
-      super(codecConfig.codec);
-      this.encoder = new VideoEncoderWrapper(this, codecConfig);
-    }
-    digest(videoFrame) {
-      this.encoder.digest(videoFrame);
-    }
-    flush() {
-      return this.encoder.flush();
-    }
-  };
-  var CanvasSource = class extends VideoSource {
-    constructor(canvas, codecConfig) {
-      super(codecConfig.codec);
-      this.canvas = canvas;
-      this.encoder = new VideoEncoderWrapper(this, codecConfig);
-    }
-    digest(timestamp, duration = 0) {
-      const frame = new VideoFrame(this.canvas, {
-        timestamp: Math.round(1e6 * timestamp),
-        duration: Math.round(1e6 * duration)
-      });
-      this.encoder.digest(frame);
-      frame.close();
-    }
-    flush() {
-      return this.encoder.flush();
-    }
-  };
-  var MediaStreamVideoTrackSource = class extends VideoSource {
-    constructor(track, codecConfig) {
-      super(codecConfig.codec);
-      this.track = track;
-      this.abortController = null;
-      this.encoder = new VideoEncoderWrapper(this, codecConfig);
-    }
-    start() {
-      this.abortController = new AbortController();
-      const processor = new MediaStreamTrackProcessor({ track: this.track });
-      const consumer = new WritableStream({
-        write: (videoFrame) => {
-          this.encoder.digest(videoFrame);
-          videoFrame.close();
-        }
-      });
-      processor.readable.pipeTo(consumer, {
-        signal: this.abortController.signal
-      }).catch((err) => {
-        if (err instanceof DOMException && err.name === "AbortError") return;
-        console.error("Pipe error:", err);
-      });
-    }
-    async flush() {
-      if (this.abortController) {
-        this.abortController.abort();
-        this.abortController = null;
-      }
-      await this.encoder.flush();
-    }
-  };
-  var EncodedAudioChunkSource = class extends AudioSource {
-    constructor(codec) {
-      super(codec);
-    }
-    digest(chunk, meta) {
-      this.ensureNotFinalizing();
-      this.connectedTrack?.output.muxer.addEncodedAudioChunk(this.connectedTrack, chunk, meta);
-    }
-  };
-  var AudioEncoderWrapper = class {
-    constructor(source, codecConfig) {
-      this.source = source;
-      this.codecConfig = codecConfig;
-      this.encoder = null;
-    }
-    // TODO: Ensure audio parameters remain constant
-    digest(audioData) {
-      this.source.ensureNotFinalizing();
-      this.ensureEncoder(audioData);
-      assert(this.encoder);
-      this.encoder.encode(audioData);
-    }
-    ensureEncoder(audioData) {
-      if (this.encoder) {
-        return;
-      }
-      this.encoder = new AudioEncoder({
-        output: (chunk, meta) => this.source.connectedTrack?.output.muxer.addEncodedAudioChunk(this.source.connectedTrack, chunk, meta),
-        error: (error) => console.error(error)
-        // TODO
-      });
-      this.encoder.configure({
-        codec: buildAudioCodecString(this.codecConfig.codec, audioData.numberOfChannels, audioData.sampleRate),
-        numberOfChannels: audioData.numberOfChannels,
-        sampleRate: audioData.sampleRate,
-        bitrate: this.codecConfig.bitrate
-      });
-    }
-    async flush() {
-      return this.encoder?.flush();
-    }
-  };
-  var AudioDataSource = class extends AudioSource {
-    constructor(codecConfig) {
-      super(codecConfig.codec);
-      this.encoder = new AudioEncoderWrapper(this, codecConfig);
-    }
-    digest(audioData) {
-      this.encoder.digest(audioData);
-    }
-    flush() {
-      return this.encoder.flush();
-    }
-  };
-  var AudioBufferSource = class extends AudioSource {
-    constructor(codecConfig) {
-      super(codecConfig.codec);
-      this.accumulatedFrameCount = 0;
-      this.encoder = new AudioEncoderWrapper(this, codecConfig);
-    }
-    digest(audioBuffer) {
-      const numberOfChannels = audioBuffer.numberOfChannels;
-      const sampleRate = audioBuffer.sampleRate;
-      const numberOfFrames = audioBuffer.length;
-      const data = new Float32Array(numberOfChannels * numberOfFrames);
-      for (let channel = 0; channel < numberOfChannels; channel++) {
-        const channelData = audioBuffer.getChannelData(channel);
-        data.set(channelData, channel * numberOfFrames);
-      }
-      const audioData = new AudioData({
-        format: "f32-planar",
-        sampleRate,
-        numberOfFrames,
-        numberOfChannels,
-        timestamp: Math.round(1e6 * this.accumulatedFrameCount / sampleRate),
-        data
-      });
-      this.encoder.digest(audioData);
-      audioData.close();
-      this.accumulatedFrameCount += numberOfFrames;
-    }
-    flush() {
-      return this.encoder.flush();
-    }
-  };
-  var MediaStreamAudioTrackSource = class extends AudioSource {
-    constructor(track, codecConfig) {
-      super(codecConfig.codec);
-      this.track = track;
-      this.abortController = null;
-      this.encoder = new AudioEncoderWrapper(this, codecConfig);
-    }
-    start() {
-      this.abortController = new AbortController();
-      const processor = new MediaStreamTrackProcessor({ track: this.track });
-      const consumer = new WritableStream({
-        write: (audioData) => {
-          this.encoder.digest(audioData);
-          audioData.close();
-        }
-      });
-      processor.readable.pipeTo(consumer, {
-        signal: this.abortController.signal
-      }).catch((err) => {
-        if (err instanceof DOMException && err.name === "AbortError") return;
-        console.error("Pipe error:", err);
-      });
-    }
-    async flush() {
-      if (this.abortController) {
-        this.abortController.abort();
-        this.abortController = null;
-      }
-      await this.encoder.flush();
-    }
-  };
-
-  // src/output.ts
-  var Output = class {
-    constructor(options) {
-      this.tracks = [];
-      this.started = false;
-      this.finalizing = false;
-      this.writer = options.target.createWriter();
-      this.muxer = options.format.createMuxer(this);
-    }
-    addTrack(source, metadata = {}) {
-      if (this.started) {
-        throw new Error("Cannot add track after output has started.");
-      }
-      if (source.connectedTrack) {
-        throw new Error("Source is already used for a track.");
-      }
-      const track = {
-        id: this.tracks.length + 1,
-        output: this,
-        type: source instanceof VideoSource ? "video" : "audio",
-        source,
-        metadata
-      };
-      this.muxer.beforeTrackAdd(track);
-      this.tracks.push(track);
-      source.connectedTrack = track;
-    }
-    start() {
-      if (this.started) {
-        throw new Error("Output already started.");
-      }
-      this.started = true;
-      this.muxer.start();
-      for (const track of this.tracks) {
-        track.source.start();
-      }
-    }
-    async finalize() {
-      if (this.finalizing) {
-        throw new Error("Cannot call finalize twice.");
-      }
-      this.finalizing = true;
-      const promises = this.tracks.map((x) => x.source.flush());
-      await Promise.all(promises);
-      this.muxer.finalize();
-      this.writer.flush();
-      this.writer.finalize();
     }
   };
 
@@ -1228,6 +889,8 @@ var Metamuxer = (() => {
     }
     beforeTrackAdd(track) {
     }
+    onTrackClose(track) {
+    }
   };
 
   // src/isobmff/isobmff_muxer.ts
@@ -1838,8 +1501,6 @@ var Metamuxer = (() => {
   };
 
   // src/matroska/matroska_muxer.ts
-  var VIDEO_TRACK_TYPE = 1;
-  var AUDIO_TRACK_TYPE = 2;
   var MAX_CHUNK_LENGTH_MS = 2 ** 15;
   var APP_NAME = "https://github.com/Vanilagy/webm-muxer";
   var SEGMENT_SIZE_BYTES = 6;
@@ -1852,7 +1513,13 @@ var Metamuxer = (() => {
     av1: "V_AV1",
     aac: "A_AAC",
     opus: "A_OPUS",
-    vorbis: "A_VORBIS"
+    vorbis: "A_VORBIS",
+    webvtt: "S_TEXT/WEBVTT"
+  };
+  var TRACK_TYPE_MAP = {
+    video: 1,
+    audio: 2,
+    subtitle: 17
   };
   var MatroskaMuxer = class extends Muxer {
     constructor(output, format) {
@@ -2039,10 +1706,16 @@ var Metamuxer = (() => {
         if (!["vp8", "vp9", "av1"].includes(track.source.codec)) {
           throw new Error(`WebM only supports VP8, VP9 and AV1 as video codecs. Switching to MKV removes this restriction.`);
         }
-      } else {
+      } else if (track.type === "audio") {
         if (!["opus", "vorbis"].includes(track.source.codec)) {
           throw new Error(`WebM only supports Opus and Vorbis as audio codecs. Switching to MKV removes this restriction.`);
         }
+      } else if (track.type === "subtitle") {
+        if (track.source.codec !== "webvtt") {
+          throw new Error(`WebM only supports WebVTT as subtitle codec. Switching to MKV removes this restriction.`);
+        }
+      } else {
+        throw new Error("WebM only supports video, audio and subtitle tracks. Switching to MKV removes this restriction.");
       }
     }
     start() {
@@ -2108,7 +1781,7 @@ var Metamuxer = (() => {
         tracksElement.data.push({ id: 174 /* TrackEntry */, data: [
           { id: 215 /* TrackNumber */, data: trackData.track.id },
           { id: 29637 /* TrackUID */, data: trackData.track.id },
-          { id: 131 /* TrackType */, data: trackData.type === "video" ? VIDEO_TRACK_TYPE : AUDIO_TRACK_TYPE },
+          { id: 131 /* TrackType */, data: TRACK_TYPE_MAP[trackData.type] },
           // TODO Subtitle case
           { id: 134 /* CodecID */, data: CODEC_STRING_MAP[trackData.track.source.codec] },
           trackData.info.decoderConfig.description ? { id: 25506 /* CodecPrivate */, data: toUint8Array(trackData.info.decoderConfig.description) } : null,
@@ -2227,23 +1900,55 @@ var Metamuxer = (() => {
       this.#trackDatas.sort((a, b) => a.track.id - b.track.id);
       return newTrackData;
     }
+    #getSubtitleTrackData(track, meta) {
+      const existingTrackData = this.#trackDatas.find((x) => x.track === track);
+      if (existingTrackData) {
+        return existingTrackData;
+      }
+      assert(meta);
+      assert(meta.decoderConfig);
+      const newTrackData = {
+        track,
+        type: "subtitle",
+        info: {
+          decoderConfig: meta.decoderConfig
+        },
+        chunkQueue: [],
+        firstTimestamp: null,
+        lastKeyFrameTimestamp: null,
+        lastWrittenMsTimestamp: null
+      };
+      this.#trackDatas.push(newTrackData);
+      this.#trackDatas.sort((a, b) => a.track.id - b.track.id);
+      return newTrackData;
+    }
     addEncodedVideoChunk(track, chunk, meta) {
       const trackData = this.#getVideoTrackData(track, meta);
-      let videoChunk = this.#createInternalChunk(trackData, chunk);
+      let data = new Uint8Array(chunk.byteLength);
+      chunk.copyTo(data);
+      let videoChunk = this.#createInternalChunk(trackData, data, chunk.timestamp, chunk.duration ?? 0, chunk.type);
       if (track.source.codec === "vp9") this.#fixVP9ColorSpace(trackData, videoChunk);
       trackData.chunkQueue.push(videoChunk);
       this.#interleaveChunks();
-      this.#writer.flush();
     }
     addEncodedAudioChunk(track, chunk, meta) {
       const trackData = this.#getAudioTrackData(track, meta);
-      let audioChunk = this.#createInternalChunk(trackData, chunk);
+      let data = new Uint8Array(chunk.byteLength);
+      chunk.copyTo(data);
+      let audioChunk = this.#createInternalChunk(trackData, data, chunk.timestamp, chunk.duration ?? 0, chunk.type);
       trackData.chunkQueue.push(audioChunk);
       this.#interleaveChunks();
-      this.#writer.flush();
+    }
+    addEncodedSubtitleChunk(track, chunk, meta) {
+      const trackData = this.#getSubtitleTrackData(track, meta);
+      let subtitleChunk = this.#createInternalChunk(trackData, chunk.body, chunk.timestamp, chunk.duration, "key", chunk.additions);
+      trackData.chunkQueue.push(subtitleChunk);
+      this.#interleaveChunks();
     }
     #interleaveChunks() {
-      if (this.#trackDatas.length < this.output.tracks.length) {
+      let openTrackCount = 0;
+      for (const trackData of this.#trackDatas) if (!trackData.track.source.closed) openTrackCount++;
+      if (this.#trackDatas.length < openTrackCount) {
         return;
       }
       outer:
@@ -2251,10 +1956,10 @@ var Metamuxer = (() => {
           let trackWithMinTimestamp = null;
           let minTimestamp = Infinity;
           for (let trackData of this.#trackDatas) {
-            if (trackData.chunkQueue.length === 0) {
+            if (trackData.chunkQueue.length === 0 && !trackData.track.source.closed) {
               break outer;
             }
-            if (trackData.chunkQueue[0].timestamp < minTimestamp) {
+            if (trackData.chunkQueue.length > 0 && trackData.chunkQueue[0].timestamp < minTimestamp) {
               trackWithMinTimestamp = trackData;
               minTimestamp = trackData.chunkQueue[0].timestamp;
             }
@@ -2265,6 +1970,7 @@ var Metamuxer = (() => {
           let chunk = trackWithMinTimestamp.chunkQueue.shift();
           this.#writeBlock(trackWithMinTimestamp, chunk);
         }
+      this.#writer.flush();
     }
     /** Due to [a bug in Chromium](https://bugs.chromium.org/p/chromium/issues/detail?id=1377842), VP9 streams often
      * lack color space information. This method patches in that information. */
@@ -2297,91 +2003,20 @@ var Metamuxer = (() => {
       }[trackData.info.decoderConfig.colorSpace.matrix];
       writeBits(chunk.data, i + 0, i + 3, colorSpaceID);
     }
-    /*
-    	addSubtitleChunk(chunk: EncodedSubtitleChunk, meta: EncodedSubtitleChunkMetadata, timestamp?: number) {
-    		if (typeof chunk !== 'object' || !chunk) {
-    			throw new TypeError("addSubtitleChunk's first argument (chunk) must be an object.");
-    		} else {
-    			// We can't simply do an instanceof check, so let's check the structure itself:
-    			if (!(chunk.body instanceof Uint8Array)) {
-    				throw new TypeError('body must be an instance of Uint8Array.');
-    			}
-    			if (!Number.isFinite(chunk.timestamp) || chunk.timestamp < 0) {
-    				throw new TypeError('timestamp must be a non-negative real number.');
-    			}
-    			if (!Number.isFinite(chunk.duration) || chunk.duration < 0) {
-    				throw new TypeError('duration must be a non-negative real number.');
-    			}
-    			if (chunk.additions && !(chunk.additions instanceof Uint8Array)) {
-    				throw new TypeError('additions, when present, must be an instance of Uint8Array.');
-    			}
-    		}
-    
-    		if (typeof meta !== 'object') {
-    			throw new TypeError("addSubtitleChunk's second argument (meta) must be an object.");
-    		}
-    
-    		this.#ensureNotFinalized();
-    		if (!this.#options.subtitles) throw new Error('No subtitle track declared.');
-    
-    		// Write possible subtitle decoder metadata to the file
-    		if (meta?.decoderConfig) {
-    			if (this.#options.streaming) {
-    				this.#subtitleCodecPrivate = this.#createCodecPrivateElement(meta.decoderConfig.description);
-    			} else {
-    				this.#writeCodecPrivate(this.#subtitleCodecPrivate, meta.decoderConfig.description);
-    			}
-    		}
-    
-    		let subtitleChunk = this.#createInternalChunk(
-    			chunk.body,
-    			'key',
-    			timestamp ?? chunk.timestamp,
-    			SUBTITLE_TRACK_NUMBER,
-    			chunk.duration,
-    			chunk.additions
-    		);
-    
-    		this.#lastSubtitleTimestamp = subtitleChunk.timestamp;
-    		this.#subtitleChunkQueue.push(subtitleChunk);
-    
-    		this.#writeSubtitleChunks();
-    		this.#maybeFlushStreamingTargetWriter();
-    	}
-    
-    	#writeSubtitleChunks() {
-    		// Writing subtitle chunks is different from video and audio: A subtitle chunk will be written if it's
-    		// guaranteed that no more media chunks will be written before it, to ensure monotonicity. However, media chunks
-    		// will NOT wait for subtitle chunks to arrive, as they may never arrive, so that's how non-monotonicity can
-    		// arrive. But it should be fine, since it's all still in one cluster.
-    
-    		let lastWrittenMediaTimestamp = Math.min(
-    			this.#options.video ? this.#lastVideoTimestamp : Infinity,
-    			this.#options.audio ? this.#lastAudioTimestamp : Infinity
-    		);
-    
-    		let queue = this.#subtitleChunkQueue;
-    		while (queue.length > 0 && queue[0].timestamp <= lastWrittenMediaTimestamp) {
-    			this.#writeBlock(queue.shift(), !this.#options.video && !this.#options.audio);
-    		}
-    	}
-    	*/
     /** Converts a read-only external chunk into an internal one for easier use. */
-    #createInternalChunk(trackData, chunk) {
-      let adjustedTimestamp = this.#validateTimestamp(trackData, chunk);
-      let data = new Uint8Array(chunk.byteLength);
-      chunk.copyTo(data);
+    #createInternalChunk(trackData, data, timestamp, duration, type, additions = null) {
+      let adjustedTimestamp = this.#validateTimestamp(trackData, timestamp, type === "key");
       let internalChunk = {
         data,
-        type: chunk.type,
+        type,
         timestamp: adjustedTimestamp,
-        duration: (chunk.duration ?? 0) / 1e6,
-        additions: null
+        duration: duration / 1e6,
+        additions
       };
       return internalChunk;
     }
-    #validateTimestamp(trackData, chunk) {
-      let timestampInSeconds = chunk.timestamp / 1e6;
+    #validateTimestamp(trackData, timestamp, isKeyFrame) {
+      let timestampInSeconds = timestamp / 1e6;
       if (timestampInSeconds < 0) {
         throw new Error(`Timestamps must be non-negative (got ${timestampInSeconds}s).`);
       }
@@ -2392,7 +2027,7 @@ var Metamuxer = (() => {
       if (trackData.lastKeyFrameTimestamp !== null && timestampInSeconds < trackData.lastKeyFrameTimestamp) {
         throw new Error(`Timestamp cannot be before last key frame's timestamp (got ${timestampInSeconds}s, last key frame at ${trackData.lastKeyFrameTimestamp}s).`);
       }
-      if (chunk.type === "key") {
+      if (isKeyFrame) {
         trackData.lastKeyFrameTimestamp = timestampInSeconds;
       }
       return timestampInSeconds;
@@ -2488,6 +2123,9 @@ var Metamuxer = (() => {
         })
       ] });
     }
+    onTrackClose() {
+      this.#interleaveChunks();
+    }
     /** Finalizes the file, making it ready for use. Must be called after all media chunks have been added. */
     finalize() {
       for (let trackData of this.#trackDatas) {
@@ -2540,6 +2178,499 @@ var Metamuxer = (() => {
     }
   };
   var WebMOutputFormat = class extends MkvOutputFormat2 {
+  };
+
+  // src/codec.ts
+  var buildVideoCodecString = (codec, width, height) => {
+    if (codec === "avc") {
+      let profileIndication = 100;
+      if (width <= 768 && height <= 432) {
+        profileIndication = 66;
+      } else if (width <= 1920 && height <= 1080) {
+        profileIndication = 77;
+      }
+      const profileCompatibility = 0;
+      const levelIndication = width > 1920 || height > 1080 ? 50 : 41;
+      const hexProfileIndication = profileIndication.toString(16).padStart(2, "0");
+      const hexProfileCompatibility = profileCompatibility.toString(16).padStart(2, "0");
+      const hexLevelIndication = levelIndication.toString(16).padStart(2, "0");
+      return `avc1.${hexProfileIndication}${hexProfileCompatibility}${hexLevelIndication}`;
+    } else if (codec === "hevc") {
+      let profileSpace = 0;
+      let profileIdc = 1;
+      const compatibilityFlags = Array(32).fill(0);
+      compatibilityFlags[profileIdc] = 1;
+      const compatibilityHex = parseInt(compatibilityFlags.reverse().join(""), 2).toString(16).replace(/^0+/, "");
+      let tier = "L";
+      let level = 120;
+      if (width <= 1280 && height <= 720) {
+        level = 93;
+      } else if (width <= 1920 && height <= 1080) {
+        level = 120;
+      } else if (width <= 3840 && height <= 2160) {
+        level = 150;
+      } else {
+        tier = "H";
+        level = 180;
+      }
+      const constraintFlags = "B0";
+      const profilePrefix = profileSpace === 0 ? "" : String.fromCharCode(65 + profileSpace - 1);
+      return `hev1.${profilePrefix}${profileIdc}.${compatibilityHex}.${tier}${level}.${constraintFlags}`;
+    } else if (codec === "vp8") {
+      return "vp8";
+    } else if (codec === "vp9") {
+      const profile = "00";
+      let level;
+      if (width <= 854 && height <= 480) {
+        level = "21";
+      } else if (width <= 1280 && height <= 720) {
+        level = "31";
+      } else if (width <= 1920 && height <= 1080) {
+        level = "41";
+      } else if (width <= 3840 && height <= 2160) {
+        level = "51";
+      } else {
+        level = "61";
+      }
+      const bitDepth = "08";
+      return `vp09.${profile}.${level}.${bitDepth}`;
+    } else if (codec === "av1") {
+      const profile = 0;
+      let level;
+      if (width <= 854 && height <= 480) {
+        level = "01";
+      } else if (width <= 1280 && height <= 720) {
+        level = "03";
+      } else if (width <= 1920 && height <= 1080) {
+        level = "04";
+      } else if (width <= 3840 && height <= 2160) {
+        level = "07";
+      } else {
+        level = "09";
+      }
+      const tier = "M";
+      const bitDepth = "08";
+      return `av01.${profile}.${level}${tier}.${bitDepth}`;
+    }
+    throw new Error(`Unhandled codec '${codec}'.`);
+  };
+  var buildAudioCodecString = (codec, numberOfChannels, sampleRate) => {
+    if (codec === "aac") {
+      if (numberOfChannels >= 2 && sampleRate <= 24e3) {
+        return "mp4a.40.29";
+      }
+      if (sampleRate <= 24e3) {
+        return "mp4a.40.5";
+      }
+      return "mp4a.40.2";
+    } else if (codec === "opus") {
+      return "opus";
+    } else if (codec === "vorbis") {
+      return "vorbis";
+    }
+    throw new Error(`Unhandled codec '${codec}'.`);
+  };
+
+  // src/subtitles.ts
+  var cueBlockHeaderRegex = /(?:(.+?)\n)?((?:\d{2}:)?\d{2}:\d{2}.\d{3})\s+-->\s+((?:\d{2}:)?\d{2}:\d{2}.\d{3})/g;
+  var preambleStartRegex = /^WEBVTT.*?\n{2}/;
+  var timestampRegex = /(?:(\d{2}):)?(\d{2}):(\d{2}).(\d{3})/;
+  var inlineTimestampRegex = /<(?:(\d{2}):)?(\d{2}):(\d{2}).(\d{3})>/g;
+  var textEncoder = new TextEncoder();
+  var SubtitleEncoder = class {
+    #options;
+    #config = null;
+    #preambleBytes = null;
+    #preambleEmitted = false;
+    constructor(options) {
+      this.#options = options;
+    }
+    configure(config) {
+      if (config.codec !== "webvtt") {
+        throw new Error("Codec must be 'webvtt'.");
+      }
+      this.#config = config;
+    }
+    encode(text) {
+      if (!this.#config) {
+        throw new Error("Encoder not configured.");
+      }
+      text = text.replace("\r\n", "\n").replace("\r", "\n");
+      cueBlockHeaderRegex.lastIndex = 0;
+      let match;
+      if (!this.#preambleBytes) {
+        if (!preambleStartRegex.test(text)) {
+          let error = new Error("WebVTT preamble incorrect.");
+          this.#options.error(error);
+          throw error;
+        }
+        match = cueBlockHeaderRegex.exec(text);
+        let preamble = text.slice(0, match?.index ?? text.length).trimEnd();
+        if (!preamble) {
+          let error = new Error("No WebVTT preamble provided.");
+          this.#options.error(error);
+          throw error;
+        }
+        this.#preambleBytes = textEncoder.encode(preamble);
+        if (match) {
+          text = text.slice(match.index);
+          cueBlockHeaderRegex.lastIndex = 0;
+        }
+      }
+      while (match = cueBlockHeaderRegex.exec(text)) {
+        let notes = text.slice(0, match.index);
+        let cueIdentifier = match[1] || "";
+        let matchEnd = match.index + match[0].length;
+        let bodyStart = text.indexOf("\n", matchEnd) + 1;
+        let cueSettings = text.slice(matchEnd, bodyStart).trim();
+        let bodyEnd = text.indexOf("\n\n", matchEnd);
+        if (bodyEnd === -1) bodyEnd = text.length;
+        let startTime = this.#parseTimestamp(match[2]);
+        let endTime = this.#parseTimestamp(match[3]);
+        let duration = endTime - startTime;
+        let body = text.slice(bodyStart, bodyEnd);
+        let additions = `${cueSettings}
+${cueIdentifier}
+${notes}`;
+        inlineTimestampRegex.lastIndex = 0;
+        body = body.replace(inlineTimestampRegex, (match2) => {
+          let time = this.#parseTimestamp(match2.slice(1, -1));
+          let offsetTime = time - startTime;
+          return `<${this.#formatTimestamp(offsetTime)}>`;
+        });
+        text = text.slice(bodyEnd).trimStart();
+        cueBlockHeaderRegex.lastIndex = 0;
+        let chunk = {
+          body: textEncoder.encode(body),
+          additions: additions.trim() === "" ? null : textEncoder.encode(additions),
+          timestamp: startTime * 1e3,
+          duration: duration * 1e3
+        };
+        let meta = {};
+        if (!this.#preambleEmitted) {
+          meta.decoderConfig = {
+            description: this.#preambleBytes
+          };
+          this.#preambleEmitted = true;
+        }
+        this.#options.output(chunk, meta);
+      }
+    }
+    #parseTimestamp(string) {
+      let match = timestampRegex.exec(string);
+      if (!match) throw new Error("Expected match.");
+      return 60 * 60 * 1e3 * Number(match[1] || "0") + 60 * 1e3 * Number(match[2]) + 1e3 * Number(match[3]) + Number(match[4]);
+    }
+    #formatTimestamp(timestamp) {
+      let hours = Math.floor(timestamp / (60 * 60 * 1e3));
+      let minutes = Math.floor(timestamp % (60 * 60 * 1e3) / (60 * 1e3));
+      let seconds = Math.floor(timestamp % (60 * 1e3) / 1e3);
+      let milliseconds = timestamp % 1e3;
+      return hours.toString().padStart(2, "0") + ":" + minutes.toString().padStart(2, "0") + ":" + seconds.toString().padStart(2, "0") + "." + milliseconds.toString().padStart(3, "0");
+    }
+  };
+
+  // src/source.ts
+  var MediaSource = class {
+    constructor() {
+      this.connectedTrack = null;
+      this.closed = false;
+    }
+    ensureValidDigest() {
+      if (!this.connectedTrack) {
+        throw new Error("Cannot call digest without connecting the source to an output track.");
+      }
+      if (!this.connectedTrack.output.started) {
+        throw new Error("Cannot call digest before output has been started.");
+      }
+      if (this.connectedTrack.output.finalizing) {
+        throw new Error("Cannot call digest after output has started finalizing.");
+      }
+      if (this.closed) {
+        throw new Error("Cannot call digest after source has been closed.");
+      }
+    }
+    // TODO: These are should not be called from the outside lib
+    start() {
+    }
+    async flush() {
+    }
+    close() {
+      if (this.closed) {
+        throw new Error("Source already closed.");
+      }
+      if (!this.connectedTrack) {
+        throw new Error("Cannot call close without connecting the source to an output track.");
+      }
+      if (!this.connectedTrack.output.started) {
+        throw new Error("Cannot call close before output has been started.");
+      }
+      this.closed = true;
+      if (this.connectedTrack.output.finalizing) {
+        return;
+      }
+      this.connectedTrack.output.muxer.onTrackClose(this.connectedTrack);
+    }
+  };
+  var VideoSource = class extends MediaSource {
+    constructor(codec) {
+      super();
+      this.connectedTrack = null;
+      this.codec = codec;
+    }
+  };
+  var EncodedVideoChunkSource = class extends VideoSource {
+    constructor(codec) {
+      super(codec);
+    }
+    // TODO: Ensure that the first chunk is a key frame (same for the audio case)
+    digest(chunk, meta) {
+      this.ensureValidDigest();
+      this.connectedTrack?.output.muxer.addEncodedVideoChunk(this.connectedTrack, chunk, meta);
+    }
+  };
+  var KEY_FRAME_INTERVAL = 5;
+  var VideoEncoderWrapper = class {
+    constructor(source, codecConfig) {
+      this.source = source;
+      this.codecConfig = codecConfig;
+      this.encoder = null;
+      this.lastMultipleOfKeyFrameInterval = -1;
+    }
+    // TODO: Ensure video frame size remains constant
+    digest(videoFrame) {
+      this.source.ensureValidDigest();
+      this.ensureEncoder(videoFrame);
+      assert(this.encoder);
+      const multipleOfKeyFrameInterval = Math.floor(videoFrame.timestamp / 1e6 / KEY_FRAME_INTERVAL);
+      this.encoder.encode(videoFrame, { keyFrame: multipleOfKeyFrameInterval !== this.lastMultipleOfKeyFrameInterval });
+      this.lastMultipleOfKeyFrameInterval = multipleOfKeyFrameInterval;
+    }
+    ensureEncoder(videoFrame) {
+      if (this.encoder) {
+        return;
+      }
+      this.encoder = new VideoEncoder({
+        output: (chunk, meta) => this.source.connectedTrack?.output.muxer.addEncodedVideoChunk(this.source.connectedTrack, chunk, meta),
+        error: (error) => console.error(error)
+        // TODO
+      });
+      this.encoder.configure({
+        codec: buildVideoCodecString(this.codecConfig.codec, videoFrame.codedWidth, videoFrame.codedHeight),
+        width: videoFrame.codedWidth,
+        height: videoFrame.codedHeight,
+        bitrate: this.codecConfig.bitrate
+      });
+    }
+    async flush() {
+      return this.encoder?.flush();
+    }
+  };
+  var VideoFrameSource = class extends VideoSource {
+    constructor(codecConfig) {
+      super(codecConfig.codec);
+      this.encoder = new VideoEncoderWrapper(this, codecConfig);
+    }
+    digest(videoFrame) {
+      this.encoder.digest(videoFrame);
+    }
+    flush() {
+      return this.encoder.flush();
+    }
+  };
+  var CanvasSource = class extends VideoSource {
+    constructor(canvas, codecConfig) {
+      super(codecConfig.codec);
+      this.canvas = canvas;
+      this.encoder = new VideoEncoderWrapper(this, codecConfig);
+    }
+    digest(timestamp, duration = 0) {
+      const frame = new VideoFrame(this.canvas, {
+        timestamp: Math.round(1e6 * timestamp),
+        duration: Math.round(1e6 * duration)
+      });
+      this.encoder.digest(frame);
+      frame.close();
+    }
+    flush() {
+      return this.encoder.flush();
+    }
+  };
+  var MediaStreamVideoTrackSource = class extends VideoSource {
+    constructor(track, codecConfig) {
+      super(codecConfig.codec);
+      this.track = track;
+      this.abortController = null;
+      this.encoder = new VideoEncoderWrapper(this, codecConfig);
+    }
+    start() {
+      this.abortController = new AbortController();
+      const processor = new MediaStreamTrackProcessor({ track: this.track });
+      const consumer = new WritableStream({
+        write: (videoFrame) => {
+          this.encoder.digest(videoFrame);
+          videoFrame.close();
+        }
+      });
+      processor.readable.pipeTo(consumer, {
+        signal: this.abortController.signal
+      }).catch((err) => {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        console.error("Pipe error:", err);
+      });
+    }
+    async flush() {
+      if (this.abortController) {
+        this.abortController.abort();
+        this.abortController = null;
+      }
+      await this.encoder.flush();
+    }
+  };
+  var AudioSource = class extends MediaSource {
+    constructor(codec) {
+      super();
+      this.connectedTrack = null;
+      this.codec = codec;
+    }
+  };
+  var EncodedAudioChunkSource = class extends AudioSource {
+    constructor(codec) {
+      super(codec);
+    }
+    digest(chunk, meta) {
+      this.ensureValidDigest();
+      this.connectedTrack?.output.muxer.addEncodedAudioChunk(this.connectedTrack, chunk, meta);
+    }
+  };
+  var AudioEncoderWrapper = class {
+    constructor(source, codecConfig) {
+      this.source = source;
+      this.codecConfig = codecConfig;
+      this.encoder = null;
+    }
+    // TODO: Ensure audio parameters remain constant
+    digest(audioData) {
+      this.source.ensureValidDigest();
+      this.ensureEncoder(audioData);
+      assert(this.encoder);
+      this.encoder.encode(audioData);
+    }
+    ensureEncoder(audioData) {
+      if (this.encoder) {
+        return;
+      }
+      this.encoder = new AudioEncoder({
+        output: (chunk, meta) => this.source.connectedTrack?.output.muxer.addEncodedAudioChunk(this.source.connectedTrack, chunk, meta),
+        error: (error) => console.error(error)
+        // TODO
+      });
+      this.encoder.configure({
+        codec: buildAudioCodecString(this.codecConfig.codec, audioData.numberOfChannels, audioData.sampleRate),
+        numberOfChannels: audioData.numberOfChannels,
+        sampleRate: audioData.sampleRate,
+        bitrate: this.codecConfig.bitrate
+      });
+    }
+    async flush() {
+      return this.encoder?.flush();
+    }
+  };
+  var AudioDataSource = class extends AudioSource {
+    constructor(codecConfig) {
+      super(codecConfig.codec);
+      this.encoder = new AudioEncoderWrapper(this, codecConfig);
+    }
+    digest(audioData) {
+      this.encoder.digest(audioData);
+    }
+    flush() {
+      return this.encoder.flush();
+    }
+  };
+  var AudioBufferSource = class extends AudioSource {
+    constructor(codecConfig) {
+      super(codecConfig.codec);
+      this.accumulatedFrameCount = 0;
+      this.encoder = new AudioEncoderWrapper(this, codecConfig);
+    }
+    digest(audioBuffer) {
+      const numberOfChannels = audioBuffer.numberOfChannels;
+      const sampleRate = audioBuffer.sampleRate;
+      const numberOfFrames = audioBuffer.length;
+      const data = new Float32Array(numberOfChannels * numberOfFrames);
+      for (let channel = 0; channel < numberOfChannels; channel++) {
+        const channelData = audioBuffer.getChannelData(channel);
+        data.set(channelData, channel * numberOfFrames);
+      }
+      const audioData = new AudioData({
+        format: "f32-planar",
+        sampleRate,
+        numberOfFrames,
+        numberOfChannels,
+        timestamp: Math.round(1e6 * this.accumulatedFrameCount / sampleRate),
+        data
+      });
+      this.encoder.digest(audioData);
+      audioData.close();
+      this.accumulatedFrameCount += numberOfFrames;
+    }
+    flush() {
+      return this.encoder.flush();
+    }
+  };
+  var MediaStreamAudioTrackSource = class extends AudioSource {
+    constructor(track, codecConfig) {
+      super(codecConfig.codec);
+      this.track = track;
+      this.abortController = null;
+      this.encoder = new AudioEncoderWrapper(this, codecConfig);
+    }
+    start() {
+      this.abortController = new AbortController();
+      const processor = new MediaStreamTrackProcessor({ track: this.track });
+      const consumer = new WritableStream({
+        write: (audioData) => {
+          this.encoder.digest(audioData);
+          audioData.close();
+        }
+      });
+      processor.readable.pipeTo(consumer, {
+        signal: this.abortController.signal
+      }).catch((err) => {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        console.error("Pipe error:", err);
+      });
+    }
+    async flush() {
+      if (this.abortController) {
+        this.abortController.abort();
+        this.abortController = null;
+      }
+      await this.encoder.flush();
+    }
+  };
+  var SubtitleSource = class extends MediaSource {
+    constructor(codec) {
+      super();
+      this.connectedTrack = null;
+      this.codec = codec;
+    }
+  };
+  var TextSubtitleSource = class extends SubtitleSource {
+    constructor(codec) {
+      super(codec);
+      this.encoder = new SubtitleEncoder({
+        output: (chunk, metadata) => this.connectedTrack?.output.muxer.addEncodedSubtitleChunk(this.connectedTrack, chunk, metadata),
+        error: (error) => console.error(error)
+        // TODO
+      });
+      this.encoder.configure({ codec });
+    }
+    digest(text) {
+      this.ensureValidDigest();
+      this.encoder.encode(text);
+    }
   };
 
   // src/writer.ts
@@ -2759,9 +2890,10 @@ var Metamuxer = (() => {
   };
 
   // src/target.ts
-  var isTarget = Symbol("isTarget");
-  isTarget;
   var Target = class {
+    constructor() {
+      this.output = null;
+    }
   };
   var ArrayBufferTarget2 = class extends Target {
     constructor() {

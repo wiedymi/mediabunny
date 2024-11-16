@@ -1,17 +1,15 @@
 import { buildAudioCodecString, buildVideoCodecString } from "./codec";
 import { assert, TransformationMatrix } from "./misc";
-import { OutputAudioTrack, OutputTrack, OutputVideoTrack } from "./output";
+import { OutputAudioTrack, OutputSubtitleTrack, OutputTrack, OutputVideoTrack } from "./output";
+import { SubtitleEncoder } from "./subtitles";
 
 export type VideoCodec = 'avc' | 'hevc' | 'vp8' | 'vp9' | 'av1';
 export type AudioCodec = 'aac' | 'opus' | 'vorbis'; // TODO add the rest
+export type SubtitleCodec = 'webvtt';
 
-export abstract class VideoSource {
-	connectedTrack: OutputVideoTrack | null = null;
-	codec: VideoCodec;
-
-	constructor(codec: VideoCodec) {
-		this.codec = codec;
-	}
+export abstract class MediaSource {
+	connectedTrack: OutputTrack | null = null;
+	closed = false;
 
 	ensureValidDigest() {
 		if (!this.connectedTrack) {
@@ -25,39 +23,49 @@ export abstract class VideoSource {
 		if (this.connectedTrack.output.finalizing) {
 			throw new Error('Cannot call digest after output has started finalizing.');
 		}
-	}
 
-	start() {}
-	async flush() {}
-}
-
-export abstract class AudioSource {
-	connectedTrack: OutputAudioTrack | null = null;
-	codec: AudioCodec;
-
-	constructor(codec: AudioCodec) {
-		this.codec = codec;
-	}
-
-	ensureNotFinalizing() {
-		if (this.connectedTrack?.output.finalizing) {
-			throw new Error('Cannot call digest after output has started finalizing.');
+		if (this.closed) {
+			throw new Error('Cannot call digest after source has been closed.');
 		}
 	}
 
+	// TODO: These are should not be called from the outside lib
 	start() {}
 	async flush() {}
+
+	close() {
+		if (this.closed) {
+			throw new Error('Source already closed.');
+		}
+
+		if (!this.connectedTrack) {
+			throw new Error('Cannot call close without connecting the source to an output track.');
+		}
+
+		if (!this.connectedTrack.output.started) {
+			throw new Error('Cannot call close before output has been started.');
+		}
+
+		this.closed = true;
+
+		if (this.connectedTrack.output.finalizing) {
+			return;
+		}
+
+		this.connectedTrack.output.muxer.onTrackClose(this.connectedTrack);
+	}
 }
 
-export type VideoCodecConfig = {
-	codec: 'avc' | 'hevc' | 'vp8' | 'vp9' | 'av1',
-	bitrate: number 
-};
+export abstract class VideoSource extends MediaSource {
+	override connectedTrack: OutputVideoTrack | null = null;
+	codec: VideoCodec;
 
-export type AudioCodecConfig = {
-	codec: 'aac' | 'opus' | 'vorbis',
-	bitrate: number
-};
+	constructor(codec: VideoCodec) {
+		super();
+
+		this.codec = codec;
+	}
+}
 
 export class EncodedVideoChunkSource extends VideoSource {
 	constructor(codec: VideoCodec) {
@@ -73,6 +81,11 @@ export class EncodedVideoChunkSource extends VideoSource {
 }
 
 const KEY_FRAME_INTERVAL = 5;
+
+type VideoCodecConfig = {
+	codec: 'avc' | 'hevc' | 'vp8' | 'vp9' | 'av1',
+	bitrate: number 
+};
 
 class VideoEncoderWrapper {
 	private encoder: VideoEncoder | null = null;
@@ -200,16 +213,32 @@ export class MediaStreamVideoTrackSource extends VideoSource {
     }
 }
 
+export abstract class AudioSource extends MediaSource {
+	override connectedTrack: OutputAudioTrack | null = null;
+	codec: AudioCodec;
+
+	constructor(codec: AudioCodec) {
+		super();
+
+		this.codec = codec;
+	}
+}
+
 export class EncodedAudioChunkSource extends AudioSource {
 	constructor(codec: AudioCodec) {
 		super(codec);
 	}
 
 	digest(chunk: EncodedAudioChunk, meta?: EncodedAudioChunkMetadata) {
-		this.ensureNotFinalizing();
+		this.ensureValidDigest();
 		this.connectedTrack?.output.muxer.addEncodedAudioChunk(this.connectedTrack, chunk, meta);
 	}
 }
+
+type AudioCodecConfig = {
+	codec: 'aac' | 'opus' | 'vorbis',
+	bitrate: number
+};
 
 class AudioEncoderWrapper {
     private encoder: AudioEncoder | null = null;
@@ -218,7 +247,7 @@ class AudioEncoderWrapper {
 
 	// TODO: Ensure audio parameters remain constant
     digest(audioData: AudioData) {
-        this.source.ensureNotFinalizing();
+        this.source.ensureValidDigest();
 
         this.ensureEncoder(audioData);
         assert(this.encoder);
@@ -345,4 +374,35 @@ export class MediaStreamAudioTrackSource extends AudioSource {
 
         await this.encoder.flush();
     }
+}
+
+export abstract class SubtitleSource extends MediaSource {
+	override connectedTrack: OutputSubtitleTrack | null = null;
+	codec: SubtitleCodec;
+
+	constructor(codec: SubtitleCodec) {
+		super();
+
+		this.codec = codec;
+	}
+}
+
+export class TextSubtitleSource extends SubtitleSource {
+	private encoder: SubtitleEncoder;
+
+	constructor(codec: SubtitleCodec) {
+		super(codec);
+
+		this.encoder = new SubtitleEncoder({
+			output: (chunk, metadata) => this.connectedTrack?.output.muxer.addEncodedSubtitleChunk(this.connectedTrack, chunk, metadata),
+			error: (error) => console.error(error) // TODO
+		});
+
+		this.encoder.configure({ codec });
+	}
+
+	digest(text: string) {
+		this.ensureValidDigest();
+		this.encoder.encode(text);
+	}
 }

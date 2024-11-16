@@ -1,9 +1,8 @@
+import { Output } from "./output";
 import { ArrayBufferTargetWriter, ChunkedStreamTargetWriter, FileSystemWritableFileStreamTargetWriter, StreamTargetWriter, Writer } from "./writer";
 
-const isTarget = Symbol('isTarget');
 export abstract class Target {
-	// If we didn't add this symbol, then {} would be assignable to Target
-	[isTarget]!: true;
+	output: Output | null = null;
 
 	abstract createWriter(): Writer;
 }

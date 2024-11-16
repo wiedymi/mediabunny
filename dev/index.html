@@ -78,11 +78,22 @@
 		codec: 'opus',
 		bitrate: 128e3,
 	});
+	let subtitleSource = new Metamuxer.TextSubtitleSource('webvtt');
 
-	output.addTrack(videoSource);
-	output.addTrack(audioSource);
+	output.addVideoTrack(videoSource);
+	output.addAudioTrack(audioSource);
+	output.addSubtitleTrack(subtitleSource);
 
 	output.start();
+
+	let simpleWebvttFile =
+`WEBVTT
+
+00:00:00.000 --> 00:00:10.000
+Example entry 1: Hello <b>world</b>.
+`;
+	subtitleSource.digest(simpleWebvttFile);
+	subtitleSource.close();
 
 	for (let i = 0; i < 100; i++) {
 		context.fillStyle = ['red', 'green', 'blue', 'yellow'][i % 4];

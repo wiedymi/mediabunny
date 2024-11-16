@@ -1,13 +1,12 @@
 import { assert, readBits, toUint8Array, writeBits } from '../misc';
 import { Muxer } from '../muxer';
-import { Output, OutputAudioTrack, OutputTrack, OutputVideoTrack } from '../output';
+import { Output, OutputAudioTrack, OutputSubtitleTrack, OutputTrack, OutputVideoTrack } from '../output';
 import { MkvOutputFormat, WebMOutputFormat } from '../output_format';
-import { AudioCodec, VideoCodec } from '../source';
+import { AudioCodec, SubtitleCodec, VideoCodec } from '../source';
+import { EncodedSubtitleChunk, EncodedSubtitleChunkMetadata, SubtitleDecoderConfig } from '../subtitles';
 import { Writer } from '../writer';
 import { EBML, EBMLElement, EBMLFloat32, EBMLFloat64, EBMLId, EBMLSignedInt, measureEBMLVarInt, measureSignedInt, measureUnsignedInt } from './ebml';
 
-const VIDEO_TRACK_TYPE = 1;
-const AUDIO_TRACK_TYPE = 2;
 const MAX_CHUNK_LENGTH_MS = 2**15;
 const APP_NAME = 'https://github.com/Vanilagy/webm-muxer'; // TODO
 const SEGMENT_SIZE_BYTES = 6;
@@ -59,12 +58,19 @@ type MatroskaTrackData = {
 		sampleRate: number,
 		decoderConfig: AudioDecoderConfig
 	}
+} | {
+	track: OutputSubtitleTrack,
+	type: 'subtitle',
+	info: {
+		decoderConfig: SubtitleDecoderConfig
+	}
 });
 
 type MatroskaVideoTrackData = MatroskaTrackData & { type: 'video' };
 type MatroskaAudioTrackData = MatroskaTrackData & { type: 'audio' };
+type MatroskaSubtitleTrackData = MatroskaTrackData & { type: 'subtitle' };
 
-const CODEC_STRING_MAP: Record<VideoCodec | AudioCodec, string> = {
+const CODEC_STRING_MAP: Record<VideoCodec | AudioCodec | SubtitleCodec, string> = {
 	avc: 'V_MPEG4/ISO/AVC',
 	hevc: 'V_MPEGH/ISO/HEVC',
 	vp8: 'V_VP8',
@@ -73,6 +79,13 @@ const CODEC_STRING_MAP: Record<VideoCodec | AudioCodec, string> = {
 	aac: 'A_AAC',
 	opus: 'A_OPUS',
 	vorbis: 'A_VORBIS',
+	webvtt: 'S_TEXT/WEBVTT'
+};
+
+const TRACK_TYPE_MAP: Record<OutputTrack['type'], number> = {
+	video: 1,
+	audio: 2,
+	subtitle: 17
 };
 
 // TODO: Perhaps we can make this muxer always be streamable. We can do it similar to the MP4 muxer, where for each 
@@ -290,10 +303,16 @@ export class MatroskaMuxer extends Muxer {
 			if (!['vp8', 'vp9', 'av1'].includes(track.source.codec)) {
 				throw new Error(`WebM only supports VP8, VP9 and AV1 as video codecs. Switching to MKV removes this restriction.`);
 			}
-		} else {
+		} else if (track.type === 'audio') {
 			if (!['opus', 'vorbis'].includes(track.source.codec)) {
 				throw new Error(`WebM only supports Opus and Vorbis as audio codecs. Switching to MKV removes this restriction.`);
 			}
+		} else if (track.type === 'subtitle') {
+			if (track.source.codec !== 'webvtt') {
+				throw new Error(`WebM only supports WebVTT as subtitle codec. Switching to MKV removes this restriction.`);
+			}
+		} else {
+			throw new Error('WebM only supports video, audio and subtitle tracks. Switching to MKV removes this restriction.');
 		}
 	}
 
@@ -370,7 +389,7 @@ export class MatroskaMuxer extends Muxer {
 			tracksElement.data.push({ id: EBMLId.TrackEntry, data: [
 				{ id: EBMLId.TrackNumber, data: trackData.track.id },
 				{ id: EBMLId.TrackUID, data: trackData.track.id },
-				{ id: EBMLId.TrackType, data: trackData.type === 'video' ? VIDEO_TRACK_TYPE : AUDIO_TRACK_TYPE }, // TODO Subtitle case
+				{ id: EBMLId.TrackType, data: TRACK_TYPE_MAP[trackData.type] }, // TODO Subtitle case
 				{ id: EBMLId.CodecID, data: CODEC_STRING_MAP[trackData.track.source.codec] },
 				(trackData.info.decoderConfig.description ? { id: EBMLId.CodecPrivate, data: toUint8Array(trackData.info.decoderConfig.description) } : null),
 				...(trackData.type === 'video' ? [
@@ -419,18 +438,6 @@ export class MatroskaMuxer extends Muxer {
 				] : [])
 			] })
 		}
-
-		/*
-		if (this.#options.subtitles) {
-			tracksElement.data.push({ id: EBMLId.TrackEntry, data: [
-				{ id: EBMLId.TrackNumber, data: SUBTITLE_TRACK_NUMBER },
-				{ id: EBMLId.TrackUID, data: SUBTITLE_TRACK_NUMBER },
-				{ id: EBMLId.TrackType, data: SUBTITLE_TRACK_TYPE },
-				{ id: EBMLId.CodecID, data: this.#options.subtitles.codec },
-				this.#subtitleCodecPrivate
-			] });
-		}
-		*/
 	}
 
 	#createSegment() {
@@ -525,35 +532,75 @@ export class MatroskaMuxer extends Muxer {
 
 		return newTrackData;
 	}
+
+	#getSubtitleTrackData(track: OutputSubtitleTrack, meta?: EncodedSubtitleChunkMetadata) {
+		const existingTrackData = this.#trackDatas.find(x => x.track === track);
+		if (existingTrackData) {
+			return existingTrackData as MatroskaAudioTrackData;
+		}
+
+		// TODO Make proper errors for these
+		assert(meta);
+		assert(meta.decoderConfig);
+
+		const newTrackData: MatroskaSubtitleTrackData = {
+			track,
+			type: 'subtitle',
+			info: {
+				decoderConfig: meta.decoderConfig
+			},
+			chunkQueue: [],
+			firstTimestamp: null,
+			lastKeyFrameTimestamp: null,
+			lastWrittenMsTimestamp: null
+		};
+
+		this.#trackDatas.push(newTrackData);
+		this.#trackDatas.sort((a, b) => a.track.id - b.track.id);
+
+		return newTrackData;
+	}
 	
 	addEncodedVideoChunk(track: OutputVideoTrack, chunk: EncodedVideoChunk, meta?: EncodedVideoChunkMetadata) {
 		const trackData = this.#getVideoTrackData(track, meta);
 
-		let videoChunk = this.#createInternalChunk(trackData, chunk);
+		let data = new Uint8Array(chunk.byteLength);
+		chunk.copyTo(data);
+
+		let videoChunk = this.#createInternalChunk(trackData, data, chunk.timestamp, chunk.duration ?? 0, chunk.type);
 		if (track.source.codec === 'vp9') this.#fixVP9ColorSpace(trackData, videoChunk);
 
 		trackData.chunkQueue.push(videoChunk);	
 		this.#interleaveChunks();
-		
-		//this.#writeSubtitleChunks();
-		this.#writer.flush();
 	}
 
 	addEncodedAudioChunk(track: OutputAudioTrack, chunk: EncodedAudioChunk, meta?: EncodedAudioChunkMetadata) {
 		const trackData = this.#getAudioTrackData(track, meta);
 
-		let audioChunk = this.#createInternalChunk(trackData, chunk);
+		let data = new Uint8Array(chunk.byteLength);
+		chunk.copyTo(data);
+
+		let audioChunk = this.#createInternalChunk(trackData, data, chunk.timestamp, chunk.duration ?? 0, chunk.type);
 
 		trackData.chunkQueue.push(audioChunk);
 		this.#interleaveChunks();
-		
-		//this.#writeSubtitleChunks();
-		this.#writer.flush();
+	}
+	
+	addEncodedSubtitleChunk(track: OutputSubtitleTrack, chunk: EncodedSubtitleChunk, meta?: EncodedSubtitleChunkMetadata) {
+		const trackData = this.#getSubtitleTrackData(track, meta);
+
+		let subtitleChunk = this.#createInternalChunk(trackData, chunk.body, chunk.timestamp, chunk.duration, 'key', chunk.additions);
+
+		trackData.chunkQueue.push(subtitleChunk);
+		this.#interleaveChunks();
 	}
 
 	#interleaveChunks() {
-		if (this.#trackDatas.length < this.output.tracks.length) {
-			return; // We haven't seen a sample from each track yet
+		let openTrackCount = 0;
+		for (const trackData of this.#trackDatas) if (!trackData.track.source.closed) openTrackCount++;
+
+		if (this.#trackDatas.length < openTrackCount) {
+			return; // We haven't seen a sample from every open track yet
 		}
 
 		outer:
@@ -562,11 +609,11 @@ export class MatroskaMuxer extends Muxer {
 			let minTimestamp = Infinity;
 
 			for (let trackData of this.#trackDatas) {
-				if (trackData.chunkQueue.length === 0) {
+				if (trackData.chunkQueue.length === 0 && !trackData.track.source.closed) {
 					break outer;
 				}
 
-				if (trackData.chunkQueue[0]!.timestamp < minTimestamp) {
+				if (trackData.chunkQueue.length > 0 && trackData.chunkQueue[0]!.timestamp < minTimestamp) {
 					trackWithMinTimestamp = trackData;
 					minTimestamp = trackData.chunkQueue[0]!.timestamp;
 				}
@@ -579,6 +626,8 @@ export class MatroskaMuxer extends Muxer {
 			let chunk = trackWithMinTimestamp.chunkQueue.shift()!;
 			this.#writeBlock(trackWithMinTimestamp, chunk);
 		}
+
+		this.#writer.flush();
 	}
 
 	/** Due to [a bug in Chromium](https://bugs.chromium.org/p/chromium/issues/detail?id=1377842), VP9 streams often
@@ -617,99 +666,30 @@ export class MatroskaMuxer extends Muxer {
 		writeBits(chunk.data, i+0, i+3, colorSpaceID);
 	}
 
-	/*
-	addSubtitleChunk(chunk: EncodedSubtitleChunk, meta: EncodedSubtitleChunkMetadata, timestamp?: number) {
-		if (typeof chunk !== 'object' || !chunk) {
-			throw new TypeError("addSubtitleChunk's first argument (chunk) must be an object.");
-		} else {
-			// We can't simply do an instanceof check, so let's check the structure itself:
-			if (!(chunk.body instanceof Uint8Array)) {
-				throw new TypeError('body must be an instance of Uint8Array.');
-			}
-			if (!Number.isFinite(chunk.timestamp) || chunk.timestamp < 0) {
-				throw new TypeError('timestamp must be a non-negative real number.');
-			}
-			if (!Number.isFinite(chunk.duration) || chunk.duration < 0) {
-				throw new TypeError('duration must be a non-negative real number.');
-			}
-			if (chunk.additions && !(chunk.additions instanceof Uint8Array)) {
-				throw new TypeError('additions, when present, must be an instance of Uint8Array.');
-			}
-		}
-
-		if (typeof meta !== 'object') {
-			throw new TypeError("addSubtitleChunk's second argument (meta) must be an object.");
-		}
-
-		this.#ensureNotFinalized();
-		if (!this.#options.subtitles) throw new Error('No subtitle track declared.');
-
-		// Write possible subtitle decoder metadata to the file
-		if (meta?.decoderConfig) {
-			if (this.#options.streaming) {
-				this.#subtitleCodecPrivate = this.#createCodecPrivateElement(meta.decoderConfig.description);
-			} else {
-				this.#writeCodecPrivate(this.#subtitleCodecPrivate, meta.decoderConfig.description);
-			}
-		}
-
-		let subtitleChunk = this.#createInternalChunk(
-			chunk.body,
-			'key',
-			timestamp ?? chunk.timestamp,
-			SUBTITLE_TRACK_NUMBER,
-			chunk.duration,
-			chunk.additions
-		);
-
-		this.#lastSubtitleTimestamp = subtitleChunk.timestamp;
-		this.#subtitleChunkQueue.push(subtitleChunk);
-
-		this.#writeSubtitleChunks();
-		this.#maybeFlushStreamingTargetWriter();
-	}
-
-	#writeSubtitleChunks() {
-		// Writing subtitle chunks is different from video and audio: A subtitle chunk will be written if it's
-		// guaranteed that no more media chunks will be written before it, to ensure monotonicity. However, media chunks
-		// will NOT wait for subtitle chunks to arrive, as they may never arrive, so that's how non-monotonicity can
-		// arrive. But it should be fine, since it's all still in one cluster.
-
-		let lastWrittenMediaTimestamp = Math.min(
-			this.#options.video ? this.#lastVideoTimestamp : Infinity,
-			this.#options.audio ? this.#lastAudioTimestamp : Infinity
-		);
-
-		let queue = this.#subtitleChunkQueue;
-		while (queue.length > 0 && queue[0].timestamp <= lastWrittenMediaTimestamp) {
-			this.#writeBlock(queue.shift(), !this.#options.video && !this.#options.audio);
-		}
-	}
-	*/
-
 	/** Converts a read-only external chunk into an internal one for easier use. */
 	#createInternalChunk(
 		trackData: MatroskaTrackData,
-		chunk: EncodedVideoChunk | EncodedAudioChunk
+		data: Uint8Array,
+		timestamp: number,
+		duration: number,
+		type: 'key' | 'delta',
+		additions: Uint8Array | null = null
 	) {
-		let adjustedTimestamp = this.#validateTimestamp(trackData, chunk);
-
-		let data = new Uint8Array(chunk.byteLength);
-		chunk.copyTo(data);
+		let adjustedTimestamp = this.#validateTimestamp(trackData, timestamp, type === 'key');
 
 		let internalChunk: InternalMediaChunk = {
 			data,
-			type: chunk.type,
+			type,
 			timestamp: adjustedTimestamp,
-			duration: (chunk.duration ?? 0) / 1e6,
-			additions: null
+			duration: duration / 1e6,
+			additions
 		};
 
 		return internalChunk;
 	}
 
-	#validateTimestamp(trackData: MatroskaTrackData, chunk: EncodedVideoChunk | EncodedAudioChunk) {
-		let timestampInSeconds = chunk.timestamp / 1e6;
+	#validateTimestamp(trackData: MatroskaTrackData, timestamp: number, isKeyFrame: boolean) {
+		let timestampInSeconds = timestamp / 1e6;
 
 		if (timestampInSeconds < 0) {
 			throw new Error(`Timestamps must be non-negative (got ${timestampInSeconds}s).`);
@@ -725,7 +705,7 @@ export class MatroskaMuxer extends Muxer {
 			throw new Error(`Timestamp cannot be before last key frame's timestamp (got ${timestampInSeconds}s, last key frame at ${trackData.lastKeyFrameTimestamp}s).`);
 		}
 
-		if (chunk.type === 'key') {
+		if (isKeyFrame) {
 			trackData.lastKeyFrameTimestamp = timestampInSeconds;
 		}
 
@@ -860,7 +840,6 @@ export class MatroskaMuxer extends Muxer {
 		assert(this.#cues);
 
 		// Add a CuePoint to the Cues element for better seeking
-		// TODO: Should this include subtitle tracks?
 		(this.#cues.data as EBML[]).push({ id: EBMLId.CuePoint, data: [
 			{ id: EBMLId.CueTime, data: this.#currentClusterMsTimestamp! },
 			// We only write out cues for tracks that have at least one chunk in this cluster
@@ -871,6 +850,11 @@ export class MatroskaMuxer extends Muxer {
 				] };
 			})
 		] });
+	}
+
+	override onTrackClose() {
+		// Since a track is now closed, we may be able to write out chunks that were previously waiting
+		this.#interleaveChunks();
 	}
 
 	/** Finalizes the file, making it ready for use. Must be called after all media chunks have been added. */
@@ -885,14 +869,6 @@ export class MatroskaMuxer extends Muxer {
 		if (!this.#format.options.streaming) {
 			this.#finalizeCurrentCluster();
 		}
-
-		/*
-		while (this.#videoChunkQueue.length > 0) this.#writeBlock(this.#videoChunkQueue.shift(), true);
-		while (this.#audioChunkQueue.length > 0) this.#writeBlock(this.#audioChunkQueue.shift(), true);
-		while (this.#subtitleChunkQueue.length > 0 && this.#subtitleChunkQueue[0].timestamp <= this.#duration) {
-			this.#writeBlock(this.#subtitleChunkQueue.shift(), false);
-		}
-		*/
 
 		assert(this.#cues);
 		this.writeEBML(this.#cues);
