@@ -1,4 +1,4 @@
-import { assert, readBits, textEncoder, toUint8Array, writeBits } from '../misc';
+import { assert, COLOR_PRIMARIES_MAP, colorSpaceIsComplete, MATRIX_COEFFICIENTS_MAP, readBits, textEncoder, toUint8Array, TRANSFER_CHARACTERISTICS_MAP, writeBits } from '../misc';
 import { Muxer } from '../muxer';
 import { Output, OutputAudioTrack, OutputSubtitleTrack, OutputTrack, OutputVideoTrack } from '../output';
 import { MkvOutputFormat, WebMOutputFormat } from '../output_format';
@@ -398,27 +398,14 @@ export class MatroskaMuxer extends Muxer {
 						(() => {
 							if (trackData.info.decoderConfig.colorSpace) {
 								let colorSpace = trackData.info.decoderConfig.colorSpace;
-								if (!colorSpace.matrix || !colorSpace.transfer || !colorSpace.primaries || colorSpace.fullRange == null) {
+								if (!colorSpaceIsComplete(colorSpace)) {
 									return null;
 								}
 
 								return {id: EBMLId.Colour, data: [
-									{ id: EBMLId.MatrixCoefficients, data: {
-										'rgb': 1,
-										'bt709': 1,
-										'bt470bg': 5,
-										'smpte170m': 6
-									}[colorSpace.matrix] },
-									{ id: EBMLId.TransferCharacteristics, data: {
-										'bt709': 1,
-										'smpte170m': 6,
-										'iec61966-2-1': 13
-									}[colorSpace.transfer] },
-									{ id: EBMLId.Primaries, data: {
-										'bt709': 1,
-										'bt470bg': 5,
-										'smpte170m': 6
-									}[colorSpace.primaries] },
+									{ id: EBMLId.MatrixCoefficients, data: MATRIX_COEFFICIENTS_MAP[colorSpace.matrix!] },
+									{ id: EBMLId.TransferCharacteristics, data: TRANSFER_CHARACTERISTICS_MAP[colorSpace.transfer!] },
+									{ id: EBMLId.Primaries, data: COLOR_PRIMARIES_MAP[colorSpace.primaries!] },
 									{ id: EBMLId.Range, data: [1, 2][Number(colorSpace.fullRange)]! }
 								] };
 							}

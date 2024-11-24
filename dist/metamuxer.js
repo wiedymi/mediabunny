@@ -145,6 +145,35 @@ var Metamuxer = (() => {
     }
   };
   var textEncoder = new TextEncoder();
+  var COLOR_PRIMARIES_MAP = {
+    "bt709": 1,
+    // ITU-R BT.709
+    "bt470bg": 5,
+    // ITU-R BT.470BG
+    "smpte170m": 6
+    // ITU-R BT.601 525 - SMPTE 170M
+  };
+  var TRANSFER_CHARACTERISTICS_MAP = {
+    "bt709": 1,
+    // ITU-R BT.709
+    "smpte170m": 6,
+    // SMPTE 170M
+    "iec61966-2-1": 13
+    // IEC 61966-2-1
+  };
+  var MATRIX_COEFFICIENTS_MAP = {
+    "rgb": 0,
+    // Identity
+    "bt709": 1,
+    // ITU-R BT.709
+    "bt470bg": 5,
+    // ITU-R BT.470BG
+    "smpte170m": 6
+    // SMPTE 170M
+  };
+  var colorSpaceIsComplete = (colorSpace) => {
+    return !!colorSpace && !!colorSpace.primaries && !!colorSpace.transfer && !!colorSpace.matrix && colorSpace.fullRange !== void 0;
+  };
 
   // src/subtitles.ts
   var cueBlockHeaderRegex = /(?:(.+?)\n)?((?:\d{2}:)?\d{2}:\d{2}.\d{3})\s+-->\s+((?:\d{2}:)?\d{2}:\d{2}.\d{3})/g;
@@ -671,8 +700,20 @@ var Metamuxer = (() => {
     i16(65535)
     // Pre-defined
   ], [
-    VIDEO_CODEC_TO_CONFIGURATION_BOX[trackData.track.source.codec](trackData)
-    // TODO colr
+    VIDEO_CODEC_TO_CONFIGURATION_BOX[trackData.track.source.codec](trackData),
+    colorSpaceIsComplete(trackData.info.decoderConfig.colorSpace) ? colr(trackData) : null
+  ]);
+  var colr = (trackData) => box("colr", [
+    ascii("nclx"),
+    // Colour type
+    u16(COLOR_PRIMARIES_MAP[trackData.info.decoderConfig.colorSpace.primaries]),
+    // Colour primaries
+    u16(TRANSFER_CHARACTERISTICS_MAP[trackData.info.decoderConfig.colorSpace.transfer]),
+    // Transfer characteristics
+    u16(MATRIX_COEFFICIENTS_MAP[trackData.info.decoderConfig.colorSpace.matrix]),
+    // Matrix coefficients
+    u8((trackData.info.decoderConfig.colorSpace.fullRange ? 1 : 0) << 7)
+    // Full range flag
   ]);
   var avcC = (trackData) => trackData.info.decoderConfig && box("avcC", [
     // For AVC, description is an AVCDecoderConfigurationRecord, so nothing else to do here
@@ -2382,26 +2423,13 @@ var Metamuxer = (() => {
               (() => {
                 if (trackData.info.decoderConfig.colorSpace) {
                   let colorSpace = trackData.info.decoderConfig.colorSpace;
-                  if (!colorSpace.matrix || !colorSpace.transfer || !colorSpace.primaries || colorSpace.fullRange == null) {
+                  if (!colorSpaceIsComplete(colorSpace)) {
                     return null;
                   }
                   return { id: 21936 /* Colour */, data: [
-                    { id: 21937 /* MatrixCoefficients */, data: {
-                      "rgb": 1,
-                      "bt709": 1,
-                      "bt470bg": 5,
-                      "smpte170m": 6
-                    }[colorSpace.matrix] },
-                    { id: 21946 /* TransferCharacteristics */, data: {
-                      "bt709": 1,
-                      "smpte170m": 6,
-                      "iec61966-2-1": 13
-                    }[colorSpace.transfer] },
-                    { id: 21947 /* Primaries */, data: {
-                      "bt709": 1,
-                      "bt470bg": 5,
-                      "smpte170m": 6
-                    }[colorSpace.primaries] },
+                    { id: 21937 /* MatrixCoefficients */, data: MATRIX_COEFFICIENTS_MAP[colorSpace.matrix] },
+                    { id: 21946 /* TransferCharacteristics */, data: TRANSFER_CHARACTERISTICS_MAP[colorSpace.transfer] },
+                    { id: 21947 /* Primaries */, data: COLOR_PRIMARIES_MAP[colorSpace.primaries] },
                     { id: 21945 /* Range */, data: [1, 2][Number(colorSpace.fullRange)] }
                   ] };
                 }

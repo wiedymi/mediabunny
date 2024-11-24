@@ -51,3 +51,26 @@ export const toUint8Array = (source: AllowSharedBufferSource): Uint8Array => {
 };
 
 export const textEncoder = new TextEncoder();
+
+// These maps are taken from https://www.matroska.org/technical/elements.html,
+// which references the tables in ITU-T H.273 - they should be valid for Matroska and ISOBMFF.
+export const COLOR_PRIMARIES_MAP: Record<VideoColorPrimaries, number> = {
+	'bt709': 1,     // ITU-R BT.709
+	'bt470bg': 5,   // ITU-R BT.470BG
+	'smpte170m': 6  // ITU-R BT.601 525 - SMPTE 170M
+};
+export const TRANSFER_CHARACTERISTICS_MAP: Record<VideoTransferCharacteristics, number> = {
+	'bt709': 1,          // ITU-R BT.709
+	'smpte170m': 6,      // SMPTE 170M
+	'iec61966-2-1': 13   // IEC 61966-2-1
+};
+export const MATRIX_COEFFICIENTS_MAP: Record<VideoMatrixCoefficients, number> = {
+	'rgb': 0,       // Identity
+	'bt709': 1,     // ITU-R BT.709
+	'bt470bg': 5,   // ITU-R BT.470BG
+	'smpte170m': 6  // SMPTE 170M
+};
+
+export const colorSpaceIsComplete = (colorSpace: VideoColorSpaceInit | undefined) => {
+	return !!colorSpace && !!colorSpace.primaries && !!colorSpace.transfer && !!colorSpace.matrix && colorSpace.fullRange !== undefined;
+};

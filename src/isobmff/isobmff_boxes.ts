@@ -1,4 +1,4 @@
-import { toUint8Array, assert, isU32, last, TransformationMatrix, textEncoder } from '../misc';
+import { toUint8Array, assert, isU32, last, TransformationMatrix, textEncoder, COLOR_PRIMARIES_MAP, TRANSFER_CHARACTERISTICS_MAP, MATRIX_COEFFICIENTS_MAP, colorSpaceIsComplete } from '../misc';
 import { AudioCodec, AudioSource, SubtitleCodec, VideoCodec, VideoSource } from '../source';
 import { formatSubtitleTimestamp } from '../subtitles';
 import { Writer } from '../writer';
@@ -525,8 +525,17 @@ export const videoSampleDescription = (
 	u16(0x0018), // Depth
 	i16(0xffff) // Pre-defined
 ], [
-	VIDEO_CODEC_TO_CONFIGURATION_BOX[trackData.track.source.codec](trackData)
-	// TODO colr
+	VIDEO_CODEC_TO_CONFIGURATION_BOX[trackData.track.source.codec](trackData),
+	colorSpaceIsComplete(trackData.info.decoderConfig.colorSpace) ? colr(trackData) : null
+]);
+
+/** Colour Information Box: Specifies the color space of the video. */
+export const colr = (trackData: IsobmffVideoTrackData) => box('colr', [
+	ascii('nclx'), // Colour type
+	u16(COLOR_PRIMARIES_MAP[trackData.info.decoderConfig.colorSpace!.primaries!]), // Colour primaries
+	u16(TRANSFER_CHARACTERISTICS_MAP[trackData.info.decoderConfig.colorSpace!.transfer!]), // Transfer characteristics
+	u16(MATRIX_COEFFICIENTS_MAP[trackData.info.decoderConfig.colorSpace!.matrix!]), // Matrix coefficients
+	u8((trackData.info.decoderConfig.colorSpace!.fullRange ? 1 : 0) << 7) // Full range flag
 ]);
 
 // TODO: All muxers should ensure that the decoder config description is provided for the codecs that require it. This
