@@ -9,13 +9,15 @@ export abstract class OutputFormat {
 
 export class Mp4OutputFormat extends OutputFormat {
 	constructor(public options: {
-		// TODO: Make this optional with a smart default
-		fastStart: false | 'in-memory' | 'fragmented' | {
-			// TODO: This is too simple now that multiple tracks can exist.
-			expectedVideoChunks?: number,
-			expectedAudioChunks?: number
-		},
-	}) {
+		fastStart?: false | 'in-memory' | 'fragmented',
+	} = {}) {
+		if (!options || typeof options !== 'object') {
+			throw new TypeError('options must be an object.');
+		}
+		if (options.fastStart !== undefined && ![false, 'in-memory', 'fragmented'].includes(options.fastStart)) {
+			throw new TypeError('options.fastStart, when provided, must be false, "in-memory", or "fragmented".');
+		}
+
 		super();
 	}
 
@@ -26,8 +28,15 @@ export class Mp4OutputFormat extends OutputFormat {
 
 export class MkvOutputFormat extends OutputFormat {
 	constructor(public options: {
-		streaming?: boolean // TODO: Is there a better name?
+		streamable?: boolean
 	} = {}) {
+		if (!options || typeof options !== 'object') {
+			throw new TypeError('options must be an object.');
+		}
+		if (options.streamable !== undefined && typeof options.streamable !== 'boolean') {
+			throw new TypeError('options.streamable, when provided, must be a boolean.');
+		}
+
 		super();
 	}
 

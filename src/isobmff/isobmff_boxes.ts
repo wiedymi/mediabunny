@@ -146,6 +146,31 @@ const fixed_2_30 = (value: number) => {
 	return [bytes[0], bytes[1], bytes[2], bytes[3]] as number[];
 };
 
+const variableUnsignedInt = (value: number, byteLength?: number) => {
+	let bytes: number[] = [];
+	let remaining = value;
+
+	do {
+		let byte = remaining & 0x7f;
+		remaining >>= 7;
+		
+		// If this isn't the first byte we're adding (meaning there will be more bytes after it
+		// when we reverse the array), set the continuation bit
+		if (bytes.length > 0) {
+			byte |= 0x80;
+		}
+		
+		bytes.push(byte);
+
+		if (byteLength !== undefined) {
+			byteLength--;
+		}
+	} while (remaining > 0 || byteLength);
+
+	// Reverse the array since we built it backwards
+	return bytes.reverse();
+};
+
 const ascii = (text: string, nullTerminated = false) => {
 	let bytes = Array(text.length).fill(null).map((_, i) => text.charCodeAt(i));
 	if (nullTerminated) bytes.push(0x00);
@@ -279,7 +304,7 @@ export const mvhd = (
 				return lastSample.timestamp + lastSample.duration;
 			})
 	), GLOBAL_TIMESCALE);
-	let nextTrackId = Math.max(...trackDatas.map(x => x.track.id)) + 1;
+	let nextTrackId = Math.max(0, ...trackDatas.map(x => x.track.id)) + 1;
 
 	// Conditionally use u64 if u32 isn't enough
 	let needsU64 = !isU32(creationTime) || !isU32(duration);
@@ -538,9 +563,6 @@ export const colr = (trackData: IsobmffVideoTrackData) => box('colr', [
 	u8((trackData.info.decoderConfig.colorSpace!.fullRange ? 1 : 0) << 7) // Full range flag
 ]);
 
-// TODO: All muxers should ensure that the decoder config description is provided for the codecs that require it. This
-// is relevant when the user skips WebCodecs and uses their own encoder.
-
 /** AVC Configuration Box: Provides additional information to the decoder. */
 export const avcC = (trackData: IsobmffVideoTrackData) => trackData.info.decoderConfig && box('avcC', [
 	// For AVC, description is an AVCDecoderConfigurationRecord, so nothing else to do here
@@ -549,7 +571,7 @@ export const avcC = (trackData: IsobmffVideoTrackData) => trackData.info.decoder
 
 /** HEVC Configuration Box: Provides additional information to the decoder. */
 export const hvcC = (trackData: IsobmffVideoTrackData) => trackData.info.decoderConfig && box('hvcC', [
-	// For HEVC, description is a HEVCDecoderConfigurationRecord, so nothing else to do here
+	// For HEVC, description is an HEVCDecoderConfigurationRecord, so nothing else to do here
 	...toUint8Array(trackData.info.decoderConfig.description!)
 ]);
 
@@ -562,9 +584,7 @@ export const vpcC = (trackData: IsobmffVideoTrackData) => {
 	}
 
 	let decoderConfig = trackData.info.decoderConfig;
-	if (!decoderConfig.colorSpace) {
-		throw new Error(`'colorSpace' is required in the decoder config for VP8/VP9.`);
-	}
+	assert(decoderConfig.colorSpace); // This is guaranteed by an earlier validation step
 
 	let parts = decoderConfig.codec.split('.');
 	let profile = Number(parts[1]);
@@ -631,28 +651,39 @@ export const soundSampleDescription = (
 export const esds = (trackData: IsobmffAudioTrackData) => {
 	let description = toUint8Array(trackData.info.decoderConfig.description ?? new ArrayBuffer(0));
 
-	// TODO Compact the 808080 stuff, it's superfluous
+	// Adapted from https://stackoverflow.com/a/54803118
+	// We build up the bytes in a layered way which reflects the nested structure
 
-	return fullBox('esds', 0, 0, [
-		// https://stackoverflow.com/a/54803118
-		u32(0x03808080), // TAG(3) = Object Descriptor ([2])
-		u8(0x20 + description.byteLength), // length of this OD (which includes the next 2 tags)
-		u16(1), // ES_ID = 1
-		u8(0x00), // flags etc = 0
-		u32(0x04808080), // TAG(4) = ES Descriptor ([2]) embedded in above OD
-		u8(0x12 + description.byteLength), // length of this ESD
-		u8(0x40), // MPEG-4 Audio
-		u8(0x15), // stream type(6bits)=5 audio, flags(2bits)=1
-		u24(0), // 24bit buffer size
-		u32(0x0001FC17), // max bitrate
-		u32(0x0001FC17), // avg bitrate
-		u32(0x05808080), // TAG(5) = ASC ([2],[3]) embedded in above OD
-		u8(description.byteLength), // length
-		...description,
-		u32(0x06808080), // TAG(6)
-		u8(0x01), // length
-		u8(0x02) // data
-	]);
+	let bytes = [
+		...description
+	];
+	bytes = [
+		...u8(0x40), // MPEG-4 Audio
+		...u8(0x15), // stream type(6bits)=5 audio, flags(2bits)=1
+		...u24(0), // 24bit buffer size
+		...u32(0), // max bitrate
+		...u32(0), // avg bitrate
+		...u8(0x05), // TAG(5) = ASC ([2],[3]) embedded in above OD
+		...variableUnsignedInt(bytes.length),
+		...bytes
+	];
+	bytes = [
+		...u16(1), // ES_ID = 1
+		...u8(0x00), // flags etc = 0
+		...u8(0x04), // TAG(4) = ES Descriptor ([2]) embedded in above OD
+		...variableUnsignedInt(bytes.length),
+		...bytes,
+		...u8(0x06), // TAG(6)
+		...u8(0x01), // length
+		...u8(0x02) // data
+	];
+	bytes = [
+		...u8(0x03), // TAG(3) = Object Descriptor ([2])
+		...variableUnsignedInt(bytes.length),
+		...bytes
+	];
+
+	return fullBox('esds', 0, 0, bytes);
 };
 
 /** Opus Specific Box. */
@@ -665,9 +696,7 @@ export const dOps = (trackData: IsobmffAudioTrackData) => {
 	// https://www.rfc-editor.org/rfc/rfc7845#section-5
 	const description = trackData.info.decoderConfig?.description;
 	if (description) {
-		if (description.byteLength < 18) {
-			throw new TypeError('Invalid decoder description provided for Opus; must be at least 18 bytes long.');
-		}
+		assert(description.byteLength < 18); // Is validated in an earlier step
 
 		const view = ArrayBuffer.isView(description)
 			? new DataView(description.buffer, description.byteOffset, description.byteLength)

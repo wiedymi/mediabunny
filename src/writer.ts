@@ -1,6 +1,9 @@
 import { ArrayBufferTarget, FileSystemWritableFileStreamTarget, StreamTarget } from './target';
 
 export abstract class Writer {
+	/** Setting this to true will cause the writer to ensure data is written in a strictly monotonic, streamable way. */
+	ensureMonotonicity = false;
+
 	/** Writes the given data to the target, at the current position. */
 	abstract write(data: Uint8Array): void;
 	/** Sets the current position for future writes to a new one. */
@@ -84,6 +87,7 @@ export class StreamTargetWriter extends Writer {
 		data: Uint8Array,
 		start: number
 	}[] = [];
+	#lastFlushEnd = 0;
 
 	constructor(target: StreamTarget) {
 		super();
@@ -148,7 +152,12 @@ export class StreamTargetWriter extends Writer {
 				}
 			}
 
+			if (this.ensureMonotonicity && chunk.start !== this.#lastFlushEnd) {
+				throw new Error('Internal error: Monotonicity violation.');
+			}
+
 			this.#target.options.onData?.(chunk.data, chunk.start);
+			this.#lastFlushEnd = chunk.start + chunk.data.byteLength;
 		}
 
 		this.#sections.length = 0;
@@ -185,6 +194,7 @@ export class ChunkedStreamTargetWriter extends Writer {
 	 * A chunk is flushed if all of its contents have been written.
 	 */
 	#chunks: Chunk[] = [];
+	#lastFlushEnd = 0;
 
 	constructor(target: StreamTarget) {
 		super();
@@ -298,10 +308,15 @@ export class ChunkedStreamTargetWriter extends Writer {
 			if (!chunk.shouldFlush && !force) continue;
 
 			for (let section of chunk.written) {
+				if (this.ensureMonotonicity && chunk.start + section.start !== this.#lastFlushEnd) {
+					throw new Error('Internal error: Monotonicity violation.');
+				}
+
 				this.#target.options.onData?.(
 					chunk.data.subarray(section.start, section.end),
 					chunk.start + section.start
 				);
+				this.#lastFlushEnd = chunk.start + section.end;
 			}
 			this.#chunks.splice(i--, 1);
 		}

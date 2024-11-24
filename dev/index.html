@@ -36,9 +36,10 @@
 	canvas.height = 720;
 	const context = canvas.getContext('2d');
 
-	let format = new Metamuxer.WebMOutputFormat();
+	let format = new Metamuxer.WebMOutputFormat({ streamable: true });
 	format = new Metamuxer.Mp4OutputFormat({ fastStart: false }); // new Metamuxer.MkvOutputFormat();// new Metamuxer.Mp4OutputFormat({ fastStart: false });
 	let target = new Metamuxer.ArrayBufferTarget();
+	//target = new Metamuxer.StreamTarget({ onData: (data, pos) => console.log(data, pos), chunked: true }) ?? 
 
 	let output = new Metamuxer.Output({ format, target });
 
@@ -142,8 +143,8 @@ Testing... <00:17.350>One... <00:18.125>Two...
 9. <b>justify (bottom, right)</b>.
 `;
 
-	subtitleSource.digest(simpleWebvttFile);
-	subtitleSource.close();
+	//subtitleSource.digest(simpleWebvttFile);
+	//subtitleSource.close();
 
 	for (let i = 0; i < 100; i++) {
 		context.fillStyle = ['red', 'green', 'blue', 'yellow'][i % 4];

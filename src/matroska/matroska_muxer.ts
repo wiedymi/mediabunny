@@ -1,3 +1,4 @@
+import { validateAudioChunkMetadata, validateSubtitleMetadata, validateVideoChunkMetadata } from '../codec';
 import { assert, COLOR_PRIMARIES_MAP, colorSpaceIsComplete, MATRIX_COEFFICIENTS_MAP, readBits, textEncoder, toUint8Array, TRANSFER_CHARACTERISTICS_MAP, writeBits } from '../misc';
 import { Muxer } from '../muxer';
 import { Output, OutputAudioTrack, OutputSubtitleTrack, OutputTrack, OutputVideoTrack } from '../output';
@@ -84,13 +85,8 @@ const TRACK_TYPE_MAP: Record<OutputTrack['type'], number> = {
 	subtitle: 17
 };
 
-// TODO: Perhaps we can make this muxer always be streamable. We can do it similar to the MP4 muxer, where for each 
-// cluster, we hold onto all of the chunks (called sample there), until it's done, and then we write it out in one go.
-// This way, we can set proper headers. Will just mean a bit more memory usage.
-// Update: Not really. There are duration fields and seek fields that are just uneditable if streaming is required.
-
 export class MatroskaMuxer extends Muxer {
-	override timestampsMustStartAtZero = true;
+	override timestampsMustStartAtZero = false;
 
 	#writer: Writer;
 	#format: WebMOutputFormat | MkvOutputFormat;
@@ -126,6 +122,10 @@ export class MatroskaMuxer extends Muxer {
 
 		this.#writer = output.writer;
 		this.#format = format;
+
+		if (this.#format.options.streamable) {
+			this.#writer.ensureMonotonicity = true;
+		}
 	}
 
 	#writeByte(value: number) {
@@ -317,7 +317,7 @@ export class MatroskaMuxer extends Muxer {
 	start() {
 		this.#writeEBMLHeader();
 
-		if (!this.#format.options.streaming) {
+		if (!this.#format.options.streamable) {
 			this.#createSeekHead();
 		}
 
@@ -374,7 +374,7 @@ export class MatroskaMuxer extends Muxer {
 			{ id: EBMLId.TimestampScale, data: 1e6 },
 			{ id: EBMLId.MuxingApp, data: APP_NAME },
 			{ id: EBMLId.WritingApp, data: APP_NAME },
-			!this.#format.options.streaming ? segmentDuration : null
+			!this.#format.options.streamable ? segmentDuration : null
 		] };
 		this.#segmentInfo = segmentInfo;
 	}
@@ -387,7 +387,7 @@ export class MatroskaMuxer extends Muxer {
 			tracksElement.data.push({ id: EBMLId.TrackEntry, data: [
 				{ id: EBMLId.TrackNumber, data: trackData.track.id },
 				{ id: EBMLId.TrackUID, data: trackData.track.id },
-				{ id: EBMLId.TrackType, data: TRACK_TYPE_MAP[trackData.type] }, // TODO Subtitle case
+				{ id: EBMLId.TrackType, data: TRACK_TYPE_MAP[trackData.type] },
 				{ id: EBMLId.CodecID, data: CODEC_STRING_MAP[trackData.track.source.codec] },
 				...(trackData.type === 'video' ? [
 					(trackData.info.decoderConfig.description ? { id: EBMLId.CodecPrivate, data: toUint8Array(trackData.info.decoderConfig.description) } : null),
@@ -432,9 +432,9 @@ export class MatroskaMuxer extends Muxer {
 	#createSegment() {
 		let segment: EBML = {
 			id: EBMLId.Segment,
-			size: this.#format.options.streaming ? -1 : SEGMENT_SIZE_BYTES,
+			size: this.#format.options.streamable ? -1 : SEGMENT_SIZE_BYTES,
 			data: [
-				!this.#format.options.streaming ? this.#seekHead as EBML : null,
+				!this.#format.options.streamable ? this.#seekHead as EBML : null,
 				this.#segmentInfo,
 				this.#tracksElement
 			]
@@ -466,7 +466,8 @@ export class MatroskaMuxer extends Muxer {
 			return existingTrackData as MatroskaVideoTrackData;
 		}
 
-		// TODO Make proper errors for these
+		validateVideoChunkMetadata(meta);
+
 		assert(meta);
 		assert(meta.decoderConfig);
 		assert(meta.decoderConfig.codedWidth !== undefined);
@@ -496,7 +497,8 @@ export class MatroskaMuxer extends Muxer {
 			return existingTrackData as MatroskaAudioTrackData;
 		}
 
-		// TODO Make proper errors for these
+		validateAudioChunkMetadata(meta);
+
 		assert(meta);
 		assert(meta.decoderConfig);
 
@@ -524,7 +526,8 @@ export class MatroskaMuxer extends Muxer {
 			return existingTrackData as MatroskaAudioTrackData;
 		}
 
-		// TODO Make proper errors for these
+		validateSubtitleMetadata(meta);
+
 		assert(meta);
 		assert(meta.config);
 
@@ -688,8 +691,6 @@ export class MatroskaMuxer extends Muxer {
 
 	/** Writes a block containing media data to the file. */
 	#writeBlock(trackData: MatroskaTrackData, chunk: InternalMediaChunk) {
-		// TODO Update this comment. This code always runs now
-		// When streaming, we create the tracks and segment after we've received the first media chunks.
 		// Due to the interlacing algorithm, this code will be run once we've seen one chunk from every media track.
 		if (!this.#segment) {
 			this.#createTracks();
@@ -777,7 +778,7 @@ export class MatroskaMuxer extends Muxer {
 
 	/** Creates a new Cluster element to contain media chunks. */
 	#createNewCluster(msTimestamp: number) {
-		if (this.#currentCluster && !this.#format.options.streaming) {
+		if (this.#currentCluster && !this.#format.options.streamable) {
 			this.#finalizeCurrentCluster();
 		}
 
@@ -789,7 +790,7 @@ export class MatroskaMuxer extends Muxer {
 
 		this.#currentCluster = {
 			id: EBMLId.Cluster,
-			size: this.#format.options.streaming ? -1 : CLUSTER_SIZE_BYTES,
+			size: this.#format.options.streamable ? -1 : CLUSTER_SIZE_BYTES,
 			data: [
 				{ id: EBMLId.Timestamp, data: msTimestamp }
 			]
@@ -842,6 +843,11 @@ export class MatroskaMuxer extends Muxer {
 
 	/** Finalizes the file, making it ready for use. Must be called after all media chunks have been added. */
 	finalize() {
+		if (!this.#segment) {
+			this.#createTracks();
+			this.#createSegment();
+		}
+
 		// Flush any remaining queued chunks to the file
 		for (let trackData of this.#trackDatas) {
 			while (trackData.chunkQueue.length > 0) {
@@ -849,14 +855,14 @@ export class MatroskaMuxer extends Muxer {
 			}
 		}
 
-		if (!this.#format.options.streaming) {
+		if (!this.#format.options.streamable && this.#currentCluster) {
 			this.#finalizeCurrentCluster();
 		}
 
 		assert(this.#cues);
 		this.writeEBML(this.#cues);
 
-		if (!this.#format.options.streaming) {
+		if (!this.#format.options.streamable) {
 			let endPos = this.#writer.getPos();
 
 			// Write the Segment size

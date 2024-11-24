@@ -3,15 +3,20 @@ import { assert } from "./misc";
 import { OutputAudioTrack, OutputSubtitleTrack, OutputTrack, OutputVideoTrack } from "./output";
 import { SubtitleParser } from "./subtitles";
 
-export type VideoCodec = 'avc' | 'hevc' | 'vp8' | 'vp9' | 'av1';
-export type AudioCodec = 'aac' | 'opus'; // TODO add the rest
-export type SubtitleCodec = 'webvtt';
+const VIDEO_CODECS = ['avc', 'hevc', 'vp8', 'vp9', 'av1'] as const;
+const AUDIO_CODECS = ['aac', 'opus'] as const; // TODO add the rest
+const SUBTITLE_CODECS = ['webvtt'] as const; // TODO add the rest
+
+export type VideoCodec = typeof VIDEO_CODECS[number];
+export type AudioCodec = typeof AUDIO_CODECS[number];
+export type SubtitleCodec = typeof SUBTITLE_CODECS[number];
 
 export abstract class MediaSource {
 	connectedTrack: OutputTrack | null = null;
 	closed = false;
 	offsetTimestamps = false;
 
+	// TODO this is also just internal:
 	ensureValidDigest() {
 		if (!this.connectedTrack) {
 			throw new Error('Cannot call digest without connecting the source to an output track.');
@@ -64,6 +69,10 @@ export abstract class VideoSource extends MediaSource {
 	constructor(codec: VideoCodec) {
 		super();
 
+		if (!VIDEO_CODECS.includes(codec)) {
+			throw new TypeError(`Invalid video codec '${codec}'. Must be one of: ${VIDEO_CODECS.join(', ')}.`);
+		}
+
 		this.codec = codec;
 	}
 }
@@ -73,9 +82,12 @@ export class EncodedVideoChunkSource extends VideoSource {
 		super(codec);
 	}
 
-	// TODO: Ensure that the first chunk is a key frame (same for the audio case)
-
 	digest(chunk: EncodedVideoChunk, meta?: EncodedVideoChunkMetadata) {
+		if (!(chunk instanceof EncodedVideoChunk)) {
+			// TODO add polyfill for browsers that don't have this
+			throw new TypeError('chunk must be an EncodedVideoChunk.');
+		}
+
 		this.ensureValidDigest();
 		this.connectedTrack?.output.muxer.addEncodedVideoChunk(this.connectedTrack, chunk, meta);
 	}
@@ -89,15 +101,43 @@ type VideoCodecConfig = {
 	latencyMode?: VideoEncoderConfig['latencyMode']
 };
 
+const validateVideoCodecConfig = (config: VideoCodecConfig) => {
+	if (!config || typeof config !== 'object') {
+		throw new TypeError('Codec config must be an object.');
+	}
+	if (!VIDEO_CODECS.includes(config.codec)) {
+		throw new TypeError(`Invalid video codec '${config.codec}'. Must be one of: ${VIDEO_CODECS.join(', ')}.`);
+	}
+	if (!Number.isInteger(config.bitrate) || config.bitrate <= 0) {
+		throw new TypeError('config.bitrate must be a positive integer.');
+	}
+	if (config.latencyMode !== undefined && ['quality', 'realtime'].includes(config.latencyMode)) {
+		throw new TypeError("config.latencyMode, when provided, must be 'quality' or 'realtime'.");
+	}
+};
+
 class VideoEncoderWrapper {
 	private encoder: VideoEncoder | null = null;
 	private lastMultipleOfKeyFrameInterval = -1;
+	private lastWidth: number | null = null;
+	private lastHeight: number | null = null;
 
-	constructor(private source: VideoSource, private codecConfig: VideoCodecConfig) {}
+	constructor(private source: VideoSource, private codecConfig: VideoCodecConfig) {
+		validateVideoCodecConfig(codecConfig);
+	}
 
-	// TODO: Ensure video frame size remains constant
 	digest(videoFrame: VideoFrame) {
 		this.source.ensureValidDigest();
+
+		// Ensure video frame size remains constant
+		if (this.lastWidth !== null && this.lastHeight !== null) {
+			if (videoFrame.codedWidth !== this.lastWidth || videoFrame.codedHeight !== this.lastHeight) {
+				throw new Error(`Video frame size must remain constant. Expected ${this.lastWidth}x${this.lastHeight}, got ${videoFrame.codedWidth}x${videoFrame.codedHeight}.`);
+			}
+		} else {
+			this.lastWidth = videoFrame.codedWidth;
+			this.lastHeight = videoFrame.codedHeight;
+		}
 
 		this.ensureEncoder(videoFrame);
 		assert(this.encoder);
@@ -119,7 +159,7 @@ class VideoEncoderWrapper {
 
 		this.encoder = new VideoEncoder({
 			output: (chunk, meta) => this.source.connectedTrack?.output.muxer.addEncodedVideoChunk(this.source.connectedTrack, chunk, meta),
-			error: (error) => console.error(error), // TODO
+			error: (error) => console.error('Video encode error:', error),
 		});
 
 		this.encoder.configure({
@@ -146,6 +186,10 @@ export class VideoFrameSource extends VideoSource {
 	}
 
 	digest(videoFrame: VideoFrame) {
+		if (!(videoFrame instanceof VideoFrame)) {
+			throw new TypeError('videoFrame must be a VideoFrame.');
+		}
+
 		this.encoder.digest(videoFrame);
 	}
 
@@ -158,11 +202,22 @@ export class CanvasSource extends VideoSource {
 	private encoder: VideoEncoderWrapper;
 
 	constructor(private canvas: HTMLCanvasElement, codecConfig: VideoCodecConfig) {
+		if (!(canvas instanceof HTMLCanvasElement)) {
+			throw new TypeError('canvas must be an HTMLCanvasElement.');
+		}
+
 		super(codecConfig.codec);
 		this.encoder = new VideoEncoderWrapper(this, codecConfig);
 	}
 
 	digest(timestamp: number, duration = 0) {
+		if (!Number.isFinite(timestamp) || timestamp < 0) {
+			throw new TypeError('timestamp must be a non-negative number.');
+		}
+		if (!Number.isFinite(duration) || duration < 0) {
+			throw new TypeError('duration must be a non-negative number.');
+		}
+
 		const frame = new VideoFrame(this.canvas, {
 			timestamp: Math.round(1e6 * timestamp),
 			duration: Math.round(1e6 * duration),
@@ -179,45 +234,49 @@ export class CanvasSource extends VideoSource {
 }
 
 export class MediaStreamVideoTrackSource extends VideoSource {
-    private encoder: VideoEncoderWrapper;
-    private abortController: AbortController | null = null;
+	private encoder: VideoEncoderWrapper;
+	private abortController: AbortController | null = null;
 
 	override offsetTimestamps = true;
 
-    constructor(private track: MediaStreamVideoTrack, codecConfig: VideoCodecConfig) {
-        super(codecConfig.codec);
-        this.encoder = new VideoEncoderWrapper(this, codecConfig);
-    }
+	constructor(private track: MediaStreamVideoTrack, codecConfig: VideoCodecConfig) {
+		if (!(track instanceof MediaStreamTrack) || track.kind !== 'video') {
+			throw new TypeError('track must be a video MediaStreamTrack.');
+		}
 
-    override start() {
-        this.abortController = new AbortController();
-        
-        const processor = new MediaStreamTrackProcessor({ track: this.track });
-        const consumer = new WritableStream<VideoFrame>({
-            write: (videoFrame) => {
-                this.encoder.digest(videoFrame);
-                videoFrame.close();
-            }
-        });
+		super(codecConfig.codec);
+		this.encoder = new VideoEncoderWrapper(this, codecConfig);
+	}
 
-        processor.readable.pipeTo(consumer, {
-            signal: this.abortController.signal
-        }).catch(err => {
-            // Handle abort error silently
-            if (err instanceof DOMException && err.name === 'AbortError') return;
-            // Handle other errors
-            console.error('Pipe error:', err);
-        });
-    }
+	override start() {
+		this.abortController = new AbortController();
+		
+		const processor = new MediaStreamTrackProcessor({ track: this.track });
+		const consumer = new WritableStream<VideoFrame>({
+			write: (videoFrame) => {
+				this.encoder.digest(videoFrame);
+				videoFrame.close();
+			}
+		});
 
-    override async flush() {
-        if (this.abortController) {
-            this.abortController.abort();
-            this.abortController = null;
-        }
+		processor.readable.pipeTo(consumer, {
+			signal: this.abortController.signal
+		}).catch(err => {
+			// Handle abort error silently
+			if (err instanceof DOMException && err.name === 'AbortError') return;
+			// Handle other errors
+			console.error('Pipe error:', err);
+		});
+	}
 
-        await this.encoder.flush();
-    }
+	override async flush() {
+		if (this.abortController) {
+			this.abortController.abort();
+			this.abortController = null;
+		}
+
+		await this.encoder.flush();
+	}
 }
 
 export abstract class AudioSource extends MediaSource {
@@ -226,6 +285,10 @@ export abstract class AudioSource extends MediaSource {
 
 	constructor(codec: AudioCodec) {
 		super();
+
+		if (!AUDIO_CODECS.includes(codec)) {
+			throw new TypeError(`Invalid audio codec '${codec}'. Must be one of: ${AUDIO_CODECS.join(', ')}.`);
+		}
 
 		this.codec = codec;
 	}
@@ -237,6 +300,11 @@ export class EncodedAudioChunkSource extends AudioSource {
 	}
 
 	digest(chunk: EncodedAudioChunk, meta?: EncodedAudioChunkMetadata) {
+		if (!(chunk instanceof EncodedAudioChunk)) {
+			// TODO add polyfill for browsers that don't have this
+			throw new TypeError('chunk must be an EncodedAudioChunk.');
+		}
+
 		this.ensureValidDigest();
 		this.connectedTrack?.output.muxer.addEncodedAudioChunk(this.connectedTrack, chunk, meta);
 	}
@@ -247,142 +315,179 @@ type AudioCodecConfig = {
 	bitrate: number
 };
 
+const validateAudioCodecConfig = (config: AudioCodecConfig) => {
+	if (!config || typeof config !== 'object') {
+		throw new TypeError('Codec config must be an object.');
+	}
+	if (!AUDIO_CODECS.includes(config.codec)) {
+		throw new TypeError(`Invalid audio codec '${config.codec}'. Must be one of: ${AUDIO_CODECS.join(', ')}.`);
+	}
+	if (!Number.isInteger(config.bitrate) || config.bitrate <= 0) {
+		throw new TypeError('config.bitrate must be a positive integer.');
+	}
+};
+
 class AudioEncoderWrapper {
-    private encoder: AudioEncoder | null = null;
+	private encoder: AudioEncoder | null = null;
+	private lastNumberOfChannels: number | null = null;
+	private lastSampleRate: number | null = null;
 
-    constructor(private source: AudioSource, private codecConfig: AudioCodecConfig) {}
+	constructor(private source: AudioSource, private codecConfig: AudioCodecConfig) {
+		validateAudioCodecConfig(codecConfig);
+	}
 
-	// TODO: Ensure audio parameters remain constant
-    digest(audioData: AudioData) {
-        this.source.ensureValidDigest();
+	digest(audioData: AudioData) {
+		this.source.ensureValidDigest();
 
-        this.ensureEncoder(audioData);
-        assert(this.encoder);
+		// Ensure audio parameters remain constant
+		if (this.lastNumberOfChannels !== null && this.lastSampleRate !== null) {
+			if (audioData.numberOfChannels !== this.lastNumberOfChannels || audioData.sampleRate !== this.lastSampleRate) {
+				throw new Error(`Audio parameters must remain constant. Expected ${this.lastNumberOfChannels} channels at ${this.lastSampleRate} Hz, got ${audioData.numberOfChannels} channels at ${audioData.sampleRate} Hz.`);
+			}
+		} else {
+			this.lastNumberOfChannels = audioData.numberOfChannels;
+			this.lastSampleRate = audioData.sampleRate;
+		}
 
-        this.encoder.encode(audioData);
-    }
+		this.ensureEncoder(audioData);
+		assert(this.encoder);
 
-    private ensureEncoder(audioData: AudioData) {
-        if (this.encoder) {
-            return;
-        }
+		this.encoder.encode(audioData);
+	}
 
-        this.encoder = new AudioEncoder({
-            output: (chunk, meta) => this.source.connectedTrack?.output.muxer.addEncodedAudioChunk(this.source.connectedTrack, chunk, meta),
-            error: (error) => console.error(error), // TODO
-        });
+	private ensureEncoder(audioData: AudioData) {
+		if (this.encoder) {
+			return;
+		}
 
-        this.encoder.configure({
-            codec: buildAudioCodecString(this.codecConfig.codec, audioData.numberOfChannels, audioData.sampleRate),
-            numberOfChannels: audioData.numberOfChannels,
-            sampleRate: audioData.sampleRate,
-            bitrate: this.codecConfig.bitrate,
-        });
-    }
-    
-    async flush() {
-        return this.encoder?.flush();
-    }
+		this.encoder = new AudioEncoder({
+			output: (chunk, meta) => this.source.connectedTrack?.output.muxer.addEncodedAudioChunk(this.source.connectedTrack, chunk, meta),
+			error: (error) => console.error('Audio encode error:', error),
+		});
+
+		this.encoder.configure({
+			codec: buildAudioCodecString(this.codecConfig.codec, audioData.numberOfChannels, audioData.sampleRate),
+			numberOfChannels: audioData.numberOfChannels,
+			sampleRate: audioData.sampleRate,
+			bitrate: this.codecConfig.bitrate,
+		});
+	}
+	
+	async flush() {
+		return this.encoder?.flush();
+	}
 }
 
 export class AudioDataSource extends AudioSource {
-    private encoder: AudioEncoderWrapper;
+	private encoder: AudioEncoderWrapper;
 
-    constructor(codecConfig: AudioCodecConfig) {
-        super(codecConfig.codec);
-        this.encoder = new AudioEncoderWrapper(this, codecConfig);
-    }
+	constructor(codecConfig: AudioCodecConfig) {
+		super(codecConfig.codec);
+		this.encoder = new AudioEncoderWrapper(this, codecConfig);
+	}
 
-    digest(audioData: AudioData) {
-        this.encoder.digest(audioData);
-    }
+	digest(audioData: AudioData) {
+		if (!(audioData instanceof AudioData)) {
+			throw new TypeError('audioData must be an AudioData.');
+		}
 
-    override flush() {
-        return this.encoder.flush();
-    }
+		this.encoder.digest(audioData);
+	}
+
+	override flush() {
+		return this.encoder.flush();
+	}
 }
 
 export class AudioBufferSource extends AudioSource {
-    private encoder: AudioEncoderWrapper;
-    private accumulatedFrameCount = 0;
+	private encoder: AudioEncoderWrapper;
+	private accumulatedFrameCount = 0;
 
-    constructor(codecConfig: AudioCodecConfig) {
-        super(codecConfig.codec);
-        this.encoder = new AudioEncoderWrapper(this, codecConfig);
-    }
+	constructor(codecConfig: AudioCodecConfig) {
+		super(codecConfig.codec);
+		this.encoder = new AudioEncoderWrapper(this, codecConfig);
+	}
 
-    digest(audioBuffer: AudioBuffer) {
-        const numberOfChannels = audioBuffer.numberOfChannels;
-        const sampleRate = audioBuffer.sampleRate;
-        const numberOfFrames = audioBuffer.length;
-        
-        // Create a planar F32 array containing all channels
-        const data = new Float32Array(numberOfChannels * numberOfFrames);
-        for (let channel = 0; channel < numberOfChannels; channel++) {
-            const channelData = audioBuffer.getChannelData(channel);
-            data.set(channelData, channel * numberOfFrames);
-        }
+	digest(audioBuffer: AudioBuffer) {
+		if (!(audioBuffer instanceof AudioBuffer)) {
+			throw new TypeError('audioBuffer must be an AudioBuffer.');
+		}
 
-        const audioData = new AudioData({
-            format: 'f32-planar',
-            sampleRate,
-            numberOfFrames,
-            numberOfChannels,
-            timestamp: Math.round(1e6 * this.accumulatedFrameCount / sampleRate),
-            data: data
-        });
+		const numberOfChannels = audioBuffer.numberOfChannels;
+		const sampleRate = audioBuffer.sampleRate;
+		const numberOfFrames = audioBuffer.length;
+		
+		// Create a planar F32 array containing all channels
+		const data = new Float32Array(numberOfChannels * numberOfFrames);
+		for (let channel = 0; channel < numberOfChannels; channel++) {
+			const channelData = audioBuffer.getChannelData(channel);
+			data.set(channelData, channel * numberOfFrames);
+		}
 
-        this.encoder.digest(audioData);
-        audioData.close();
+		const audioData = new AudioData({
+			format: 'f32-planar',
+			sampleRate,
+			numberOfFrames,
+			numberOfChannels,
+			timestamp: Math.round(1e6 * this.accumulatedFrameCount / sampleRate),
+			data: data
+		});
+
+		this.encoder.digest(audioData);
+		audioData.close();
 
 		this.accumulatedFrameCount += numberOfFrames;
-    }
+	}
 
-    override flush() {
-        return this.encoder.flush();
-    }
+	override flush() {
+		return this.encoder.flush();
+	}
 }
 
 export class MediaStreamAudioTrackSource extends AudioSource {
-    private encoder: AudioEncoderWrapper;
-    private abortController: AbortController | null = null;
+	private encoder: AudioEncoderWrapper;
+	private abortController: AbortController | null = null;
 
 	override offsetTimestamps = true;
 
-    constructor(private track: MediaStreamAudioTrack, codecConfig: AudioCodecConfig) {
-        super(codecConfig.codec);
-        this.encoder = new AudioEncoderWrapper(this, codecConfig);
-    }
+	constructor(private track: MediaStreamAudioTrack, codecConfig: AudioCodecConfig) {
+		if (!(track instanceof MediaStreamTrack) || track.kind !== 'audio') {
+			throw new TypeError('track must be an audio MediaStreamTrack.');
+		}
 
-    override start() {
-        this.abortController = new AbortController();
-        
-        const processor = new MediaStreamTrackProcessor({ track: this.track });
-        const consumer = new WritableStream<AudioData>({
-            write: (audioData) => {
-                this.encoder.digest(audioData);
-                audioData.close();
-            }
-        });
+		super(codecConfig.codec);
+		this.encoder = new AudioEncoderWrapper(this, codecConfig);
+	}
 
-        processor.readable.pipeTo(consumer, {
-            signal: this.abortController.signal
-        }).catch(err => {
-            // Handle abort error silently
-            if (err instanceof DOMException && err.name === 'AbortError') return;
-            // Handle other errors
-            console.error('Pipe error:', err);
-        });
-    }
+	override start() {
+		this.abortController = new AbortController();
+		
+		const processor = new MediaStreamTrackProcessor({ track: this.track });
+		const consumer = new WritableStream<AudioData>({
+			write: (audioData) => {
+				this.encoder.digest(audioData);
+				audioData.close();
+			}
+		});
 
-    override async flush() {
-        if (this.abortController) {
-            this.abortController.abort();
-            this.abortController = null;
-        }
+		processor.readable.pipeTo(consumer, {
+			signal: this.abortController.signal
+		}).catch(err => {
+			// Handle abort error silently
+			if (err instanceof DOMException && err.name === 'AbortError') return;
+			// Handle other errors
+			console.error('Pipe error:', err);
+		});
+	}
 
-        await this.encoder.flush();
-    }
+	override async flush() {
+		if (this.abortController) {
+			this.abortController.abort();
+			this.abortController = null;
+		}
+
+		await this.encoder.flush();
+	}
 }
 
 export abstract class SubtitleSource extends MediaSource {
@@ -391,6 +496,10 @@ export abstract class SubtitleSource extends MediaSource {
 
 	constructor(codec: SubtitleCodec) {
 		super();
+
+		if (!SUBTITLE_CODECS.includes(codec)) {
+			throw new TypeError(`Invalid subtitle codec '${codec}'. Must be one of: ${SUBTITLE_CODECS.join(', ')}.`);
+		}
 
 		this.codec = codec;
 	}
@@ -405,11 +514,15 @@ export class TextSubtitleSource extends SubtitleSource {
 		this.parser = new SubtitleParser({
 			codec,
 			output: (cue, metadata) => this.connectedTrack?.output.muxer.addSubtitleCue(this.connectedTrack, cue, metadata),
-			error: (error) => console.error(error) // TODO
+			error: (error) => console.error('Subtitle parse error:', error)
 		});
 	}
 
 	digest(text: string) {
+		if (typeof text !== 'string') {
+			throw new TypeError('text must be a string.');
+		}
+
 		this.ensureValidDigest();
 		this.parser.parse(text);
 	}

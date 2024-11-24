@@ -1,11 +1,12 @@
 import { Box, free, ftyp, IsobmffBoxWriter, mdat, mfra, moof, moov, vtta, vttc, vtte } from './isobmff_boxes';
 import { Muxer } from '../muxer';
 import { Output, OutputAudioTrack, OutputSubtitleTrack, OutputTrack, OutputVideoTrack } from '../output';
-import { Writer } from '../writer';
+import { ArrayBufferTargetWriter, Writer } from '../writer';
 import { assert, last, TransformationMatrix } from '../misc';
 import { Mp4OutputFormat } from '../output_format';
 import { inlineTimestampRegex, SubtitleConfig, SubtitleCue, SubtitleMetadata } from '../subtitles';
 import { ArrayBufferTarget } from '../target';
+import { validateAudioChunkMetadata, validateSubtitleMetadata, validateVideoChunkMetadata } from '../codec';
 
 export const GLOBAL_TIMESCALE = 1000;
 const TIMESTAMP_OFFSET = 2_082_844_800; // Seconds between Jan 1 1904 and Jan 1 1970
@@ -88,6 +89,7 @@ export class IsobmffMuxer extends Muxer {
 	#writer: Writer;
 	#boxWriter: IsobmffBoxWriter;
 	#format: Mp4OutputFormat;
+	#fastStart: NonNullable<Mp4OutputFormat['options']['fastStart']>;
 
 	#auxTarget = new ArrayBufferTarget();
 	#auxWriter = this.#auxTarget.createWriter();
@@ -109,6 +111,14 @@ export class IsobmffMuxer extends Muxer {
 		this.#writer = output.writer;
 		this.#boxWriter = new IsobmffBoxWriter(this.#writer);
 		this.#format = format;
+
+		// If the fastStart option isn't defined, enable in-memory fast start if the target is an ArrayBuffer, as the
+		// memory usage remains identical
+		this.#fastStart = format.options.fastStart ?? (this.#writer instanceof ArrayBufferTargetWriter ? 'in-memory' : false);
+
+		if (this.#fastStart === 'in-memory' || this.#fastStart === 'fragmented') {
+			this.#writer.ensureMonotonicity = true;
+		}
 	}
 
 	start() {
@@ -117,58 +127,21 @@ export class IsobmffMuxer extends Muxer {
 		// Write the header
 		this.#boxWriter.writeBox(ftyp({
 			holdsAvc: holdsAvc,
-			fragmented: this.#format.options.fastStart === 'fragmented'
+			fragmented: this.#fastStart === 'fragmented'
 		}));
 
 		this.#ftypSize = this.#writer.getPos();
 
-		if (this.#format.options.fastStart === 'in-memory') {
+		if (this.#fastStart === 'in-memory') {
 			this.#mdat = mdat(false);
-		} else if (this.#format.options.fastStart === 'fragmented') {
+		} else if (this.#fastStart === 'fragmented') {
 			// We write the moov box once we write out the first fragment to make sure we get the decoder configs
 		} else {
-			if (typeof this.#format.options.fastStart === 'object') {
-				let moovSizeUpperBound = this.#computeMoovSizeUpperBound();
-				this.#writer.seek(this.#writer.getPos() + moovSizeUpperBound);
-			}
-
 			this.#mdat = mdat(true); // Reserve large size by default, can refine this when finalizing.
 			this.#boxWriter.writeBox(this.#mdat);
 		}
 
 		this.#writer.flush();
-	}
-
-	#computeMoovSizeUpperBound() {
-		assert(typeof this.#format.options.fastStart === 'object');
-
-		let upperBound = 0;
-		let sampleCounts = [
-			this.#format.options.fastStart.expectedVideoChunks,
-			this.#format.options.fastStart.expectedAudioChunks
-		];
-
-		for (let n of sampleCounts) {
-			if (!n) continue;
-
-			// Given the max allowed sample count, compute the space they'll take up in the Sample Table Box, assuming
-			// the worst case for each individual box:
-
-			// stts box - since it is compactly coded, the maximum length of this table will be 2/3n
-			upperBound += (4 + 4) * Math.ceil(2/3 * n);
-			// stss box - 1 entry per sample
-			upperBound += 4 * n;
-			// stsc box - since it is compactly coded, the maximum length of this table will be 2/3n
-			upperBound += (4 + 4 + 4) * Math.ceil(2/3 * n);
-			// stsz box - 1 entry per sample
-			upperBound += 4 * n;
-			// co64 box - we assume 1 sample per chunk and 64-bit chunk offsets
-			upperBound += 8 * n;
-		}
-
-		upperBound += 4096; // Assume a generous 4 kB for everything else: Track metadata, codec descriptors, etc.
-
-		return upperBound;
 	}
 
 	#getVideoTrackData(track: OutputVideoTrack, meta?: EncodedVideoChunkMetadata) {
@@ -177,7 +150,8 @@ export class IsobmffMuxer extends Muxer {
 			return existingTrackData as IsobmffVideoTrackData;
 		}
 
-		// TODO Make proper errors for these
+		validateVideoChunkMetadata(meta);
+
 		assert(meta);
 		assert(meta.decoderConfig);
 		assert(meta.decoderConfig.codedWidth !== undefined);
@@ -216,7 +190,8 @@ export class IsobmffMuxer extends Muxer {
 			return existingTrackData as IsobmffAudioTrackData;
 		}
 
-		// TODO Make proper errors for these
+		validateAudioChunkMetadata(meta);
+
 		assert(meta);
 		assert(meta.decoderConfig);
 
@@ -253,7 +228,8 @@ export class IsobmffMuxer extends Muxer {
 			return existingTrackData as IsobmffSubtitleTrackData;
 		}
 
-		// TODO Make proper errors for these
+		validateSubtitleMetadata(meta);
+
 		assert(meta);
 		assert(meta.config);
 
@@ -293,61 +269,29 @@ export class IsobmffMuxer extends Muxer {
 	addEncodedVideoChunk(track: OutputVideoTrack, chunk: EncodedVideoChunk, meta?: EncodedVideoChunkMetadata) {
 		const trackData = this.#getVideoTrackData(track, meta);
 
-		if (
-			typeof this.#format.options.fastStart === 'object' &&
-			trackData.samples.length === this.#format.options.fastStart.expectedVideoChunks
-		) {
-			// TODO reference track id
-			throw new Error(`Cannot add more video chunks than specified in 'fastStart' (${
-				this.#format.options.fastStart.expectedVideoChunks
-			}).`);
-		}
-
 		let data = new Uint8Array(chunk.byteLength);
 		chunk.copyTo(data);
 
 		let timestamp = this.validateAndNormalizeTimestamp(trackData.track, chunk.timestamp, chunk.type === 'key');
 		let sample = this.#createSampleForTrack(trackData, data, timestamp, (chunk.duration ?? 0) / 1e6, chunk.type);
 
-		if (this.#format.options.fastStart === 'fragmented') {
-			trackData.sampleQueue.push(sample);
-			this.#interleaveSamples();
-		} else {
-			this.#addSampleToTrack(trackData, sample);
-		}
+		this.#registerSample(trackData, sample);
 	}
 
 	addEncodedAudioChunk(track: OutputAudioTrack, chunk: EncodedAudioChunk, meta?: EncodedAudioChunkMetadata) {
 		const trackData = this.#getAudioTrackData(track, meta);
 
-		if (
-			typeof this.#format.options.fastStart === 'object' &&
-			trackData.samples.length === this.#format.options.fastStart.expectedAudioChunks
-		) {
-			// TODO reference track id
-			throw new Error(`Cannot add more audio chunks than specified in 'fastStart' (${
-				this.#format.options.fastStart.expectedAudioChunks
-			}).`);
-		}
-
 		let data = new Uint8Array(chunk.byteLength);
 		chunk.copyTo(data);
 
 		let timestamp = this.validateAndNormalizeTimestamp(trackData.track, chunk.timestamp, chunk.type === 'key');
 		let sample = this.#createSampleForTrack(trackData, data, timestamp, (chunk.duration ?? 0) / 1e6, chunk.type);
 
-		if (this.#format.options.fastStart === 'fragmented') {
-			trackData.sampleQueue.push(sample);
-			this.#interleaveSamples();
-		} else {
-			this.#addSampleToTrack(trackData, sample);
-		}
+		this.#registerSample(trackData, sample);
 	}
 
 	addSubtitleCue(track: OutputSubtitleTrack, cue: SubtitleCue, meta?: SubtitleMetadata) {
 		const trackData = this.#getSubtitleTrackData(track, meta);
-
-		// TODO the expectedSubtitleChunks thing
 
 		this.validateAndNormalizeTimestamp(trackData.track, 1e6 * cue.timestamp, true);
 
@@ -392,14 +336,7 @@ export class IsobmffMuxer extends Muxer {
 				let body = this.#auxWriter.getSlice(0, this.#auxWriter.getPos());
 				let sample = this.#createSampleForTrack(trackData, body, trackData.lastCueEndTimestamp, sampleStart - trackData.lastCueEndTimestamp, 'key');
 
-				// todo extract this into reusable thing
-				if (this.#format.options.fastStart === 'fragmented') {
-					trackData.sampleQueue.push(sample);
-					this.#interleaveSamples();
-				} else {
-					this.#addSampleToTrack(trackData, sample);
-				}
-
+				this.#registerSample(trackData, sample);
 				trackData.lastCueEndTimestamp = sampleStart;
 			}
 
@@ -442,14 +379,7 @@ export class IsobmffMuxer extends Muxer {
 			let body = this.#auxWriter.getSlice(0, this.#auxWriter.getPos());
 			let sample = this.#createSampleForTrack(trackData, body, sampleStart, sampleEnd - sampleStart, 'key');
 			
-			// todo extract this into reusable thing
-			if (this.#format.options.fastStart === 'fragmented') {
-				trackData.sampleQueue.push(sample);
-				this.#interleaveSamples();
-			} else {
-				this.#addSampleToTrack(trackData, sample);
-			}
-
+			this.#registerSample(trackData, sample);
 			trackData.lastCueEndTimestamp = sampleEnd;
 		}
 	}
@@ -503,7 +433,7 @@ export class IsobmffMuxer extends Muxer {
 				trackData.lastTimescaleUnits += delta;
 				trackData.lastSample.timescaleUnitsToNextSample = delta;
 	
-				if (this.#format.options.fastStart !== 'fragmented') {
+				if (this.#fastStart !== 'fragmented') {
 					let lastTableEntry = last(trackData.timeToSampleTable);
 					assert(lastTableEntry);
 
@@ -555,7 +485,7 @@ export class IsobmffMuxer extends Muxer {
 			} else {
 				trackData.lastTimescaleUnits = 0;
 	
-				if (this.#format.options.fastStart !== 'fragmented') {
+				if (this.#fastStart !== 'fragmented') {
 					trackData.timeToSampleTable.push({
 						sampleCount: 1,
 						sampleDelta: durationInTimescale
@@ -573,15 +503,21 @@ export class IsobmffMuxer extends Muxer {
 		trackData.timestampProcessingQueue.length = 0;
 	}
 
-	#addSampleToTrack(
-		trackData: IsobmffTrackData,
-		sample: Sample
-	) {
+	#registerSample(trackData: IsobmffTrackData, sample: Sample) {
+		if (this.#fastStart === 'fragmented') {
+			trackData.sampleQueue.push(sample);
+			this.#interleaveSamples();
+		} else {
+			this.#addSampleToTrack(trackData, sample);
+		}
+	}
+
+	#addSampleToTrack(trackData: IsobmffTrackData, sample: Sample) {
 		if (sample.type === 'key') {
 			this.#processTimestamps(trackData);
 		}
 
-		if (this.#format.options.fastStart !== 'fragmented') {
+		if (this.#fastStart !== 'fragmented') {
 			trackData.samples.push(sample);
 		}
 
@@ -591,7 +527,7 @@ export class IsobmffMuxer extends Muxer {
 		} else {
 			let currentChunkDuration = sample.timestamp - trackData.currentChunk.startTimestamp;
 
-			if (this.#format.options.fastStart === 'fragmented') {
+			if (this.#fastStart === 'fragmented') {
 				// We can only finalize this fragment (and begin a new one) if we know that each track will be able to
 				// start the new one with a key frame.
 				const keyFrameQueuedEverywhere = this.#trackDatas.every(otherTrackData => {
@@ -631,7 +567,7 @@ export class IsobmffMuxer extends Muxer {
 	}
 
 	#finalizeCurrentChunk(trackData: IsobmffTrackData) {
-		assert(this.#format.options.fastStart !== 'fragmented');
+		assert(this.#fastStart !== 'fragmented');
 
 		if (!trackData.currentChunk) return;
 
@@ -648,7 +584,7 @@ export class IsobmffMuxer extends Muxer {
 			});
 		}
 
-		if (this.#format.options.fastStart === 'in-memory') {
+		if (this.#fastStart === 'in-memory') {
 			trackData.currentChunk.offset = 0; // We'll compute the proper offset when finalizing
 			return;
 		}
@@ -665,7 +601,7 @@ export class IsobmffMuxer extends Muxer {
 	}
 
 	#interleaveSamples() {
-		assert(this.#format.options.fastStart === 'fragmented');
+		assert(this.#fastStart === 'fragmented');
 
 		for (const track of this.output.tracks) {
 			if (!track.source.closed && !this.#trackDatas.some(x => x.track === track)) {
@@ -699,7 +635,7 @@ export class IsobmffMuxer extends Muxer {
 	}
 
 	#finalizeFragment(flushWriter = true) {
-		assert(this.#format.options.fastStart === 'fragmented');
+		assert(this.#fastStart === 'fragmented');
 
 		let fragmentNumber = this.#nextFragmentNumber++;
 
@@ -775,7 +711,7 @@ export class IsobmffMuxer extends Muxer {
 			}
 		}
 
-		if (this.#format.options.fastStart === 'fragmented') {
+		if (this.#fastStart === 'fragmented') {
 			// Since a track is now closed, we may be able to write out chunks that were previously waiting
 			this.#interleaveSamples();
 		}
@@ -789,7 +725,7 @@ export class IsobmffMuxer extends Muxer {
 			}
 		}
 
-		if (this.#format.options.fastStart === 'fragmented') {
+		if (this.#fastStart === 'fragmented') {
 			for (let trackData of this.#trackDatas) {
 				for (let sample of trackData.sampleQueue) {
 					this.#addSampleToTrack(trackData, sample);
@@ -800,13 +736,13 @@ export class IsobmffMuxer extends Muxer {
 
 			this.#finalizeFragment(false); // Don't flush the last fragment as we will flush it with the mfra box soon
 		} else {
-		 	for (let trackData of this.#trackDatas) {
+			for (let trackData of this.#trackDatas) {
 				this.#processTimestamps(trackData);
 				this.#finalizeCurrentChunk(trackData);
 			}
 		}
 
-		if (this.#format.options.fastStart === 'in-memory') {
+		if (this.#fastStart === 'in-memory') {
 			assert(this.#mdat);
 			let mdatSize: number;
 
@@ -850,7 +786,7 @@ export class IsobmffMuxer extends Muxer {
 					sample.data = null;
 				}
 			}
-		} else if (this.#format.options.fastStart === 'fragmented') {
+		} else if (this.#fastStart === 'fragmented') {
 			// Append the mfra box to the end of the file for better random access
 			let startPos = this.#writer.getPos();
 			let mfraBox = mfra(this.#trackDatas);
@@ -873,7 +809,7 @@ export class IsobmffMuxer extends Muxer {
 
 			let movieBox = moov(this.#trackDatas, this.#creationTime);
 
-			if (typeof this.#format.options.fastStart === 'object') {
+			if (typeof this.#fastStart === 'object') {
 				this.#writer.seek(this.#ftypSize);
 				this.#boxWriter.writeBox(movieBox);
 

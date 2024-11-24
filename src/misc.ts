@@ -74,3 +74,8 @@ export const MATRIX_COEFFICIENTS_MAP: Record<VideoMatrixCoefficients, number> = 
 export const colorSpaceIsComplete = (colorSpace: VideoColorSpaceInit | undefined) => {
 	return !!colorSpace && !!colorSpace.primaries && !!colorSpace.transfer && !!colorSpace.matrix && colorSpace.fullRange !== undefined;
 };
+
+export const isAllowSharedBufferSource = (x: unknown) => {
+	// Quite a mouthful:
+	return x instanceof ArrayBuffer || (typeof SharedArrayBuffer !== 'undefined' && x instanceof SharedArrayBuffer) || (ArrayBuffer.isView(x) && !(x instanceof DataView));
+};
