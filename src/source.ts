@@ -1,15 +1,16 @@
 import { buildAudioCodecString, buildVideoCodecString } from "./codec";
-import { assert, TransformationMatrix } from "./misc";
+import { assert } from "./misc";
 import { OutputAudioTrack, OutputSubtitleTrack, OutputTrack, OutputVideoTrack } from "./output";
-import { SubtitleEncoder } from "./subtitles";
+import { SubtitleParser } from "./subtitles";
 
 export type VideoCodec = 'avc' | 'hevc' | 'vp8' | 'vp9' | 'av1';
-export type AudioCodec = 'aac' | 'opus' | 'vorbis'; // TODO add the rest
+export type AudioCodec = 'aac' | 'opus'; // TODO add the rest
 export type SubtitleCodec = 'webvtt';
 
 export abstract class MediaSource {
 	connectedTrack: OutputTrack | null = null;
 	closed = false;
+	offsetTimestamps = false;
 
 	ensureValidDigest() {
 		if (!this.connectedTrack) {
@@ -83,8 +84,9 @@ export class EncodedVideoChunkSource extends VideoSource {
 const KEY_FRAME_INTERVAL = 5;
 
 type VideoCodecConfig = {
-	codec: 'avc' | 'hevc' | 'vp8' | 'vp9' | 'av1',
-	bitrate: number 
+	codec: VideoCodec,
+	bitrate: number,
+	latencyMode?: VideoEncoderConfig['latencyMode']
 };
 
 class VideoEncoderWrapper {
@@ -125,6 +127,8 @@ class VideoEncoderWrapper {
 			width: videoFrame.codedWidth,
 			height: videoFrame.codedHeight,
 			bitrate: this.codecConfig.bitrate,
+			framerate: this.source.connectedTrack?.metadata.frameRate,
+			latencyMode: this.codecConfig.latencyMode,
 		});
 	}
 	
@@ -162,6 +166,7 @@ export class CanvasSource extends VideoSource {
 		const frame = new VideoFrame(this.canvas, {
 			timestamp: Math.round(1e6 * timestamp),
 			duration: Math.round(1e6 * duration),
+			alpha: 'discard',
 		});
 
 		this.encoder.digest(frame);
@@ -176,6 +181,8 @@ export class CanvasSource extends VideoSource {
 export class MediaStreamVideoTrackSource extends VideoSource {
     private encoder: VideoEncoderWrapper;
     private abortController: AbortController | null = null;
+
+	override offsetTimestamps = true;
 
     constructor(private track: MediaStreamVideoTrack, codecConfig: VideoCodecConfig) {
         super(codecConfig.codec);
@@ -236,7 +243,7 @@ export class EncodedAudioChunkSource extends AudioSource {
 }
 
 type AudioCodecConfig = {
-	codec: 'aac' | 'opus' | 'vorbis',
+	codec: AudioCodec,
 	bitrate: number
 };
 
@@ -340,6 +347,8 @@ export class MediaStreamAudioTrackSource extends AudioSource {
     private encoder: AudioEncoderWrapper;
     private abortController: AbortController | null = null;
 
+	override offsetTimestamps = true;
+
     constructor(private track: MediaStreamAudioTrack, codecConfig: AudioCodecConfig) {
         super(codecConfig.codec);
         this.encoder = new AudioEncoderWrapper(this, codecConfig);
@@ -388,21 +397,20 @@ export abstract class SubtitleSource extends MediaSource {
 }
 
 export class TextSubtitleSource extends SubtitleSource {
-	private encoder: SubtitleEncoder;
+	private parser: SubtitleParser;
 
 	constructor(codec: SubtitleCodec) {
 		super(codec);
 
-		this.encoder = new SubtitleEncoder({
-			output: (chunk, metadata) => this.connectedTrack?.output.muxer.addEncodedSubtitleChunk(this.connectedTrack, chunk, metadata),
+		this.parser = new SubtitleParser({
+			codec,
+			output: (cue, metadata) => this.connectedTrack?.output.muxer.addSubtitleCue(this.connectedTrack, cue, metadata),
 			error: (error) => console.error(error) // TODO
 		});
-
-		this.encoder.configure({ codec });
 	}
 
 	digest(text: string) {
 		this.ensureValidDigest();
-		this.encoder.encode(text);
+		this.parser.parse(text);
 	}
 }

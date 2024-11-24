@@ -49,3 +49,5 @@ export const toUint8Array = (source: AllowSharedBufferSource): Uint8Array => {
 		return new Uint8Array(source.buffer, source.byteOffset, source.byteLength);
 	}
 };
+
+export const textEncoder = new TextEncoder();

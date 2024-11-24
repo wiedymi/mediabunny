@@ -67,6 +67,10 @@ export class ArrayBufferTargetWriter extends Writer {
 		this.#ensureSize(this.#pos);
 		this.#target.buffer = this.#buffer.slice(0, Math.max(this.#maxPos, this.#pos));
 	}
+
+	getSlice(start: number, end: number) {
+		return this.#bytes.slice(start, end);
+	}
 }
 
 /**

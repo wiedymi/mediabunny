@@ -102,8 +102,168 @@ var toUint8Array = (source) => {
     return new Uint8Array(source.buffer, source.byteOffset, source.byteLength);
   }
 };
+var textEncoder = new TextEncoder();
+
+// src/subtitles.ts
+var cueBlockHeaderRegex = /(?:(.+?)\n)?((?:\d{2}:)?\d{2}:\d{2}.\d{3})\s+-->\s+((?:\d{2}:)?\d{2}:\d{2}.\d{3})/g;
+var preambleStartRegex = /^WEBVTT(.|\n)*?\n{2}/;
+var inlineTimestampRegex = /<(?:(\d{2}):)?(\d{2}):(\d{2}).(\d{3})>/g;
+var SubtitleParser = class {
+  #options;
+  #preambleText = null;
+  #preambleEmitted = false;
+  constructor(options) {
+    this.#options = options;
+  }
+  parse(text) {
+    text = text.replaceAll("\r\n", "\n").replaceAll("\r", "\n");
+    cueBlockHeaderRegex.lastIndex = 0;
+    let match;
+    if (!this.#preambleText) {
+      if (!preambleStartRegex.test(text)) {
+        let error = new Error("WebVTT preamble incorrect.");
+        this.#options.error(error);
+        throw error;
+      }
+      match = cueBlockHeaderRegex.exec(text);
+      let preamble = text.slice(0, match?.index ?? text.length).trimEnd();
+      if (!preamble) {
+        let error = new Error("No WebVTT preamble provided.");
+        this.#options.error(error);
+        throw error;
+      }
+      this.#preambleText = preamble;
+      if (match) {
+        text = text.slice(match.index);
+        cueBlockHeaderRegex.lastIndex = 0;
+      }
+    }
+    while (match = cueBlockHeaderRegex.exec(text)) {
+      let notes = text.slice(0, match.index);
+      let cueIdentifier = match[1];
+      let matchEnd = match.index + match[0].length;
+      let bodyStart = text.indexOf("\n", matchEnd) + 1;
+      let cueSettings = text.slice(matchEnd, bodyStart).trim();
+      let bodyEnd = text.indexOf("\n\n", matchEnd);
+      if (bodyEnd === -1) bodyEnd = text.length;
+      let startTime = parseSubtitleTimestamp(match[2]);
+      let endTime = parseSubtitleTimestamp(match[3]);
+      let duration = endTime - startTime;
+      let body = text.slice(bodyStart, bodyEnd).trim();
+      text = text.slice(bodyEnd).trimStart();
+      cueBlockHeaderRegex.lastIndex = 0;
+      let cue = {
+        timestamp: startTime / 1e3,
+        duration: duration / 1e3,
+        text: body,
+        identifier: cueIdentifier,
+        settings: cueSettings,
+        notes
+      };
+      let meta = {};
+      if (!this.#preambleEmitted) {
+        meta.config = {
+          description: this.#preambleText
+        };
+        this.#preambleEmitted = true;
+      }
+      this.#options.output(cue, meta);
+    }
+  }
+};
+var timestampRegex = /(?:(\d{2}):)?(\d{2}):(\d{2}).(\d{3})/;
+var parseSubtitleTimestamp = (string) => {
+  let match = timestampRegex.exec(string);
+  if (!match) throw new Error("Expected match.");
+  return 60 * 60 * 1e3 * Number(match[1] || "0") + 60 * 1e3 * Number(match[2]) + 1e3 * Number(match[3]) + Number(match[4]);
+};
+var formatSubtitleTimestamp = (timestamp) => {
+  let hours = Math.floor(timestamp / (60 * 60 * 1e3));
+  let minutes = Math.floor(timestamp % (60 * 60 * 1e3) / (60 * 1e3));
+  let seconds = Math.floor(timestamp % (60 * 1e3) / 1e3);
+  let milliseconds = timestamp % 1e3;
+  return hours.toString().padStart(2, "0") + ":" + minutes.toString().padStart(2, "0") + ":" + seconds.toString().padStart(2, "0") + "." + milliseconds.toString().padStart(3, "0");
+};
 
 // src/isobmff/isobmff_boxes.ts
+var IsobmffBoxWriter = class {
+  constructor(writer) {
+    this.writer = writer;
+    this.helper = new Uint8Array(8);
+    this.helperView = new DataView(this.helper.buffer);
+    /**
+     * Stores the position from the start of the file to where boxes elements have been written. This is used to
+     * rewrite/edit elements that were already added before, and to measure sizes of things.
+     */
+    this.offsets = /* @__PURE__ */ new WeakMap();
+  }
+  writeU32(value) {
+    this.helperView.setUint32(0, value, false);
+    this.writer.write(this.helper.subarray(0, 4));
+  }
+  writeU64(value) {
+    this.helperView.setUint32(0, Math.floor(value / 2 ** 32), false);
+    this.helperView.setUint32(4, value, false);
+    this.writer.write(this.helper.subarray(0, 8));
+  }
+  writeAscii(text) {
+    for (let i = 0; i < text.length; i++) {
+      this.helperView.setUint8(i % 8, text.charCodeAt(i));
+      if (i % 8 === 7) this.writer.write(this.helper);
+    }
+    if (text.length % 8 !== 0) {
+      this.writer.write(this.helper.subarray(0, text.length % 8));
+    }
+  }
+  writeBox(box2) {
+    this.offsets.set(box2, this.writer.getPos());
+    if (box2.contents && !box2.children) {
+      this.writeBoxHeader(box2, box2.size ?? box2.contents.byteLength + 8);
+      this.writer.write(box2.contents);
+    } else {
+      let startPos = this.writer.getPos();
+      this.writeBoxHeader(box2, 0);
+      if (box2.contents) this.writer.write(box2.contents);
+      if (box2.children) {
+        for (let child of box2.children) if (child) this.writeBox(child);
+      }
+      let endPos = this.writer.getPos();
+      let size = box2.size ?? endPos - startPos;
+      this.writer.seek(startPos);
+      this.writeBoxHeader(box2, size);
+      this.writer.seek(endPos);
+    }
+  }
+  writeBoxHeader(box2, size) {
+    this.writeU32(box2.largeSize ? 1 : size);
+    this.writeAscii(box2.type);
+    if (box2.largeSize) this.writeU64(size);
+  }
+  measureBoxHeader(box2) {
+    return 8 + (box2.largeSize ? 8 : 0);
+  }
+  patchBox(box2) {
+    const boxOffset = this.offsets.get(box2);
+    assert(boxOffset !== void 0);
+    let endPos = this.writer.getPos();
+    this.writer.seek(boxOffset);
+    this.writeBox(box2);
+    this.writer.seek(endPos);
+  }
+  measureBox(box2) {
+    if (box2.contents && !box2.children) {
+      let headerSize = this.measureBoxHeader(box2);
+      return headerSize + box2.contents.byteLength;
+    } else {
+      let result = this.measureBoxHeader(box2);
+      if (box2.contents) result += box2.contents.byteLength;
+      if (box2.children) {
+        for (let child of box2.children) if (child) result += this.measureBox(child);
+      }
+      return result;
+    }
+  }
+};
 var bytes = new Uint8Array(8);
 var view = new DataView(bytes.buffer);
 var u8 = (value) => {
@@ -298,7 +458,7 @@ var tkhd = (trackData, creationTime) => {
     // Reserved
     u16(0),
     // Layer
-    u16(0),
+    u16(trackData.track.id),
     // Alternate group
     fixed_8_8(trackData.type === "audio" ? 1 : 0),
     // Volume
@@ -314,7 +474,7 @@ var tkhd = (trackData, creationTime) => {
 };
 var mdia = (trackData, creationTime) => box("mdia", void 0, [
   mdhd(trackData, creationTime),
-  hdlr(trackData.type === "video" ? "vide" : "soun"),
+  hdlr(trackData),
   minf(trackData)
 ]);
 var mdhd = (trackData, creationTime) => {
@@ -340,10 +500,20 @@ var mdhd = (trackData, creationTime) => {
     // Quality
   ]);
 };
-var hdlr = (componentSubtype) => fullBox("hdlr", 0, 0, [
+var TRACK_TYPE_TO_COMPONENT_SUBTYPE = {
+  video: "vide",
+  audio: "soun",
+  subtitle: "text"
+};
+var TRACK_TYPE_TO_HANDLER_NAME = {
+  video: "VideoHandler",
+  audio: "SoundHandler",
+  subtitle: "TextHandler"
+};
+var hdlr = (trackData) => fullBox("hdlr", 0, 0, [
   ascii("mhlr"),
   // Component type
-  ascii(componentSubtype),
+  ascii(TRACK_TYPE_TO_COMPONENT_SUBTYPE[trackData.type]),
   // Component subtype
   u32(0),
   // Component manufacturer
@@ -351,12 +521,11 @@ var hdlr = (componentSubtype) => fullBox("hdlr", 0, 0, [
   // Component flags
   u32(0),
   // Component flags mask
-  // TODO:
-  ascii("mp4-muxer-hdlr", true)
+  ascii(TRACK_TYPE_TO_HANDLER_NAME[trackData.type], true)
   // Component name
 ]);
 var minf = (trackData) => box("minf", void 0, [
-  trackData.type === "video" ? vmhd() : smhd(),
+  TRACK_TYPE_TO_HEADER_BOX[trackData.type](),
   dinf(),
   stbl(trackData)
 ]);
@@ -376,6 +545,12 @@ var smhd = () => fullBox("smhd", 0, 0, [
   u16(0)
   // Reserved
 ]);
+var nmhd = () => fullBox("nmhd", 0, 0);
+var TRACK_TYPE_TO_HEADER_BOX = {
+  video: vmhd,
+  audio: smhd,
+  subtitle: nmhd
+};
 var dinf = () => box("dinf", void 0, [
   dref()
 ]);
@@ -398,18 +573,32 @@ var stbl = (trackData) => {
     needsCtts ? ctts(trackData) : null
   ]);
 };
-var stsd = (trackData) => fullBox("stsd", 0, 0, [
-  u32(1)
-  // Entry count
-], [
-  trackData.type === "video" ? videoSampleDescription(
-    VIDEO_CODEC_TO_BOX_NAME[trackData.track.source.codec],
-    trackData
-  ) : soundSampleDescription(
-    AUDIO_CODEC_TO_BOX_NAME[trackData.track.source.codec],
-    trackData
-  )
-]);
+var stsd = (trackData) => {
+  let sampleDescription;
+  if (trackData.type === "video") {
+    sampleDescription = videoSampleDescription(
+      VIDEO_CODEC_TO_BOX_NAME[trackData.track.source.codec],
+      trackData
+    );
+  } else if (trackData.type === "audio") {
+    sampleDescription = soundSampleDescription(
+      AUDIO_CODEC_TO_BOX_NAME[trackData.track.source.codec],
+      trackData
+    );
+  } else if (trackData.type === "subtitle") {
+    sampleDescription = subtitleSampleDescription(
+      SUBTITLE_CODEC_TO_BOX_NAME[trackData.track.source.codec],
+      trackData
+    );
+  }
+  assert(sampleDescription);
+  return fullBox("stsd", 0, 0, [
+    u32(1)
+    // Entry count
+  ], [
+    sampleDescription
+  ]);
+};
 var videoSampleDescription = (compressionType, trackData) => box(compressionType, [
   Array(6).fill(0),
   // Reserved
@@ -441,6 +630,7 @@ var videoSampleDescription = (compressionType, trackData) => box(compressionType
   // Pre-defined
 ], [
   VIDEO_CODEC_TO_CONFIGURATION_BOX[trackData.track.source.codec](trackData)
+  // TODO colr
 ]);
 var avcC = (trackData) => trackData.info.decoderConfig && box("avcC", [
   // For AVC, description is an AVCDecoderConfigurationRecord, so nothing else to do here
@@ -584,6 +774,17 @@ var dOps = (trackData) => {
     // ChannelMappingFamily
   ]);
 };
+var subtitleSampleDescription = (compressionType, trackData) => box(compressionType, [
+  Array(6).fill(0),
+  // Reserved
+  u16(1)
+  // Data reference index
+], [
+  SUBTITLE_CODEC_TO_CONFIGURATION_BOX[trackData.track.source.codec](trackData)
+]);
+var vttC = (trackData) => box("vttC", [
+  ...textEncoder.encode(trackData.info.config.description)
+]);
 var stts = (trackData) => {
   return fullBox("stts", 0, 0, [
     u32(trackData.timeToSampleTable.length),
@@ -817,6 +1018,15 @@ var mfro = () => {
     // Size
   ]);
 };
+var vtte = () => box("vtte");
+var vttc = (payload, timestamp, identifier, settings, sourceId) => box("vttc", void 0, [
+  sourceId !== null ? box("vsid", [i32(sourceId)]) : null,
+  identifier !== null ? box("iden", [...textEncoder.encode(identifier)]) : null,
+  timestamp !== null ? box("ctim", [...textEncoder.encode(formatSubtitleTimestamp(timestamp))]) : null,
+  settings !== null ? box("sttg", [...textEncoder.encode(settings)]) : null,
+  box("payl", [...textEncoder.encode(payload)])
+]);
+var vtta = (notes) => box("vtta", [...textEncoder.encode(notes)]);
 var VIDEO_CODEC_TO_BOX_NAME = {
   "avc": "avc1",
   "hevc": "hvc1",
@@ -839,15 +1049,341 @@ var AUDIO_CODEC_TO_CONFIGURATION_BOX = {
   "aac": esds,
   "opus": dOps
 };
+var SUBTITLE_CODEC_TO_BOX_NAME = {
+  "webvtt": "wvtt"
+};
+var SUBTITLE_CODEC_TO_CONFIGURATION_BOX = {
+  "webvtt": vttC
+};
 
 // src/muxer.ts
 var Muxer = class {
   constructor(output) {
+    this.trackTimestampInfo = /* @__PURE__ */ new WeakMap();
     this.output = output;
   }
   beforeTrackAdd(track) {
   }
   onTrackClose(track) {
+  }
+  validateAndNormalizeTimestamp(track, rawTimestampInUs, isKeyFrame) {
+    let timestampInSeconds = rawTimestampInUs / 1e6;
+    let timestampInfo = this.trackTimestampInfo.get(track);
+    if (!timestampInfo) {
+      if (!isKeyFrame) {
+        throw new Error("First frame must be a key frame.");
+      }
+      if (this.timestampsMustStartAtZero && timestampInSeconds > 0) {
+        throw new Error(`Timestamps must start at zero (got ${timestampInSeconds}s).`);
+      }
+      timestampInfo = {
+        timestampOffset: timestampInSeconds,
+        maxTimestamp: track.source.offsetTimestamps ? 0 : timestampInSeconds,
+        lastKeyFrameTimestamp: track.source.offsetTimestamps ? 0 : timestampInSeconds
+      };
+      this.trackTimestampInfo.set(track, timestampInfo);
+    }
+    if (track.source.offsetTimestamps) {
+      timestampInSeconds -= timestampInfo.timestampOffset;
+    }
+    if (timestampInSeconds < 0) {
+      throw new Error(`Timestamps must be non-negative (got ${timestampInSeconds}s).`);
+    }
+    if (timestampInSeconds < timestampInfo.lastKeyFrameTimestamp) {
+      throw new Error(`Timestamp cannot be smaller than last key frame's timestamp (got ${timestampInSeconds}s, last key frame at ${timestampInfo.lastKeyFrameTimestamp}s).`);
+    }
+    if (isKeyFrame) {
+      if (timestampInSeconds < timestampInfo.maxTimestamp) {
+        throw new Error(`Key frame timestamps cannot be smaller than any timestamp that came before (got ${timestampInSeconds}s, max timestamp was ${timestampInfo.maxTimestamp}s).`);
+      }
+      timestampInfo.lastKeyFrameTimestamp = timestampInSeconds;
+    }
+    timestampInfo.maxTimestamp = Math.max(timestampInfo.maxTimestamp, timestampInSeconds);
+    return timestampInSeconds;
+  }
+};
+
+// src/writer.ts
+var Writer = class {
+};
+var ArrayBufferTargetWriter = class extends Writer {
+  #pos = 0;
+  #target;
+  #buffer = new ArrayBuffer(2 ** 16);
+  #bytes = new Uint8Array(this.#buffer);
+  #maxPos = 0;
+  constructor(target) {
+    super();
+    this.#target = target;
+  }
+  #ensureSize(size) {
+    let newLength = this.#buffer.byteLength;
+    while (newLength < size) newLength *= 2;
+    if (newLength === this.#buffer.byteLength) return;
+    let newBuffer = new ArrayBuffer(newLength);
+    let newBytes = new Uint8Array(newBuffer);
+    newBytes.set(this.#bytes, 0);
+    this.#buffer = newBuffer;
+    this.#bytes = newBytes;
+  }
+  write(data) {
+    this.#ensureSize(this.#pos + data.byteLength);
+    this.#bytes.set(data, this.#pos);
+    this.#pos += data.byteLength;
+    this.#maxPos = Math.max(this.#maxPos, this.#pos);
+  }
+  seek(newPos) {
+    this.#pos = newPos;
+  }
+  getPos() {
+    return this.#pos;
+  }
+  flush() {
+  }
+  finalize() {
+    this.#ensureSize(this.#pos);
+    this.#target.buffer = this.#buffer.slice(0, Math.max(this.#maxPos, this.#pos));
+  }
+  getSlice(start, end) {
+    return this.#bytes.slice(start, end);
+  }
+};
+var StreamTargetWriter = class extends Writer {
+  #pos = 0;
+  #target;
+  #sections = [];
+  constructor(target) {
+    super();
+    this.#target = target;
+  }
+  write(data) {
+    this.#sections.push({
+      data: data.slice(),
+      start: this.#pos
+    });
+    this.#pos += data.byteLength;
+  }
+  seek(newPos) {
+    this.#pos = newPos;
+  }
+  getPos() {
+    return this.#pos;
+  }
+  flush() {
+    if (this.#sections.length === 0) return;
+    let chunks = [];
+    let sorted = [...this.#sections].sort((a, b) => a.start - b.start);
+    chunks.push({
+      start: sorted[0].start,
+      size: sorted[0].data.byteLength
+    });
+    for (let i = 1; i < sorted.length; i++) {
+      let lastChunk = chunks[chunks.length - 1];
+      let section = sorted[i];
+      if (section.start <= lastChunk.start + lastChunk.size) {
+        lastChunk.size = Math.max(lastChunk.size, section.start + section.data.byteLength - lastChunk.start);
+      } else {
+        chunks.push({
+          start: section.start,
+          size: section.data.byteLength
+        });
+      }
+    }
+    for (let chunk of chunks) {
+      chunk.data = new Uint8Array(chunk.size);
+      for (let section of this.#sections) {
+        if (chunk.start <= section.start && section.start < chunk.start + chunk.size) {
+          chunk.data.set(section.data, section.start - chunk.start);
+        }
+      }
+      this.#target.options.onData?.(chunk.data, chunk.start);
+    }
+    this.#sections.length = 0;
+  }
+  finalize() {
+  }
+};
+var DEFAULT_CHUNK_SIZE = 2 ** 24;
+var MAX_CHUNKS_AT_ONCE = 2;
+var ChunkedStreamTargetWriter = class extends Writer {
+  #pos = 0;
+  #target;
+  #chunkSize;
+  /**
+   * The data is divided up into fixed-size chunks, whose contents are first filled in RAM and then flushed out.
+   * A chunk is flushed if all of its contents have been written.
+   */
+  #chunks = [];
+  constructor(target) {
+    super();
+    this.#target = target;
+    this.#chunkSize = target.options?.chunkSize ?? DEFAULT_CHUNK_SIZE;
+    if (!Number.isInteger(this.#chunkSize) || this.#chunkSize < 2 ** 10) {
+      throw new Error("Invalid StreamTarget options: chunkSize must be an integer not smaller than 1024.");
+    }
+  }
+  write(data) {
+    this.#writeDataIntoChunks(data, this.#pos);
+    this.#flushChunks();
+    this.#pos += data.byteLength;
+  }
+  seek(newPos) {
+    this.#pos = newPos;
+  }
+  getPos() {
+    return this.#pos;
+  }
+  #writeDataIntoChunks(data, position) {
+    let chunkIndex = this.#chunks.findIndex((x) => x.start <= position && position < x.start + this.#chunkSize);
+    if (chunkIndex === -1) chunkIndex = this.#createChunk(position);
+    let chunk = this.#chunks[chunkIndex];
+    let relativePosition = position - chunk.start;
+    let toWrite = data.subarray(0, Math.min(this.#chunkSize - relativePosition, data.byteLength));
+    chunk.data.set(toWrite, relativePosition);
+    let section = {
+      start: relativePosition,
+      end: relativePosition + toWrite.byteLength
+    };
+    this.#insertSectionIntoChunk(chunk, section);
+    if (chunk.written[0].start === 0 && chunk.written[0].end === this.#chunkSize) {
+      chunk.shouldFlush = true;
+    }
+    if (this.#chunks.length > MAX_CHUNKS_AT_ONCE) {
+      for (let i = 0; i < this.#chunks.length - 1; i++) {
+        this.#chunks[i].shouldFlush = true;
+      }
+      this.#flushChunks();
+    }
+    if (toWrite.byteLength < data.byteLength) {
+      this.#writeDataIntoChunks(data.subarray(toWrite.byteLength), position + toWrite.byteLength);
+    }
+  }
+  #insertSectionIntoChunk(chunk, section) {
+    let low = 0;
+    let high = chunk.written.length - 1;
+    let index = -1;
+    while (low <= high) {
+      let mid = Math.floor(low + (high - low + 1) / 2);
+      if (chunk.written[mid].start <= section.start) {
+        low = mid + 1;
+        index = mid;
+      } else {
+        high = mid - 1;
+      }
+    }
+    chunk.written.splice(index + 1, 0, section);
+    if (index === -1 || chunk.written[index].end < section.start) index++;
+    while (index < chunk.written.length - 1 && chunk.written[index].end >= chunk.written[index + 1].start) {
+      chunk.written[index].end = Math.max(chunk.written[index].end, chunk.written[index + 1].end);
+      chunk.written.splice(index + 1, 1);
+    }
+  }
+  #createChunk(includesPosition) {
+    let start = Math.floor(includesPosition / this.#chunkSize) * this.#chunkSize;
+    let chunk = {
+      start,
+      data: new Uint8Array(this.#chunkSize),
+      written: [],
+      shouldFlush: false
+    };
+    this.#chunks.push(chunk);
+    this.#chunks.sort((a, b) => a.start - b.start);
+    return this.#chunks.indexOf(chunk);
+  }
+  #flushChunks(force = false) {
+    for (let i = 0; i < this.#chunks.length; i++) {
+      let chunk = this.#chunks[i];
+      if (!chunk.shouldFlush && !force) continue;
+      for (let section of chunk.written) {
+        this.#target.options.onData?.(
+          chunk.data.subarray(section.start, section.end),
+          chunk.start + section.start
+        );
+      }
+      this.#chunks.splice(i--, 1);
+    }
+  }
+  flush() {
+  }
+  finalize() {
+    this.#flushChunks(true);
+  }
+};
+var FileSystemWritableFileStreamTargetWriter = class extends ChunkedStreamTargetWriter {
+  constructor(target) {
+    super(new StreamTarget({
+      onData: (data, position) => target.stream.write({
+        type: "write",
+        data,
+        position
+      }),
+      chunkSize: target.options?.chunkSize
+    }));
+  }
+};
+
+// src/target.ts
+var Target = class {
+  constructor() {
+    this.output = null;
+  }
+};
+var ArrayBufferTarget2 = class extends Target {
+  constructor() {
+    super(...arguments);
+    this.buffer = null;
+  }
+  createWriter() {
+    return new ArrayBufferTargetWriter(this);
+  }
+};
+var StreamTarget = class extends Target {
+  constructor(options) {
+    super();
+    this.options = options;
+    if (typeof options !== "object") {
+      throw new TypeError("StreamTarget requires an options object to be passed to its constructor.");
+    }
+    if (options.onData) {
+      if (typeof options.onData !== "function") {
+        throw new TypeError("options.onData, when provided, must be a function.");
+      }
+      if (options.onData.length < 2) {
+        throw new TypeError(
+          "options.onData, when provided, must be a function that takes in at least two arguments (data and position). Ignoring the position argument, which specifies the byte offset at which the data is to be written, can lead to broken outputs."
+        );
+      }
+    }
+    if (options.chunked !== void 0 && typeof options.chunked !== "boolean") {
+      throw new TypeError("options.chunked, when provided, must be a boolean.");
+    }
+    if (options.chunkSize !== void 0 && (!Number.isInteger(options.chunkSize) || options.chunkSize <= 0)) {
+      throw new TypeError("options.chunkSize, when provided, must be a positive integer.");
+    }
+  }
+  createWriter() {
+    return this.options.chunked ? new ChunkedStreamTargetWriter(this) : new StreamTargetWriter(this);
+  }
+};
+var FileSystemWritableFileStreamTarget2 = class extends Target {
+  constructor(stream, options) {
+    super();
+    this.stream = stream;
+    this.options = options;
+    if (!(stream instanceof FileSystemWritableFileStream)) {
+      throw new TypeError("FileSystemWritableFileStreamTarget requires a FileSystemWritableFileStream instance.");
+    }
+    if (options !== void 0 && typeof options !== "object") {
+      throw new TypeError("FileSystemWritableFileStreamTarget's options, when provided, must be an object.");
+    }
+    if (options) {
+      if (options.chunkSize !== void 0 && (!Number.isInteger(options.chunkSize) || options.chunkSize <= 0)) {
+        throw new TypeError("options.chunkSize, when provided, must be a positive integer");
+      }
+    }
+  }
+  createWriter() {
+    return new FileSystemWritableFileStreamTargetWriter(this);
   }
 };
 
@@ -861,13 +1397,10 @@ var intoTimescale = (timeInSeconds, timescale, round = true) => {
 var IsobmffMuxer = class extends Muxer {
   constructor(output, format) {
     super(output);
-    this.#helper = new Uint8Array(8);
-    this.#helperView = new DataView(this.#helper.buffer);
-    /**
-     * Stores the position from the start of the file to where boxes elements have been written. This is used to
-     * rewrite/edit elements that were already added before, and to measure sizes of things.
-     */
-    this.offsets = /* @__PURE__ */ new WeakMap();
+    this.timestampsMustStartAtZero = true;
+    this.#auxTarget = new ArrayBufferTarget2();
+    this.#auxWriter = this.#auxTarget.createWriter();
+    this.#auxBoxWriter = new IsobmffBoxWriter(this.#auxWriter);
     this.#ftypSize = null;
     this.#mdat = null;
     this.#trackDatas = [];
@@ -875,87 +1408,24 @@ var IsobmffMuxer = class extends Muxer {
     this.#finalizedChunks = [];
     this.#nextFragmentNumber = 1;
     this.#writer = output.writer;
+    this.#boxWriter = new IsobmffBoxWriter(this.#writer);
     this.#format = format;
   }
   #writer;
+  #boxWriter;
   #format;
-  #helper;
-  #helperView;
+  #auxTarget;
+  #auxWriter;
+  #auxBoxWriter;
   #ftypSize;
   #mdat;
   #trackDatas;
   #creationTime;
   #finalizedChunks;
   #nextFragmentNumber;
-  writeU32(value) {
-    this.#helperView.setUint32(0, value, false);
-    this.#writer.write(this.#helper.subarray(0, 4));
-  }
-  writeU64(value) {
-    this.#helperView.setUint32(0, Math.floor(value / 2 ** 32), false);
-    this.#helperView.setUint32(4, value, false);
-    this.#writer.write(this.#helper.subarray(0, 8));
-  }
-  writeAscii(text) {
-    for (let i = 0; i < text.length; i++) {
-      this.#helperView.setUint8(i % 8, text.charCodeAt(i));
-      if (i % 8 === 7) this.#writer.write(this.#helper);
-    }
-    if (text.length % 8 !== 0) {
-      this.#writer.write(this.#helper.subarray(0, text.length % 8));
-    }
-  }
-  writeBox(box2) {
-    this.offsets.set(box2, this.#writer.getPos());
-    if (box2.contents && !box2.children) {
-      this.writeBoxHeader(box2, box2.size ?? box2.contents.byteLength + 8);
-      this.#writer.write(box2.contents);
-    } else {
-      let startPos = this.#writer.getPos();
-      this.writeBoxHeader(box2, 0);
-      if (box2.contents) this.#writer.write(box2.contents);
-      if (box2.children) {
-        for (let child of box2.children) if (child) this.writeBox(child);
-      }
-      let endPos = this.#writer.getPos();
-      let size = box2.size ?? endPos - startPos;
-      this.#writer.seek(startPos);
-      this.writeBoxHeader(box2, size);
-      this.#writer.seek(endPos);
-    }
-  }
-  writeBoxHeader(box2, size) {
-    this.writeU32(box2.largeSize ? 1 : size);
-    this.writeAscii(box2.type);
-    if (box2.largeSize) this.writeU64(size);
-  }
-  measureBoxHeader(box2) {
-    return 8 + (box2.largeSize ? 8 : 0);
-  }
-  patchBox(box2) {
-    const boxOffset = this.offsets.get(box2);
-    assert(boxOffset !== void 0);
-    let endPos = this.#writer.getPos();
-    this.#writer.seek(boxOffset);
-    this.writeBox(box2);
-    this.#writer.seek(endPos);
-  }
-  measureBox(box2) {
-    if (box2.contents && !box2.children) {
-      let headerSize = this.measureBoxHeader(box2);
-      return headerSize + box2.contents.byteLength;
-    } else {
-      let result = this.measureBoxHeader(box2);
-      if (box2.contents) result += box2.contents.byteLength;
-      if (box2.children) {
-        for (let child of box2.children) if (child) result += this.measureBox(child);
-      }
-      return result;
-    }
-  }
   start() {
     const holdsAvc = this.output.tracks.some((x) => x.type === "video" && x.source.codec === "avc");
-    this.writeBox(ftyp({
+    this.#boxWriter.writeBox(ftyp({
       holdsAvc,
       fragmented: this.#format.options.fastStart === "fragmented"
     }));
@@ -969,7 +1439,7 @@ var IsobmffMuxer = class extends Muxer {
         this.#writer.seek(this.#writer.getPos() + moovSizeUpperBound);
       }
       this.#mdat = mdat(true);
-      this.writeBox(this.#mdat);
+      this.#boxWriter.writeBox(this.#mdat);
     }
     this.#writer.flush();
   }
@@ -1012,8 +1482,6 @@ var IsobmffMuxer = class extends Muxer {
       samples: [],
       sampleQueue: [],
       timestampProcessingQueue: [],
-      firstTimestamp: null,
-      lastKeyFrameTimestamp: null,
       timeToSampleTable: [],
       compositionTimeOffsetTable: [],
       lastTimescaleUnits: null,
@@ -1045,8 +1513,6 @@ var IsobmffMuxer = class extends Muxer {
       samples: [],
       sampleQueue: [],
       timestampProcessingQueue: [],
-      firstTimestamp: null,
-      lastKeyFrameTimestamp: null,
       timeToSampleTable: [],
       compositionTimeOffsetTable: [],
       lastTimescaleUnits: null,
@@ -1059,17 +1525,55 @@ var IsobmffMuxer = class extends Muxer {
     this.#trackDatas.sort((a, b) => a.track.id - b.track.id);
     return newTrackData;
   }
+  #getSubtitleTrackData(track, meta) {
+    const existingTrackData = this.#trackDatas.find((x) => x.track === track);
+    if (existingTrackData) {
+      return existingTrackData;
+    }
+    assert(meta);
+    assert(meta.config);
+    const newTrackData = {
+      track,
+      type: "subtitle",
+      info: {
+        config: meta.config
+      },
+      timescale: 1e3,
+      // Reasonable
+      samples: [],
+      sampleQueue: [],
+      timestampProcessingQueue: [],
+      timeToSampleTable: [],
+      compositionTimeOffsetTable: [],
+      lastTimescaleUnits: null,
+      lastSample: null,
+      finalizedChunks: [],
+      currentChunk: null,
+      compactlyCodedChunkTable: [],
+      lastCueEndTimestamp: 0,
+      cueQueue: [],
+      nextSourceId: 0,
+      cueToSourceId: /* @__PURE__ */ new WeakMap()
+    };
+    this.#trackDatas.push(newTrackData);
+    this.#trackDatas.sort((a, b) => a.track.id - b.track.id);
+    this.validateAndNormalizeTimestamp(track, 0, true);
+    return newTrackData;
+  }
   addEncodedVideoChunk(track, chunk, meta) {
     const trackData = this.#getVideoTrackData(track, meta);
     if (typeof this.#format.options.fastStart === "object" && trackData.samples.length === this.#format.options.fastStart.expectedVideoChunks) {
       throw new Error(`Cannot add more video chunks than specified in 'fastStart' (${this.#format.options.fastStart.expectedVideoChunks}).`);
     }
-    let videoSample = this.#createSampleForTrack(trackData, chunk);
+    let data = new Uint8Array(chunk.byteLength);
+    chunk.copyTo(data);
+    let timestamp = this.validateAndNormalizeTimestamp(trackData.track, chunk.timestamp, chunk.type === "key");
+    let sample = this.#createSampleForTrack(trackData, data, timestamp, (chunk.duration ?? 0) / 1e6, chunk.type);
     if (this.#format.options.fastStart === "fragmented") {
-      trackData.sampleQueue.push(videoSample);
+      trackData.sampleQueue.push(sample);
       this.#interleaveSamples();
     } else {
-      this.#addSampleToTrack(trackData, videoSample);
+      this.#addSampleToTrack(trackData, sample);
     }
   }
   addEncodedAudioChunk(track, chunk, meta) {
@@ -1077,29 +1581,101 @@ var IsobmffMuxer = class extends Muxer {
     if (typeof this.#format.options.fastStart === "object" && trackData.samples.length === this.#format.options.fastStart.expectedAudioChunks) {
       throw new Error(`Cannot add more audio chunks than specified in 'fastStart' (${this.#format.options.fastStart.expectedAudioChunks}).`);
     }
-    let audioSample = this.#createSampleForTrack(trackData, chunk);
-    if (this.#format.options.fastStart === "fragmented") {
-      trackData.sampleQueue.push(audioSample);
-      this.#interleaveSamples();
-    } else {
-      this.#addSampleToTrack(trackData, audioSample);
-    }
-  }
-  #createSampleForTrack(trackData, chunk) {
-    let timestampInSeconds = this.#validateTimestamp(trackData, chunk);
-    let durationInSeconds = (chunk.duration ?? 0) / 1e6;
     let data = new Uint8Array(chunk.byteLength);
     chunk.copyTo(data);
+    let timestamp = this.validateAndNormalizeTimestamp(trackData.track, chunk.timestamp, chunk.type === "key");
+    let sample = this.#createSampleForTrack(trackData, data, timestamp, (chunk.duration ?? 0) / 1e6, chunk.type);
+    if (this.#format.options.fastStart === "fragmented") {
+      trackData.sampleQueue.push(sample);
+      this.#interleaveSamples();
+    } else {
+      this.#addSampleToTrack(trackData, sample);
+    }
+  }
+  addSubtitleCue(track, cue, meta) {
+    const trackData = this.#getSubtitleTrackData(track, meta);
+    this.validateAndNormalizeTimestamp(trackData.track, 1e6 * cue.timestamp, true);
+    if (track.source.codec === "webvtt") {
+      trackData.cueQueue.push(cue);
+      this.#processWebVTTCues(trackData, cue.timestamp);
+    } else {
+    }
+  }
+  #processWebVTTCues(trackData, until) {
+    while (trackData.cueQueue.length > 0) {
+      let timestamps = /* @__PURE__ */ new Set([]);
+      for (let cue of trackData.cueQueue) {
+        assert(cue.timestamp <= until);
+        assert(trackData.lastCueEndTimestamp <= cue.timestamp + cue.duration);
+        timestamps.add(Math.max(cue.timestamp, trackData.lastCueEndTimestamp));
+        timestamps.add(cue.timestamp + cue.duration);
+      }
+      let sortedTimestamps = [...timestamps].sort((a, b) => a - b);
+      let sampleStart = sortedTimestamps[0];
+      let sampleEnd = sortedTimestamps[1] ?? sampleStart;
+      if (until < sampleEnd) {
+        break;
+      }
+      if (trackData.lastCueEndTimestamp < sampleStart) {
+        this.#auxWriter.seek(0);
+        let box2 = vtte();
+        this.#auxBoxWriter.writeBox(box2);
+        let body2 = this.#auxWriter.getSlice(0, this.#auxWriter.getPos());
+        let sample2 = this.#createSampleForTrack(trackData, body2, trackData.lastCueEndTimestamp, sampleStart - trackData.lastCueEndTimestamp, "key");
+        if (this.#format.options.fastStart === "fragmented") {
+          trackData.sampleQueue.push(sample2);
+          this.#interleaveSamples();
+        } else {
+          this.#addSampleToTrack(trackData, sample2);
+        }
+        trackData.lastCueEndTimestamp = sampleStart;
+      }
+      this.#auxWriter.seek(0);
+      for (let i = 0; i < trackData.cueQueue.length; i++) {
+        let cue = trackData.cueQueue[i];
+        if (cue.timestamp >= sampleEnd) {
+          break;
+        }
+        inlineTimestampRegex.lastIndex = 0;
+        let containsTimestamp = inlineTimestampRegex.test(cue.text);
+        let endTimestamp = cue.timestamp + cue.duration;
+        let sourceId = trackData.cueToSourceId.get(cue);
+        if (sourceId === void 0 && sampleEnd < endTimestamp) {
+          sourceId = trackData.nextSourceId++;
+          trackData.cueToSourceId.set(cue, sourceId);
+        }
+        if (cue.notes) {
+          let box3 = vtta(cue.notes);
+          this.#auxBoxWriter.writeBox(box3);
+        }
+        let box2 = vttc(cue.text, containsTimestamp ? sampleStart : null, cue.identifier ?? null, cue.settings ?? null, sourceId ?? null);
+        this.#auxBoxWriter.writeBox(box2);
+        if (endTimestamp === sampleEnd) {
+          trackData.cueQueue.splice(i--, 1);
+        }
+      }
+      let body = this.#auxWriter.getSlice(0, this.#auxWriter.getPos());
+      let sample = this.#createSampleForTrack(trackData, body, sampleStart, sampleEnd - sampleStart, "key");
+      if (this.#format.options.fastStart === "fragmented") {
+        trackData.sampleQueue.push(sample);
+        this.#interleaveSamples();
+      } else {
+        this.#addSampleToTrack(trackData, sample);
+      }
+      trackData.lastCueEndTimestamp = sampleEnd;
+    }
+  }
+  #createSampleForTrack(trackData, data, timestamp, duration, type) {
     let sample = {
-      timestamp: timestampInSeconds,
-      decodeTimestamp: timestampInSeconds,
-      // We may refine this later
-      duration: durationInSeconds,
+      timestamp,
+      decodeTimestamp: timestamp,
+      // This may be refined later
+      duration,
       data,
       size: data.byteLength,
-      type: chunk.type,
+      type,
       // Will be refined once the next sample comes in
-      timescaleUnitsToNextSample: intoTimescale(durationInSeconds, trackData.timescale)
+      timescaleUnitsToNextSample: intoTimescale(duration, trackData.timescale)
     };
     return sample;
   }
@@ -1112,6 +1688,7 @@ var IsobmffMuxer = class extends Muxer {
       const sample = trackData.timestampProcessingQueue[i];
       sample.decodeTimestamp = sortedTimestamps[i];
       const sampleCompositionTimeOffset = intoTimescale(sample.timestamp - sample.decodeTimestamp, trackData.timescale);
+      const durationInTimescale = intoTimescale(sample.duration, trackData.timescale);
       if (trackData.lastTimescaleUnits !== null) {
         assert(trackData.lastSample);
         let timescaleUnits = intoTimescale(sample.decodeTimestamp, trackData.timescale, false);
@@ -1123,14 +1700,25 @@ var IsobmffMuxer = class extends Muxer {
           assert(lastTableEntry);
           if (lastTableEntry.sampleCount === 1) {
             lastTableEntry.sampleDelta = delta;
-            lastTableEntry.sampleCount++;
-          } else if (lastTableEntry.sampleDelta === delta) {
+            let entryBefore = trackData.timeToSampleTable[trackData.timeToSampleTable.length - 2];
+            if (entryBefore && entryBefore.sampleDelta === delta) {
+              entryBefore.sampleCount++;
+              trackData.timeToSampleTable.pop();
+              lastTableEntry = entryBefore;
+            }
+          } else if (lastTableEntry.sampleDelta !== delta) {
+            lastTableEntry.sampleCount--;
+            trackData.timeToSampleTable.push(lastTableEntry = {
+              sampleCount: 1,
+              sampleDelta: delta
+            });
+          }
+          if (lastTableEntry.sampleDelta === durationInTimescale) {
             lastTableEntry.sampleCount++;
           } else {
-            lastTableEntry.sampleCount--;
             trackData.timeToSampleTable.push({
-              sampleCount: 2,
-              sampleDelta: delta
+              sampleCount: 1,
+              sampleDelta: durationInTimescale
             });
           }
           const lastCompositionTimeOffsetTableEntry = last(trackData.compositionTimeOffsetTable);
@@ -1149,7 +1737,7 @@ var IsobmffMuxer = class extends Muxer {
         if (this.#format.options.fastStart !== "fragmented") {
           trackData.timeToSampleTable.push({
             sampleCount: 1,
-            sampleDelta: intoTimescale(sample.duration, trackData.timescale)
+            sampleDelta: durationInTimescale
           });
           trackData.compositionTimeOffsetTable.push({
             sampleCount: 1,
@@ -1204,23 +1792,6 @@ var IsobmffMuxer = class extends Muxer {
     trackData.currentChunk.samples.push(sample);
     trackData.timestampProcessingQueue.push(sample);
   }
-  #validateTimestamp(trackData, chunk) {
-    let timestampInSeconds = chunk.timestamp / 1e6;
-    if (timestampInSeconds < 0) {
-      throw new Error(`Timestamps must be non-negative (got ${timestampInSeconds}s).`);
-    }
-    if (trackData.firstTimestamp === null) {
-      trackData.firstTimestamp = timestampInSeconds;
-    }
-    timestampInSeconds -= trackData.firstTimestamp;
-    if (trackData.lastKeyFrameTimestamp !== null && timestampInSeconds < trackData.lastKeyFrameTimestamp) {
-      throw new Error(`Timestamp cannot be before last key frame's timestamp (got ${timestampInSeconds}s, last key frame at ${trackData.lastKeyFrameTimestamp}s).`);
-    }
-    if (chunk.type === "key") {
-      trackData.lastKeyFrameTimestamp = timestampInSeconds;
-    }
-    return timestampInSeconds;
-  }
   #finalizeCurrentChunk(trackData) {
     assert(this.#format.options.fastStart !== "fragmented");
     if (!trackData.currentChunk) return;
@@ -1247,18 +1818,20 @@ var IsobmffMuxer = class extends Muxer {
   }
   #interleaveSamples() {
     assert(this.#format.options.fastStart === "fragmented");
-    if (this.#trackDatas.length < this.output.tracks.length) {
-      return;
+    for (const track of this.output.tracks) {
+      if (!track.source.closed && !this.#trackDatas.some((x) => x.track === track)) {
+        return;
+      }
     }
     outer:
       while (true) {
         let trackWithMinTimestamp = null;
         let minTimestamp = Infinity;
         for (let trackData of this.#trackDatas) {
-          if (trackData.sampleQueue.length === 0) {
+          if (trackData.sampleQueue.length === 0 && !trackData.track.source.closed) {
             break outer;
           }
-          if (trackData.sampleQueue[0].timestamp < minTimestamp) {
+          if (trackData.sampleQueue.length > 0 && trackData.sampleQueue[0].timestamp < minTimestamp) {
             trackWithMinTimestamp = trackData;
             minTimestamp = trackData.sampleQueue[0].timestamp;
           }
@@ -1275,11 +1848,11 @@ var IsobmffMuxer = class extends Muxer {
     let fragmentNumber = this.#nextFragmentNumber++;
     if (fragmentNumber === 1) {
       let movieBox = moov(this.#trackDatas, this.#creationTime, true);
-      this.writeBox(movieBox);
+      this.#boxWriter.writeBox(movieBox);
     }
     let moofOffset = this.#writer.getPos();
     let moofBox = moof(fragmentNumber, this.#trackDatas);
-    this.writeBox(moofBox);
+    this.#boxWriter.writeBox(moofBox);
     {
       let mdatBox = mdat(false);
       let totalTrackSampleSize = 0;
@@ -1289,13 +1862,13 @@ var IsobmffMuxer = class extends Muxer {
           totalTrackSampleSize += sample.size;
         }
       }
-      let mdatSize = this.measureBox(mdatBox) + totalTrackSampleSize;
+      let mdatSize = this.#boxWriter.measureBox(mdatBox) + totalTrackSampleSize;
       if (mdatSize >= 2 ** 32) {
         mdatBox.largeSize = true;
-        mdatSize = this.measureBox(mdatBox) + totalTrackSampleSize;
+        mdatSize = this.#boxWriter.measureBox(mdatBox) + totalTrackSampleSize;
       }
       mdatBox.size = mdatSize;
-      this.writeBox(mdatBox);
+      this.#boxWriter.writeBox(mdatBox);
     }
     for (let trackData of this.#trackDatas) {
       trackData.currentChunk.offset = this.#writer.getPos();
@@ -1306,9 +1879,9 @@ var IsobmffMuxer = class extends Muxer {
       }
     }
     let endPos = this.#writer.getPos();
-    this.#writer.seek(this.offsets.get(moofBox));
+    this.#writer.seek(this.#boxWriter.offsets.get(moofBox));
     let newMoofBox = moof(fragmentNumber, this.#trackDatas);
-    this.writeBox(newMoofBox);
+    this.#boxWriter.writeBox(newMoofBox);
     this.#writer.seek(endPos);
     for (let trackData of this.#trackDatas) {
       trackData.finalizedChunks.push(trackData.currentChunk);
@@ -1319,8 +1892,24 @@ var IsobmffMuxer = class extends Muxer {
       this.#writer.flush();
     }
   }
+  onTrackClose(track) {
+    if (track.type === "subtitle" && track.source.codec === "webvtt") {
+      let trackData = this.#trackDatas.find((x) => x.track === track);
+      if (trackData) {
+        this.#processWebVTTCues(trackData, Infinity);
+      }
+    }
+    if (this.#format.options.fastStart === "fragmented") {
+      this.#interleaveSamples();
+    }
+  }
   /** Finalizes the file, making it ready for use. Must be called after all video and audio chunks have been added. */
   finalize() {
+    for (let trackData of this.#trackDatas) {
+      if (trackData.type === "subtitle" && trackData.track.source.codec === "webvtt") {
+        this.#processWebVTTCues(trackData, Infinity);
+      }
+    }
     if (this.#format.options.fastStart === "fragmented") {
       for (let trackData of this.#trackDatas) {
         for (let sample of trackData.sampleQueue) {
@@ -1340,8 +1929,8 @@ var IsobmffMuxer = class extends Muxer {
       let mdatSize;
       for (let i = 0; i < 2; i++) {
         let movieBox2 = moov(this.#trackDatas, this.#creationTime);
-        let movieBoxSize = this.measureBox(movieBox2);
-        mdatSize = this.measureBox(this.#mdat);
+        let movieBoxSize = this.#boxWriter.measureBox(movieBox2);
+        mdatSize = this.#boxWriter.measureBox(this.#mdat);
         let currentChunkPos = this.#writer.getPos() + movieBoxSize + mdatSize;
         for (let chunk of this.#finalizedChunks) {
           chunk.offset = currentChunkPos;
@@ -1355,9 +1944,9 @@ var IsobmffMuxer = class extends Muxer {
         if (mdatSize >= 2 ** 32) this.#mdat.largeSize = true;
       }
       let movieBox = moov(this.#trackDatas, this.#creationTime);
-      this.writeBox(movieBox);
+      this.#boxWriter.writeBox(movieBox);
       this.#mdat.size = mdatSize;
-      this.writeBox(this.#mdat);
+      this.#boxWriter.writeBox(this.#mdat);
       for (let chunk of this.#finalizedChunks) {
         for (let sample of chunk.samples) {
           assert(sample.data);
@@ -1368,27 +1957,27 @@ var IsobmffMuxer = class extends Muxer {
     } else if (this.#format.options.fastStart === "fragmented") {
       let startPos = this.#writer.getPos();
       let mfraBox = mfra(this.#trackDatas);
-      this.writeBox(mfraBox);
+      this.#boxWriter.writeBox(mfraBox);
       let mfraBoxSize = this.#writer.getPos() - startPos;
       this.#writer.seek(this.#writer.getPos() - 4);
-      this.writeU32(mfraBoxSize);
+      this.#boxWriter.writeU32(mfraBoxSize);
     } else {
       assert(this.#mdat);
       assert(this.#ftypSize !== null);
-      let mdatPos = this.offsets.get(this.#mdat);
+      let mdatPos = this.#boxWriter.offsets.get(this.#mdat);
       assert(mdatPos !== void 0);
       let mdatSize = this.#writer.getPos() - mdatPos;
       this.#mdat.size = mdatSize;
       this.#mdat.largeSize = mdatSize >= 2 ** 32;
-      this.patchBox(this.#mdat);
+      this.#boxWriter.patchBox(this.#mdat);
       let movieBox = moov(this.#trackDatas, this.#creationTime);
       if (typeof this.#format.options.fastStart === "object") {
         this.#writer.seek(this.#ftypSize);
-        this.writeBox(movieBox);
+        this.#boxWriter.writeBox(movieBox);
         let remainingBytes = mdatPos - this.#writer.getPos();
-        this.writeBox(free(remainingBytes));
+        this.#boxWriter.writeBox(free(remainingBytes));
       } else {
-        this.writeBox(movieBox);
+        this.#boxWriter.writeBox(movieBox);
       }
     }
   }
@@ -1471,7 +2060,6 @@ var CODEC_STRING_MAP = {
   av1: "V_AV1",
   aac: "A_AAC",
   opus: "A_OPUS",
-  vorbis: "A_VORBIS",
   webvtt: "S_TEXT/WEBVTT"
 };
 var TRACK_TYPE_MAP = {
@@ -1482,6 +2070,7 @@ var TRACK_TYPE_MAP = {
 var MatroskaMuxer = class extends Muxer {
   constructor(output, format) {
     super(output);
+    this.timestampsMustStartAtZero = true;
     this.#helper = new Uint8Array(8);
     this.#helperView = new DataView(this.#helper.buffer);
     /**
@@ -1742,8 +2331,8 @@ var MatroskaMuxer = class extends Muxer {
         { id: 131 /* TrackType */, data: TRACK_TYPE_MAP[trackData.type] },
         // TODO Subtitle case
         { id: 134 /* CodecID */, data: CODEC_STRING_MAP[trackData.track.source.codec] },
-        trackData.info.decoderConfig.description ? { id: 25506 /* CodecPrivate */, data: toUint8Array(trackData.info.decoderConfig.description) } : null,
         ...trackData.type === "video" ? [
+          trackData.info.decoderConfig.description ? { id: 25506 /* CodecPrivate */, data: toUint8Array(trackData.info.decoderConfig.description) } : null,
           trackData.track.metadata.frameRate ? { id: 2352003 /* DefaultDuration */, data: 1e9 / trackData.track.metadata.frameRate } : null,
           { id: 224 /* Video */, data: [
             { id: 176 /* PixelWidth */, data: trackData.info.width },
@@ -1779,11 +2368,15 @@ var MatroskaMuxer = class extends Muxer {
           ] }
         ] : [],
         ...trackData.type === "audio" ? [
+          trackData.info.decoderConfig.description ? { id: 25506 /* CodecPrivate */, data: toUint8Array(trackData.info.decoderConfig.description) } : null,
           { id: 225 /* Audio */, data: [
             { id: 181 /* SamplingFrequency */, data: new EBMLFloat32(trackData.info.sampleRate) },
             { id: 159 /* Channels */, data: trackData.info.numberOfChannels }
             // Bit depth for when PCM is a thing
           ] }
+        ] : [],
+        ...trackData.type === "subtitle" ? [
+          { id: 25506 /* CodecPrivate */, data: textEncoder.encode(trackData.info.config.description) }
         ] : []
       ] });
     }
@@ -1826,8 +2419,6 @@ var MatroskaMuxer = class extends Muxer {
         decoderConfig: meta.decoderConfig
       },
       chunkQueue: [],
-      firstTimestamp: null,
-      lastKeyFrameTimestamp: null,
       lastWrittenMsTimestamp: null
     };
     this.#trackDatas.push(newTrackData);
@@ -1850,8 +2441,6 @@ var MatroskaMuxer = class extends Muxer {
         decoderConfig: meta.decoderConfig
       },
       chunkQueue: [],
-      firstTimestamp: null,
-      lastKeyFrameTimestamp: null,
       lastWrittenMsTimestamp: null
     };
     this.#trackDatas.push(newTrackData);
@@ -1864,16 +2453,14 @@ var MatroskaMuxer = class extends Muxer {
       return existingTrackData;
     }
     assert(meta);
-    assert(meta.decoderConfig);
+    assert(meta.config);
     const newTrackData = {
       track,
       type: "subtitle",
       info: {
-        decoderConfig: meta.decoderConfig
+        config: meta.config
       },
       chunkQueue: [],
-      firstTimestamp: null,
-      lastKeyFrameTimestamp: null,
       lastWrittenMsTimestamp: null
     };
     this.#trackDatas.push(newTrackData);
@@ -1884,7 +2471,8 @@ var MatroskaMuxer = class extends Muxer {
     const trackData = this.#getVideoTrackData(track, meta);
     let data = new Uint8Array(chunk.byteLength);
     chunk.copyTo(data);
-    let videoChunk = this.#createInternalChunk(trackData, data, chunk.timestamp, chunk.duration ?? 0, chunk.type);
+    let timestamp = this.validateAndNormalizeTimestamp(trackData.track, chunk.timestamp, chunk.type === "key");
+    let videoChunk = this.#createInternalChunk(data, timestamp, (chunk.duration ?? 0) / 1e6, chunk.type);
     if (track.source.codec === "vp9") this.#fixVP9ColorSpace(trackData, videoChunk);
     trackData.chunkQueue.push(videoChunk);
     this.#interleaveChunks();
@@ -1893,21 +2481,35 @@ var MatroskaMuxer = class extends Muxer {
     const trackData = this.#getAudioTrackData(track, meta);
     let data = new Uint8Array(chunk.byteLength);
     chunk.copyTo(data);
-    let audioChunk = this.#createInternalChunk(trackData, data, chunk.timestamp, chunk.duration ?? 0, chunk.type);
+    let timestamp = this.validateAndNormalizeTimestamp(trackData.track, chunk.timestamp, chunk.type === "key");
+    let audioChunk = this.#createInternalChunk(data, timestamp, (chunk.duration ?? 0) / 1e6, chunk.type);
     trackData.chunkQueue.push(audioChunk);
     this.#interleaveChunks();
   }
-  addEncodedSubtitleChunk(track, chunk, meta) {
+  addSubtitleCue(track, cue, meta) {
     const trackData = this.#getSubtitleTrackData(track, meta);
-    let subtitleChunk = this.#createInternalChunk(trackData, chunk.body, chunk.timestamp, chunk.duration, "key", chunk.additions);
+    const timestamp = this.validateAndNormalizeTimestamp(trackData.track, 1e6 * cue.timestamp, true);
+    let bodyText = cue.text;
+    const timestampMs = Math.floor(timestamp * 1e3);
+    inlineTimestampRegex.lastIndex = 0;
+    bodyText = bodyText.replace(inlineTimestampRegex, (match) => {
+      let time = parseSubtitleTimestamp(match.slice(1, -1));
+      let offsetTime = time - timestampMs;
+      return `<${formatSubtitleTimestamp(offsetTime)}>`;
+    });
+    const body = textEncoder.encode(bodyText);
+    const additions = `${cue.settings ?? ""}
+${cue.identifier ?? ""}
+${cue.notes ?? ""}`;
+    let subtitleChunk = this.#createInternalChunk(body, timestamp, cue.duration, "key", additions.trim() ? textEncoder.encode(additions) : null);
     trackData.chunkQueue.push(subtitleChunk);
     this.#interleaveChunks();
   }
   #interleaveChunks() {
-    let openTrackCount = 0;
-    for (const trackData of this.#trackDatas) if (!trackData.track.source.closed) openTrackCount++;
-    if (this.#trackDatas.length < openTrackCount) {
-      return;
+    for (const track of this.output.tracks) {
+      if (!track.source.closed && !this.#trackDatas.some((x) => x.track === track)) {
+        return;
+      }
     }
     outer:
       while (true) {
@@ -1962,33 +2564,15 @@ var MatroskaMuxer = class extends Muxer {
     writeBits(chunk.data, i + 0, i + 3, colorSpaceID);
   }
   /** Converts a read-only external chunk into an internal one for easier use. */
-  #createInternalChunk(trackData, data, timestamp, duration, type, additions = null) {
-    let adjustedTimestamp = this.#validateTimestamp(trackData, timestamp, type === "key");
+  #createInternalChunk(data, timestamp, duration, type, additions = null) {
     let internalChunk = {
       data,
       type,
-      timestamp: adjustedTimestamp,
-      duration: duration / 1e6,
+      timestamp,
+      duration,
       additions
     };
     return internalChunk;
-  }
-  #validateTimestamp(trackData, timestamp, isKeyFrame) {
-    let timestampInSeconds = timestamp / 1e6;
-    if (timestampInSeconds < 0) {
-      throw new Error(`Timestamps must be non-negative (got ${timestampInSeconds}s).`);
-    }
-    if (trackData.firstTimestamp === null) {
-      trackData.firstTimestamp = timestampInSeconds;
-    }
-    timestampInSeconds -= trackData.firstTimestamp;
-    if (trackData.lastKeyFrameTimestamp !== null && timestampInSeconds < trackData.lastKeyFrameTimestamp) {
-      throw new Error(`Timestamp cannot be before last key frame's timestamp (got ${timestampInSeconds}s, last key frame at ${trackData.lastKeyFrameTimestamp}s).`);
-    }
-    if (isKeyFrame) {
-      trackData.lastKeyFrameTimestamp = timestampInSeconds;
-    }
-    return timestampInSeconds;
   }
   /** Writes a block containing media data to the file. */
   #writeBlock(trackData, chunk) {
@@ -1998,6 +2582,9 @@ var MatroskaMuxer = class extends Muxer {
     }
     let msTimestamp = Math.floor(1e3 * chunk.timestamp);
     const keyFrameQueuedEverywhere = this.#trackDatas.every((otherTrackData) => {
+      if (otherTrackData.track.source.closed) {
+        return true;
+      }
       if (trackData === otherTrackData) {
         return chunk.type === "key";
       }
@@ -2036,8 +2623,13 @@ var MatroskaMuxer = class extends Muxer {
           chunk.data
         ] },
         chunk.type === "delta" ? { id: 251 /* ReferenceBlock */, data: new EBMLSignedInt(trackData.lastWrittenMsTimestamp - msTimestamp) } : null,
-        msDuration > 0 ? { id: 155 /* BlockDuration */, data: msDuration } : null,
-        chunk.additions ? { id: 30113 /* BlockAdditions */, data: chunk.additions } : null
+        chunk.additions ? { id: 30113 /* BlockAdditions */, data: [
+          { id: 166 /* BlockMore */, data: [
+            { id: 165 /* BlockAdditional */, data: chunk.additions },
+            { id: 238 /* BlockAddID */, data: 1 }
+          ] }
+        ] } : null,
+        msDuration > 0 ? { id: 155 /* BlockDuration */, data: msDuration } : null
       ] };
       this.writeEBML(blockGroup);
     }
@@ -2229,110 +2821,12 @@ var buildAudioCodecString = (codec, numberOfChannels, sampleRate) => {
   throw new Error(`Unhandled codec '${codec}'.`);
 };
 
-// src/subtitles.ts
-var cueBlockHeaderRegex = /(?:(.+?)\n)?((?:\d{2}:)?\d{2}:\d{2}.\d{3})\s+-->\s+((?:\d{2}:)?\d{2}:\d{2}.\d{3})/g;
-var preambleStartRegex = /^WEBVTT.*?\n{2}/;
-var timestampRegex = /(?:(\d{2}):)?(\d{2}):(\d{2}).(\d{3})/;
-var inlineTimestampRegex = /<(?:(\d{2}):)?(\d{2}):(\d{2}).(\d{3})>/g;
-var textEncoder = new TextEncoder();
-var SubtitleEncoder = class {
-  #options;
-  #config = null;
-  #preambleBytes = null;
-  #preambleEmitted = false;
-  constructor(options) {
-    this.#options = options;
-  }
-  configure(config) {
-    if (config.codec !== "webvtt") {
-      throw new Error("Codec must be 'webvtt'.");
-    }
-    this.#config = config;
-  }
-  encode(text) {
-    if (!this.#config) {
-      throw new Error("Encoder not configured.");
-    }
-    text = text.replace("\r\n", "\n").replace("\r", "\n");
-    cueBlockHeaderRegex.lastIndex = 0;
-    let match;
-    if (!this.#preambleBytes) {
-      if (!preambleStartRegex.test(text)) {
-        let error = new Error("WebVTT preamble incorrect.");
-        this.#options.error(error);
-        throw error;
-      }
-      match = cueBlockHeaderRegex.exec(text);
-      let preamble = text.slice(0, match?.index ?? text.length).trimEnd();
-      if (!preamble) {
-        let error = new Error("No WebVTT preamble provided.");
-        this.#options.error(error);
-        throw error;
-      }
-      this.#preambleBytes = textEncoder.encode(preamble);
-      if (match) {
-        text = text.slice(match.index);
-        cueBlockHeaderRegex.lastIndex = 0;
-      }
-    }
-    while (match = cueBlockHeaderRegex.exec(text)) {
-      let notes = text.slice(0, match.index);
-      let cueIdentifier = match[1] || "";
-      let matchEnd = match.index + match[0].length;
-      let bodyStart = text.indexOf("\n", matchEnd) + 1;
-      let cueSettings = text.slice(matchEnd, bodyStart).trim();
-      let bodyEnd = text.indexOf("\n\n", matchEnd);
-      if (bodyEnd === -1) bodyEnd = text.length;
-      let startTime = this.#parseTimestamp(match[2]);
-      let endTime = this.#parseTimestamp(match[3]);
-      let duration = endTime - startTime;
-      let body = text.slice(bodyStart, bodyEnd);
-      let additions = `${cueSettings}
-${cueIdentifier}
-${notes}`;
-      inlineTimestampRegex.lastIndex = 0;
-      body = body.replace(inlineTimestampRegex, (match2) => {
-        let time = this.#parseTimestamp(match2.slice(1, -1));
-        let offsetTime = time - startTime;
-        return `<${this.#formatTimestamp(offsetTime)}>`;
-      });
-      text = text.slice(bodyEnd).trimStart();
-      cueBlockHeaderRegex.lastIndex = 0;
-      let chunk = {
-        body: textEncoder.encode(body),
-        additions: additions.trim() === "" ? null : textEncoder.encode(additions),
-        timestamp: startTime * 1e3,
-        duration: duration * 1e3
-      };
-      let meta = {};
-      if (!this.#preambleEmitted) {
-        meta.decoderConfig = {
-          description: this.#preambleBytes
-        };
-        this.#preambleEmitted = true;
-      }
-      this.#options.output(chunk, meta);
-    }
-  }
-  #parseTimestamp(string) {
-    let match = timestampRegex.exec(string);
-    if (!match) throw new Error("Expected match.");
-    return 60 * 60 * 1e3 * Number(match[1] || "0") + 60 * 1e3 * Number(match[2]) + 1e3 * Number(match[3]) + Number(match[4]);
-  }
-  #formatTimestamp(timestamp) {
-    let hours = Math.floor(timestamp / (60 * 60 * 1e3));
-    let minutes = Math.floor(timestamp % (60 * 60 * 1e3) / (60 * 1e3));
-    let seconds = Math.floor(timestamp % (60 * 1e3) / 1e3);
-    let milliseconds = timestamp % 1e3;
-    return hours.toString().padStart(2, "0") + ":" + minutes.toString().padStart(2, "0") + ":" + seconds.toString().padStart(2, "0") + "." + milliseconds.toString().padStart(3, "0");
-  }
-};
-
 // src/source.ts
 var MediaSource = class {
   constructor() {
     this.connectedTrack = null;
     this.closed = false;
+    this.offsetTimestamps = false;
   }
   ensureValidDigest() {
     if (!this.connectedTrack) {
@@ -2417,7 +2911,9 @@ var VideoEncoderWrapper = class {
       codec: buildVideoCodecString(this.codecConfig.codec, videoFrame.codedWidth, videoFrame.codedHeight),
       width: videoFrame.codedWidth,
       height: videoFrame.codedHeight,
-      bitrate: this.codecConfig.bitrate
+      bitrate: this.codecConfig.bitrate,
+      framerate: this.source.connectedTrack?.metadata.frameRate,
+      latencyMode: this.codecConfig.latencyMode
     });
   }
   async flush() {
@@ -2445,7 +2941,8 @@ var CanvasSource = class extends VideoSource {
   digest(timestamp, duration = 0) {
     const frame = new VideoFrame(this.canvas, {
       timestamp: Math.round(1e6 * timestamp),
-      duration: Math.round(1e6 * duration)
+      duration: Math.round(1e6 * duration),
+      alpha: "discard"
     });
     this.encoder.digest(frame);
     frame.close();
@@ -2459,6 +2956,7 @@ var MediaStreamVideoTrackSource = class extends VideoSource {
     super(codecConfig.codec);
     this.track = track;
     this.abortController = null;
+    this.offsetTimestamps = true;
     this.encoder = new VideoEncoderWrapper(this, codecConfig);
   }
   start() {
@@ -2582,6 +3080,7 @@ var MediaStreamAudioTrackSource = class extends AudioSource {
     super(codecConfig.codec);
     this.track = track;
     this.abortController = null;
+    this.offsetTimestamps = true;
     this.encoder = new AudioEncoderWrapper(this, codecConfig);
   }
   start() {
@@ -2618,297 +3117,16 @@ var SubtitleSource = class extends MediaSource {
 var TextSubtitleSource = class extends SubtitleSource {
   constructor(codec) {
     super(codec);
-    this.encoder = new SubtitleEncoder({
-      output: (chunk, metadata) => this.connectedTrack?.output.muxer.addEncodedSubtitleChunk(this.connectedTrack, chunk, metadata),
+    this.parser = new SubtitleParser({
+      codec,
+      output: (cue, metadata) => this.connectedTrack?.output.muxer.addSubtitleCue(this.connectedTrack, cue, metadata),
       error: (error) => console.error(error)
       // TODO
     });
-    this.encoder.configure({ codec });
   }
   digest(text) {
     this.ensureValidDigest();
-    this.encoder.encode(text);
-  }
-};
-
-// src/writer.ts
-var Writer = class {
-};
-var ArrayBufferTargetWriter = class extends Writer {
-  #pos = 0;
-  #target;
-  #buffer = new ArrayBuffer(2 ** 16);
-  #bytes = new Uint8Array(this.#buffer);
-  #maxPos = 0;
-  constructor(target) {
-    super();
-    this.#target = target;
-  }
-  #ensureSize(size) {
-    let newLength = this.#buffer.byteLength;
-    while (newLength < size) newLength *= 2;
-    if (newLength === this.#buffer.byteLength) return;
-    let newBuffer = new ArrayBuffer(newLength);
-    let newBytes = new Uint8Array(newBuffer);
-    newBytes.set(this.#bytes, 0);
-    this.#buffer = newBuffer;
-    this.#bytes = newBytes;
-  }
-  write(data) {
-    this.#ensureSize(this.#pos + data.byteLength);
-    this.#bytes.set(data, this.#pos);
-    this.#pos += data.byteLength;
-    this.#maxPos = Math.max(this.#maxPos, this.#pos);
-  }
-  seek(newPos) {
-    this.#pos = newPos;
-  }
-  getPos() {
-    return this.#pos;
-  }
-  flush() {
-  }
-  finalize() {
-    this.#ensureSize(this.#pos);
-    this.#target.buffer = this.#buffer.slice(0, Math.max(this.#maxPos, this.#pos));
-  }
-};
-var StreamTargetWriter = class extends Writer {
-  #pos = 0;
-  #target;
-  #sections = [];
-  constructor(target) {
-    super();
-    this.#target = target;
-  }
-  write(data) {
-    this.#sections.push({
-      data: data.slice(),
-      start: this.#pos
-    });
-    this.#pos += data.byteLength;
-  }
-  seek(newPos) {
-    this.#pos = newPos;
-  }
-  getPos() {
-    return this.#pos;
-  }
-  flush() {
-    if (this.#sections.length === 0) return;
-    let chunks = [];
-    let sorted = [...this.#sections].sort((a, b) => a.start - b.start);
-    chunks.push({
-      start: sorted[0].start,
-      size: sorted[0].data.byteLength
-    });
-    for (let i = 1; i < sorted.length; i++) {
-      let lastChunk = chunks[chunks.length - 1];
-      let section = sorted[i];
-      if (section.start <= lastChunk.start + lastChunk.size) {
-        lastChunk.size = Math.max(lastChunk.size, section.start + section.data.byteLength - lastChunk.start);
-      } else {
-        chunks.push({
-          start: section.start,
-          size: section.data.byteLength
-        });
-      }
-    }
-    for (let chunk of chunks) {
-      chunk.data = new Uint8Array(chunk.size);
-      for (let section of this.#sections) {
-        if (chunk.start <= section.start && section.start < chunk.start + chunk.size) {
-          chunk.data.set(section.data, section.start - chunk.start);
-        }
-      }
-      this.#target.options.onData?.(chunk.data, chunk.start);
-    }
-    this.#sections.length = 0;
-  }
-  finalize() {
-  }
-};
-var DEFAULT_CHUNK_SIZE = 2 ** 24;
-var MAX_CHUNKS_AT_ONCE = 2;
-var ChunkedStreamTargetWriter = class extends Writer {
-  #pos = 0;
-  #target;
-  #chunkSize;
-  /**
-   * The data is divided up into fixed-size chunks, whose contents are first filled in RAM and then flushed out.
-   * A chunk is flushed if all of its contents have been written.
-   */
-  #chunks = [];
-  constructor(target) {
-    super();
-    this.#target = target;
-    this.#chunkSize = target.options?.chunkSize ?? DEFAULT_CHUNK_SIZE;
-    if (!Number.isInteger(this.#chunkSize) || this.#chunkSize < 2 ** 10) {
-      throw new Error("Invalid StreamTarget options: chunkSize must be an integer not smaller than 1024.");
-    }
-  }
-  write(data) {
-    this.#writeDataIntoChunks(data, this.#pos);
-    this.#flushChunks();
-    this.#pos += data.byteLength;
-  }
-  seek(newPos) {
-    this.#pos = newPos;
-  }
-  getPos() {
-    return this.#pos;
-  }
-  #writeDataIntoChunks(data, position) {
-    let chunkIndex = this.#chunks.findIndex((x) => x.start <= position && position < x.start + this.#chunkSize);
-    if (chunkIndex === -1) chunkIndex = this.#createChunk(position);
-    let chunk = this.#chunks[chunkIndex];
-    let relativePosition = position - chunk.start;
-    let toWrite = data.subarray(0, Math.min(this.#chunkSize - relativePosition, data.byteLength));
-    chunk.data.set(toWrite, relativePosition);
-    let section = {
-      start: relativePosition,
-      end: relativePosition + toWrite.byteLength
-    };
-    this.#insertSectionIntoChunk(chunk, section);
-    if (chunk.written[0].start === 0 && chunk.written[0].end === this.#chunkSize) {
-      chunk.shouldFlush = true;
-    }
-    if (this.#chunks.length > MAX_CHUNKS_AT_ONCE) {
-      for (let i = 0; i < this.#chunks.length - 1; i++) {
-        this.#chunks[i].shouldFlush = true;
-      }
-      this.#flushChunks();
-    }
-    if (toWrite.byteLength < data.byteLength) {
-      this.#writeDataIntoChunks(data.subarray(toWrite.byteLength), position + toWrite.byteLength);
-    }
-  }
-  #insertSectionIntoChunk(chunk, section) {
-    let low = 0;
-    let high = chunk.written.length - 1;
-    let index = -1;
-    while (low <= high) {
-      let mid = Math.floor(low + (high - low + 1) / 2);
-      if (chunk.written[mid].start <= section.start) {
-        low = mid + 1;
-        index = mid;
-      } else {
-        high = mid - 1;
-      }
-    }
-    chunk.written.splice(index + 1, 0, section);
-    if (index === -1 || chunk.written[index].end < section.start) index++;
-    while (index < chunk.written.length - 1 && chunk.written[index].end >= chunk.written[index + 1].start) {
-      chunk.written[index].end = Math.max(chunk.written[index].end, chunk.written[index + 1].end);
-      chunk.written.splice(index + 1, 1);
-    }
-  }
-  #createChunk(includesPosition) {
-    let start = Math.floor(includesPosition / this.#chunkSize) * this.#chunkSize;
-    let chunk = {
-      start,
-      data: new Uint8Array(this.#chunkSize),
-      written: [],
-      shouldFlush: false
-    };
-    this.#chunks.push(chunk);
-    this.#chunks.sort((a, b) => a.start - b.start);
-    return this.#chunks.indexOf(chunk);
-  }
-  #flushChunks(force = false) {
-    for (let i = 0; i < this.#chunks.length; i++) {
-      let chunk = this.#chunks[i];
-      if (!chunk.shouldFlush && !force) continue;
-      for (let section of chunk.written) {
-        this.#target.options.onData?.(
-          chunk.data.subarray(section.start, section.end),
-          chunk.start + section.start
-        );
-      }
-      this.#chunks.splice(i--, 1);
-    }
-  }
-  flush() {
-  }
-  finalize() {
-    this.#flushChunks(true);
-  }
-};
-var FileSystemWritableFileStreamTargetWriter = class extends ChunkedStreamTargetWriter {
-  constructor(target) {
-    super(new StreamTarget({
-      onData: (data, position) => target.stream.write({
-        type: "write",
-        data,
-        position
-      }),
-      chunkSize: target.options?.chunkSize
-    }));
-  }
-};
-
-// src/target.ts
-var Target = class {
-  constructor() {
-    this.output = null;
-  }
-};
-var ArrayBufferTarget2 = class extends Target {
-  constructor() {
-    super(...arguments);
-    this.buffer = null;
-  }
-  createWriter() {
-    return new ArrayBufferTargetWriter(this);
-  }
-};
-var StreamTarget = class extends Target {
-  constructor(options) {
-    super();
-    this.options = options;
-    if (typeof options !== "object") {
-      throw new TypeError("StreamTarget requires an options object to be passed to its constructor.");
-    }
-    if (options.onData) {
-      if (typeof options.onData !== "function") {
-        throw new TypeError("options.onData, when provided, must be a function.");
-      }
-      if (options.onData.length < 2) {
-        throw new TypeError(
-          "options.onData, when provided, must be a function that takes in at least two arguments (data and position). Ignoring the position argument, which specifies the byte offset at which the data is to be written, can lead to broken outputs."
-        );
-      }
-    }
-    if (options.chunked !== void 0 && typeof options.chunked !== "boolean") {
-      throw new TypeError("options.chunked, when provided, must be a boolean.");
-    }
-    if (options.chunkSize !== void 0 && (!Number.isInteger(options.chunkSize) || options.chunkSize <= 0)) {
-      throw new TypeError("options.chunkSize, when provided, must be a positive integer.");
-    }
-  }
-  createWriter() {
-    return this.options.chunked ? new ChunkedStreamTargetWriter(this) : new StreamTargetWriter(this);
-  }
-};
-var FileSystemWritableFileStreamTarget2 = class extends Target {
-  constructor(stream, options) {
-    super();
-    this.stream = stream;
-    this.options = options;
-    if (!(stream instanceof FileSystemWritableFileStream)) {
-      throw new TypeError("FileSystemWritableFileStreamTarget requires a FileSystemWritableFileStream instance.");
-    }
-    if (options !== void 0 && typeof options !== "object") {
-      throw new TypeError("FileSystemWritableFileStreamTarget's options, when provided, must be an object.");
-    }
-    if (options) {
-      if (options.chunkSize !== void 0 && (!Number.isInteger(options.chunkSize) || options.chunkSize <= 0)) {
-        throw new TypeError("options.chunkSize, when provided, must be a positive integer");
-      }
-    }
-  }
-  createWriter() {
-    return new FileSystemWritableFileStreamTargetWriter(this);
+    this.parser.parse(text);
   }
 };
 export {

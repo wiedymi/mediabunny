@@ -63,7 +63,6 @@ export enum EBMLId {
 	Video = 0xe0,
 	PixelWidth = 0xb0,
 	PixelHeight = 0xba,
-	Void = 0xec,
 	Audio = 0xe1,
 	SamplingFrequency = 0xb5,
 	Channels = 0x9f,
@@ -73,6 +72,9 @@ export enum EBMLId {
 	BlockGroup = 0xa0,
 	Block = 0xa1,
 	BlockAdditions = 0x75a1,
+	BlockMore = 0xa6,
+	BlockAdditional = 0xa5,
+	BlockAddID = 0xee,
 	BlockDuration = 0x9b,
 	ReferenceBlock = 0xfb,
 	Cluster = 0x1f43b675,
@@ -87,8 +89,7 @@ export enum EBMLId {
 	MatrixCoefficients = 0x55b1,
 	TransferCharacteristics = 0x55ba,
 	Primaries = 0x55bb,
-	Range = 0x55b9,
-	AlphaMode = 0x53c0
+	Range = 0x55b9
 }
 
 export const measureUnsignedInt = (value: number) => {

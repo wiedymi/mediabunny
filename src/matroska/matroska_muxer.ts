@@ -1,9 +1,9 @@
-import { assert, readBits, toUint8Array, writeBits } from '../misc';
+import { assert, readBits, textEncoder, toUint8Array, writeBits } from '../misc';
 import { Muxer } from '../muxer';
 import { Output, OutputAudioTrack, OutputSubtitleTrack, OutputTrack, OutputVideoTrack } from '../output';
 import { MkvOutputFormat, WebMOutputFormat } from '../output_format';
 import { AudioCodec, SubtitleCodec, VideoCodec } from '../source';
-import { EncodedSubtitleChunk, EncodedSubtitleChunkMetadata, SubtitleDecoderConfig } from '../subtitles';
+import { formatSubtitleTimestamp, inlineTimestampRegex, parseSubtitleTimestamp, SubtitleConfig, SubtitleCue, SubtitleMetadata } from '../subtitles';
 import { Writer } from '../writer';
 import { EBML, EBMLElement, EBMLFloat32, EBMLFloat64, EBMLId, EBMLSignedInt, measureEBMLVarInt, measureSignedInt, measureUnsignedInt } from './ebml';
 
@@ -38,9 +38,6 @@ type SeekHead = {
 
 type MatroskaTrackData = {
 	chunkQueue: InternalMediaChunk[],
-
-	firstTimestamp: number | null,
-	lastKeyFrameTimestamp: number | null,
 	lastWrittenMsTimestamp: number | null
 } & ({
 	track: OutputVideoTrack,
@@ -62,7 +59,7 @@ type MatroskaTrackData = {
 	track: OutputSubtitleTrack,
 	type: 'subtitle',
 	info: {
-		decoderConfig: SubtitleDecoderConfig
+		config: SubtitleConfig
 	}
 });
 
@@ -78,7 +75,6 @@ const CODEC_STRING_MAP: Record<VideoCodec | AudioCodec | SubtitleCodec, string> 
 	av1: 'V_AV1',
 	aac: 'A_AAC',
 	opus: 'A_OPUS',
-	vorbis: 'A_VORBIS',
 	webvtt: 'S_TEXT/WEBVTT'
 };
 
@@ -94,6 +90,8 @@ const TRACK_TYPE_MAP: Record<OutputTrack['type'], number> = {
 // Update: Not really. There are duration fields and seek fields that are just uneditable if streaming is required.
 
 export class MatroskaMuxer extends Muxer {
+	override timestampsMustStartAtZero = true;
+
 	#writer: Writer;
 	#format: WebMOutputFormat | MkvOutputFormat;
 
@@ -391,8 +389,8 @@ export class MatroskaMuxer extends Muxer {
 				{ id: EBMLId.TrackUID, data: trackData.track.id },
 				{ id: EBMLId.TrackType, data: TRACK_TYPE_MAP[trackData.type] }, // TODO Subtitle case
 				{ id: EBMLId.CodecID, data: CODEC_STRING_MAP[trackData.track.source.codec] },
-				(trackData.info.decoderConfig.description ? { id: EBMLId.CodecPrivate, data: toUint8Array(trackData.info.decoderConfig.description) } : null),
 				...(trackData.type === 'video' ? [
+					(trackData.info.decoderConfig.description ? { id: EBMLId.CodecPrivate, data: toUint8Array(trackData.info.decoderConfig.description) } : null),
 					(trackData.track.metadata.frameRate ? { id: EBMLId.DefaultDuration, data: 1e9 / trackData.track.metadata.frameRate } : null),
 					{ id: EBMLId.Video, data: [
 						{ id: EBMLId.PixelWidth, data: trackData.info.width },
@@ -430,12 +428,16 @@ export class MatroskaMuxer extends Muxer {
 					] }
 				] : []),
 				...(trackData.type === 'audio' ? [
+					(trackData.info.decoderConfig.description ? { id: EBMLId.CodecPrivate, data: toUint8Array(trackData.info.decoderConfig.description) } : null),
 					{ id: EBMLId.Audio, data: [
 						{ id: EBMLId.SamplingFrequency, data: new EBMLFloat32(trackData.info.sampleRate) },
 						{ id: EBMLId.Channels, data: trackData.info.numberOfChannels },
 						// Bit depth for when PCM is a thing
 					] }
-				] : [])
+				] : []),
+				...(trackData.type === 'subtitle' ? [
+					{ id: EBMLId.CodecPrivate, data: textEncoder.encode(trackData.info.config.description) }
+				] : []),
 			] })
 		}
 	}
@@ -492,8 +494,6 @@ export class MatroskaMuxer extends Muxer {
 				decoderConfig: meta.decoderConfig
 			},
 			chunkQueue: [],
-			firstTimestamp: null,
-			lastKeyFrameTimestamp: null,
 			lastWrittenMsTimestamp: null
 		};
 
@@ -522,8 +522,6 @@ export class MatroskaMuxer extends Muxer {
 				decoderConfig: meta.decoderConfig
 			},
 			chunkQueue: [],
-			firstTimestamp: null,
-			lastKeyFrameTimestamp: null,
 			lastWrittenMsTimestamp: null
 		};
 
@@ -533,7 +531,7 @@ export class MatroskaMuxer extends Muxer {
 		return newTrackData;
 	}
 
-	#getSubtitleTrackData(track: OutputSubtitleTrack, meta?: EncodedSubtitleChunkMetadata) {
+	#getSubtitleTrackData(track: OutputSubtitleTrack, meta?: SubtitleMetadata) {
 		const existingTrackData = this.#trackDatas.find(x => x.track === track);
 		if (existingTrackData) {
 			return existingTrackData as MatroskaAudioTrackData;
@@ -541,17 +539,15 @@ export class MatroskaMuxer extends Muxer {
 
 		// TODO Make proper errors for these
 		assert(meta);
-		assert(meta.decoderConfig);
+		assert(meta.config);
 
 		const newTrackData: MatroskaSubtitleTrackData = {
 			track,
 			type: 'subtitle',
 			info: {
-				decoderConfig: meta.decoderConfig
+				config: meta.config
 			},
 			chunkQueue: [],
-			firstTimestamp: null,
-			lastKeyFrameTimestamp: null,
 			lastWrittenMsTimestamp: null
 		};
 
@@ -567,7 +563,8 @@ export class MatroskaMuxer extends Muxer {
 		let data = new Uint8Array(chunk.byteLength);
 		chunk.copyTo(data);
 
-		let videoChunk = this.#createInternalChunk(trackData, data, chunk.timestamp, chunk.duration ?? 0, chunk.type);
+		let timestamp = this.validateAndNormalizeTimestamp(trackData.track, chunk.timestamp, chunk.type === 'key');
+		let videoChunk = this.#createInternalChunk(data, timestamp, (chunk.duration ?? 0) / 1e6, chunk.type);
 		if (track.source.codec === 'vp9') this.#fixVP9ColorSpace(trackData, videoChunk);
 
 		trackData.chunkQueue.push(videoChunk);	
@@ -580,27 +577,44 @@ export class MatroskaMuxer extends Muxer {
 		let data = new Uint8Array(chunk.byteLength);
 		chunk.copyTo(data);
 
-		let audioChunk = this.#createInternalChunk(trackData, data, chunk.timestamp, chunk.duration ?? 0, chunk.type);
+		let timestamp = this.validateAndNormalizeTimestamp(trackData.track, chunk.timestamp, chunk.type === 'key');
+		let audioChunk = this.#createInternalChunk(data, timestamp, (chunk.duration ?? 0) / 1e6, chunk.type);
 
 		trackData.chunkQueue.push(audioChunk);
 		this.#interleaveChunks();
 	}
 	
-	addEncodedSubtitleChunk(track: OutputSubtitleTrack, chunk: EncodedSubtitleChunk, meta?: EncodedSubtitleChunkMetadata) {
+	addSubtitleCue(track: OutputSubtitleTrack, cue: SubtitleCue, meta?: SubtitleMetadata) {
 		const trackData = this.#getSubtitleTrackData(track, meta);
 
-		let subtitleChunk = this.#createInternalChunk(trackData, chunk.body, chunk.timestamp, chunk.duration, 'key', chunk.additions);
+		const timestamp = this.validateAndNormalizeTimestamp(trackData.track, 1e6 * cue.timestamp, true);
+
+		let bodyText = cue.text;
+		const timestampMs = Math.floor(timestamp * 1000);
+
+		// Replace in-body timestamps so that they're relative to the cue start time
+		inlineTimestampRegex.lastIndex = 0;
+		bodyText = bodyText.replace(inlineTimestampRegex, (match) => {
+			let time = parseSubtitleTimestamp(match.slice(1, -1));
+			let offsetTime = time - timestampMs;
+
+			return `<${formatSubtitleTimestamp(offsetTime)}>`;
+		});
+
+		const body = textEncoder.encode(bodyText);
+		const additions = `${cue.settings ?? ''}\n${cue.identifier ?? ''}\n${cue.notes ?? ''}`;
+
+		let subtitleChunk = this.#createInternalChunk(body, timestamp, cue.duration, 'key', additions.trim() ? textEncoder.encode(additions) : null);
 
 		trackData.chunkQueue.push(subtitleChunk);
 		this.#interleaveChunks();
 	}
 
 	#interleaveChunks() {
-		let openTrackCount = 0;
-		for (const trackData of this.#trackDatas) if (!trackData.track.source.closed) openTrackCount++;
-
-		if (this.#trackDatas.length < openTrackCount) {
-			return; // We haven't seen a sample from every open track yet
+		for (const track of this.output.tracks) {
+			if (!track.source.closed && !this.#trackDatas.some(x => x.track === track)) {
+				return; // We haven't seen a sample from this open track yet
+			}
 		}
 
 		outer:
@@ -668,48 +682,21 @@ export class MatroskaMuxer extends Muxer {
 
 	/** Converts a read-only external chunk into an internal one for easier use. */
 	#createInternalChunk(
-		trackData: MatroskaTrackData,
 		data: Uint8Array,
 		timestamp: number,
 		duration: number,
 		type: 'key' | 'delta',
 		additions: Uint8Array | null = null
 	) {
-		let adjustedTimestamp = this.#validateTimestamp(trackData, timestamp, type === 'key');
-
 		let internalChunk: InternalMediaChunk = {
 			data,
 			type,
-			timestamp: adjustedTimestamp,
-			duration: duration / 1e6,
+			timestamp,
+			duration,
 			additions
 		};
 
 		return internalChunk;
-	}
-
-	#validateTimestamp(trackData: MatroskaTrackData, timestamp: number, isKeyFrame: boolean) {
-		let timestampInSeconds = timestamp / 1e6;
-
-		if (timestampInSeconds < 0) {
-			throw new Error(`Timestamps must be non-negative (got ${timestampInSeconds}s).`);
-		}
-
-		if (trackData.firstTimestamp === null) {
-			trackData.firstTimestamp = timestampInSeconds;
-		}
-
-		timestampInSeconds -= trackData.firstTimestamp;
-
-		if (trackData.lastKeyFrameTimestamp !== null && timestampInSeconds < trackData.lastKeyFrameTimestamp) {
-			throw new Error(`Timestamp cannot be before last key frame's timestamp (got ${timestampInSeconds}s, last key frame at ${trackData.lastKeyFrameTimestamp}s).`);
-		}
-
-		if (isKeyFrame) {
-			trackData.lastKeyFrameTimestamp = timestampInSeconds;
-		}
-
-		return timestampInSeconds;
 	}
 
 	/** Writes a block containing media data to the file. */
@@ -726,6 +713,10 @@ export class MatroskaMuxer extends Muxer {
 		// We can only finalize this fragment (and begin a new one) if we know that each track will be able to
 		// start the new one with a key frame.
 		const keyFrameQueuedEverywhere = this.#trackDatas.every(otherTrackData => {
+			if (otherTrackData.track.source.closed) {
+				return true;
+			}
+
 			if (trackData === otherTrackData) {
 				return chunk.type === 'key';
 			}
@@ -780,8 +771,13 @@ export class MatroskaMuxer extends Muxer {
 					chunk.data
 				] },
 				chunk.type === 'delta' ? { id: EBMLId.ReferenceBlock, data: new EBMLSignedInt(trackData.lastWrittenMsTimestamp! - msTimestamp) } : null,
-				msDuration > 0 ? { id: EBMLId.BlockDuration, data: msDuration } : null,
-				chunk.additions ? { id: EBMLId.BlockAdditions, data: chunk.additions } : null
+				chunk.additions ? { id: EBMLId.BlockAdditions, data: [
+					{ id: EBMLId.BlockMore, data: [
+						{ id: EBMLId.BlockAdditional, data: chunk.additions },
+						{ id: EBMLId.BlockAddID, data: 1 }
+					] }
+				] } : null,
+				msDuration > 0 ? { id: EBMLId.BlockDuration, data: msDuration } : null
 			] };
 			this.writeEBML(blockGroup);
 		}

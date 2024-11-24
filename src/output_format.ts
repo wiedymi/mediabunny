@@ -9,7 +9,9 @@ export abstract class OutputFormat {
 
 export class Mp4OutputFormat extends OutputFormat {
 	constructor(public options: {
+		// TODO: Make this optional with a smart default
 		fastStart: false | 'in-memory' | 'fragmented' | {
+			// TODO: This is too simple now that multiple tracks can exist.
 			expectedVideoChunks?: number,
 			expectedAudioChunks?: number
 		},
