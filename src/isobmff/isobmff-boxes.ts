@@ -2,7 +2,7 @@ import { toUint8Array, assert, isU32, last, TransformationMatrix, textEncoder, C
 import { AudioCodec, AudioSource, SubtitleCodec, VideoCodec, VideoSource } from '../source';
 import { formatSubtitleTimestamp } from '../subtitles';
 import { Writer } from '../writer';
-import { GLOBAL_TIMESCALE, intoTimescale, IsobmffAudioTrackData, IsobmffSubtitleTrackData, IsobmffTrackData, IsobmffVideoTrackData, Sample } from './isobmff_muxer';
+import { GLOBAL_TIMESCALE, intoTimescale, IsobmffAudioTrackData, IsobmffSubtitleTrackData, IsobmffTrackData, IsobmffVideoTrackData, Sample } from './isobmff-muxer';
 
 export class IsobmffBoxWriter {
 	private helper = new Uint8Array(8);
@@ -506,17 +506,17 @@ export const stsd = (trackData: IsobmffTrackData) => {
 
 	if (trackData.type === 'video') {
 		sampleDescription = videoSampleDescription(
-			VIDEO_CODEC_TO_BOX_NAME[trackData.track.source.codec],
+			VIDEO_CODEC_TO_BOX_NAME[trackData.track.source._codec],
 			trackData
 		)
 	} else if (trackData.type === 'audio') {
 		sampleDescription = soundSampleDescription(
-			AUDIO_CODEC_TO_BOX_NAME[trackData.track.source.codec],
+			AUDIO_CODEC_TO_BOX_NAME[trackData.track.source._codec],
 			trackData
 		);
 	} else if (trackData.type === 'subtitle') {
 		sampleDescription = subtitleSampleDescription(
-			SUBTITLE_CODEC_TO_BOX_NAME[trackData.track.source.codec],
+			SUBTITLE_CODEC_TO_BOX_NAME[trackData.track.source._codec],
 			trackData
 		);
 	}
@@ -550,7 +550,7 @@ export const videoSampleDescription = (
 	u16(0x0018), // Depth
 	i16(0xffff) // Pre-defined
 ], [
-	VIDEO_CODEC_TO_CONFIGURATION_BOX[trackData.track.source.codec](trackData),
+	VIDEO_CODEC_TO_CONFIGURATION_BOX[trackData.track.source._codec](trackData),
 	colorSpaceIsComplete(trackData.info.decoderConfig.colorSpace) ? colr(trackData) : null
 ]);
 
@@ -644,7 +644,7 @@ export const soundSampleDescription = (
 	u16(0), // Packet size
 	fixed_16_16(trackData.info.sampleRate) // Sample rate
 ], [
-	AUDIO_CODEC_TO_CONFIGURATION_BOX[trackData.track.source.codec](trackData)
+	AUDIO_CODEC_TO_CONFIGURATION_BOX[trackData.track.source._codec](trackData)
 ]);
 
 /** MPEG-4 Elementary Stream Descriptor Box. */
@@ -722,7 +722,7 @@ export const subtitleSampleDescription = (
 	Array(6).fill(0), // Reserved
 	u16(1), // Data reference index
 ], [
-	SUBTITLE_CODEC_TO_CONFIGURATION_BOX[trackData.track.source.codec](trackData)
+	SUBTITLE_CODEC_TO_CONFIGURATION_BOX[trackData.track.source._codec](trackData)
 ])
 
 export const vttC = (trackData: IsobmffSubtitleTrackData) => box('vttC', [

@@ -1,11 +1,12 @@
 import { TransformationMatrix } from "./misc";
 import { Muxer } from "./muxer";
-import { OutputFormat } from "./output_format";
+import { OutputFormat } from "./output-format";
 import { AudioSource, MediaSource, SubtitleSource, VideoSource } from "./source";
 import { Target } from "./target";
 import { Writer } from "./writer";
 
-type OutputOptions = {
+/** @public */
+export type OutputOptions = {
 	format: OutputFormat,
 	target: Target
 };
@@ -31,19 +32,28 @@ export type OutputVideoTrack = OutputTrack & { type: 'video' };
 export type OutputAudioTrack = OutputTrack & { type: 'audio' };
 export type OutputSubtitleTrack = OutputTrack & { type: 'subtitle' };
 
-type VideoTrackMetadata = {
+/** @public */
+export type VideoTrackMetadata = {
 	rotation?: 0 | 90 | 180 | 270 | TransformationMatrix, // TODO respect this field for Matroska
 	frameRate?: number
 };
-type AudioTrackMetadata = {};
-type SubtitleTrackMetadata = {};
+/** @public */
+export type AudioTrackMetadata = {};
+/** @public */
+export type SubtitleTrackMetadata = {};
 
+/** @public */
 export class Output {
-	muxer: Muxer;
-	writer: Writer;
-	tracks: OutputTrack[] = [];
-	started = false;
-	finalizing = false;
+	/** @internal */
+	_muxer: Muxer;
+	/** @internal */
+	_writer: Writer;
+	/** @internal */
+	_tracks: OutputTrack[] = [];
+	/** @internal */
+	_started = false;
+	/** @internal */
+	_finalizing = false;
 
 	constructor(options: OutputOptions) {
 		if (!options || typeof options !== 'object') {
@@ -61,8 +71,8 @@ export class Output {
 		}
 		options.target.output = this;
 
-		this.writer = options.target.createWriter();
-		this.muxer = options.format.createMuxer(this);
+		this._writer = options.target._createWriter();
+		this._muxer = options.format._createMuxer(this);
 	}
 
 	addVideoTrack(source: VideoSource, metadata: VideoTrackMetadata = {}) {
@@ -89,7 +99,7 @@ export class Output {
 			);
 		}
 
-		this.addTrack('video', source, metadata);
+		this._addTrack('video', source, metadata);
 	}
 
 	addAudioTrack(source: AudioSource, metadata: AudioTrackMetadata = {}) {
@@ -100,7 +110,7 @@ export class Output {
 			throw new TypeError('metadata must be an object.');
 		}
 
-		this.addTrack('audio', source, metadata);
+		this._addTrack('audio', source, metadata);
 	}
 
 	addSubtitleTrack(source: SubtitleSource, metadata: SubtitleTrackMetadata = {}) {
@@ -111,56 +121,57 @@ export class Output {
 			throw new TypeError('metadata must be an object.');
 		}
 
-		this.addTrack('subtitle', source, metadata);
+		this._addTrack('subtitle', source, metadata);
 	}
 
-	private addTrack(type: OutputTrack['type'], source: MediaSource, metadata: object) {
-		if (this.started) {
+	/** @internal */
+	private _addTrack(type: OutputTrack['type'], source: MediaSource, metadata: object) {
+		if (this._started) {
 			throw new Error('Cannot add track after output has started.');
 		}
-		if (source.connectedTrack) {
+		if (source._connectedTrack) {
 			throw new Error('Source is already used for a track.');
 		}
 
 		const track = {
-			id: this.tracks.length + 1,
+			id: this._tracks.length + 1,
 			output: this,
 			type,
 			source: source as any,
 			metadata
 		} as OutputTrack;
 
-		this.muxer.beforeTrackAdd(track);
+		this._muxer.beforeTrackAdd(track);
 
-		this.tracks.push(track);
-		source.connectedTrack = track;
+		this._tracks.push(track);
+		source._connectedTrack = track;
 	}
 
 	start() {
-		if (this.started) {
+		if (this._started) {
 			throw new Error('Output already started.');
 		}
 
-		this.started = true;
-		this.muxer.start();
+		this._started = true;
+		this._muxer.start();
 
-		for (const track of this.tracks) {
-			track.source.start();
+		for (const track of this._tracks) {
+			track.source._start();
 		}
 	}
 
 	async finalize() {
-		if (this.finalizing) {
+		if (this._finalizing) {
 			throw new Error('Cannot call finalize twice.');
 		}
-		this.finalizing = true;
+		this._finalizing = true;
 
-		const promises = this.tracks.map(x => x.source.flush());
+		const promises = this._tracks.map(x => x.source._flush());
 		await Promise.all(promises);
 
-		this.muxer.finalize();
+		this._muxer.finalize();
 
-		this.writer.flush();
-		this.writer.finalize();
+		this._writer.flush();
+		this._writer.finalize();
 	}
 }

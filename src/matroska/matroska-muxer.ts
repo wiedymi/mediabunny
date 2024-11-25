@@ -2,7 +2,7 @@ import { validateAudioChunkMetadata, validateSubtitleMetadata, validateVideoChun
 import { assert, COLOR_PRIMARIES_MAP, colorSpaceIsComplete, MATRIX_COEFFICIENTS_MAP, readBits, textEncoder, toUint8Array, TRANSFER_CHARACTERISTICS_MAP, writeBits } from '../misc';
 import { Muxer } from '../muxer';
 import { Output, OutputAudioTrack, OutputSubtitleTrack, OutputTrack, OutputVideoTrack } from '../output';
-import { MkvOutputFormat, WebMOutputFormat } from '../output_format';
+import { MkvOutputFormat, WebMOutputFormat } from '../output-format';
 import { AudioCodec, SubtitleCodec, VideoCodec } from '../source';
 import { formatSubtitleTimestamp, inlineTimestampRegex, parseSubtitleTimestamp, SubtitleConfig, SubtitleCue, SubtitleMetadata } from '../subtitles';
 import { Writer } from '../writer';
@@ -120,7 +120,7 @@ export class MatroskaMuxer extends Muxer {
 	constructor(output: Output, format: MkvOutputFormat) {
 		super(output);
 
-		this.#writer = output.writer;
+		this.#writer = output._writer;
 		this.#format = format;
 
 		if (this.#format.options.streamable) {
@@ -298,15 +298,15 @@ export class MatroskaMuxer extends Muxer {
 		}
 
 		if (track.type === 'video') {
-			if (!['vp8', 'vp9', 'av1'].includes(track.source.codec)) {
+			if (!['vp8', 'vp9', 'av1'].includes(track.source._codec)) {
 				throw new Error(`WebM only supports VP8, VP9 and AV1 as video codecs. Switching to MKV removes this restriction.`);
 			}
 		} else if (track.type === 'audio') {
-			if (!['opus', 'vorbis'].includes(track.source.codec)) {
+			if (!['opus', 'vorbis'].includes(track.source._codec)) {
 				throw new Error(`WebM only supports Opus and Vorbis as audio codecs. Switching to MKV removes this restriction.`);
 			}
 		} else if (track.type === 'subtitle') {
-			if (track.source.codec !== 'webvtt') {
+			if (track.source._codec !== 'webvtt') {
 				throw new Error(`WebM only supports WebVTT as subtitle codec. Switching to MKV removes this restriction.`);
 			}
 		} else {
@@ -388,7 +388,7 @@ export class MatroskaMuxer extends Muxer {
 				{ id: EBMLId.TrackNumber, data: trackData.track.id },
 				{ id: EBMLId.TrackUID, data: trackData.track.id },
 				{ id: EBMLId.TrackType, data: TRACK_TYPE_MAP[trackData.type] },
-				{ id: EBMLId.CodecID, data: CODEC_STRING_MAP[trackData.track.source.codec] },
+				{ id: EBMLId.CodecID, data: CODEC_STRING_MAP[trackData.track.source._codec] },
 				...(trackData.type === 'video' ? [
 					(trackData.info.decoderConfig.description ? { id: EBMLId.CodecPrivate, data: toUint8Array(trackData.info.decoderConfig.description) } : null),
 					(trackData.track.metadata.frameRate ? { id: EBMLId.DefaultDuration, data: 1e9 / trackData.track.metadata.frameRate } : null),
@@ -555,7 +555,7 @@ export class MatroskaMuxer extends Muxer {
 
 		let timestamp = this.validateAndNormalizeTimestamp(trackData.track, chunk.timestamp, chunk.type === 'key');
 		let videoChunk = this.#createInternalChunk(data, timestamp, (chunk.duration ?? 0) / 1e6, chunk.type);
-		if (track.source.codec === 'vp9') this.#fixVP9ColorSpace(trackData, videoChunk);
+		if (track.source._codec === 'vp9') this.#fixVP9ColorSpace(trackData, videoChunk);
 
 		trackData.chunkQueue.push(videoChunk);	
 		this.#interleaveChunks();
@@ -601,8 +601,8 @@ export class MatroskaMuxer extends Muxer {
 	}
 
 	#interleaveChunks() {
-		for (const track of this.output.tracks) {
-			if (!track.source.closed && !this.#trackDatas.some(x => x.track === track)) {
+		for (const track of this.output._tracks) {
+			if (!track.source._closed && !this.#trackDatas.some(x => x.track === track)) {
 				return; // We haven't seen a sample from this open track yet
 			}
 		}
@@ -613,7 +613,7 @@ export class MatroskaMuxer extends Muxer {
 			let minTimestamp = Infinity;
 
 			for (let trackData of this.#trackDatas) {
-				if (trackData.chunkQueue.length === 0 && !trackData.track.source.closed) {
+				if (trackData.chunkQueue.length === 0 && !trackData.track.source._closed) {
 					break outer;
 				}
 
@@ -701,7 +701,7 @@ export class MatroskaMuxer extends Muxer {
 		// We can only finalize this fragment (and begin a new one) if we know that each track will be able to
 		// start the new one with a key frame.
 		const keyFrameQueuedEverywhere = this.#trackDatas.every(otherTrackData => {
-			if (otherTrackData.track.source.closed) {
+			if (otherTrackData.track.source._closed) {
 				return true;
 			}
 

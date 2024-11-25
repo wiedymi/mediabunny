@@ -5,7 +5,11 @@
 		"noImplicitAny": true,
 		"noImplicitOverride": true,
 		"noUncheckedIndexedAccess": true,
-		"noPropertyAccessFromIndexSignature": true
+		"noPropertyAccessFromIndexSignature": true,
+		"rootDir": "src",
+		"outDir": "build",
+		"declaration": true,
+		"stripInternal": true
 	},
 	"include": [
 		"src/**/*"

@@ -1,20 +1,25 @@
 import { Output } from "./output";
 import { ArrayBufferTargetWriter, ChunkedStreamTargetWriter, FileSystemWritableFileStreamTargetWriter, StreamTargetWriter, Writer } from "./writer";
 
+/** @public */
 export abstract class Target {
 	output: Output | null = null;
 
-	abstract createWriter(): Writer;
+	/** @internal */
+	abstract _createWriter(): Writer;
 }
 
+/** @public */
 export class ArrayBufferTarget extends Target {
 	buffer: ArrayBuffer | null = null;
 
-	createWriter() {
+	/** @internal */
+	_createWriter() {
 		return new ArrayBufferTargetWriter(this);
 	}
 }
 
+/** @public */
 export class StreamTarget extends Target {
 	constructor(public options: {
 		onData?: (data: Uint8Array, position: number) => void,
@@ -48,11 +53,13 @@ export class StreamTarget extends Target {
 		}
 	}
 
-	createWriter() {
+	/** @internal */
+	_createWriter() {
 		return this.options.chunked ? new ChunkedStreamTargetWriter(this) : new StreamTargetWriter(this);
 	}
 }
 
+/** @public */
 export class FileSystemWritableFileStreamTarget extends Target {
 	constructor(
 		public stream: FileSystemWritableFileStream,
@@ -73,7 +80,8 @@ export class FileSystemWritableFileStreamTarget extends Target {
 		}
 	}
 
-	createWriter() {
+	/** @internal */
+	_createWriter() {
 		return new FileSystemWritableFileStreamTargetWriter(this);
 	}
 }

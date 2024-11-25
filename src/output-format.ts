@@ -1,12 +1,15 @@
-import { IsobmffMuxer } from "./isobmff/isobmff_muxer";
-import { MatroskaMuxer } from "./matroska/matroska_muxer";
+import { IsobmffMuxer } from "./isobmff/isobmff-muxer";
+import { MatroskaMuxer } from "./matroska/matroska-muxer";
 import { Muxer } from "./muxer";
 import { Output } from "./output";
 
+/** @public */
 export abstract class OutputFormat {
-	abstract createMuxer(output: Output): Muxer;
+	/** @internal */
+	abstract _createMuxer(output: Output): Muxer;
 }
 
+/** @public */
 export class Mp4OutputFormat extends OutputFormat {
 	constructor(public options: {
 		fastStart?: false | 'in-memory' | 'fragmented',
@@ -21,11 +24,13 @@ export class Mp4OutputFormat extends OutputFormat {
 		super();
 	}
 
-	override createMuxer(output: Output) {
+	/** @internal */
+	override _createMuxer(output: Output) {
 		return new IsobmffMuxer(output, this);
 	}
 }
 
+/** @public */
 export class MkvOutputFormat extends OutputFormat {
 	constructor(public options: {
 		streamable?: boolean
@@ -40,9 +45,11 @@ export class MkvOutputFormat extends OutputFormat {
 		super();
 	}
 
-	override createMuxer(output: Output) {
+	/** @internal */
+	override _createMuxer(output: Output) {
 		return new MatroskaMuxer(output, this);
 	}
 }
 
+/** @public */
 export class WebMOutputFormat extends MkvOutputFormat {}

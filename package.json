@@ -2,9 +2,17 @@
   "name": "metamuxer",
   "version": "0.1.0",
   "description": "TODO",
-  "main": "index.js",
+  "main": "./dist/metamuxer.js",
+  "module": "./dist/metamuxer.mjs",
+  "types": "./dist/metamuxer.d.ts",
+  "exports": {
+    "types": "./dist/metamuxer.d.ts",
+    "import": "./dist/metamuxer.mjs",
+    "require": "./dist/metamuxer.js"
+  },
   "scripts": {
-    "build": "node build.mjs",
+    "build": "node build.mjs && tsc && api-extractor run && node append-namespace.mjs",
+    "build-local": "node build.mjs && tsc && api-extractor run --local --verbose && node append-namespace.mjs",
     "watch": "node build.mjs --watch"
   },
   "author": "",
@@ -14,6 +22,7 @@
     "@types/dom-webcodecs": "^0.1.11"
   },
   "devDependencies": {
+    "@microsoft/api-extractor": "^7.48.0",
     "esbuild": "^0.23.1",
     "typescript": "^5.5.4"
   }

@@ -39,13 +39,13 @@ export abstract class Muxer {
 
 			timestampInfo = {
 				timestampOffset: timestampInSeconds,
-				maxTimestamp: track.source.offsetTimestamps ? 0 : timestampInSeconds,
-				lastKeyFrameTimestamp: track.source.offsetTimestamps ? 0 : timestampInSeconds
+				maxTimestamp: track.source._offsetTimestamps ? 0 : timestampInSeconds,
+				lastKeyFrameTimestamp: track.source._offsetTimestamps ? 0 : timestampInSeconds
 			};
 			this.trackTimestampInfo.set(track, timestampInfo);
 		}
 
-		if (track.source.offsetTimestamps) {
+		if (track.source._offsetTimestamps) {
 			timestampInSeconds -= timestampInfo.timestampOffset;
 		}
 

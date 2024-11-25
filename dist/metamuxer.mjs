@@ -154,7 +154,7 @@ var formatSubtitleTimestamp = (timestamp) => {
   return hours.toString().padStart(2, "0") + ":" + minutes.toString().padStart(2, "0") + ":" + seconds.toString().padStart(2, "0") + "." + milliseconds.toString().padStart(3, "0");
 };
 
-// src/isobmff/isobmff_boxes.ts
+// src/isobmff/isobmff-boxes.ts
 var IsobmffBoxWriter = class {
   constructor(writer) {
     this.writer = writer;
@@ -562,17 +562,17 @@ var stsd = (trackData) => {
   let sampleDescription;
   if (trackData.type === "video") {
     sampleDescription = videoSampleDescription(
-      VIDEO_CODEC_TO_BOX_NAME[trackData.track.source.codec],
+      VIDEO_CODEC_TO_BOX_NAME[trackData.track.source._codec],
       trackData
     );
   } else if (trackData.type === "audio") {
     sampleDescription = soundSampleDescription(
-      AUDIO_CODEC_TO_BOX_NAME[trackData.track.source.codec],
+      AUDIO_CODEC_TO_BOX_NAME[trackData.track.source._codec],
       trackData
     );
   } else if (trackData.type === "subtitle") {
     sampleDescription = subtitleSampleDescription(
-      SUBTITLE_CODEC_TO_BOX_NAME[trackData.track.source.codec],
+      SUBTITLE_CODEC_TO_BOX_NAME[trackData.track.source._codec],
       trackData
     );
   }
@@ -614,7 +614,7 @@ var videoSampleDescription = (compressionType, trackData) => box(compressionType
   i16(65535)
   // Pre-defined
 ], [
-  VIDEO_CODEC_TO_CONFIGURATION_BOX[trackData.track.source.codec](trackData),
+  VIDEO_CODEC_TO_CONFIGURATION_BOX[trackData.track.source._codec](trackData),
   colorSpaceIsComplete(trackData.info.decoderConfig.colorSpace) ? colr(trackData) : null
 ]);
 var colr = (trackData) => box("colr", [
@@ -702,7 +702,7 @@ var soundSampleDescription = (compressionType, trackData) => box(compressionType
   fixed_16_16(trackData.info.sampleRate)
   // Sample rate
 ], [
-  AUDIO_CODEC_TO_CONFIGURATION_BOX[trackData.track.source.codec](trackData)
+  AUDIO_CODEC_TO_CONFIGURATION_BOX[trackData.track.source._codec](trackData)
 ]);
 var esds = (trackData) => {
   let description = toUint8Array(trackData.info.decoderConfig.description ?? new ArrayBuffer(0));
@@ -779,7 +779,7 @@ var subtitleSampleDescription = (compressionType, trackData) => box(compressionT
   u16(1)
   // Data reference index
 ], [
-  SUBTITLE_CODEC_TO_CONFIGURATION_BOX[trackData.track.source.codec](trackData)
+  SUBTITLE_CODEC_TO_CONFIGURATION_BOX[trackData.track.source._codec](trackData)
 ]);
 var vttC = (trackData) => box("vttC", [
   ...textEncoder.encode(trackData.info.config.description)
@@ -1077,12 +1077,12 @@ var Muxer = class {
       }
       timestampInfo = {
         timestampOffset: timestampInSeconds,
-        maxTimestamp: track.source.offsetTimestamps ? 0 : timestampInSeconds,
-        lastKeyFrameTimestamp: track.source.offsetTimestamps ? 0 : timestampInSeconds
+        maxTimestamp: track.source._offsetTimestamps ? 0 : timestampInSeconds,
+        lastKeyFrameTimestamp: track.source._offsetTimestamps ? 0 : timestampInSeconds
       };
       this.trackTimestampInfo.set(track, timestampInfo);
     }
-    if (track.source.offsetTimestamps) {
+    if (track.source._offsetTimestamps) {
       timestampInSeconds -= timestampInfo.timestampOffset;
     }
     if (timestampInSeconds < 0) {
@@ -1113,7 +1113,8 @@ var ArrayBufferTarget = class extends Target {
     super(...arguments);
     this.buffer = null;
   }
-  createWriter() {
+  /** @internal */
+  _createWriter() {
     return new ArrayBufferTargetWriter(this);
   }
 };
@@ -1141,7 +1142,8 @@ var StreamTarget = class extends Target {
       throw new TypeError("options.chunkSize, when provided, must be a positive integer.");
     }
   }
-  createWriter() {
+  /** @internal */
+  _createWriter() {
     return this.options.chunked ? new ChunkedStreamTargetWriter(this) : new StreamTargetWriter(this);
   }
 };
@@ -1162,7 +1164,8 @@ var FileSystemWritableFileStreamTarget = class extends Target {
       }
     }
   }
-  createWriter() {
+  /** @internal */
+  _createWriter() {
     return new FileSystemWritableFileStreamTargetWriter(this);
   }
 };
@@ -1597,7 +1600,7 @@ var validateSubtitleMetadata = (metadata) => {
   }
 };
 
-// src/isobmff/isobmff_muxer.ts
+// src/isobmff/isobmff-muxer.ts
 var GLOBAL_TIMESCALE = 1e3;
 var TIMESTAMP_OFFSET = 2082844800;
 var intoTimescale = (timeInSeconds, timescale, round = true) => {
@@ -1609,7 +1612,7 @@ var IsobmffMuxer = class extends Muxer {
     super(output);
     this.timestampsMustStartAtZero = true;
     this.#auxTarget = new ArrayBufferTarget();
-    this.#auxWriter = this.#auxTarget.createWriter();
+    this.#auxWriter = this.#auxTarget._createWriter();
     this.#auxBoxWriter = new IsobmffBoxWriter(this.#auxWriter);
     this.#ftypSize = null;
     this.#mdat = null;
@@ -1617,7 +1620,7 @@ var IsobmffMuxer = class extends Muxer {
     this.#creationTime = Math.floor(Date.now() / 1e3) + TIMESTAMP_OFFSET;
     this.#finalizedChunks = [];
     this.#nextFragmentNumber = 1;
-    this.#writer = output.writer;
+    this.#writer = output._writer;
     this.#boxWriter = new IsobmffBoxWriter(this.#writer);
     this.#format = format;
     this.#fastStart = format.options.fastStart ?? (this.#writer instanceof ArrayBufferTargetWriter ? "in-memory" : false);
@@ -1639,7 +1642,7 @@ var IsobmffMuxer = class extends Muxer {
   #finalizedChunks;
   #nextFragmentNumber;
   start() {
-    const holdsAvc = this.output.tracks.some((x) => x.type === "video" && x.source.codec === "avc");
+    const holdsAvc = this.output._tracks.some((x) => x.type === "video" && x.source._codec === "avc");
     this.#boxWriter.writeBox(ftyp({
       holdsAvc,
       fragmented: this.#fastStart === "fragmented"
@@ -1775,7 +1778,7 @@ var IsobmffMuxer = class extends Muxer {
   addSubtitleCue(track, cue, meta) {
     const trackData = this.#getSubtitleTrackData(track, meta);
     this.validateAndNormalizeTimestamp(trackData.track, 1e6 * cue.timestamp, true);
-    if (track.source.codec === "webvtt") {
+    if (track.source._codec === "webvtt") {
       trackData.cueQueue.push(cue);
       this.#processWebVTTCues(trackData, cue.timestamp);
     } else {
@@ -1996,8 +1999,8 @@ var IsobmffMuxer = class extends Muxer {
   }
   #interleaveSamples() {
     assert(this.#fastStart === "fragmented");
-    for (const track of this.output.tracks) {
-      if (!track.source.closed && !this.#trackDatas.some((x) => x.track === track)) {
+    for (const track of this.output._tracks) {
+      if (!track.source._closed && !this.#trackDatas.some((x) => x.track === track)) {
         return;
       }
     }
@@ -2006,7 +2009,7 @@ var IsobmffMuxer = class extends Muxer {
         let trackWithMinTimestamp = null;
         let minTimestamp = Infinity;
         for (let trackData of this.#trackDatas) {
-          if (trackData.sampleQueue.length === 0 && !trackData.track.source.closed) {
+          if (trackData.sampleQueue.length === 0 && !trackData.track.source._closed) {
             break outer;
           }
           if (trackData.sampleQueue.length > 0 && trackData.sampleQueue[0].timestamp < minTimestamp) {
@@ -2071,7 +2074,7 @@ var IsobmffMuxer = class extends Muxer {
     }
   }
   onTrackClose(track) {
-    if (track.type === "subtitle" && track.source.codec === "webvtt") {
+    if (track.type === "subtitle" && track.source._codec === "webvtt") {
       let trackData = this.#trackDatas.find((x) => x.track === track);
       if (trackData) {
         this.#processWebVTTCues(trackData, Infinity);
@@ -2084,7 +2087,7 @@ var IsobmffMuxer = class extends Muxer {
   /** Finalizes the file, making it ready for use. Must be called after all video and audio chunks have been added. */
   finalize() {
     for (let trackData of this.#trackDatas) {
-      if (trackData.type === "subtitle" && trackData.track.source.codec === "webvtt") {
+      if (trackData.type === "subtitle" && trackData.track.source._codec === "webvtt") {
         this.#processWebVTTCues(trackData, Infinity);
       }
     }
@@ -2225,7 +2228,7 @@ var measureEBMLVarInt = (value) => {
   }
 };
 
-// src/matroska/matroska_muxer.ts
+// src/matroska/matroska-muxer.ts
 var MAX_CHUNK_LENGTH_MS = 2 ** 15;
 var APP_NAME = "https://github.com/Vanilagy/webm-muxer";
 var SEGMENT_SIZE_BYTES = 6;
@@ -2269,7 +2272,7 @@ var MatroskaMuxer = class extends Muxer {
     this.#currentClusterMsTimestamp = null;
     this.#trackDatasInCurrentCluster = /* @__PURE__ */ new Set();
     this.#duration = 0;
-    this.#writer = output.writer;
+    this.#writer = output._writer;
     this.#format = format;
     if (this.#format.options.streamable) {
       this.#writer.ensureMonotonicity = true;
@@ -2431,15 +2434,15 @@ var MatroskaMuxer = class extends Muxer {
       return;
     }
     if (track.type === "video") {
-      if (!["vp8", "vp9", "av1"].includes(track.source.codec)) {
+      if (!["vp8", "vp9", "av1"].includes(track.source._codec)) {
         throw new Error(`WebM only supports VP8, VP9 and AV1 as video codecs. Switching to MKV removes this restriction.`);
       }
     } else if (track.type === "audio") {
-      if (!["opus", "vorbis"].includes(track.source.codec)) {
+      if (!["opus", "vorbis"].includes(track.source._codec)) {
         throw new Error(`WebM only supports Opus and Vorbis as audio codecs. Switching to MKV removes this restriction.`);
       }
     } else if (track.type === "subtitle") {
-      if (track.source.codec !== "webvtt") {
+      if (track.source._codec !== "webvtt") {
         throw new Error(`WebM only supports WebVTT as subtitle codec. Switching to MKV removes this restriction.`);
       }
     } else {
@@ -2510,7 +2513,7 @@ var MatroskaMuxer = class extends Muxer {
         { id: 215 /* TrackNumber */, data: trackData.track.id },
         { id: 29637 /* TrackUID */, data: trackData.track.id },
         { id: 131 /* TrackType */, data: TRACK_TYPE_MAP[trackData.type] },
-        { id: 134 /* CodecID */, data: CODEC_STRING_MAP[trackData.track.source.codec] },
+        { id: 134 /* CodecID */, data: CODEC_STRING_MAP[trackData.track.source._codec] },
         ...trackData.type === "video" ? [
           trackData.info.decoderConfig.description ? { id: 25506 /* CodecPrivate */, data: toUint8Array(trackData.info.decoderConfig.description) } : null,
           trackData.track.metadata.frameRate ? { id: 2352003 /* DefaultDuration */, data: 1e9 / trackData.track.metadata.frameRate } : null,
@@ -2643,7 +2646,7 @@ var MatroskaMuxer = class extends Muxer {
     chunk.copyTo(data);
     let timestamp = this.validateAndNormalizeTimestamp(trackData.track, chunk.timestamp, chunk.type === "key");
     let videoChunk = this.#createInternalChunk(data, timestamp, (chunk.duration ?? 0) / 1e6, chunk.type);
-    if (track.source.codec === "vp9") this.#fixVP9ColorSpace(trackData, videoChunk);
+    if (track.source._codec === "vp9") this.#fixVP9ColorSpace(trackData, videoChunk);
     trackData.chunkQueue.push(videoChunk);
     this.#interleaveChunks();
   }
@@ -2676,8 +2679,8 @@ ${cue.notes ?? ""}`;
     this.#interleaveChunks();
   }
   #interleaveChunks() {
-    for (const track of this.output.tracks) {
-      if (!track.source.closed && !this.#trackDatas.some((x) => x.track === track)) {
+    for (const track of this.output._tracks) {
+      if (!track.source._closed && !this.#trackDatas.some((x) => x.track === track)) {
         return;
       }
     }
@@ -2686,7 +2689,7 @@ ${cue.notes ?? ""}`;
         let trackWithMinTimestamp = null;
         let minTimestamp = Infinity;
         for (let trackData of this.#trackDatas) {
-          if (trackData.chunkQueue.length === 0 && !trackData.track.source.closed) {
+          if (trackData.chunkQueue.length === 0 && !trackData.track.source._closed) {
             break outer;
           }
           if (trackData.chunkQueue.length > 0 && trackData.chunkQueue[0].timestamp < minTimestamp) {
@@ -2752,7 +2755,7 @@ ${cue.notes ?? ""}`;
     }
     let msTimestamp = Math.floor(1e3 * chunk.timestamp);
     const keyFrameQueuedEverywhere = this.#trackDatas.every((otherTrackData) => {
-      if (otherTrackData.track.source.closed) {
+      if (otherTrackData.track.source._closed) {
         return true;
       }
       if (trackData === otherTrackData) {
@@ -2880,7 +2883,7 @@ ${cue.notes ?? ""}`;
   }
 };
 
-// src/output_format.ts
+// src/output-format.ts
 var OutputFormat = class {
 };
 var Mp4OutputFormat = class extends OutputFormat {
@@ -2894,7 +2897,8 @@ var Mp4OutputFormat = class extends OutputFormat {
     super();
     this.options = options;
   }
-  createMuxer(output) {
+  /** @internal */
+  _createMuxer(output) {
     return new IsobmffMuxer(output, this);
   }
 };
@@ -2909,7 +2913,8 @@ var MkvOutputFormat2 = class extends OutputFormat {
     super();
     this.options = options;
   }
-  createMuxer(output) {
+  /** @internal */
+  _createMuxer(output) {
     return new MatroskaMuxer(output, this);
   }
 };
@@ -2922,55 +2927,60 @@ var AUDIO_CODECS = ["aac", "opus"];
 var SUBTITLE_CODECS = ["webvtt"];
 var MediaSource = class {
   constructor() {
-    this.connectedTrack = null;
-    this.closed = false;
-    this.offsetTimestamps = false;
+    /** @internal */
+    this._connectedTrack = null;
+    /** @internal */
+    this._closed = false;
+    /** @internal */
+    this._offsetTimestamps = false;
   }
-  // TODO this is also just internal:
-  ensureValidDigest() {
-    if (!this.connectedTrack) {
+  /** @internal */
+  _ensureValidDigest() {
+    if (!this._connectedTrack) {
       throw new Error("Cannot call digest without connecting the source to an output track.");
     }
-    if (!this.connectedTrack.output.started) {
+    if (!this._connectedTrack.output._started) {
       throw new Error("Cannot call digest before output has been started.");
     }
-    if (this.connectedTrack.output.finalizing) {
+    if (this._connectedTrack.output._finalizing) {
       throw new Error("Cannot call digest after output has started finalizing.");
     }
-    if (this.closed) {
+    if (this._closed) {
       throw new Error("Cannot call digest after source has been closed.");
     }
   }
-  // TODO: These are should not be called from the outside lib
-  start() {
+  /** @internal */
+  _start() {
   }
-  async flush() {
+  /** @internal */
+  async _flush() {
   }
   close() {
-    if (this.closed) {
+    if (this._closed) {
       throw new Error("Source already closed.");
     }
-    if (!this.connectedTrack) {
+    if (!this._connectedTrack) {
       throw new Error("Cannot call close without connecting the source to an output track.");
     }
-    if (!this.connectedTrack.output.started) {
+    if (!this._connectedTrack.output._started) {
       throw new Error("Cannot call close before output has been started.");
     }
-    this.closed = true;
-    if (this.connectedTrack.output.finalizing) {
+    this._closed = true;
+    if (this._connectedTrack.output._finalizing) {
       return;
     }
-    this.connectedTrack.output.muxer.onTrackClose(this.connectedTrack);
+    this._connectedTrack.output._muxer.onTrackClose(this._connectedTrack);
   }
 };
 var VideoSource = class extends MediaSource {
   constructor(codec) {
     super();
-    this.connectedTrack = null;
+    /** @internal */
+    this._connectedTrack = null;
     if (!VIDEO_CODECS.includes(codec)) {
       throw new TypeError(`Invalid video codec '${codec}'. Must be one of: ${VIDEO_CODECS.join(", ")}.`);
     }
-    this.codec = codec;
+    this._codec = codec;
   }
 };
 var EncodedVideoChunkSource = class extends VideoSource {
@@ -2981,8 +2991,8 @@ var EncodedVideoChunkSource = class extends VideoSource {
     if (!(chunk instanceof EncodedVideoChunk)) {
       throw new TypeError("chunk must be an EncodedVideoChunk.");
     }
-    this.ensureValidDigest();
-    this.connectedTrack?.output.muxer.addEncodedVideoChunk(this.connectedTrack, chunk, meta);
+    this._ensureValidDigest();
+    this._connectedTrack?.output._muxer.addEncodedVideoChunk(this._connectedTrack, chunk, meta);
   }
 };
 var KEY_FRAME_INTERVAL = 5;
@@ -3011,7 +3021,7 @@ var VideoEncoderWrapper = class {
     validateVideoCodecConfig(codecConfig);
   }
   digest(videoFrame) {
-    this.source.ensureValidDigest();
+    this.source._ensureValidDigest();
     if (this.lastWidth !== null && this.lastHeight !== null) {
       if (videoFrame.codedWidth !== this.lastWidth || videoFrame.codedHeight !== this.lastHeight) {
         throw new Error(`Video frame size must remain constant. Expected ${this.lastWidth}x${this.lastHeight}, got ${videoFrame.codedWidth}x${videoFrame.codedHeight}.`);
@@ -3031,7 +3041,7 @@ var VideoEncoderWrapper = class {
       return;
     }
     this.encoder = new VideoEncoder({
-      output: (chunk, meta) => this.source.connectedTrack?.output.muxer.addEncodedVideoChunk(this.source.connectedTrack, chunk, meta),
+      output: (chunk, meta) => this.source._connectedTrack?.output._muxer.addEncodedVideoChunk(this.source._connectedTrack, chunk, meta),
       error: (error) => console.error("Video encode error:", error)
     });
     this.encoder.configure({
@@ -3039,7 +3049,7 @@ var VideoEncoderWrapper = class {
       width: videoFrame.codedWidth,
       height: videoFrame.codedHeight,
       bitrate: this.codecConfig.bitrate,
-      framerate: this.source.connectedTrack?.metadata.frameRate,
+      framerate: this.source._connectedTrack?.metadata.frameRate,
       latencyMode: this.codecConfig.latencyMode
     });
   }
@@ -3050,16 +3060,17 @@ var VideoEncoderWrapper = class {
 var VideoFrameSource = class extends VideoSource {
   constructor(codecConfig) {
     super(codecConfig.codec);
-    this.encoder = new VideoEncoderWrapper(this, codecConfig);
+    this._encoder = new VideoEncoderWrapper(this, codecConfig);
   }
   digest(videoFrame) {
     if (!(videoFrame instanceof VideoFrame)) {
       throw new TypeError("videoFrame must be a VideoFrame.");
     }
-    this.encoder.digest(videoFrame);
+    this._encoder.digest(videoFrame);
   }
-  flush() {
-    return this.encoder.flush();
+  /** @internal */
+  _flush() {
+    return this._encoder.flush();
   }
 };
 var CanvasSource = class extends VideoSource {
@@ -3068,8 +3079,8 @@ var CanvasSource = class extends VideoSource {
       throw new TypeError("canvas must be an HTMLCanvasElement.");
     }
     super(codecConfig.codec);
-    this.canvas = canvas;
-    this.encoder = new VideoEncoderWrapper(this, codecConfig);
+    this._encoder = new VideoEncoderWrapper(this, codecConfig);
+    this._canvas = canvas;
   }
   digest(timestamp, duration = 0) {
     if (!Number.isFinite(timestamp) || timestamp < 0) {
@@ -3078,16 +3089,17 @@ var CanvasSource = class extends VideoSource {
     if (!Number.isFinite(duration) || duration < 0) {
       throw new TypeError("duration must be a non-negative number.");
     }
-    const frame = new VideoFrame(this.canvas, {
+    const frame = new VideoFrame(this._canvas, {
       timestamp: Math.round(1e6 * timestamp),
       duration: Math.round(1e6 * duration),
       alpha: "discard"
     });
-    this.encoder.digest(frame);
+    this._encoder.digest(frame);
     frame.close();
   }
-  flush() {
-    return this.encoder.flush();
+  /** @internal */
+  _flush() {
+    return this._encoder.flush();
   }
 };
 var MediaStreamVideoTrackSource = class extends VideoSource {
@@ -3095,44 +3107,53 @@ var MediaStreamVideoTrackSource = class extends VideoSource {
     if (!(track instanceof MediaStreamTrack) || track.kind !== "video") {
       throw new TypeError("track must be a video MediaStreamTrack.");
     }
+    codecConfig = {
+      ...codecConfig,
+      latencyMode: "realtime"
+    };
     super(codecConfig.codec);
-    this.track = track;
-    this.abortController = null;
-    this.offsetTimestamps = true;
-    this.encoder = new VideoEncoderWrapper(this, codecConfig);
+    /** @internal */
+    this._abortController = null;
+    /** @internal */
+    this._offsetTimestamps = true;
+    this._encoder = new VideoEncoderWrapper(this, codecConfig);
+    this._track = track;
   }
-  start() {
-    this.abortController = new AbortController();
-    const processor = new MediaStreamTrackProcessor({ track: this.track });
+  /** @internal */
+  _start() {
+    this._abortController = new AbortController();
+    const processor = new MediaStreamTrackProcessor({ track: this._track });
     const consumer = new WritableStream({
       write: (videoFrame) => {
-        this.encoder.digest(videoFrame);
+        this._encoder.digest(videoFrame);
         videoFrame.close();
       }
     });
     processor.readable.pipeTo(consumer, {
-      signal: this.abortController.signal
+      signal: this._abortController.signal
     }).catch((err) => {
       if (err instanceof DOMException && err.name === "AbortError") return;
       console.error("Pipe error:", err);
     });
   }
-  async flush() {
-    if (this.abortController) {
-      this.abortController.abort();
-      this.abortController = null;
+  /** @internal */
+  async _flush() {
+    if (this._abortController) {
+      this._abortController.abort();
+      this._abortController = null;
     }
-    await this.encoder.flush();
+    await this._encoder.flush();
   }
 };
 var AudioSource = class extends MediaSource {
   constructor(codec) {
     super();
-    this.connectedTrack = null;
+    /** @internal */
+    this._connectedTrack = null;
     if (!AUDIO_CODECS.includes(codec)) {
       throw new TypeError(`Invalid audio codec '${codec}'. Must be one of: ${AUDIO_CODECS.join(", ")}.`);
     }
-    this.codec = codec;
+    this._codec = codec;
   }
 };
 var EncodedAudioChunkSource = class extends AudioSource {
@@ -3143,8 +3164,8 @@ var EncodedAudioChunkSource = class extends AudioSource {
     if (!(chunk instanceof EncodedAudioChunk)) {
       throw new TypeError("chunk must be an EncodedAudioChunk.");
     }
-    this.ensureValidDigest();
-    this.connectedTrack?.output.muxer.addEncodedAudioChunk(this.connectedTrack, chunk, meta);
+    this._ensureValidDigest();
+    this._connectedTrack?.output._muxer.addEncodedAudioChunk(this._connectedTrack, chunk, meta);
   }
 };
 var validateAudioCodecConfig = (config) => {
@@ -3168,7 +3189,7 @@ var AudioEncoderWrapper = class {
     validateAudioCodecConfig(codecConfig);
   }
   digest(audioData) {
-    this.source.ensureValidDigest();
+    this.source._ensureValidDigest();
     if (this.lastNumberOfChannels !== null && this.lastSampleRate !== null) {
       if (audioData.numberOfChannels !== this.lastNumberOfChannels || audioData.sampleRate !== this.lastSampleRate) {
         throw new Error(`Audio parameters must remain constant. Expected ${this.lastNumberOfChannels} channels at ${this.lastSampleRate} Hz, got ${audioData.numberOfChannels} channels at ${audioData.sampleRate} Hz.`);
@@ -3186,7 +3207,7 @@ var AudioEncoderWrapper = class {
       return;
     }
     this.encoder = new AudioEncoder({
-      output: (chunk, meta) => this.source.connectedTrack?.output.muxer.addEncodedAudioChunk(this.source.connectedTrack, chunk, meta),
+      output: (chunk, meta) => this.source._connectedTrack?.output._muxer.addEncodedAudioChunk(this.source._connectedTrack, chunk, meta),
       error: (error) => console.error("Audio encode error:", error)
     });
     this.encoder.configure({
@@ -3203,23 +3224,25 @@ var AudioEncoderWrapper = class {
 var AudioDataSource = class extends AudioSource {
   constructor(codecConfig) {
     super(codecConfig.codec);
-    this.encoder = new AudioEncoderWrapper(this, codecConfig);
+    this._encoder = new AudioEncoderWrapper(this, codecConfig);
   }
   digest(audioData) {
     if (!(audioData instanceof AudioData)) {
       throw new TypeError("audioData must be an AudioData.");
     }
-    this.encoder.digest(audioData);
+    this._encoder.digest(audioData);
   }
-  flush() {
-    return this.encoder.flush();
+  /** @internal */
+  _flush() {
+    return this._encoder.flush();
   }
 };
 var AudioBufferSource = class extends AudioSource {
   constructor(codecConfig) {
     super(codecConfig.codec);
-    this.accumulatedFrameCount = 0;
-    this.encoder = new AudioEncoderWrapper(this, codecConfig);
+    /** @internal */
+    this._accumulatedFrameCount = 0;
+    this._encoder = new AudioEncoderWrapper(this, codecConfig);
   }
   digest(audioBuffer) {
     if (!(audioBuffer instanceof AudioBuffer)) {
@@ -3238,15 +3261,16 @@ var AudioBufferSource = class extends AudioSource {
       sampleRate,
       numberOfFrames,
       numberOfChannels,
-      timestamp: Math.round(1e6 * this.accumulatedFrameCount / sampleRate),
+      timestamp: Math.round(1e6 * this._accumulatedFrameCount / sampleRate),
       data
     });
-    this.encoder.digest(audioData);
+    this._encoder.digest(audioData);
     audioData.close();
-    this.accumulatedFrameCount += numberOfFrames;
+    this._accumulatedFrameCount += numberOfFrames;
   }
-  flush() {
-    return this.encoder.flush();
+  /** @internal */
+  _flush() {
+    return this._encoder.flush();
   }
 };
 var MediaStreamAudioTrackSource = class extends AudioSource {
@@ -3255,51 +3279,55 @@ var MediaStreamAudioTrackSource = class extends AudioSource {
       throw new TypeError("track must be an audio MediaStreamTrack.");
     }
     super(codecConfig.codec);
-    this.track = track;
-    this.abortController = null;
-    this.offsetTimestamps = true;
-    this.encoder = new AudioEncoderWrapper(this, codecConfig);
+    /** @internal */
+    this._abortController = null;
+    this._offsetTimestamps = true;
+    this._encoder = new AudioEncoderWrapper(this, codecConfig);
+    this._track = track;
   }
-  start() {
-    this.abortController = new AbortController();
-    const processor = new MediaStreamTrackProcessor({ track: this.track });
+  /** @internal */
+  _start() {
+    this._abortController = new AbortController();
+    const processor = new MediaStreamTrackProcessor({ track: this._track });
     const consumer = new WritableStream({
       write: (audioData) => {
-        this.encoder.digest(audioData);
+        this._encoder.digest(audioData);
         audioData.close();
       }
     });
     processor.readable.pipeTo(consumer, {
-      signal: this.abortController.signal
+      signal: this._abortController.signal
     }).catch((err) => {
       if (err instanceof DOMException && err.name === "AbortError") return;
       console.error("Pipe error:", err);
     });
   }
-  async flush() {
-    if (this.abortController) {
-      this.abortController.abort();
-      this.abortController = null;
+  /** @internal */
+  async _flush() {
+    if (this._abortController) {
+      this._abortController.abort();
+      this._abortController = null;
     }
-    await this.encoder.flush();
+    await this._encoder.flush();
   }
 };
 var SubtitleSource = class extends MediaSource {
   constructor(codec) {
     super();
-    this.connectedTrack = null;
+    /** @internal */
+    this._connectedTrack = null;
     if (!SUBTITLE_CODECS.includes(codec)) {
       throw new TypeError(`Invalid subtitle codec '${codec}'. Must be one of: ${SUBTITLE_CODECS.join(", ")}.`);
     }
-    this.codec = codec;
+    this._codec = codec;
   }
 };
 var TextSubtitleSource = class extends SubtitleSource {
   constructor(codec) {
     super(codec);
-    this.parser = new SubtitleParser({
+    this._parser = new SubtitleParser({
       codec,
-      output: (cue, metadata) => this.connectedTrack?.output.muxer.addSubtitleCue(this.connectedTrack, cue, metadata),
+      output: (cue, metadata) => this._connectedTrack?.output._muxer.addSubtitleCue(this._connectedTrack, cue, metadata),
       error: (error) => console.error("Subtitle parse error:", error)
     });
   }
@@ -3307,17 +3335,20 @@ var TextSubtitleSource = class extends SubtitleSource {
     if (typeof text !== "string") {
       throw new TypeError("text must be a string.");
     }
-    this.ensureValidDigest();
-    this.parser.parse(text);
+    this._ensureValidDigest();
+    this._parser.parse(text);
   }
 };
 
 // src/output.ts
 var Output = class {
   constructor(options) {
-    this.tracks = [];
-    this.started = false;
-    this.finalizing = false;
+    /** @internal */
+    this._tracks = [];
+    /** @internal */
+    this._started = false;
+    /** @internal */
+    this._finalizing = false;
     if (!options || typeof options !== "object") {
       throw new TypeError("options must be an object.");
     }
@@ -3331,8 +3362,8 @@ var Output = class {
       throw new Error("Target is already used for another output.");
     }
     options.target.output = this;
-    this.writer = options.target.createWriter();
-    this.muxer = options.format.createMuxer(this);
+    this._writer = options.target._createWriter();
+    this._muxer = options.format._createMuxer(this);
   }
   addVideoTrack(source, metadata = {}) {
     if (!(source instanceof VideoSource)) {
@@ -3351,7 +3382,7 @@ var Output = class {
         `Invalid video frame rate: ${metadata.frameRate}. Must be a positive integer.`
       );
     }
-    this.addTrack("video", source, metadata);
+    this._addTrack("video", source, metadata);
   }
   addAudioTrack(source, metadata = {}) {
     if (!(source instanceof AudioSource)) {
@@ -3360,7 +3391,7 @@ var Output = class {
     if (!metadata || typeof metadata !== "object") {
       throw new TypeError("metadata must be an object.");
     }
-    this.addTrack("audio", source, metadata);
+    this._addTrack("audio", source, metadata);
   }
   addSubtitleTrack(source, metadata = {}) {
     if (!(source instanceof SubtitleSource)) {
@@ -3369,64 +3400,73 @@ var Output = class {
     if (!metadata || typeof metadata !== "object") {
       throw new TypeError("metadata must be an object.");
     }
-    this.addTrack("subtitle", source, metadata);
+    this._addTrack("subtitle", source, metadata);
   }
-  addTrack(type, source, metadata) {
-    if (this.started) {
+  /** @internal */
+  _addTrack(type, source, metadata) {
+    if (this._started) {
       throw new Error("Cannot add track after output has started.");
     }
-    if (source.connectedTrack) {
+    if (source._connectedTrack) {
       throw new Error("Source is already used for a track.");
     }
     const track = {
-      id: this.tracks.length + 1,
+      id: this._tracks.length + 1,
       output: this,
       type,
       source,
       metadata
     };
-    this.muxer.beforeTrackAdd(track);
-    this.tracks.push(track);
-    source.connectedTrack = track;
+    this._muxer.beforeTrackAdd(track);
+    this._tracks.push(track);
+    source._connectedTrack = track;
   }
   start() {
-    if (this.started) {
+    if (this._started) {
       throw new Error("Output already started.");
     }
-    this.started = true;
-    this.muxer.start();
-    for (const track of this.tracks) {
-      track.source.start();
+    this._started = true;
+    this._muxer.start();
+    for (const track of this._tracks) {
+      track.source._start();
     }
   }
   async finalize() {
-    if (this.finalizing) {
+    if (this._finalizing) {
       throw new Error("Cannot call finalize twice.");
     }
-    this.finalizing = true;
-    const promises = this.tracks.map((x) => x.source.flush());
+    this._finalizing = true;
+    const promises = this._tracks.map((x) => x.source._flush());
     await Promise.all(promises);
-    this.muxer.finalize();
-    this.writer.flush();
-    this.writer.finalize();
+    this._muxer.finalize();
+    this._writer.flush();
+    this._writer.finalize();
   }
 };
 export {
+  AUDIO_CODECS,
   ArrayBufferTarget,
   AudioBufferSource,
   AudioDataSource,
+  AudioSource,
   CanvasSource,
   EncodedAudioChunkSource,
   EncodedVideoChunkSource,
   FileSystemWritableFileStreamTarget,
+  MediaSource,
   MediaStreamAudioTrackSource,
   MediaStreamVideoTrackSource,
   MkvOutputFormat2 as MkvOutputFormat,
   Mp4OutputFormat,
   Output,
+  OutputFormat,
+  SUBTITLE_CODECS,
   StreamTarget,
+  SubtitleSource,
   Target,
   TextSubtitleSource,
+  VIDEO_CODECS,
   VideoFrameSource,
+  VideoSource,
   WebMOutputFormat
 };

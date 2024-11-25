@@ -1,9 +1,9 @@
-import { Box, free, ftyp, IsobmffBoxWriter, mdat, mfra, moof, moov, vtta, vttc, vtte } from './isobmff_boxes';
+import { Box, free, ftyp, IsobmffBoxWriter, mdat, mfra, moof, moov, vtta, vttc, vtte } from './isobmff-boxes';
 import { Muxer } from '../muxer';
 import { Output, OutputAudioTrack, OutputSubtitleTrack, OutputTrack, OutputVideoTrack } from '../output';
 import { ArrayBufferTargetWriter, Writer } from '../writer';
 import { assert, last, TransformationMatrix } from '../misc';
-import { Mp4OutputFormat } from '../output_format';
+import { Mp4OutputFormat } from '../output-format';
 import { inlineTimestampRegex, SubtitleConfig, SubtitleCue, SubtitleMetadata } from '../subtitles';
 import { ArrayBufferTarget } from '../target';
 import { validateAudioChunkMetadata, validateSubtitleMetadata, validateVideoChunkMetadata } from '../codec';
@@ -92,7 +92,7 @@ export class IsobmffMuxer extends Muxer {
 	#fastStart: NonNullable<Mp4OutputFormat['options']['fastStart']>;
 
 	#auxTarget = new ArrayBufferTarget();
-	#auxWriter = this.#auxTarget.createWriter();
+	#auxWriter = this.#auxTarget._createWriter();
 	#auxBoxWriter = new IsobmffBoxWriter(this.#auxWriter);
 
 	#ftypSize: number | null = null;
@@ -108,7 +108,7 @@ export class IsobmffMuxer extends Muxer {
 	constructor(output: Output, format: Mp4OutputFormat) {
 		super(output);
 
-		this.#writer = output.writer;
+		this.#writer = output._writer;
 		this.#boxWriter = new IsobmffBoxWriter(this.#writer);
 		this.#format = format;
 
@@ -122,7 +122,7 @@ export class IsobmffMuxer extends Muxer {
 	}
 
 	start() {
-		const holdsAvc = this.output.tracks.some(x => x.type === 'video' && x.source.codec === 'avc');
+		const holdsAvc = this.output._tracks.some(x => x.type === 'video' && x.source._codec === 'avc');
 		
 		// Write the header
 		this.#boxWriter.writeBox(ftyp({
@@ -295,7 +295,7 @@ export class IsobmffMuxer extends Muxer {
 
 		this.validateAndNormalizeTimestamp(trackData.track, 1e6 * cue.timestamp, true);
 
-		if (track.source.codec === 'webvtt') {
+		if (track.source._codec === 'webvtt') {
 			trackData.cueQueue.push(cue);
 			this.#processWebVTTCues(trackData, cue.timestamp);
 		} else {
@@ -603,8 +603,8 @@ export class IsobmffMuxer extends Muxer {
 	#interleaveSamples() {
 		assert(this.#fastStart === 'fragmented');
 
-		for (const track of this.output.tracks) {
-			if (!track.source.closed && !this.#trackDatas.some(x => x.track === track)) {
+		for (const track of this.output._tracks) {
+			if (!track.source._closed && !this.#trackDatas.some(x => x.track === track)) {
 				return; // We haven't seen a sample from this open track yet
 			}
 		}
@@ -615,7 +615,7 @@ export class IsobmffMuxer extends Muxer {
 			let minTimestamp = Infinity;
 
 			for (let trackData of this.#trackDatas) {
-				if (trackData.sampleQueue.length === 0 && !trackData.track.source.closed) {
+				if (trackData.sampleQueue.length === 0 && !trackData.track.source._closed) {
 					break outer;
 				}
 
@@ -704,7 +704,7 @@ export class IsobmffMuxer extends Muxer {
 	}
 
 	override onTrackClose(track: OutputTrack) {
-		if (track.type === 'subtitle' && track.source.codec === 'webvtt') {
+		if (track.type === 'subtitle' && track.source._codec === 'webvtt') {
 			let trackData = this.#trackDatas.find(x => x.track === track) as IsobmffSubtitleTrackData;
 			if (trackData) {
 				this.#processWebVTTCues(trackData, Infinity);
@@ -720,7 +720,7 @@ export class IsobmffMuxer extends Muxer {
 	/** Finalizes the file, making it ready for use. Must be called after all video and audio chunks have been added. */
 	finalize() {
 		for (let trackData of this.#trackDatas) {
-			if (trackData.type === 'subtitle' && trackData.track.source.codec === 'webvtt') {
+			if (trackData.type === 'subtitle' && trackData.track.source._codec === 'webvtt') {
 				this.#processWebVTTCues(trackData, Infinity);
 			}
 		}

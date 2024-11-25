@@ -14,6 +14,7 @@ export const buildVideoCodecString = (codec: VideoCodec, width: number, height: 
 
 		const profileCompatibility = 0x00;
 
+		// TODO this is not correct. Fails for 3000x3000 for example. This logic needs to be more complex
 		// Default to Level 4.1 (0x29) for most content, only bump to Level 5.0 (0x32) for 4K content
 		const levelIndication = (width > 1920 || height > 1080) ? 0x32 : 0x29;
 

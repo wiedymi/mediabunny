@@ -4,6 +4,7 @@ export function assert(x: unknown): asserts x {
 	}
 }
 
+/** @public */
 export type TransformationMatrix = [number, number, number, number, number, number, number, number, number];
 
 export const last = <T>(arr: T[]) => {
