@@ -26,12 +26,12 @@ const preambleStartRegex = /^WEBVTT(.|\n)*?\n{2}/;
 export const inlineTimestampRegex = /<(?:(\d{2}):)?(\d{2}):(\d{2}).(\d{3})>/g;
 
 export class SubtitleParser {
-	#options: SubtitleParserOptions;
-	#preambleText: string | null = null;
-	#preambleEmitted = false;
+	private options: SubtitleParserOptions;
+	private preambleText: string | null = null;
+	private preambleEmitted = false;
 
 	constructor(options: SubtitleParserOptions) {
-		this.#options = options;
+		this.options = options;
 	}
 
 	parse(text: string) {
@@ -40,10 +40,10 @@ export class SubtitleParser {
 		cueBlockHeaderRegex.lastIndex = 0;
 		let match: RegExpMatchArray | null;
 
-		if (!this.#preambleText) {
+		if (!this.preambleText) {
 			if (!preambleStartRegex.test(text)) {
 				let error = new Error('WebVTT preamble incorrect.');
-				this.#options.error(error);
+				this.options.error(error);
 				throw error;
 			}
 
@@ -52,11 +52,11 @@ export class SubtitleParser {
 
 			if (!preamble) {
 				let error = new Error('No WebVTT preamble provided.');
-				this.#options.error(error);
+				this.options.error(error);
 				throw error;
 			}
 
-			this.#preambleText = preamble;
+			this.preambleText = preamble;
 
 			if (match) {
 				text = text.slice(match.index);
@@ -92,14 +92,14 @@ export class SubtitleParser {
 			};
 
 			let meta: SubtitleMetadata = {};
-			if (!this.#preambleEmitted) {
+			if (!this.preambleEmitted) {
 				meta.config = {
-					description: this.#preambleText
+					description: this.preambleText
 				};
-				this.#preambleEmitted = true;
+				this.preambleEmitted = true;
 			}
 
-			this.#options.output(cue, meta);
+			this.options.output(cue, meta);
 		}
 	}
 }

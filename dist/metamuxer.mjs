@@ -78,30 +78,29 @@ var cueBlockHeaderRegex = /(?:(.+?)\n)?((?:\d{2}:)?\d{2}:\d{2}.\d{3})\s+-->\s+((
 var preambleStartRegex = /^WEBVTT(.|\n)*?\n{2}/;
 var inlineTimestampRegex = /<(?:(\d{2}):)?(\d{2}):(\d{2}).(\d{3})>/g;
 var SubtitleParser = class {
-  #options;
-  #preambleText = null;
-  #preambleEmitted = false;
   constructor(options) {
-    this.#options = options;
+    this.preambleText = null;
+    this.preambleEmitted = false;
+    this.options = options;
   }
   parse(text) {
     text = text.replaceAll("\r\n", "\n").replaceAll("\r", "\n");
     cueBlockHeaderRegex.lastIndex = 0;
     let match;
-    if (!this.#preambleText) {
+    if (!this.preambleText) {
       if (!preambleStartRegex.test(text)) {
         let error = new Error("WebVTT preamble incorrect.");
-        this.#options.error(error);
+        this.options.error(error);
         throw error;
       }
       match = cueBlockHeaderRegex.exec(text);
       let preamble = text.slice(0, match?.index ?? text.length).trimEnd();
       if (!preamble) {
         let error = new Error("No WebVTT preamble provided.");
-        this.#options.error(error);
+        this.options.error(error);
         throw error;
       }
-      this.#preambleText = preamble;
+      this.preambleText = preamble;
       if (match) {
         text = text.slice(match.index);
         cueBlockHeaderRegex.lastIndex = 0;
@@ -130,13 +129,13 @@ var SubtitleParser = class {
         notes
       };
       let meta = {};
-      if (!this.#preambleEmitted) {
+      if (!this.preambleEmitted) {
         meta.config = {
-          description: this.#preambleText
+          description: this.preambleText
         };
-        this.#preambleEmitted = true;
+        this.preambleEmitted = true;
       }
-      this.#options.output(cue, meta);
+      this.options.output(cue, meta);
     }
   }
 };
@@ -1178,73 +1177,71 @@ var Writer2 = class {
   }
 };
 var ArrayBufferTargetWriter = class extends Writer2 {
-  #pos = 0;
-  #target;
-  #buffer = new ArrayBuffer(2 ** 16);
-  #bytes = new Uint8Array(this.#buffer);
-  #maxPos = 0;
   constructor(target) {
     super();
-    this.#target = target;
+    this.pos = 0;
+    this.buffer = new ArrayBuffer(2 ** 16);
+    this.bytes = new Uint8Array(this.buffer);
+    this.maxPos = 0;
+    this.target = target;
   }
-  #ensureSize(size) {
-    let newLength = this.#buffer.byteLength;
+  ensureSize(size) {
+    let newLength = this.buffer.byteLength;
     while (newLength < size) newLength *= 2;
-    if (newLength === this.#buffer.byteLength) return;
+    if (newLength === this.buffer.byteLength) return;
     let newBuffer = new ArrayBuffer(newLength);
     let newBytes = new Uint8Array(newBuffer);
-    newBytes.set(this.#bytes, 0);
-    this.#buffer = newBuffer;
-    this.#bytes = newBytes;
+    newBytes.set(this.bytes, 0);
+    this.buffer = newBuffer;
+    this.bytes = newBytes;
   }
   write(data) {
-    this.#ensureSize(this.#pos + data.byteLength);
-    this.#bytes.set(data, this.#pos);
-    this.#pos += data.byteLength;
-    this.#maxPos = Math.max(this.#maxPos, this.#pos);
+    this.ensureSize(this.pos + data.byteLength);
+    this.bytes.set(data, this.pos);
+    this.pos += data.byteLength;
+    this.maxPos = Math.max(this.maxPos, this.pos);
   }
   seek(newPos) {
-    this.#pos = newPos;
+    this.pos = newPos;
   }
   getPos() {
-    return this.#pos;
+    return this.pos;
   }
   flush() {
   }
   finalize() {
-    this.#ensureSize(this.#pos);
-    this.#target.buffer = this.#buffer.slice(0, Math.max(this.#maxPos, this.#pos));
+    this.ensureSize(this.pos);
+    this.target.buffer = this.buffer.slice(0, Math.max(this.maxPos, this.pos));
   }
   getSlice(start, end) {
-    return this.#bytes.slice(start, end);
+    return this.bytes.slice(start, end);
   }
 };
 var StreamTargetWriter = class extends Writer2 {
-  #pos = 0;
-  #target;
-  #sections = [];
-  #lastFlushEnd = 0;
   constructor(target) {
     super();
-    this.#target = target;
+    this.pos = 0;
+    this.sections = [];
+    this.lastFlushEnd = 0;
+    this.target = target;
   }
   write(data) {
-    this.#sections.push({
+    this.sections.push({
       data: data.slice(),
-      start: this.#pos
+      start: this.pos
     });
-    this.#pos += data.byteLength;
+    this.pos += data.byteLength;
   }
   seek(newPos) {
-    this.#pos = newPos;
+    this.pos = newPos;
   }
   getPos() {
-    return this.#pos;
+    return this.pos;
   }
   flush() {
-    if (this.#sections.length === 0) return;
+    if (this.sections.length === 0) return;
     let chunks = [];
-    let sorted = [...this.#sections].sort((a, b) => a.start - b.start);
+    let sorted = [...this.sections].sort((a, b) => a.start - b.start);
     chunks.push({
       start: sorted[0].start,
       size: sorted[0].data.byteLength
@@ -1263,18 +1260,18 @@ var StreamTargetWriter = class extends Writer2 {
     }
     for (let chunk of chunks) {
       chunk.data = new Uint8Array(chunk.size);
-      for (let section of this.#sections) {
+      for (let section of this.sections) {
         if (chunk.start <= section.start && section.start < chunk.start + chunk.size) {
           chunk.data.set(section.data, section.start - chunk.start);
         }
       }
-      if (this.ensureMonotonicity && chunk.start !== this.#lastFlushEnd) {
+      if (this.ensureMonotonicity && chunk.start !== this.lastFlushEnd) {
         throw new Error("Internal error: Monotonicity violation.");
       }
-      this.#target.options.onData?.(chunk.data, chunk.start);
-      this.#lastFlushEnd = chunk.start + chunk.data.byteLength;
+      this.target.options.onData?.(chunk.data, chunk.start);
+      this.lastFlushEnd = chunk.start + chunk.data.byteLength;
     }
-    this.#sections.length = 0;
+    this.sections.length = 0;
   }
   finalize() {
   }
@@ -1282,60 +1279,58 @@ var StreamTargetWriter = class extends Writer2 {
 var DEFAULT_CHUNK_SIZE = 2 ** 24;
 var MAX_CHUNKS_AT_ONCE = 2;
 var ChunkedStreamTargetWriter = class extends Writer2 {
-  #pos = 0;
-  #target;
-  #chunkSize;
-  /**
-   * The data is divided up into fixed-size chunks, whose contents are first filled in RAM and then flushed out.
-   * A chunk is flushed if all of its contents have been written.
-   */
-  #chunks = [];
-  #lastFlushEnd = 0;
   constructor(target) {
     super();
-    this.#target = target;
-    this.#chunkSize = target.options?.chunkSize ?? DEFAULT_CHUNK_SIZE;
-    if (!Number.isInteger(this.#chunkSize) || this.#chunkSize < 2 ** 10) {
+    this.pos = 0;
+    /**
+     * The data is divided up into fixed-size chunks, whose contents are first filled in RAM and then flushed out.
+     * A chunk is flushed if all of its contents have been written.
+     */
+    this.chunks = [];
+    this.lastFlushEnd = 0;
+    this.target = target;
+    this.chunkSize = target.options?.chunkSize ?? DEFAULT_CHUNK_SIZE;
+    if (!Number.isInteger(this.chunkSize) || this.chunkSize < 2 ** 10) {
       throw new Error("Invalid StreamTarget options: chunkSize must be an integer not smaller than 1024.");
     }
   }
   write(data) {
-    this.#writeDataIntoChunks(data, this.#pos);
-    this.#flushChunks();
-    this.#pos += data.byteLength;
+    this.writeDataIntoChunks(data, this.pos);
+    this.flushChunks();
+    this.pos += data.byteLength;
   }
   seek(newPos) {
-    this.#pos = newPos;
+    this.pos = newPos;
   }
   getPos() {
-    return this.#pos;
+    return this.pos;
   }
-  #writeDataIntoChunks(data, position) {
-    let chunkIndex = this.#chunks.findIndex((x) => x.start <= position && position < x.start + this.#chunkSize);
-    if (chunkIndex === -1) chunkIndex = this.#createChunk(position);
-    let chunk = this.#chunks[chunkIndex];
+  writeDataIntoChunks(data, position) {
+    let chunkIndex = this.chunks.findIndex((x) => x.start <= position && position < x.start + this.chunkSize);
+    if (chunkIndex === -1) chunkIndex = this.createChunk(position);
+    let chunk = this.chunks[chunkIndex];
     let relativePosition = position - chunk.start;
-    let toWrite = data.subarray(0, Math.min(this.#chunkSize - relativePosition, data.byteLength));
+    let toWrite = data.subarray(0, Math.min(this.chunkSize - relativePosition, data.byteLength));
     chunk.data.set(toWrite, relativePosition);
     let section = {
       start: relativePosition,
       end: relativePosition + toWrite.byteLength
     };
-    this.#insertSectionIntoChunk(chunk, section);
-    if (chunk.written[0].start === 0 && chunk.written[0].end === this.#chunkSize) {
+    this.insertSectionIntoChunk(chunk, section);
+    if (chunk.written[0].start === 0 && chunk.written[0].end === this.chunkSize) {
       chunk.shouldFlush = true;
     }
-    if (this.#chunks.length > MAX_CHUNKS_AT_ONCE) {
-      for (let i = 0; i < this.#chunks.length - 1; i++) {
-        this.#chunks[i].shouldFlush = true;
+    if (this.chunks.length > MAX_CHUNKS_AT_ONCE) {
+      for (let i = 0; i < this.chunks.length - 1; i++) {
+        this.chunks[i].shouldFlush = true;
       }
-      this.#flushChunks();
+      this.flushChunks();
     }
     if (toWrite.byteLength < data.byteLength) {
-      this.#writeDataIntoChunks(data.subarray(toWrite.byteLength), position + toWrite.byteLength);
+      this.writeDataIntoChunks(data.subarray(toWrite.byteLength), position + toWrite.byteLength);
     }
   }
-  #insertSectionIntoChunk(chunk, section) {
+  insertSectionIntoChunk(chunk, section) {
     let low = 0;
     let high = chunk.written.length - 1;
     let index = -1;
@@ -1355,39 +1350,39 @@ var ChunkedStreamTargetWriter = class extends Writer2 {
       chunk.written.splice(index + 1, 1);
     }
   }
-  #createChunk(includesPosition) {
-    let start = Math.floor(includesPosition / this.#chunkSize) * this.#chunkSize;
+  createChunk(includesPosition) {
+    let start = Math.floor(includesPosition / this.chunkSize) * this.chunkSize;
     let chunk = {
       start,
-      data: new Uint8Array(this.#chunkSize),
+      data: new Uint8Array(this.chunkSize),
       written: [],
       shouldFlush: false
     };
-    this.#chunks.push(chunk);
-    this.#chunks.sort((a, b) => a.start - b.start);
-    return this.#chunks.indexOf(chunk);
+    this.chunks.push(chunk);
+    this.chunks.sort((a, b) => a.start - b.start);
+    return this.chunks.indexOf(chunk);
   }
-  #flushChunks(force = false) {
-    for (let i = 0; i < this.#chunks.length; i++) {
-      let chunk = this.#chunks[i];
+  flushChunks(force = false) {
+    for (let i = 0; i < this.chunks.length; i++) {
+      let chunk = this.chunks[i];
       if (!chunk.shouldFlush && !force) continue;
       for (let section of chunk.written) {
-        if (this.ensureMonotonicity && chunk.start + section.start !== this.#lastFlushEnd) {
+        if (this.ensureMonotonicity && chunk.start + section.start !== this.lastFlushEnd) {
           throw new Error("Internal error: Monotonicity violation.");
         }
-        this.#target.options.onData?.(
+        this.target.options.onData?.(
           chunk.data.subarray(section.start, section.end),
           chunk.start + section.start
         );
-        this.#lastFlushEnd = chunk.start + section.end;
+        this.lastFlushEnd = chunk.start + section.end;
       }
-      this.#chunks.splice(i--, 1);
+      this.chunks.splice(i--, 1);
     }
   }
   flush() {
   }
   finalize() {
-    this.#flushChunks(true);
+    this.flushChunks(true);
   }
 };
 var FileSystemWritableFileStreamTargetWriter = class extends ChunkedStreamTargetWriter {
@@ -1611,54 +1606,40 @@ var IsobmffMuxer = class extends Muxer {
   constructor(output, format) {
     super(output);
     this.timestampsMustStartAtZero = true;
-    this.#auxTarget = new ArrayBufferTarget();
-    this.#auxWriter = this.#auxTarget._createWriter();
-    this.#auxBoxWriter = new IsobmffBoxWriter(this.#auxWriter);
-    this.#ftypSize = null;
-    this.#mdat = null;
-    this.#trackDatas = [];
-    this.#creationTime = Math.floor(Date.now() / 1e3) + TIMESTAMP_OFFSET;
-    this.#finalizedChunks = [];
-    this.#nextFragmentNumber = 1;
-    this.#writer = output._writer;
-    this.#boxWriter = new IsobmffBoxWriter(this.#writer);
-    this.#format = format;
-    this.#fastStart = format.options.fastStart ?? (this.#writer instanceof ArrayBufferTargetWriter ? "in-memory" : false);
-    if (this.#fastStart === "in-memory" || this.#fastStart === "fragmented") {
-      this.#writer.ensureMonotonicity = true;
+    this.auxTarget = new ArrayBufferTarget();
+    this.auxWriter = this.auxTarget._createWriter();
+    this.auxBoxWriter = new IsobmffBoxWriter(this.auxWriter);
+    this.ftypSize = null;
+    this.mdat = null;
+    this.trackDatas = [];
+    this.creationTime = Math.floor(Date.now() / 1e3) + TIMESTAMP_OFFSET;
+    this.finalizedChunks = [];
+    this.nextFragmentNumber = 1;
+    this.writer = output._writer;
+    this.boxWriter = new IsobmffBoxWriter(this.writer);
+    this.fastStart = format.options.fastStart ?? (this.writer instanceof ArrayBufferTargetWriter ? "in-memory" : false);
+    if (this.fastStart === "in-memory" || this.fastStart === "fragmented") {
+      this.writer.ensureMonotonicity = true;
     }
   }
-  #writer;
-  #boxWriter;
-  #format;
-  #fastStart;
-  #auxTarget;
-  #auxWriter;
-  #auxBoxWriter;
-  #ftypSize;
-  #mdat;
-  #trackDatas;
-  #creationTime;
-  #finalizedChunks;
-  #nextFragmentNumber;
   start() {
     const holdsAvc = this.output._tracks.some((x) => x.type === "video" && x.source._codec === "avc");
-    this.#boxWriter.writeBox(ftyp({
+    this.boxWriter.writeBox(ftyp({
       holdsAvc,
-      fragmented: this.#fastStart === "fragmented"
+      fragmented: this.fastStart === "fragmented"
     }));
-    this.#ftypSize = this.#writer.getPos();
-    if (this.#fastStart === "in-memory") {
-      this.#mdat = mdat(false);
-    } else if (this.#fastStart === "fragmented") {
+    this.ftypSize = this.writer.getPos();
+    if (this.fastStart === "in-memory") {
+      this.mdat = mdat(false);
+    } else if (this.fastStart === "fragmented") {
     } else {
-      this.#mdat = mdat(true);
-      this.#boxWriter.writeBox(this.#mdat);
+      this.mdat = mdat(true);
+      this.boxWriter.writeBox(this.mdat);
     }
-    this.#writer.flush();
+    this.writer.flush();
   }
-  #getVideoTrackData(track, meta) {
-    const existingTrackData = this.#trackDatas.find((x) => x.track === track);
+  getVideoTrackData(track, meta) {
+    const existingTrackData = this.trackDatas.find((x) => x.track === track);
     if (existingTrackData) {
       return existingTrackData;
     }
@@ -1687,12 +1668,12 @@ var IsobmffMuxer = class extends Muxer {
       currentChunk: null,
       compactlyCodedChunkTable: []
     };
-    this.#trackDatas.push(newTrackData);
-    this.#trackDatas.sort((a, b) => a.track.id - b.track.id);
+    this.trackDatas.push(newTrackData);
+    this.trackDatas.sort((a, b) => a.track.id - b.track.id);
     return newTrackData;
   }
-  #getAudioTrackData(track, meta) {
-    const existingTrackData = this.#trackDatas.find((x) => x.track === track);
+  getAudioTrackData(track, meta) {
+    const existingTrackData = this.trackDatas.find((x) => x.track === track);
     if (existingTrackData) {
       return existingTrackData;
     }
@@ -1719,12 +1700,12 @@ var IsobmffMuxer = class extends Muxer {
       currentChunk: null,
       compactlyCodedChunkTable: []
     };
-    this.#trackDatas.push(newTrackData);
-    this.#trackDatas.sort((a, b) => a.track.id - b.track.id);
+    this.trackDatas.push(newTrackData);
+    this.trackDatas.sort((a, b) => a.track.id - b.track.id);
     return newTrackData;
   }
-  #getSubtitleTrackData(track, meta) {
-    const existingTrackData = this.#trackDatas.find((x) => x.track === track);
+  getSubtitleTrackData(track, meta) {
+    const existingTrackData = this.trackDatas.find((x) => x.track === track);
     if (existingTrackData) {
       return existingTrackData;
     }
@@ -1754,37 +1735,37 @@ var IsobmffMuxer = class extends Muxer {
       nextSourceId: 0,
       cueToSourceId: /* @__PURE__ */ new WeakMap()
     };
-    this.#trackDatas.push(newTrackData);
-    this.#trackDatas.sort((a, b) => a.track.id - b.track.id);
+    this.trackDatas.push(newTrackData);
+    this.trackDatas.sort((a, b) => a.track.id - b.track.id);
     this.validateAndNormalizeTimestamp(track, 0, true);
     return newTrackData;
   }
   addEncodedVideoChunk(track, chunk, meta) {
-    const trackData = this.#getVideoTrackData(track, meta);
+    const trackData = this.getVideoTrackData(track, meta);
     let data = new Uint8Array(chunk.byteLength);
     chunk.copyTo(data);
     let timestamp = this.validateAndNormalizeTimestamp(trackData.track, chunk.timestamp, chunk.type === "key");
-    let sample = this.#createSampleForTrack(trackData, data, timestamp, (chunk.duration ?? 0) / 1e6, chunk.type);
-    this.#registerSample(trackData, sample);
+    let sample = this.createSampleForTrack(trackData, data, timestamp, (chunk.duration ?? 0) / 1e6, chunk.type);
+    this.registerSample(trackData, sample);
   }
   addEncodedAudioChunk(track, chunk, meta) {
-    const trackData = this.#getAudioTrackData(track, meta);
+    const trackData = this.getAudioTrackData(track, meta);
     let data = new Uint8Array(chunk.byteLength);
     chunk.copyTo(data);
     let timestamp = this.validateAndNormalizeTimestamp(trackData.track, chunk.timestamp, chunk.type === "key");
-    let sample = this.#createSampleForTrack(trackData, data, timestamp, (chunk.duration ?? 0) / 1e6, chunk.type);
-    this.#registerSample(trackData, sample);
+    let sample = this.createSampleForTrack(trackData, data, timestamp, (chunk.duration ?? 0) / 1e6, chunk.type);
+    this.registerSample(trackData, sample);
   }
   addSubtitleCue(track, cue, meta) {
-    const trackData = this.#getSubtitleTrackData(track, meta);
+    const trackData = this.getSubtitleTrackData(track, meta);
     this.validateAndNormalizeTimestamp(trackData.track, 1e6 * cue.timestamp, true);
     if (track.source._codec === "webvtt") {
       trackData.cueQueue.push(cue);
-      this.#processWebVTTCues(trackData, cue.timestamp);
+      this.processWebVTTCues(trackData, cue.timestamp);
     } else {
     }
   }
-  #processWebVTTCues(trackData, until) {
+  processWebVTTCues(trackData, until) {
     while (trackData.cueQueue.length > 0) {
       let timestamps = /* @__PURE__ */ new Set([]);
       for (let cue of trackData.cueQueue) {
@@ -1800,15 +1781,15 @@ var IsobmffMuxer = class extends Muxer {
         break;
       }
       if (trackData.lastCueEndTimestamp < sampleStart) {
-        this.#auxWriter.seek(0);
+        this.auxWriter.seek(0);
         let box2 = vtte();
-        this.#auxBoxWriter.writeBox(box2);
-        let body2 = this.#auxWriter.getSlice(0, this.#auxWriter.getPos());
-        let sample2 = this.#createSampleForTrack(trackData, body2, trackData.lastCueEndTimestamp, sampleStart - trackData.lastCueEndTimestamp, "key");
-        this.#registerSample(trackData, sample2);
+        this.auxBoxWriter.writeBox(box2);
+        let body2 = this.auxWriter.getSlice(0, this.auxWriter.getPos());
+        let sample2 = this.createSampleForTrack(trackData, body2, trackData.lastCueEndTimestamp, sampleStart - trackData.lastCueEndTimestamp, "key");
+        this.registerSample(trackData, sample2);
         trackData.lastCueEndTimestamp = sampleStart;
       }
-      this.#auxWriter.seek(0);
+      this.auxWriter.seek(0);
       for (let i = 0; i < trackData.cueQueue.length; i++) {
         let cue = trackData.cueQueue[i];
         if (cue.timestamp >= sampleEnd) {
@@ -1824,21 +1805,21 @@ var IsobmffMuxer = class extends Muxer {
         }
         if (cue.notes) {
           let box3 = vtta(cue.notes);
-          this.#auxBoxWriter.writeBox(box3);
+          this.auxBoxWriter.writeBox(box3);
         }
         let box2 = vttc(cue.text, containsTimestamp ? sampleStart : null, cue.identifier ?? null, cue.settings ?? null, sourceId ?? null);
-        this.#auxBoxWriter.writeBox(box2);
+        this.auxBoxWriter.writeBox(box2);
         if (endTimestamp === sampleEnd) {
           trackData.cueQueue.splice(i--, 1);
         }
       }
-      let body = this.#auxWriter.getSlice(0, this.#auxWriter.getPos());
-      let sample = this.#createSampleForTrack(trackData, body, sampleStart, sampleEnd - sampleStart, "key");
-      this.#registerSample(trackData, sample);
+      let body = this.auxWriter.getSlice(0, this.auxWriter.getPos());
+      let sample = this.createSampleForTrack(trackData, body, sampleStart, sampleEnd - sampleStart, "key");
+      this.registerSample(trackData, sample);
       trackData.lastCueEndTimestamp = sampleEnd;
     }
   }
-  #createSampleForTrack(trackData, data, timestamp, duration, type) {
+  createSampleForTrack(trackData, data, timestamp, duration, type) {
     let sample = {
       timestamp,
       decodeTimestamp: timestamp,
@@ -1852,7 +1833,7 @@ var IsobmffMuxer = class extends Muxer {
     };
     return sample;
   }
-  #processTimestamps(trackData) {
+  processTimestamps(trackData) {
     if (trackData.timestampProcessingQueue.length === 0) {
       return;
     }
@@ -1868,7 +1849,7 @@ var IsobmffMuxer = class extends Muxer {
         let delta = Math.round(timescaleUnits - trackData.lastTimescaleUnits);
         trackData.lastTimescaleUnits += delta;
         trackData.lastSample.timescaleUnitsToNextSample = delta;
-        if (this.#fastStart !== "fragmented") {
+        if (this.fastStart !== "fragmented") {
           let lastTableEntry = last(trackData.timeToSampleTable);
           assert(lastTableEntry);
           if (lastTableEntry.sampleCount === 1) {
@@ -1907,7 +1888,7 @@ var IsobmffMuxer = class extends Muxer {
         }
       } else {
         trackData.lastTimescaleUnits = 0;
-        if (this.#fastStart !== "fragmented") {
+        if (this.fastStart !== "fragmented") {
           trackData.timeToSampleTable.push({
             sampleCount: 1,
             sampleDelta: durationInTimescale
@@ -1922,19 +1903,19 @@ var IsobmffMuxer = class extends Muxer {
     }
     trackData.timestampProcessingQueue.length = 0;
   }
-  #registerSample(trackData, sample) {
-    if (this.#fastStart === "fragmented") {
+  registerSample(trackData, sample) {
+    if (this.fastStart === "fragmented") {
       trackData.sampleQueue.push(sample);
-      this.#interleaveSamples();
+      this.interleaveSamples();
     } else {
-      this.#addSampleToTrack(trackData, sample);
+      this.addSampleToTrack(trackData, sample);
     }
   }
-  #addSampleToTrack(trackData, sample) {
+  addSampleToTrack(trackData, sample) {
     if (sample.type === "key") {
-      this.#processTimestamps(trackData);
+      this.processTimestamps(trackData);
     }
-    if (this.#fastStart !== "fragmented") {
+    if (this.fastStart !== "fragmented") {
       trackData.samples.push(sample);
     }
     let beginNewChunk = false;
@@ -1942,8 +1923,8 @@ var IsobmffMuxer = class extends Muxer {
       beginNewChunk = true;
     } else {
       let currentChunkDuration = sample.timestamp - trackData.currentChunk.startTimestamp;
-      if (this.#fastStart === "fragmented") {
-        const keyFrameQueuedEverywhere = this.#trackDatas.every((otherTrackData) => {
+      if (this.fastStart === "fragmented") {
+        const keyFrameQueuedEverywhere = this.trackDatas.every((otherTrackData) => {
           if (trackData === otherTrackData) {
             return sample.type === "key";
           }
@@ -1952,7 +1933,7 @@ var IsobmffMuxer = class extends Muxer {
         });
         if (currentChunkDuration >= 1 && keyFrameQueuedEverywhere) {
           beginNewChunk = true;
-          this.#finalizeFragment();
+          this.finalizeFragment();
         }
       } else {
         beginNewChunk = currentChunkDuration >= 0.5;
@@ -1960,7 +1941,7 @@ var IsobmffMuxer = class extends Muxer {
     }
     if (beginNewChunk) {
       if (trackData.currentChunk) {
-        this.#finalizeCurrentChunk(trackData);
+        this.finalizeCurrentChunk(trackData);
       }
       trackData.currentChunk = {
         startTimestamp: sample.timestamp,
@@ -1973,11 +1954,11 @@ var IsobmffMuxer = class extends Muxer {
     trackData.currentChunk.samples.push(sample);
     trackData.timestampProcessingQueue.push(sample);
   }
-  #finalizeCurrentChunk(trackData) {
-    assert(this.#fastStart !== "fragmented");
+  finalizeCurrentChunk(trackData) {
+    assert(this.fastStart !== "fragmented");
     if (!trackData.currentChunk) return;
     trackData.finalizedChunks.push(trackData.currentChunk);
-    this.#finalizedChunks.push(trackData.currentChunk);
+    this.finalizedChunks.push(trackData.currentChunk);
     if (trackData.compactlyCodedChunkTable.length === 0 || last(trackData.compactlyCodedChunkTable).samplesPerChunk !== trackData.currentChunk.samples.length) {
       trackData.compactlyCodedChunkTable.push({
         firstChunk: trackData.finalizedChunks.length,
@@ -1985,22 +1966,22 @@ var IsobmffMuxer = class extends Muxer {
         samplesPerChunk: trackData.currentChunk.samples.length
       });
     }
-    if (this.#fastStart === "in-memory") {
+    if (this.fastStart === "in-memory") {
       trackData.currentChunk.offset = 0;
       return;
     }
-    trackData.currentChunk.offset = this.#writer.getPos();
+    trackData.currentChunk.offset = this.writer.getPos();
     for (let sample of trackData.currentChunk.samples) {
       assert(sample.data);
-      this.#writer.write(sample.data);
+      this.writer.write(sample.data);
       sample.data = null;
     }
-    this.#writer.flush();
+    this.writer.flush();
   }
-  #interleaveSamples() {
-    assert(this.#fastStart === "fragmented");
+  interleaveSamples() {
+    assert(this.fastStart === "fragmented");
     for (const track of this.output._tracks) {
-      if (!track.source._closed && !this.#trackDatas.some((x) => x.track === track)) {
+      if (!track.source._closed && !this.trackDatas.some((x) => x.track === track)) {
         return;
       }
     }
@@ -2008,7 +1989,7 @@ var IsobmffMuxer = class extends Muxer {
       while (true) {
         let trackWithMinTimestamp = null;
         let minTimestamp = Infinity;
-        for (let trackData of this.#trackDatas) {
+        for (let trackData of this.trackDatas) {
           if (trackData.sampleQueue.length === 0 && !trackData.track.source._closed) {
             break outer;
           }
@@ -2021,99 +2002,99 @@ var IsobmffMuxer = class extends Muxer {
           break;
         }
         let sample = trackWithMinTimestamp.sampleQueue.shift();
-        this.#addSampleToTrack(trackWithMinTimestamp, sample);
+        this.addSampleToTrack(trackWithMinTimestamp, sample);
       }
   }
-  #finalizeFragment(flushWriter = true) {
-    assert(this.#fastStart === "fragmented");
-    let fragmentNumber = this.#nextFragmentNumber++;
+  finalizeFragment(flushWriter = true) {
+    assert(this.fastStart === "fragmented");
+    let fragmentNumber = this.nextFragmentNumber++;
     if (fragmentNumber === 1) {
-      let movieBox = moov(this.#trackDatas, this.#creationTime, true);
-      this.#boxWriter.writeBox(movieBox);
+      let movieBox = moov(this.trackDatas, this.creationTime, true);
+      this.boxWriter.writeBox(movieBox);
     }
-    let moofOffset = this.#writer.getPos();
-    let moofBox = moof(fragmentNumber, this.#trackDatas);
-    this.#boxWriter.writeBox(moofBox);
+    let moofOffset = this.writer.getPos();
+    let moofBox = moof(fragmentNumber, this.trackDatas);
+    this.boxWriter.writeBox(moofBox);
     {
       let mdatBox = mdat(false);
       let totalTrackSampleSize = 0;
-      for (let trackData of this.#trackDatas) {
+      for (let trackData of this.trackDatas) {
         assert(trackData.currentChunk);
         for (let sample of trackData.currentChunk.samples) {
           totalTrackSampleSize += sample.size;
         }
       }
-      let mdatSize = this.#boxWriter.measureBox(mdatBox) + totalTrackSampleSize;
+      let mdatSize = this.boxWriter.measureBox(mdatBox) + totalTrackSampleSize;
       if (mdatSize >= 2 ** 32) {
         mdatBox.largeSize = true;
-        mdatSize = this.#boxWriter.measureBox(mdatBox) + totalTrackSampleSize;
+        mdatSize = this.boxWriter.measureBox(mdatBox) + totalTrackSampleSize;
       }
       mdatBox.size = mdatSize;
-      this.#boxWriter.writeBox(mdatBox);
+      this.boxWriter.writeBox(mdatBox);
     }
-    for (let trackData of this.#trackDatas) {
-      trackData.currentChunk.offset = this.#writer.getPos();
+    for (let trackData of this.trackDatas) {
+      trackData.currentChunk.offset = this.writer.getPos();
       trackData.currentChunk.moofOffset = moofOffset;
       for (let sample of trackData.currentChunk.samples) {
-        this.#writer.write(sample.data);
+        this.writer.write(sample.data);
         sample.data = null;
       }
     }
-    let endPos = this.#writer.getPos();
-    this.#writer.seek(this.#boxWriter.offsets.get(moofBox));
-    let newMoofBox = moof(fragmentNumber, this.#trackDatas);
-    this.#boxWriter.writeBox(newMoofBox);
-    this.#writer.seek(endPos);
-    for (let trackData of this.#trackDatas) {
+    let endPos = this.writer.getPos();
+    this.writer.seek(this.boxWriter.offsets.get(moofBox));
+    let newMoofBox = moof(fragmentNumber, this.trackDatas);
+    this.boxWriter.writeBox(newMoofBox);
+    this.writer.seek(endPos);
+    for (let trackData of this.trackDatas) {
       trackData.finalizedChunks.push(trackData.currentChunk);
-      this.#finalizedChunks.push(trackData.currentChunk);
+      this.finalizedChunks.push(trackData.currentChunk);
       trackData.currentChunk = null;
     }
     if (flushWriter) {
-      this.#writer.flush();
+      this.writer.flush();
     }
   }
   onTrackClose(track) {
     if (track.type === "subtitle" && track.source._codec === "webvtt") {
-      let trackData = this.#trackDatas.find((x) => x.track === track);
+      let trackData = this.trackDatas.find((x) => x.track === track);
       if (trackData) {
-        this.#processWebVTTCues(trackData, Infinity);
+        this.processWebVTTCues(trackData, Infinity);
       }
     }
-    if (this.#fastStart === "fragmented") {
-      this.#interleaveSamples();
+    if (this.fastStart === "fragmented") {
+      this.interleaveSamples();
     }
   }
   /** Finalizes the file, making it ready for use. Must be called after all video and audio chunks have been added. */
   finalize() {
-    for (let trackData of this.#trackDatas) {
+    for (let trackData of this.trackDatas) {
       if (trackData.type === "subtitle" && trackData.track.source._codec === "webvtt") {
-        this.#processWebVTTCues(trackData, Infinity);
+        this.processWebVTTCues(trackData, Infinity);
       }
     }
-    if (this.#fastStart === "fragmented") {
-      for (let trackData of this.#trackDatas) {
+    if (this.fastStart === "fragmented") {
+      for (let trackData of this.trackDatas) {
         for (let sample of trackData.sampleQueue) {
-          this.#addSampleToTrack(trackData, sample);
+          this.addSampleToTrack(trackData, sample);
         }
-        this.#processTimestamps(trackData);
+        this.processTimestamps(trackData);
       }
-      this.#finalizeFragment(false);
+      this.finalizeFragment(false);
     } else {
-      for (let trackData of this.#trackDatas) {
-        this.#processTimestamps(trackData);
-        this.#finalizeCurrentChunk(trackData);
+      for (let trackData of this.trackDatas) {
+        this.processTimestamps(trackData);
+        this.finalizeCurrentChunk(trackData);
       }
     }
-    if (this.#fastStart === "in-memory") {
-      assert(this.#mdat);
+    if (this.fastStart === "in-memory") {
+      assert(this.mdat);
       let mdatSize;
       for (let i = 0; i < 2; i++) {
-        let movieBox2 = moov(this.#trackDatas, this.#creationTime);
-        let movieBoxSize = this.#boxWriter.measureBox(movieBox2);
-        mdatSize = this.#boxWriter.measureBox(this.#mdat);
-        let currentChunkPos = this.#writer.getPos() + movieBoxSize + mdatSize;
-        for (let chunk of this.#finalizedChunks) {
+        let movieBox2 = moov(this.trackDatas, this.creationTime);
+        let movieBoxSize = this.boxWriter.measureBox(movieBox2);
+        mdatSize = this.boxWriter.measureBox(this.mdat);
+        let currentChunkPos = this.writer.getPos() + movieBoxSize + mdatSize;
+        for (let chunk of this.finalizedChunks) {
           chunk.offset = currentChunkPos;
           for (let { data } of chunk.samples) {
             assert(data);
@@ -2122,43 +2103,43 @@ var IsobmffMuxer = class extends Muxer {
           }
         }
         if (currentChunkPos < 2 ** 32) break;
-        if (mdatSize >= 2 ** 32) this.#mdat.largeSize = true;
+        if (mdatSize >= 2 ** 32) this.mdat.largeSize = true;
       }
-      let movieBox = moov(this.#trackDatas, this.#creationTime);
-      this.#boxWriter.writeBox(movieBox);
-      this.#mdat.size = mdatSize;
-      this.#boxWriter.writeBox(this.#mdat);
-      for (let chunk of this.#finalizedChunks) {
+      let movieBox = moov(this.trackDatas, this.creationTime);
+      this.boxWriter.writeBox(movieBox);
+      this.mdat.size = mdatSize;
+      this.boxWriter.writeBox(this.mdat);
+      for (let chunk of this.finalizedChunks) {
         for (let sample of chunk.samples) {
           assert(sample.data);
-          this.#writer.write(sample.data);
+          this.writer.write(sample.data);
           sample.data = null;
         }
       }
-    } else if (this.#fastStart === "fragmented") {
-      let startPos = this.#writer.getPos();
-      let mfraBox = mfra(this.#trackDatas);
-      this.#boxWriter.writeBox(mfraBox);
-      let mfraBoxSize = this.#writer.getPos() - startPos;
-      this.#writer.seek(this.#writer.getPos() - 4);
-      this.#boxWriter.writeU32(mfraBoxSize);
+    } else if (this.fastStart === "fragmented") {
+      let startPos = this.writer.getPos();
+      let mfraBox = mfra(this.trackDatas);
+      this.boxWriter.writeBox(mfraBox);
+      let mfraBoxSize = this.writer.getPos() - startPos;
+      this.writer.seek(this.writer.getPos() - 4);
+      this.boxWriter.writeU32(mfraBoxSize);
     } else {
-      assert(this.#mdat);
-      assert(this.#ftypSize !== null);
-      let mdatPos = this.#boxWriter.offsets.get(this.#mdat);
+      assert(this.mdat);
+      assert(this.ftypSize !== null);
+      let mdatPos = this.boxWriter.offsets.get(this.mdat);
       assert(mdatPos !== void 0);
-      let mdatSize = this.#writer.getPos() - mdatPos;
-      this.#mdat.size = mdatSize;
-      this.#mdat.largeSize = mdatSize >= 2 ** 32;
-      this.#boxWriter.patchBox(this.#mdat);
-      let movieBox = moov(this.#trackDatas, this.#creationTime);
-      if (typeof this.#fastStart === "object") {
-        this.#writer.seek(this.#ftypSize);
-        this.#boxWriter.writeBox(movieBox);
-        let remainingBytes = mdatPos - this.#writer.getPos();
-        this.#boxWriter.writeBox(free(remainingBytes));
+      let mdatSize = this.writer.getPos() - mdatPos;
+      this.mdat.size = mdatSize;
+      this.mdat.largeSize = mdatSize >= 2 ** 32;
+      this.boxWriter.patchBox(this.mdat);
+      let movieBox = moov(this.trackDatas, this.creationTime);
+      if (typeof this.fastStart === "object") {
+        this.writer.seek(this.ftypSize);
+        this.boxWriter.writeBox(movieBox);
+        let remainingBytes = mdatPos - this.writer.getPos();
+        this.boxWriter.writeBox(free(remainingBytes));
       } else {
-        this.#boxWriter.writeBox(movieBox);
+        this.boxWriter.writeBox(movieBox);
       }
     }
   }
@@ -2252,8 +2233,8 @@ var MatroskaMuxer = class extends Muxer {
   constructor(output, format) {
     super(output);
     this.timestampsMustStartAtZero = false;
-    this.#helper = new Uint8Array(8);
-    this.#helperView = new DataView(this.#helper.buffer);
+    this.helper = new Uint8Array(8);
+    this.helperView = new DataView(this.helper.buffer);
     /**
      * Stores the position from the start of the file to where EBML elements have been written. This is used to
      * rewrite/edit elements that were already added before, and to measure sizes of things.
@@ -2261,176 +2242,161 @@ var MatroskaMuxer = class extends Muxer {
     this.offsets = /* @__PURE__ */ new WeakMap();
     /** Same as offsets, but stores position where the element's data starts (after ID and size fields). */
     this.dataOffsets = /* @__PURE__ */ new WeakMap();
-    this.#trackDatas = [];
-    this.#segment = null;
-    this.#segmentInfo = null;
-    this.#seekHead = null;
-    this.#tracksElement = null;
-    this.#segmentDuration = null;
-    this.#cues = null;
-    this.#currentCluster = null;
-    this.#currentClusterMsTimestamp = null;
-    this.#trackDatasInCurrentCluster = /* @__PURE__ */ new Set();
-    this.#duration = 0;
-    this.#writer = output._writer;
-    this.#format = format;
-    if (this.#format.options.streamable) {
-      this.#writer.ensureMonotonicity = true;
+    this.trackDatas = [];
+    this.segment = null;
+    this.segmentInfo = null;
+    this.seekHead = null;
+    this.tracksElement = null;
+    this.segmentDuration = null;
+    this.cues = null;
+    this.currentCluster = null;
+    this.currentClusterMsTimestamp = null;
+    this.trackDatasInCurrentCluster = /* @__PURE__ */ new Set();
+    this.duration = 0;
+    this.writer = output._writer;
+    this.format = format;
+    if (this.format.options.streamable) {
+      this.writer.ensureMonotonicity = true;
     }
   }
-  #writer;
-  #format;
-  #helper;
-  #helperView;
-  #trackDatas;
-  #segment;
-  #segmentInfo;
-  #seekHead;
-  #tracksElement;
-  #segmentDuration;
-  #cues;
-  #currentCluster;
-  #currentClusterMsTimestamp;
-  #trackDatasInCurrentCluster;
-  #duration;
-  #writeByte(value) {
-    this.#helperView.setUint8(0, value);
-    this.#writer.write(this.#helper.subarray(0, 1));
+  writeByte(value) {
+    this.helperView.setUint8(0, value);
+    this.writer.write(this.helper.subarray(0, 1));
   }
-  #writeFloat32(value) {
-    this.#helperView.setFloat32(0, value, false);
-    this.#writer.write(this.#helper.subarray(0, 4));
+  writeFloat32(value) {
+    this.helperView.setFloat32(0, value, false);
+    this.writer.write(this.helper.subarray(0, 4));
   }
-  #writeFloat64(value) {
-    this.#helperView.setFloat64(0, value, false);
-    this.#writer.write(this.#helper);
+  writeFloat64(value) {
+    this.helperView.setFloat64(0, value, false);
+    this.writer.write(this.helper);
   }
-  #writeUnsignedInt(value, width = measureUnsignedInt(value)) {
+  writeUnsignedInt(value, width = measureUnsignedInt(value)) {
     let pos = 0;
     switch (width) {
       case 6:
-        this.#helperView.setUint8(pos++, value / 2 ** 40 | 0);
+        this.helperView.setUint8(pos++, value / 2 ** 40 | 0);
       case 5:
-        this.#helperView.setUint8(pos++, value / 2 ** 32 | 0);
+        this.helperView.setUint8(pos++, value / 2 ** 32 | 0);
       case 4:
-        this.#helperView.setUint8(pos++, value >> 24);
+        this.helperView.setUint8(pos++, value >> 24);
       case 3:
-        this.#helperView.setUint8(pos++, value >> 16);
+        this.helperView.setUint8(pos++, value >> 16);
       case 2:
-        this.#helperView.setUint8(pos++, value >> 8);
+        this.helperView.setUint8(pos++, value >> 8);
       case 1:
-        this.#helperView.setUint8(pos++, value);
+        this.helperView.setUint8(pos++, value);
         break;
       default:
         throw new Error("Bad UINT size " + width);
     }
-    this.#writer.write(this.#helper.subarray(0, pos));
+    this.writer.write(this.helper.subarray(0, pos));
   }
-  #writeSignedInt(value, width = measureSignedInt(value)) {
+  writeSignedInt(value, width = measureSignedInt(value)) {
     if (value < 0) {
       value += 2 ** (width * 8);
     }
-    this.#writeUnsignedInt(value, width);
+    this.writeUnsignedInt(value, width);
   }
   writeEBMLVarInt(value, width = measureEBMLVarInt(value)) {
     let pos = 0;
     switch (width) {
       case 1:
-        this.#helperView.setUint8(pos++, 1 << 7 | value);
+        this.helperView.setUint8(pos++, 1 << 7 | value);
         break;
       case 2:
-        this.#helperView.setUint8(pos++, 1 << 6 | value >> 8);
-        this.#helperView.setUint8(pos++, value);
+        this.helperView.setUint8(pos++, 1 << 6 | value >> 8);
+        this.helperView.setUint8(pos++, value);
         break;
       case 3:
-        this.#helperView.setUint8(pos++, 1 << 5 | value >> 16);
-        this.#helperView.setUint8(pos++, value >> 8);
-        this.#helperView.setUint8(pos++, value);
+        this.helperView.setUint8(pos++, 1 << 5 | value >> 16);
+        this.helperView.setUint8(pos++, value >> 8);
+        this.helperView.setUint8(pos++, value);
         break;
       case 4:
-        this.#helperView.setUint8(pos++, 1 << 4 | value >> 24);
-        this.#helperView.setUint8(pos++, value >> 16);
-        this.#helperView.setUint8(pos++, value >> 8);
-        this.#helperView.setUint8(pos++, value);
+        this.helperView.setUint8(pos++, 1 << 4 | value >> 24);
+        this.helperView.setUint8(pos++, value >> 16);
+        this.helperView.setUint8(pos++, value >> 8);
+        this.helperView.setUint8(pos++, value);
         break;
       case 5:
-        this.#helperView.setUint8(pos++, 1 << 3 | value / 2 ** 32 & 7);
-        this.#helperView.setUint8(pos++, value >> 24);
-        this.#helperView.setUint8(pos++, value >> 16);
-        this.#helperView.setUint8(pos++, value >> 8);
-        this.#helperView.setUint8(pos++, value);
+        this.helperView.setUint8(pos++, 1 << 3 | value / 2 ** 32 & 7);
+        this.helperView.setUint8(pos++, value >> 24);
+        this.helperView.setUint8(pos++, value >> 16);
+        this.helperView.setUint8(pos++, value >> 8);
+        this.helperView.setUint8(pos++, value);
         break;
       case 6:
-        this.#helperView.setUint8(pos++, 1 << 2 | value / 2 ** 40 & 3);
-        this.#helperView.setUint8(pos++, value / 2 ** 32 | 0);
-        this.#helperView.setUint8(pos++, value >> 24);
-        this.#helperView.setUint8(pos++, value >> 16);
-        this.#helperView.setUint8(pos++, value >> 8);
-        this.#helperView.setUint8(pos++, value);
+        this.helperView.setUint8(pos++, 1 << 2 | value / 2 ** 40 & 3);
+        this.helperView.setUint8(pos++, value / 2 ** 32 | 0);
+        this.helperView.setUint8(pos++, value >> 24);
+        this.helperView.setUint8(pos++, value >> 16);
+        this.helperView.setUint8(pos++, value >> 8);
+        this.helperView.setUint8(pos++, value);
         break;
       default:
         throw new Error("Bad EBML VINT size " + width);
     }
-    this.#writer.write(this.#helper.subarray(0, pos));
+    this.writer.write(this.helper.subarray(0, pos));
   }
   // Assumes the string is ASCII
-  #writeString(str) {
-    this.#writer.write(new Uint8Array(str.split("").map((x) => x.charCodeAt(0))));
+  writeString(str) {
+    this.writer.write(new Uint8Array(str.split("").map((x) => x.charCodeAt(0))));
   }
   writeEBML(data) {
     if (data === null) return;
     if (data instanceof Uint8Array) {
-      this.#writer.write(data);
+      this.writer.write(data);
     } else if (Array.isArray(data)) {
       for (let elem of data) {
         this.writeEBML(elem);
       }
     } else {
-      this.offsets.set(data, this.#writer.getPos());
-      this.#writeUnsignedInt(data.id);
+      this.offsets.set(data, this.writer.getPos());
+      this.writeUnsignedInt(data.id);
       if (Array.isArray(data.data)) {
-        let sizePos = this.#writer.getPos();
+        let sizePos = this.writer.getPos();
         let sizeSize = data.size === -1 ? 1 : data.size ?? 4;
         if (data.size === -1) {
-          this.#writeByte(255);
+          this.writeByte(255);
         } else {
-          this.#writer.seek(this.#writer.getPos() + sizeSize);
+          this.writer.seek(this.writer.getPos() + sizeSize);
         }
-        let startPos = this.#writer.getPos();
+        let startPos = this.writer.getPos();
         this.dataOffsets.set(data, startPos);
         this.writeEBML(data.data);
         if (data.size !== -1) {
-          let size = this.#writer.getPos() - startPos;
-          let endPos = this.#writer.getPos();
-          this.#writer.seek(sizePos);
+          let size = this.writer.getPos() - startPos;
+          let endPos = this.writer.getPos();
+          this.writer.seek(sizePos);
           this.writeEBMLVarInt(size, sizeSize);
-          this.#writer.seek(endPos);
+          this.writer.seek(endPos);
         }
       } else if (typeof data.data === "number") {
         let size = data.size ?? measureUnsignedInt(data.data);
         this.writeEBMLVarInt(size);
-        this.#writeUnsignedInt(data.data, size);
+        this.writeUnsignedInt(data.data, size);
       } else if (typeof data.data === "string") {
         this.writeEBMLVarInt(data.data.length);
-        this.#writeString(data.data);
+        this.writeString(data.data);
       } else if (data.data instanceof Uint8Array) {
         this.writeEBMLVarInt(data.data.byteLength, data.size);
-        this.#writer.write(data.data);
+        this.writer.write(data.data);
       } else if (data.data instanceof EBMLFloat32) {
         this.writeEBMLVarInt(4);
-        this.#writeFloat32(data.data.value);
+        this.writeFloat32(data.data.value);
       } else if (data.data instanceof EBMLFloat64) {
         this.writeEBMLVarInt(8);
-        this.#writeFloat64(data.data.value);
+        this.writeFloat64(data.data.value);
       } else if (data.data instanceof EBMLSignedInt) {
         let size = data.size ?? measureSignedInt(data.data.value);
         this.writeEBMLVarInt(size);
-        this.#writeSignedInt(data.data.value, size);
+        this.writeSignedInt(data.data.value, size);
       }
     }
   }
   beforeTrackAdd(track) {
-    if (!(this.#format instanceof WebMOutputFormat)) {
+    if (!(this.format instanceof WebMOutputFormat)) {
       return;
     }
     if (track.type === "video") {
@@ -2450,21 +2416,21 @@ var MatroskaMuxer = class extends Muxer {
     }
   }
   start() {
-    this.#writeEBMLHeader();
-    if (!this.#format.options.streamable) {
-      this.#createSeekHead();
+    this.writeEBMLHeader();
+    if (!this.format.options.streamable) {
+      this.createSeekHead();
     }
-    this.#createSegmentInfo();
-    this.#createCues();
-    this.#writer.flush();
+    this.createSegmentInfo();
+    this.createCues();
+    this.writer.flush();
   }
-  #writeEBMLHeader() {
+  writeEBMLHeader() {
     let ebmlHeader = { id: 440786851 /* EBML */, data: [
       { id: 17030 /* EBMLVersion */, data: 1 },
       { id: 17143 /* EBMLReadVersion */, data: 1 },
       { id: 17138 /* EBMLMaxIDLength */, data: 4 },
       { id: 17139 /* EBMLMaxSizeLength */, data: 8 },
-      { id: 17026 /* DocType */, data: this.#format instanceof WebMOutputFormat ? "webm" : "matroska" },
+      { id: 17026 /* DocType */, data: this.format instanceof WebMOutputFormat ? "webm" : "matroska" },
       { id: 17031 /* DocTypeVersion */, data: 2 },
       { id: 17029 /* DocTypeReadVersion */, data: 2 }
     ] };
@@ -2474,7 +2440,7 @@ var MatroskaMuxer = class extends Muxer {
    * Creates a SeekHead element which is positioned near the start of the file and allows the media player to seek to
    * relevant sections more easily. Since we don't know the positions of those sections yet, we'll set them later.
    */
-  #createSeekHead() {
+  createSeekHead() {
     const kaxCues = new Uint8Array([28, 83, 187, 107]);
     const kaxInfo = new Uint8Array([21, 73, 169, 102]);
     const kaxTracks = new Uint8Array([22, 84, 174, 107]);
@@ -2492,23 +2458,23 @@ var MatroskaMuxer = class extends Muxer {
         { id: 21420 /* SeekPosition */, size: 5, data: 0 }
       ] }
     ] };
-    this.#seekHead = seekHead;
+    this.seekHead = seekHead;
   }
-  #createSegmentInfo() {
+  createSegmentInfo() {
     let segmentDuration = { id: 17545 /* Duration */, data: new EBMLFloat64(0) };
-    this.#segmentDuration = segmentDuration;
+    this.segmentDuration = segmentDuration;
     let segmentInfo = { id: 357149030 /* Info */, data: [
       { id: 2807729 /* TimestampScale */, data: 1e6 },
       { id: 19840 /* MuxingApp */, data: APP_NAME },
       { id: 22337 /* WritingApp */, data: APP_NAME },
-      !this.#format.options.streamable ? segmentDuration : null
+      !this.format.options.streamable ? segmentDuration : null
     ] };
-    this.#segmentInfo = segmentInfo;
+    this.segmentInfo = segmentInfo;
   }
-  #createTracks() {
+  createTracks() {
     let tracksElement = { id: 374648427 /* Tracks */, data: [] };
-    this.#tracksElement = tracksElement;
-    for (let trackData of this.#trackDatas) {
+    this.tracksElement = tracksElement;
+    for (let trackData of this.trackDatas) {
       tracksElement.data.push({ id: 174 /* TrackEntry */, data: [
         { id: 215 /* TrackNumber */, data: trackData.track.id },
         { id: 29637 /* TrackUID */, data: trackData.track.id },
@@ -2551,28 +2517,28 @@ var MatroskaMuxer = class extends Muxer {
       ] });
     }
   }
-  #createSegment() {
+  createSegment() {
     let segment = {
       id: 408125543 /* Segment */,
-      size: this.#format.options.streamable ? -1 : SEGMENT_SIZE_BYTES,
+      size: this.format.options.streamable ? -1 : SEGMENT_SIZE_BYTES,
       data: [
-        !this.#format.options.streamable ? this.#seekHead : null,
-        this.#segmentInfo,
-        this.#tracksElement
+        !this.format.options.streamable ? this.seekHead : null,
+        this.segmentInfo,
+        this.tracksElement
       ]
     };
-    this.#segment = segment;
+    this.segment = segment;
     this.writeEBML(segment);
   }
-  #createCues() {
-    this.#cues = { id: 475249515 /* Cues */, data: [] };
+  createCues() {
+    this.cues = { id: 475249515 /* Cues */, data: [] };
   }
-  get #segmentDataOffset() {
-    assert(this.#segment);
-    return this.dataOffsets.get(this.#segment);
+  get segmentDataOffset() {
+    assert(this.segment);
+    return this.dataOffsets.get(this.segment);
   }
-  #getVideoTrackData(track, meta) {
-    const existingTrackData = this.#trackDatas.find((x) => x.track === track);
+  getVideoTrackData(track, meta) {
+    const existingTrackData = this.trackDatas.find((x) => x.track === track);
     if (existingTrackData) {
       return existingTrackData;
     }
@@ -2592,12 +2558,12 @@ var MatroskaMuxer = class extends Muxer {
       chunkQueue: [],
       lastWrittenMsTimestamp: null
     };
-    this.#trackDatas.push(newTrackData);
-    this.#trackDatas.sort((a, b) => a.track.id - b.track.id);
+    this.trackDatas.push(newTrackData);
+    this.trackDatas.sort((a, b) => a.track.id - b.track.id);
     return newTrackData;
   }
-  #getAudioTrackData(track, meta) {
-    const existingTrackData = this.#trackDatas.find((x) => x.track === track);
+  getAudioTrackData(track, meta) {
+    const existingTrackData = this.trackDatas.find((x) => x.track === track);
     if (existingTrackData) {
       return existingTrackData;
     }
@@ -2615,12 +2581,12 @@ var MatroskaMuxer = class extends Muxer {
       chunkQueue: [],
       lastWrittenMsTimestamp: null
     };
-    this.#trackDatas.push(newTrackData);
-    this.#trackDatas.sort((a, b) => a.track.id - b.track.id);
+    this.trackDatas.push(newTrackData);
+    this.trackDatas.sort((a, b) => a.track.id - b.track.id);
     return newTrackData;
   }
-  #getSubtitleTrackData(track, meta) {
-    const existingTrackData = this.#trackDatas.find((x) => x.track === track);
+  getSubtitleTrackData(track, meta) {
+    const existingTrackData = this.trackDatas.find((x) => x.track === track);
     if (existingTrackData) {
       return existingTrackData;
     }
@@ -2636,31 +2602,31 @@ var MatroskaMuxer = class extends Muxer {
       chunkQueue: [],
       lastWrittenMsTimestamp: null
     };
-    this.#trackDatas.push(newTrackData);
-    this.#trackDatas.sort((a, b) => a.track.id - b.track.id);
+    this.trackDatas.push(newTrackData);
+    this.trackDatas.sort((a, b) => a.track.id - b.track.id);
     return newTrackData;
   }
   addEncodedVideoChunk(track, chunk, meta) {
-    const trackData = this.#getVideoTrackData(track, meta);
+    const trackData = this.getVideoTrackData(track, meta);
     let data = new Uint8Array(chunk.byteLength);
     chunk.copyTo(data);
     let timestamp = this.validateAndNormalizeTimestamp(trackData.track, chunk.timestamp, chunk.type === "key");
-    let videoChunk = this.#createInternalChunk(data, timestamp, (chunk.duration ?? 0) / 1e6, chunk.type);
-    if (track.source._codec === "vp9") this.#fixVP9ColorSpace(trackData, videoChunk);
+    let videoChunk = this.createInternalChunk(data, timestamp, (chunk.duration ?? 0) / 1e6, chunk.type);
+    if (track.source._codec === "vp9") this.fixVP9ColorSpace(trackData, videoChunk);
     trackData.chunkQueue.push(videoChunk);
-    this.#interleaveChunks();
+    this.interleaveChunks();
   }
   addEncodedAudioChunk(track, chunk, meta) {
-    const trackData = this.#getAudioTrackData(track, meta);
+    const trackData = this.getAudioTrackData(track, meta);
     let data = new Uint8Array(chunk.byteLength);
     chunk.copyTo(data);
     let timestamp = this.validateAndNormalizeTimestamp(trackData.track, chunk.timestamp, chunk.type === "key");
-    let audioChunk = this.#createInternalChunk(data, timestamp, (chunk.duration ?? 0) / 1e6, chunk.type);
+    let audioChunk = this.createInternalChunk(data, timestamp, (chunk.duration ?? 0) / 1e6, chunk.type);
     trackData.chunkQueue.push(audioChunk);
-    this.#interleaveChunks();
+    this.interleaveChunks();
   }
   addSubtitleCue(track, cue, meta) {
-    const trackData = this.#getSubtitleTrackData(track, meta);
+    const trackData = this.getSubtitleTrackData(track, meta);
     const timestamp = this.validateAndNormalizeTimestamp(trackData.track, 1e6 * cue.timestamp, true);
     let bodyText = cue.text;
     const timestampMs = Math.floor(timestamp * 1e3);
@@ -2674,13 +2640,13 @@ var MatroskaMuxer = class extends Muxer {
     const additions = `${cue.settings ?? ""}
 ${cue.identifier ?? ""}
 ${cue.notes ?? ""}`;
-    let subtitleChunk = this.#createInternalChunk(body, timestamp, cue.duration, "key", additions.trim() ? textEncoder.encode(additions) : null);
+    let subtitleChunk = this.createInternalChunk(body, timestamp, cue.duration, "key", additions.trim() ? textEncoder.encode(additions) : null);
     trackData.chunkQueue.push(subtitleChunk);
-    this.#interleaveChunks();
+    this.interleaveChunks();
   }
-  #interleaveChunks() {
+  interleaveChunks() {
     for (const track of this.output._tracks) {
-      if (!track.source._closed && !this.#trackDatas.some((x) => x.track === track)) {
+      if (!track.source._closed && !this.trackDatas.some((x) => x.track === track)) {
         return;
       }
     }
@@ -2688,7 +2654,7 @@ ${cue.notes ?? ""}`;
       while (true) {
         let trackWithMinTimestamp = null;
         let minTimestamp = Infinity;
-        for (let trackData of this.#trackDatas) {
+        for (let trackData of this.trackDatas) {
           if (trackData.chunkQueue.length === 0 && !trackData.track.source._closed) {
             break outer;
           }
@@ -2701,14 +2667,14 @@ ${cue.notes ?? ""}`;
           break;
         }
         let chunk = trackWithMinTimestamp.chunkQueue.shift();
-        this.#writeBlock(trackWithMinTimestamp, chunk);
+        this.writeBlock(trackWithMinTimestamp, chunk);
       }
-    this.#writer.flush();
+    this.writer.flush();
   }
   /** Due to [a bug in Chromium](https://bugs.chromium.org/p/chromium/issues/detail?id=1377842), VP9 streams often
    * lack color space information. This method patches in that information. */
   // http://downloads.webmproject.org/docs/vp9/vp9-bitstream_superframe-and-uncompressed-header_v1.0.pdf
-  #fixVP9ColorSpace(trackData, chunk) {
+  fixVP9ColorSpace(trackData, chunk) {
     if (chunk.type !== "key") return;
     if (!trackData.info.decoderConfig.colorSpace || !trackData.info.decoderConfig.colorSpace.matrix) return;
     let i = 0;
@@ -2737,7 +2703,7 @@ ${cue.notes ?? ""}`;
     writeBits(chunk.data, i + 0, i + 3, colorSpaceID);
   }
   /** Converts a read-only external chunk into an internal one for easier use. */
-  #createInternalChunk(data, timestamp, duration, type, additions = null) {
+  createInternalChunk(data, timestamp, duration, type, additions = null) {
     let internalChunk = {
       data,
       type,
@@ -2748,13 +2714,13 @@ ${cue.notes ?? ""}`;
     return internalChunk;
   }
   /** Writes a block containing media data to the file. */
-  #writeBlock(trackData, chunk) {
-    if (!this.#segment) {
-      this.#createTracks();
-      this.#createSegment();
+  writeBlock(trackData, chunk) {
+    if (!this.segment) {
+      this.createTracks();
+      this.createSegment();
     }
     let msTimestamp = Math.floor(1e3 * chunk.timestamp);
-    const keyFrameQueuedEverywhere = this.#trackDatas.every((otherTrackData) => {
+    const keyFrameQueuedEverywhere = this.trackDatas.every((otherTrackData) => {
       if (otherTrackData.track.source._closed) {
         return true;
       }
@@ -2764,10 +2730,10 @@ ${cue.notes ?? ""}`;
       const firstQueuedSample = otherTrackData.chunkQueue[0];
       return firstQueuedSample && firstQueuedSample.type === "key";
     });
-    if (!this.#currentCluster || keyFrameQueuedEverywhere && msTimestamp - this.#currentClusterMsTimestamp >= 1e3) {
-      this.#createNewCluster(msTimestamp);
+    if (!this.currentCluster || keyFrameQueuedEverywhere && msTimestamp - this.currentClusterMsTimestamp >= 1e3) {
+      this.createNewCluster(msTimestamp);
     }
-    let relativeTimestamp = msTimestamp - this.#currentClusterMsTimestamp;
+    let relativeTimestamp = msTimestamp - this.currentClusterMsTimestamp;
     if (relativeTimestamp < 0) {
       return;
     }
@@ -2806,39 +2772,39 @@ ${cue.notes ?? ""}`;
       ] };
       this.writeEBML(blockGroup);
     }
-    this.#duration = Math.max(this.#duration, msTimestamp + msDuration);
+    this.duration = Math.max(this.duration, msTimestamp + msDuration);
     trackData.lastWrittenMsTimestamp = msTimestamp;
-    this.#trackDatasInCurrentCluster.add(trackData);
+    this.trackDatasInCurrentCluster.add(trackData);
   }
   /** Creates a new Cluster element to contain media chunks. */
-  #createNewCluster(msTimestamp) {
-    if (this.#currentCluster && !this.#format.options.streamable) {
-      this.#finalizeCurrentCluster();
+  createNewCluster(msTimestamp) {
+    if (this.currentCluster && !this.format.options.streamable) {
+      this.finalizeCurrentCluster();
     }
-    this.#currentCluster = {
+    this.currentCluster = {
       id: 524531317 /* Cluster */,
-      size: this.#format.options.streamable ? -1 : CLUSTER_SIZE_BYTES,
+      size: this.format.options.streamable ? -1 : CLUSTER_SIZE_BYTES,
       data: [
         { id: 231 /* Timestamp */, data: msTimestamp }
       ]
     };
-    this.writeEBML(this.#currentCluster);
-    this.#currentClusterMsTimestamp = msTimestamp;
-    this.#trackDatasInCurrentCluster.clear();
+    this.writeEBML(this.currentCluster);
+    this.currentClusterMsTimestamp = msTimestamp;
+    this.trackDatasInCurrentCluster.clear();
   }
-  #finalizeCurrentCluster() {
-    assert(this.#currentCluster);
-    let clusterSize = this.#writer.getPos() - this.dataOffsets.get(this.#currentCluster);
-    let endPos = this.#writer.getPos();
-    this.#writer.seek(this.offsets.get(this.#currentCluster) + 4);
+  finalizeCurrentCluster() {
+    assert(this.currentCluster);
+    let clusterSize = this.writer.getPos() - this.dataOffsets.get(this.currentCluster);
+    let endPos = this.writer.getPos();
+    this.writer.seek(this.offsets.get(this.currentCluster) + 4);
     this.writeEBMLVarInt(clusterSize, CLUSTER_SIZE_BYTES);
-    this.#writer.seek(endPos);
-    let clusterOffsetFromSegment = this.offsets.get(this.#currentCluster) - this.#segmentDataOffset;
-    assert(this.#cues);
-    this.#cues.data.push({ id: 187 /* CuePoint */, data: [
-      { id: 179 /* CueTime */, data: this.#currentClusterMsTimestamp },
+    this.writer.seek(endPos);
+    let clusterOffsetFromSegment = this.offsets.get(this.currentCluster) - this.segmentDataOffset;
+    assert(this.cues);
+    this.cues.data.push({ id: 187 /* CuePoint */, data: [
+      { id: 179 /* CueTime */, data: this.currentClusterMsTimestamp },
       // We only write out cues for tracks that have at least one chunk in this cluster
-      ...[...this.#trackDatasInCurrentCluster].map((trackData) => {
+      ...[...this.trackDatasInCurrentCluster].map((trackData) => {
         return { id: 183 /* CueTrackPositions */, data: [
           { id: 247 /* CueTrack */, data: trackData.track.id },
           { id: 241 /* CueClusterPosition */, data: clusterOffsetFromSegment }
@@ -2847,38 +2813,38 @@ ${cue.notes ?? ""}`;
     ] });
   }
   onTrackClose() {
-    this.#interleaveChunks();
+    this.interleaveChunks();
   }
   /** Finalizes the file, making it ready for use. Must be called after all media chunks have been added. */
   finalize() {
-    if (!this.#segment) {
-      this.#createTracks();
-      this.#createSegment();
+    if (!this.segment) {
+      this.createTracks();
+      this.createSegment();
     }
-    for (let trackData of this.#trackDatas) {
+    for (let trackData of this.trackDatas) {
       while (trackData.chunkQueue.length > 0) {
-        this.#writeBlock(trackData, trackData.chunkQueue.shift());
+        this.writeBlock(trackData, trackData.chunkQueue.shift());
       }
     }
-    if (!this.#format.options.streamable && this.#currentCluster) {
-      this.#finalizeCurrentCluster();
+    if (!this.format.options.streamable && this.currentCluster) {
+      this.finalizeCurrentCluster();
     }
-    assert(this.#cues);
-    this.writeEBML(this.#cues);
-    if (!this.#format.options.streamable) {
-      let endPos = this.#writer.getPos();
-      let segmentSize = this.#writer.getPos() - this.#segmentDataOffset;
-      this.#writer.seek(this.offsets.get(this.#segment) + 4);
+    assert(this.cues);
+    this.writeEBML(this.cues);
+    if (!this.format.options.streamable) {
+      let endPos = this.writer.getPos();
+      let segmentSize = this.writer.getPos() - this.segmentDataOffset;
+      this.writer.seek(this.offsets.get(this.segment) + 4);
       this.writeEBMLVarInt(segmentSize, SEGMENT_SIZE_BYTES);
-      this.#segmentDuration.data = new EBMLFloat64(this.#duration);
-      this.#writer.seek(this.offsets.get(this.#segmentDuration));
-      this.writeEBML(this.#segmentDuration);
-      this.#seekHead.data[0].data[1].data = this.offsets.get(this.#cues) - this.#segmentDataOffset;
-      this.#seekHead.data[1].data[1].data = this.offsets.get(this.#segmentInfo) - this.#segmentDataOffset;
-      this.#seekHead.data[2].data[1].data = this.offsets.get(this.#tracksElement) - this.#segmentDataOffset;
-      this.#writer.seek(this.offsets.get(this.#seekHead));
-      this.writeEBML(this.#seekHead);
-      this.#writer.seek(endPos);
+      this.segmentDuration.data = new EBMLFloat64(this.duration);
+      this.writer.seek(this.offsets.get(this.segmentDuration));
+      this.writeEBML(this.segmentDuration);
+      this.seekHead.data[0].data[1].data = this.offsets.get(this.cues) - this.segmentDataOffset;
+      this.seekHead.data[1].data[1].data = this.offsets.get(this.segmentInfo) - this.segmentDataOffset;
+      this.seekHead.data[2].data[1].data = this.offsets.get(this.tracksElement) - this.segmentDataOffset;
+      this.writer.seek(this.offsets.get(this.seekHead));
+      this.writeEBML(this.seekHead);
+      this.writer.seek(endPos);
     }
   }
 };

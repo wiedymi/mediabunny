@@ -88,94 +88,94 @@ const TRACK_TYPE_MAP: Record<OutputTrack['type'], number> = {
 export class MatroskaMuxer extends Muxer {
 	override timestampsMustStartAtZero = false;
 
-	#writer: Writer;
-	#format: WebMOutputFormat | MkvOutputFormat;
+	private writer: Writer;
+	private format: WebMOutputFormat | MkvOutputFormat;
 
-	#helper = new Uint8Array(8);
-	#helperView = new DataView(this.#helper.buffer);
+	private helper = new Uint8Array(8);
+	private helperView = new DataView(this.helper.buffer);
 
 	/**
 	 * Stores the position from the start of the file to where EBML elements have been written. This is used to
 	 * rewrite/edit elements that were already added before, and to measure sizes of things.
 	 */
-	offsets = new WeakMap<EBML, number>();
+	private offsets = new WeakMap<EBML, number>();
 	/** Same as offsets, but stores position where the element's data starts (after ID and size fields). */
-	dataOffsets = new WeakMap<EBML, number>();
+	private dataOffsets = new WeakMap<EBML, number>();
 
-	#trackDatas: MatroskaTrackData[] = [];
+	private trackDatas: MatroskaTrackData[] = [];
 
-	#segment: EBMLElement | null = null;
-	#segmentInfo: EBMLElement | null = null;
-	#seekHead: SeekHead | null = null;
-	#tracksElement: EBMLElement | null = null;
-	#segmentDuration: EBMLElement | null = null;
-	#cues: EBMLElement | null = null;
+	private segment: EBMLElement | null = null;
+	private segmentInfo: EBMLElement | null = null;
+	private seekHead: SeekHead | null = null;
+	private tracksElement: EBMLElement | null = null;
+	private segmentDuration: EBMLElement | null = null;
+	private cues: EBMLElement | null = null;
 
-	#currentCluster: EBMLElement | null = null;
-	#currentClusterMsTimestamp: number | null = null;
-	#trackDatasInCurrentCluster = new Set<MatroskaTrackData>();
+	private currentCluster: EBMLElement | null = null;
+	private currentClusterMsTimestamp: number | null = null;
+	private trackDatasInCurrentCluster = new Set<MatroskaTrackData>();
 
-	#duration = 0;
+	private duration = 0;
 
 	constructor(output: Output, format: MkvOutputFormat) {
 		super(output);
 
-		this.#writer = output._writer;
-		this.#format = format;
+		this.writer = output._writer;
+		this.format = format;
 
-		if (this.#format.options.streamable) {
-			this.#writer.ensureMonotonicity = true;
+		if (this.format.options.streamable) {
+			this.writer.ensureMonotonicity = true;
 		}
 	}
 
-	#writeByte(value: number) {
-		this.#helperView.setUint8(0, value);
-		this.#writer.write(this.#helper.subarray(0, 1));
+	private writeByte(value: number) {
+		this.helperView.setUint8(0, value);
+		this.writer.write(this.helper.subarray(0, 1));
 	}
 
-	#writeFloat32(value: number) {
-		this.#helperView.setFloat32(0, value, false);
-		this.#writer.write(this.#helper.subarray(0, 4));
+	private writeFloat32(value: number) {
+		this.helperView.setFloat32(0, value, false);
+		this.writer.write(this.helper.subarray(0, 4));
 	}
 
-	#writeFloat64(value: number) {
-		this.#helperView.setFloat64(0, value, false);
-		this.#writer.write(this.#helper);
+	private writeFloat64(value: number) {
+		this.helperView.setFloat64(0, value, false);
+		this.writer.write(this.helper);
 	}
 
-	#writeUnsignedInt(value: number, width = measureUnsignedInt(value)) {
+	private writeUnsignedInt(value: number, width = measureUnsignedInt(value)) {
 		let pos = 0;
 
 		// Each case falls through:
 		switch (width) {
 			case 6:
 				// Need to use division to access >32 bits of floating point var
-				this.#helperView.setUint8(pos++, (value / 2**40) | 0);
+				this.helperView.setUint8(pos++, (value / 2**40) | 0);
 			case 5:
-				this.#helperView.setUint8(pos++, (value / 2**32) | 0);
+				this.helperView.setUint8(pos++, (value / 2**32) | 0);
 			case 4:
-				this.#helperView.setUint8(pos++, value >> 24);
+				this.helperView.setUint8(pos++, value >> 24);
 			case 3:
-				this.#helperView.setUint8(pos++, value >> 16);
+				this.helperView.setUint8(pos++, value >> 16);
 			case 2:
-				this.#helperView.setUint8(pos++, value >> 8);
+				this.helperView.setUint8(pos++, value >> 8);
 			case 1:
-				this.#helperView.setUint8(pos++, value);
+				this.helperView.setUint8(pos++, value);
 				break;
 			default:
 				throw new Error('Bad UINT size ' + width);
 		}
 
-		this.#writer.write(this.#helper.subarray(0, pos));
+		this.writer.write(this.helper.subarray(0, pos));
 	}
 
-	#writeSignedInt(value: number, width = measureSignedInt(value)) {
+	private writeSignedInt(value: number, width = measureSignedInt(value)) {
 		if (value < 0) {
 			// Two's complement stuff
 			value += 2 ** (width * 8);
 		}
 
-		this.#writeUnsignedInt(value, width);
+		this.writeUnsignedInt(value, width);
 	}
 
 	writeEBMLVarInt(value: number, width = measureEBMLVarInt(value)) {
@@ -183,22 +183,22 @@ export class MatroskaMuxer extends Muxer {
 
 		switch (width) {
 			case 1:
-				this.#helperView.setUint8(pos++, (1 << 7) | value);
+				this.helperView.setUint8(pos++, (1 << 7) | value);
 				break;
 			case 2:
-				this.#helperView.setUint8(pos++, (1 << 6) | (value >> 8));
-				this.#helperView.setUint8(pos++, value);
+				this.helperView.setUint8(pos++, (1 << 6) | (value >> 8));
+				this.helperView.setUint8(pos++, value);
 				break;
 			case 3:
-				this.#helperView.setUint8(pos++, (1 << 5) | (value >> 16));
-				this.#helperView.setUint8(pos++, value >> 8);
-				this.#helperView.setUint8(pos++, value);
+				this.helperView.setUint8(pos++, (1 << 5) | (value >> 16));
+				this.helperView.setUint8(pos++, value >> 8);
+				this.helperView.setUint8(pos++, value);
 				break;
 			case 4:
-				this.#helperView.setUint8(pos++, (1 << 4) | (value >> 24));
-				this.#helperView.setUint8(pos++, value >> 16);
-				this.#helperView.setUint8(pos++, value >> 8);
-				this.#helperView.setUint8(pos++, value);
+				this.helperView.setUint8(pos++, (1 << 4) | (value >> 24));
+				this.helperView.setUint8(pos++, value >> 16);
+				this.helperView.setUint8(pos++, value >> 8);
+				this.helperView.setUint8(pos++, value);
 				break;
 			case 5:
 				/**
@@ -206,94 +206,94 @@ export class MatroskaMuxer extends Muxer {
 				 * operations, so we need to do a division by 2^32 instead of a
 				 * right-shift of 32 to retain those top 3 bits
 				 */
-				this.#helperView.setUint8(pos++, (1 << 3) | ((value / 2**32) & 0x7));
-				this.#helperView.setUint8(pos++, value >> 24);
-				this.#helperView.setUint8(pos++, value >> 16);
-				this.#helperView.setUint8(pos++, value >> 8);
-				this.#helperView.setUint8(pos++, value);
+				this.helperView.setUint8(pos++, (1 << 3) | ((value / 2**32) & 0x7));
+				this.helperView.setUint8(pos++, value >> 24);
+				this.helperView.setUint8(pos++, value >> 16);
+				this.helperView.setUint8(pos++, value >> 8);
+				this.helperView.setUint8(pos++, value);
 				break;
 			case 6:
-				this.#helperView.setUint8(pos++, (1 << 2) | ((value / 2**40) & 0x3));
-				this.#helperView.setUint8(pos++, (value / 2**32) | 0);
-				this.#helperView.setUint8(pos++, value >> 24);
-				this.#helperView.setUint8(pos++, value >> 16);
-				this.#helperView.setUint8(pos++, value >> 8);
-				this.#helperView.setUint8(pos++, value);
+				this.helperView.setUint8(pos++, (1 << 2) | ((value / 2**40) & 0x3));
+				this.helperView.setUint8(pos++, (value / 2**32) | 0);
+				this.helperView.setUint8(pos++, value >> 24);
+				this.helperView.setUint8(pos++, value >> 16);
+				this.helperView.setUint8(pos++, value >> 8);
+				this.helperView.setUint8(pos++, value);
 				break;
 			default:
 				throw new Error('Bad EBML VINT size ' + width);
 		}
 
-		this.#writer.write(this.#helper.subarray(0, pos));
+		this.writer.write(this.helper.subarray(0, pos));
 	}
 
 	// Assumes the string is ASCII
-	#writeString(str: string) {
-		this.#writer.write(new Uint8Array(str.split('').map(x => x.charCodeAt(0))));
+	private writeString(str: string) {
+		this.writer.write(new Uint8Array(str.split('').map(x => x.charCodeAt(0))));
 	}
 
-	writeEBML(data: EBML | null) {
+	private writeEBML(data: EBML | null) {
 		if (data === null) return;
 
 		if (data instanceof Uint8Array) {
-			this.#writer.write(data);
+			this.writer.write(data);
 		} else if (Array.isArray(data)) {
 			for (let elem of data) {
 				this.writeEBML(elem);
 			}
 		} else {
-			this.offsets.set(data, this.#writer.getPos());
+			this.offsets.set(data, this.writer.getPos());
 
-			this.#writeUnsignedInt(data.id); // ID field
+			this.writeUnsignedInt(data.id); // ID field
 
 			if (Array.isArray(data.data)) {
-				let sizePos = this.#writer.getPos();
+				let sizePos = this.writer.getPos();
 				let sizeSize = data.size === -1 ? 1 : (data.size ?? 4);
 
 				if (data.size === -1) {
 					// Write the reserved all-one-bits marker for unknown/unbounded size.
-					this.#writeByte(0xff);
+					this.writeByte(0xff);
 				} else {
-					this.#writer.seek(this.#writer.getPos() + sizeSize);
+					this.writer.seek(this.writer.getPos() + sizeSize);
 				}
 
-				let startPos = this.#writer.getPos();
+				let startPos = this.writer.getPos();
 				this.dataOffsets.set(data, startPos);
 				this.writeEBML(data.data);
 
 				if (data.size !== -1) {
-					let size = this.#writer.getPos() - startPos;
-					let endPos = this.#writer.getPos();
-					this.#writer.seek(sizePos);
+					let size = this.writer.getPos() - startPos;
+					let endPos = this.writer.getPos();
+					this.writer.seek(sizePos);
 					this.writeEBMLVarInt(size, sizeSize);
-					this.#writer.seek(endPos);
+					this.writer.seek(endPos);
 				}
 			} else if (typeof data.data === 'number') {
 				let size = data.size ?? measureUnsignedInt(data.data);
 				this.writeEBMLVarInt(size);
-				this.#writeUnsignedInt(data.data, size);
+				this.writeUnsignedInt(data.data, size);
 			} else if (typeof data.data === 'string') {
 				this.writeEBMLVarInt(data.data.length);
-				this.#writeString(data.data);
+				this.writeString(data.data);
 			} else if (data.data instanceof Uint8Array) {
 				this.writeEBMLVarInt(data.data.byteLength, data.size);
-				this.#writer.write(data.data);
+				this.writer.write(data.data);
 			} else if (data.data instanceof EBMLFloat32) {
 				this.writeEBMLVarInt(4);
-				this.#writeFloat32(data.data.value);
+				this.writeFloat32(data.data.value);
 			} else if (data.data instanceof EBMLFloat64) {
 				this.writeEBMLVarInt(8);
-				this.#writeFloat64(data.data.value);
+				this.writeFloat64(data.data.value);
 			} else if (data.data instanceof EBMLSignedInt) {
 				let size = data.size ?? measureSignedInt(data.data.value);
 				this.writeEBMLVarInt(size);
-				this.#writeSignedInt(data.data.value, size);
+				this.writeSignedInt(data.data.value, size);
 			}
 		}
 	}
 
 	override beforeTrackAdd(track: OutputTrack) {
-		if (!(this.#format instanceof WebMOutputFormat))  {
+		if (!(this.format instanceof WebMOutputFormat))  {
 			return;
 		}
 
@@ -315,25 +315,25 @@ export class MatroskaMuxer extends Muxer {
 	}
 
 	start() {
-		this.#writeEBMLHeader();
+		this.writeEBMLHeader();
 
-		if (!this.#format.options.streamable) {
-			this.#createSeekHead();
+		if (!this.format.options.streamable) {
+			this.createSeekHead();
 		}
 
-		this.#createSegmentInfo();
-		this.#createCues();
+		this.createSegmentInfo();
+		this.createCues();
 
-		this.#writer.flush();
+		this.writer.flush();
 	}
 
-	#writeEBMLHeader() {
+	private writeEBMLHeader() {
 		let ebmlHeader: EBML = { id: EBMLId.EBML, data: [
 			{ id: EBMLId.EBMLVersion, data: 1 },
 			{ id: EBMLId.EBMLReadVersion, data: 1 },
 			{ id: EBMLId.EBMLMaxIDLength, data: 4 },
 			{ id: EBMLId.EBMLMaxSizeLength, data: 8 },
-			{ id: EBMLId.DocType, data: this.#format instanceof WebMOutputFormat ? 'webm' : 'matroska' },
+			{ id: EBMLId.DocType, data: this.format instanceof WebMOutputFormat ? 'webm' : 'matroska' },
 			{ id: EBMLId.DocTypeVersion, data: 2 },
 			{ id: EBMLId.DocTypeReadVersion, data: 2 }
 		] };
@@ -344,7 +344,7 @@ export class MatroskaMuxer extends Muxer {
 	 * Creates a SeekHead element which is positioned near the start of the file and allows the media player to seek to
 	 * relevant sections more easily. Since we don't know the positions of those sections yet, we'll set them later.
 	 */
-	#createSeekHead() {
+	private createSeekHead() {
 		const kaxCues = new Uint8Array([ 0x1c, 0x53, 0xbb, 0x6b ]);
 		const kaxInfo = new Uint8Array([ 0x15, 0x49, 0xa9, 0x66 ]);
 		const kaxTracks = new Uint8Array([ 0x16, 0x54, 0xae, 0x6b ]);
@@ -363,27 +363,27 @@ export class MatroskaMuxer extends Muxer {
 				{ id: EBMLId.SeekPosition, size: 5, data: 0 }
 			] }
 		] };
-		this.#seekHead = seekHead;
+		this.seekHead = seekHead;
 	}
 
-	#createSegmentInfo() {
+	private createSegmentInfo() {
 		let segmentDuration: EBML = { id: EBMLId.Duration, data: new EBMLFloat64(0) };
-		this.#segmentDuration = segmentDuration;
+		this.segmentDuration = segmentDuration;
 
 		let segmentInfo: EBML = { id: EBMLId.Info, data: [
 			{ id: EBMLId.TimestampScale, data: 1e6 },
 			{ id: EBMLId.MuxingApp, data: APP_NAME },
 			{ id: EBMLId.WritingApp, data: APP_NAME },
-			!this.#format.options.streamable ? segmentDuration : null
+			!this.format.options.streamable ? segmentDuration : null
 		] };
-		this.#segmentInfo = segmentInfo;
+		this.segmentInfo = segmentInfo;
 	}
 
-	#createTracks() {
+	private createTracks() {
 		let tracksElement = { id: EBMLId.Tracks, data: [] as EBML[] };
-		this.#tracksElement = tracksElement;
+		this.tracksElement = tracksElement;
 
-		for (let trackData of this.#trackDatas) {
+		for (let trackData of this.trackDatas) {
 			tracksElement.data.push({ id: EBMLId.TrackEntry, data: [
 				{ id: EBMLId.TrackNumber, data: trackData.track.id },
 				{ id: EBMLId.TrackUID, data: trackData.track.id },
@@ -429,17 +429,17 @@ export class MatroskaMuxer extends Muxer {
 		}
 	}
 
-	#createSegment() {
+	private createSegment() {
 		let segment: EBML = {
 			id: EBMLId.Segment,
-			size: this.#format.options.streamable ? -1 : SEGMENT_SIZE_BYTES,
+			size: this.format.options.streamable ? -1 : SEGMENT_SIZE_BYTES,
 			data: [
-				!this.#format.options.streamable ? this.#seekHead as EBML : null,
-				this.#segmentInfo,
-				this.#tracksElement
+				!this.format.options.streamable ? this.seekHead as EBML : null,
+				this.segmentInfo,
+				this.tracksElement
 			]
 		};
-		this.#segment = segment;
+		this.segment = segment;
 
 		this.writeEBML(segment);
 
@@ -451,17 +451,17 @@ export class MatroskaMuxer extends Muxer {
 		*/
 	}
 
-	#createCues() {
-		this.#cues = { id: EBMLId.Cues, data: [] };
+	private createCues() {
+		this.cues = { id: EBMLId.Cues, data: [] };
 	}
 
-	get #segmentDataOffset() {
-		assert(this.#segment);
-		return this.dataOffsets.get(this.#segment)!;
+	private get segmentDataOffset() {
+		assert(this.segment);
+		return this.dataOffsets.get(this.segment)!;
 	}
 
-	#getVideoTrackData(track: OutputVideoTrack, meta?: EncodedVideoChunkMetadata) {
-		const existingTrackData = this.#trackDatas.find(x => x.track === track);
+	private getVideoTrackData(track: OutputVideoTrack, meta?: EncodedVideoChunkMetadata) {
+		const existingTrackData = this.trackDatas.find(x => x.track === track);
 		if (existingTrackData) {
 			return existingTrackData as MatroskaVideoTrackData;
 		}
@@ -485,14 +485,14 @@ export class MatroskaMuxer extends Muxer {
 			lastWrittenMsTimestamp: null
 		};
 
-		this.#trackDatas.push(newTrackData);
-		this.#trackDatas.sort((a, b) => a.track.id - b.track.id);
+		this.trackDatas.push(newTrackData);
+		this.trackDatas.sort((a, b) => a.track.id - b.track.id);
 
 		return newTrackData;
 	}
 
-	#getAudioTrackData(track: OutputAudioTrack, meta?: EncodedAudioChunkMetadata) {
-		const existingTrackData = this.#trackDatas.find(x => x.track === track);
+	private getAudioTrackData(track: OutputAudioTrack, meta?: EncodedAudioChunkMetadata) {
+		const existingTrackData = this.trackDatas.find(x => x.track === track);
 		if (existingTrackData) {
 			return existingTrackData as MatroskaAudioTrackData;
 		}
@@ -514,14 +514,14 @@ export class MatroskaMuxer extends Muxer {
 			lastWrittenMsTimestamp: null
 		};
 
-		this.#trackDatas.push(newTrackData);
-		this.#trackDatas.sort((a, b) => a.track.id - b.track.id);
+		this.trackDatas.push(newTrackData);
+		this.trackDatas.sort((a, b) => a.track.id - b.track.id);
 
 		return newTrackData;
 	}
 
-	#getSubtitleTrackData(track: OutputSubtitleTrack, meta?: SubtitleMetadata) {
-		const existingTrackData = this.#trackDatas.find(x => x.track === track);
+	private getSubtitleTrackData(track: OutputSubtitleTrack, meta?: SubtitleMetadata) {
+		const existingTrackData = this.trackDatas.find(x => x.track === track);
 		if (existingTrackData) {
 			return existingTrackData as MatroskaAudioTrackData;
 		}
@@ -541,41 +541,41 @@ export class MatroskaMuxer extends Muxer {
 			lastWrittenMsTimestamp: null
 		};
 
-		this.#trackDatas.push(newTrackData);
-		this.#trackDatas.sort((a, b) => a.track.id - b.track.id);
+		this.trackDatas.push(newTrackData);
+		this.trackDatas.sort((a, b) => a.track.id - b.track.id);
 
 		return newTrackData;
 	}
 	
 	addEncodedVideoChunk(track: OutputVideoTrack, chunk: EncodedVideoChunk, meta?: EncodedVideoChunkMetadata) {
-		const trackData = this.#getVideoTrackData(track, meta);
+		const trackData = this.getVideoTrackData(track, meta);
 
 		let data = new Uint8Array(chunk.byteLength);
 		chunk.copyTo(data);
 
 		let timestamp = this.validateAndNormalizeTimestamp(trackData.track, chunk.timestamp, chunk.type === 'key');
-		let videoChunk = this.#createInternalChunk(data, timestamp, (chunk.duration ?? 0) / 1e6, chunk.type);
-		if (track.source._codec === 'vp9') this.#fixVP9ColorSpace(trackData, videoChunk);
+		let videoChunk = this.createInternalChunk(data, timestamp, (chunk.duration ?? 0) / 1e6, chunk.type);
+		if (track.source._codec === 'vp9') this.fixVP9ColorSpace(trackData, videoChunk);
 
 		trackData.chunkQueue.push(videoChunk);	
-		this.#interleaveChunks();
+		this.interleaveChunks();
 	}
 
 	addEncodedAudioChunk(track: OutputAudioTrack, chunk: EncodedAudioChunk, meta?: EncodedAudioChunkMetadata) {
-		const trackData = this.#getAudioTrackData(track, meta);
+		const trackData = this.getAudioTrackData(track, meta);
 
 		let data = new Uint8Array(chunk.byteLength);
 		chunk.copyTo(data);
 
 		let timestamp = this.validateAndNormalizeTimestamp(trackData.track, chunk.timestamp, chunk.type === 'key');
-		let audioChunk = this.#createInternalChunk(data, timestamp, (chunk.duration ?? 0) / 1e6, chunk.type);
+		let audioChunk = this.createInternalChunk(data, timestamp, (chunk.duration ?? 0) / 1e6, chunk.type);
 
 		trackData.chunkQueue.push(audioChunk);
-		this.#interleaveChunks();
+		this.interleaveChunks();
 	}
 	
 	addSubtitleCue(track: OutputSubtitleTrack, cue: SubtitleCue, meta?: SubtitleMetadata) {
-		const trackData = this.#getSubtitleTrackData(track, meta);
+		const trackData = this.getSubtitleTrackData(track, meta);
 
 		const timestamp = this.validateAndNormalizeTimestamp(trackData.track, 1e6 * cue.timestamp, true);
 
@@ -594,15 +594,15 @@ export class MatroskaMuxer extends Muxer {
 		const body = textEncoder.encode(bodyText);
 		const additions = `${cue.settings ?? ''}\n${cue.identifier ?? ''}\n${cue.notes ?? ''}`;
 
-		let subtitleChunk = this.#createInternalChunk(body, timestamp, cue.duration, 'key', additions.trim() ? textEncoder.encode(additions) : null);
+		let subtitleChunk = this.createInternalChunk(body, timestamp, cue.duration, 'key', additions.trim() ? textEncoder.encode(additions) : null);
 
 		trackData.chunkQueue.push(subtitleChunk);
-		this.#interleaveChunks();
+		this.interleaveChunks();
 	}
 
-	#interleaveChunks() {
+	private interleaveChunks() {
 		for (const track of this.output._tracks) {
-			if (!track.source._closed && !this.#trackDatas.some(x => x.track === track)) {
+			if (!track.source._closed && !this.trackDatas.some(x => x.track === track)) {
 				return; // We haven't seen a sample from this open track yet
 			}
 		}
@@ -612,7 +612,7 @@ export class MatroskaMuxer extends Muxer {
 			let trackWithMinTimestamp: MatroskaTrackData | null = null;
 			let minTimestamp = Infinity;
 
-			for (let trackData of this.#trackDatas) {
+			for (let trackData of this.trackDatas) {
 				if (trackData.chunkQueue.length === 0 && !trackData.track.source._closed) {
 					break outer;
 				}
@@ -628,16 +628,16 @@ export class MatroskaMuxer extends Muxer {
 			}
 
 			let chunk = trackWithMinTimestamp.chunkQueue.shift()!;
-			this.#writeBlock(trackWithMinTimestamp, chunk);
+			this.writeBlock(trackWithMinTimestamp, chunk);
 		}
 
-		this.#writer.flush();
+		this.writer.flush();
 	}
 
 	/** Due to [a bug in Chromium](https://bugs.chromium.org/p/chromium/issues/detail?id=1377842), VP9 streams often
 	 * lack color space information. This method patches in that information. */
 	// http://downloads.webmproject.org/docs/vp9/vp9-bitstream_superframe-and-uncompressed-header_v1.0.pdf
-	#fixVP9ColorSpace(trackData: MatroskaVideoTrackData, chunk: InternalMediaChunk) {
+	private fixVP9ColorSpace(trackData: MatroskaVideoTrackData, chunk: InternalMediaChunk) {
 		if (chunk.type !== 'key') return;
 		if (!trackData.info.decoderConfig.colorSpace || !trackData.info.decoderConfig.colorSpace.matrix) return;
 
@@ -671,7 +671,7 @@ export class MatroskaMuxer extends Muxer {
 	}
 
 	/** Converts a read-only external chunk into an internal one for easier use. */
-	#createInternalChunk(
+	private createInternalChunk(
 		data: Uint8Array,
 		timestamp: number,
 		duration: number,
@@ -690,17 +690,17 @@ export class MatroskaMuxer extends Muxer {
 	}
 
 	/** Writes a block containing media data to the file. */
-	#writeBlock(trackData: MatroskaTrackData, chunk: InternalMediaChunk) {
+	private writeBlock(trackData: MatroskaTrackData, chunk: InternalMediaChunk) {
 		// Due to the interlacing algorithm, this code will be run once we've seen one chunk from every media track.
-		if (!this.#segment) {
-			this.#createTracks();
-			this.#createSegment();
+		if (!this.segment) {
+			this.createTracks();
+			this.createSegment();
 		}
 
 		let msTimestamp = Math.floor(1000 * chunk.timestamp);
 		// We can only finalize this fragment (and begin a new one) if we know that each track will be able to
 		// start the new one with a key frame.
-		const keyFrameQueuedEverywhere = this.#trackDatas.every(otherTrackData => {
+		const keyFrameQueuedEverywhere = this.trackDatas.every(otherTrackData => {
 			if (otherTrackData.track.source._closed) {
 				return true;
 			}
@@ -714,13 +714,13 @@ export class MatroskaMuxer extends Muxer {
 		});
 
 		if (
-			!this.#currentCluster ||
-			(keyFrameQueuedEverywhere && msTimestamp - this.#currentClusterMsTimestamp! >= 1000)
+			!this.currentCluster ||
+			(keyFrameQueuedEverywhere && msTimestamp - this.currentClusterMsTimestamp! >= 1000)
 		) {
-			this.#createNewCluster(msTimestamp);
+			this.createNewCluster(msTimestamp);
 		}
 
-		let relativeTimestamp = msTimestamp - this.#currentClusterMsTimestamp!;
+		let relativeTimestamp = msTimestamp - this.currentClusterMsTimestamp!;
 		if (relativeTimestamp < 0) {
 			// The chunk lies outside of the current cluster
 			return;
@@ -770,16 +770,16 @@ export class MatroskaMuxer extends Muxer {
 			this.writeEBML(blockGroup);
 		}
 
-		this.#duration = Math.max(this.#duration, msTimestamp + msDuration);
+		this.duration = Math.max(this.duration, msTimestamp + msDuration);
 		trackData.lastWrittenMsTimestamp = msTimestamp;
 
-		this.#trackDatasInCurrentCluster.add(trackData);
+		this.trackDatasInCurrentCluster.add(trackData);
 	}
 
 	/** Creates a new Cluster element to contain media chunks. */
-	#createNewCluster(msTimestamp: number) {
-		if (this.#currentCluster && !this.#format.options.streamable) {
-			this.#finalizeCurrentCluster();
+	private createNewCluster(msTimestamp: number) {
+		if (this.currentCluster && !this.format.options.streamable) {
+			this.finalizeCurrentCluster();
 		}
 
 		/*
@@ -788,28 +788,28 @@ export class MatroskaMuxer extends Muxer {
 		}
 		*/
 
-		this.#currentCluster = {
+		this.currentCluster = {
 			id: EBMLId.Cluster,
-			size: this.#format.options.streamable ? -1 : CLUSTER_SIZE_BYTES,
+			size: this.format.options.streamable ? -1 : CLUSTER_SIZE_BYTES,
 			data: [
 				{ id: EBMLId.Timestamp, data: msTimestamp }
 			]
 		};
-		this.writeEBML(this.#currentCluster);
+		this.writeEBML(this.currentCluster);
 
-		this.#currentClusterMsTimestamp = msTimestamp;
-		this.#trackDatasInCurrentCluster.clear();
+		this.currentClusterMsTimestamp = msTimestamp;
+		this.trackDatasInCurrentCluster.clear();
 	}
 
-	#finalizeCurrentCluster() {
-		assert(this.#currentCluster);
-		let clusterSize = this.#writer.getPos() - this.dataOffsets.get(this.#currentCluster)!;
-		let endPos = this.#writer.getPos();
+	private finalizeCurrentCluster() {
+		assert(this.currentCluster);
+		let clusterSize = this.writer.getPos() - this.dataOffsets.get(this.currentCluster)!;
+		let endPos = this.writer.getPos();
 
 		// Write the size now that we know it
-		this.#writer.seek(this.offsets.get(this.#currentCluster)! + 4);
+		this.writer.seek(this.offsets.get(this.currentCluster)! + 4);
 		this.writeEBMLVarInt(clusterSize, CLUSTER_SIZE_BYTES);
-		this.#writer.seek(endPos);
+		this.writer.seek(endPos);
 
 		/*
 		if (this.#writer instanceof BaseStreamTargetWriter && this.#writer.target.options.onCluster) {
@@ -819,15 +819,15 @@ export class MatroskaMuxer extends Muxer {
 		*/
 
 		let clusterOffsetFromSegment =
-			this.offsets.get(this.#currentCluster)! - this.#segmentDataOffset;
+			this.offsets.get(this.currentCluster)! - this.segmentDataOffset;
 
-		assert(this.#cues);
+		assert(this.cues);
 
 		// Add a CuePoint to the Cues element for better seeking
-		(this.#cues.data as EBML[]).push({ id: EBMLId.CuePoint, data: [
-			{ id: EBMLId.CueTime, data: this.#currentClusterMsTimestamp! },
+		(this.cues.data as EBML[]).push({ id: EBMLId.CuePoint, data: [
+			{ id: EBMLId.CueTime, data: this.currentClusterMsTimestamp! },
 			// We only write out cues for tracks that have at least one chunk in this cluster
-			...[...this.#trackDatasInCurrentCluster].map(trackData => {
+			...[...this.trackDatasInCurrentCluster].map(trackData => {
 				return { id: EBMLId.CueTrackPositions, data: [
 					{ id: EBMLId.CueTrack, data: trackData.track.id },
 					{ id: EBMLId.CueClusterPosition, data: clusterOffsetFromSegment }
@@ -838,55 +838,55 @@ export class MatroskaMuxer extends Muxer {
 
 	override onTrackClose() {
 		// Since a track is now closed, we may be able to write out chunks that were previously waiting
-		this.#interleaveChunks();
+		this.interleaveChunks();
 	}
 
 	/** Finalizes the file, making it ready for use. Must be called after all media chunks have been added. */
 	finalize() {
-		if (!this.#segment) {
-			this.#createTracks();
-			this.#createSegment();
+		if (!this.segment) {
+			this.createTracks();
+			this.createSegment();
 		}
 
 		// Flush any remaining queued chunks to the file
-		for (let trackData of this.#trackDatas) {
+		for (let trackData of this.trackDatas) {
 			while (trackData.chunkQueue.length > 0) {
-				this.#writeBlock(trackData, trackData.chunkQueue.shift()!);
+				this.writeBlock(trackData, trackData.chunkQueue.shift()!);
 			}
 		}
 
-		if (!this.#format.options.streamable && this.#currentCluster) {
-			this.#finalizeCurrentCluster();
+		if (!this.format.options.streamable && this.currentCluster) {
+			this.finalizeCurrentCluster();
 		}
 
-		assert(this.#cues);
-		this.writeEBML(this.#cues);
+		assert(this.cues);
+		this.writeEBML(this.cues);
 
-		if (!this.#format.options.streamable) {
-			let endPos = this.#writer.getPos();
+		if (!this.format.options.streamable) {
+			let endPos = this.writer.getPos();
 
 			// Write the Segment size
-			let segmentSize = this.#writer.getPos() - this.#segmentDataOffset;
-			this.#writer.seek(this.offsets.get(this.#segment!)! + 4);
+			let segmentSize = this.writer.getPos() - this.segmentDataOffset;
+			this.writer.seek(this.offsets.get(this.segment!)! + 4);
 			this.writeEBMLVarInt(segmentSize, SEGMENT_SIZE_BYTES);
 
 			// Write the duration of the media to the Segment
-			this.#segmentDuration!.data = new EBMLFloat64(this.#duration);
-			this.#writer.seek(this.offsets.get(this.#segmentDuration!)!);
-			this.writeEBML(this.#segmentDuration!);
+			this.segmentDuration!.data = new EBMLFloat64(this.duration);
+			this.writer.seek(this.offsets.get(this.segmentDuration!)!);
+			this.writeEBML(this.segmentDuration!);
 
 			// Fill in SeekHead position data and write it again
-			this.#seekHead!.data[0]!.data[1]!.data =
-				this.offsets.get(this.#cues)! - this.#segmentDataOffset;
-			this.#seekHead!.data[1]!.data[1]!.data =
-				this.offsets.get(this.#segmentInfo!)! - this.#segmentDataOffset;
-			this.#seekHead!.data[2]!.data[1]!.data =
-				this.offsets.get(this.#tracksElement!)! - this.#segmentDataOffset;
+			this.seekHead!.data[0]!.data[1]!.data =
+				this.offsets.get(this.cues)! - this.segmentDataOffset;
+			this.seekHead!.data[1]!.data[1]!.data =
+				this.offsets.get(this.segmentInfo!)! - this.segmentDataOffset;
+			this.seekHead!.data[2]!.data[1]!.data =
+				this.offsets.get(this.tracksElement!)! - this.segmentDataOffset;
 
-			this.#writer.seek(this.offsets.get(this.#seekHead!)!);
-			this.writeEBML(this.#seekHead!);
+			this.writer.seek(this.offsets.get(this.seekHead!)!);
+			this.writeEBML(this.seekHead!);
 
-			this.#writer.seek(endPos);
+			this.writer.seek(endPos);
 		}
 	}
 }
