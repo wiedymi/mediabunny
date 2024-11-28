@@ -39,7 +39,14 @@
 	let format = new Metamuxer.WebMOutputFormat({ streamable: true });
 	format = new Metamuxer.Mp4OutputFormat({ fastStart: false }); // new Metamuxer.MkvOutputFormat();// new Metamuxer.Mp4OutputFormat({ fastStart: false });
 	let target = new Metamuxer.ArrayBufferTarget();
-	//target = new Metamuxer.StreamTarget({ onData: (data, pos) => console.log(data, pos), chunked: true }) ?? 
+
+	target = new Metamuxer.StreamTarget(new WritableStream({
+		async write(chunk) {
+			console.log(chunk)
+
+			await new Promise(resolve => setTimeout(resolve, 250));
+		}
+	}), { chunked: true });
 
 	let output = new Metamuxer.Output({ format, target });
 
@@ -150,7 +157,7 @@ Testing... <00:17.350>One... <00:18.125>Two...
 		context.fillStyle = ['red', 'green', 'blue', 'yellow'][i % 4];
 		context.fillRect(canvas.width * Math.random(), canvas.height * Math.random(), canvas.width * Math.random(), canvas.height * Math.random());
 
-		videoSource.digest(i / 10, 1 / 10);
+		await videoSource.digest(i / 10, 1 / 10);
 	}
 
 	let audioContext = new AudioContext();
@@ -158,10 +165,10 @@ Testing... <00:17.350>One... <00:18.125>Two...
 	let length = 10;
 	let slicedAudioBuffer = sliceAudioBuffer(audioBuffer, length, audioContext);
 
-	audioSource.digest(slicedAudioBuffer);
+	await audioSource.digest(slicedAudioBuffer);
 
 	await output.finalize();
 
 	console.log(target);
-	download(new Blob([target.buffer]), 'test.mp4');
+	//download(new Blob([target.buffer]), 'test.mp4');
 </script>

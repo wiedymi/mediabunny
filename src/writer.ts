@@ -1,8 +1,11 @@
-import { ArrayBufferTarget, FileSystemWritableFileStreamTarget, StreamTarget } from './target';
+import { assert } from './misc';
+import { ArrayBufferTarget, StreamTarget, StreamTargetChunk } from './target';
 
 export abstract class Writer {
 	/** Setting this to true will cause the writer to ensure data is written in a strictly monotonic, streamable way. */
 	ensureMonotonicity = false;
+
+	start() {}
 
 	/** Writes the given data to the target, at the current position. */
 	abstract write(data: Uint8Array): void;
@@ -10,10 +13,10 @@ export abstract class Writer {
 	abstract seek(newPos: number): void;
 	/** Returns the current position. */
 	abstract getPos(): number;
-	/** Called after muxing has finished. */
-	abstract finalize(): void;
 	/** Signals to the writer that it may be time to flush. */	
-	abstract flush(): void;
+	abstract flush(): Promise<void>;
+	/** Called after muxing has finished. */
+	abstract finalize(): Promise<void>;
 }
 
 /**
@@ -64,9 +67,9 @@ export class ArrayBufferTargetWriter extends Writer {
 		return this.pos;
 	}
 
-	flush() {}
+	async flush() {}
 
-	finalize() {
+	async finalize() {
 		this.ensureSize(this.pos);
 		this.target.buffer = this.buffer.slice(0, Math.max(this.maxPos, this.pos));
 	}
@@ -88,11 +91,16 @@ export class StreamTargetWriter extends Writer {
 		start: number
 	}[] = [];
 	private lastFlushEnd = 0;
+	private writer: WritableStreamDefaultWriter<StreamTargetChunk> | null = null;
 
 	constructor(target: StreamTarget) {
 		super();
 
 		this.target = target;
+	}
+
+	override start() {
+		this.writer = this.target._writable.getWriter();
 	}
 
 	write(data: Uint8Array) {
@@ -111,7 +119,8 @@ export class StreamTargetWriter extends Writer {
 		return this.pos;
 	}
 
-	flush() {
+	async flush() {
+		assert(this.writer);
 		if (this.sections.length === 0) return;
 
 		let chunks: {
@@ -156,14 +165,25 @@ export class StreamTargetWriter extends Writer {
 				throw new Error('Internal error: Monotonicity violation.');
 			}
 
-			this.target.options.onData?.(chunk.data, chunk.start);
+			if (this.writer.desiredSize !== null && this.writer.desiredSize <= 0) {
+				await this.writer.ready; // Allow the writer to apply backpressure
+			}
+
+			this.writer.write({
+				type: 'write',
+				data: chunk.data,
+				position: chunk.start
+			});	
 			this.lastFlushEnd = chunk.start + chunk.data.byteLength;
 		}
 
 		this.sections.length = 0;
 	}
 
-	finalize() {}
+	finalize() {
+		assert(this.writer);
+		return this.writer.close();
+	}
 }
 
 const DEFAULT_CHUNK_SIZE = 2**24;
@@ -195,21 +215,27 @@ export class ChunkedStreamTargetWriter extends Writer {
 	 */
 	private chunks: Chunk[] = [];
 	private lastFlushEnd = 0;
+	private writer: WritableStreamDefaultWriter<StreamTargetChunk> | null = null;
+	private flushedChunkQueue: StreamTargetChunk[] = [];
 
 	constructor(target: StreamTarget) {
 		super();
 
 		this.target = target;
-		this.chunkSize = target.options?.chunkSize ?? DEFAULT_CHUNK_SIZE;
+		this.chunkSize = target._options?.chunkSize ?? DEFAULT_CHUNK_SIZE;
 
 		if (!Number.isInteger(this.chunkSize) || this.chunkSize < 2**10) {
 			throw new Error('Invalid StreamTarget options: chunkSize must be an integer not smaller than 1024.');
 		}
 	}
 
+	override start() {
+		this.writer = this.target._writable.getWriter();
+	}
+
 	write(data: Uint8Array) {
 		this.writeDataIntoChunks(data, this.pos);
-		this.flushChunks();
+		this.queueChunksForFlush();
 
 		this.pos += data.byteLength;
 	}
@@ -251,7 +277,7 @@ export class ChunkedStreamTargetWriter extends Writer {
 			for (let i = 0; i < this.chunks.length-1; i++) {
 				this.chunks[i]!.shouldFlush = true;
 			}
-			this.flushChunks();
+			this.queueChunksForFlush();
 		}
 
 		// If the data didn't fit in one chunk, recurse with the remaining datas
@@ -302,7 +328,9 @@ export class ChunkedStreamTargetWriter extends Writer {
 		return this.chunks.indexOf(chunk);
 	}
 
-	private flushChunks(force = false) {
+	private queueChunksForFlush(force = false) {
+		assert(this.writer);
+
 		for (let i = 0; i < this.chunks.length; i++) {
 			let chunk = this.chunks[i]!;
 			if (!chunk.shouldFlush && !force) continue;
@@ -312,38 +340,38 @@ export class ChunkedStreamTargetWriter extends Writer {
 					throw new Error('Internal error: Monotonicity violation.');
 				}
 
-				this.target.options.onData?.(
-					chunk.data.subarray(section.start, section.end),
-					chunk.start + section.start
-				);
+				this.flushedChunkQueue.push({
+					type: 'write',
+					data: chunk.data.subarray(section.start, section.end),
+					position: chunk.start + section.start
+				});
 				this.lastFlushEnd = chunk.start + section.end;
 			}
 			this.chunks.splice(i--, 1);
 		}
 	}
 
-	flush() {
-		// Do nothing, we flush ourselves
+	async flush() {
+		assert(this.writer);
+		if (this.flushedChunkQueue.length === 0) return;
+
+		for (let chunk of this.flushedChunkQueue) {
+			if (this.writer.desiredSize !== null && this.writer.desiredSize <= 0) {
+				await this.writer.ready; // Allow the writer to apply backpressure
+			}
+
+			this.writer.write(chunk);
+		}
+
+		this.flushedChunkQueue.length = 0;
 	}
 
-	finalize() {
-		this.flushChunks(true);
-	}
-}
+	async finalize() {
+		assert(this.writer);
 
-/**
- * Essentially a wrapper around ChunkedStreamTargetWriter, writing directly to disk using the File System Access API.
- * This is useful for large files, as available RAM is no longer a bottleneck.
- */
-export class FileSystemWritableFileStreamTargetWriter extends ChunkedStreamTargetWriter {
-	constructor(target: FileSystemWritableFileStreamTarget) {
-		super(new StreamTarget({
-			onData: (data, position) => target.stream.write({
-				type: 'write',
-				data,
-				position
-			}),
-			chunkSize: target.options?.chunkSize
-		}));
+		this.queueChunksForFlush(true);
+		await this.flush();
+
+		return this.writer.close();
 	}
 }

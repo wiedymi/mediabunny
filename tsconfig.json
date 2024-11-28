@@ -9,7 +9,8 @@
 		"rootDir": "src",
 		"outDir": "build",
 		"declaration": true,
-		"stripInternal": true
+		"stripInternal": true,
+		"skipLibCheck": true
 	},
 	"include": [
 		"src/**/*"

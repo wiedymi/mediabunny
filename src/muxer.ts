@@ -1,18 +1,20 @@
+import { AsyncMutex } from "./misc";
 import { Output, OutputAudioTrack, OutputSubtitleTrack, OutputTrack, OutputVideoTrack } from "./output";
 import { SubtitleCue, SubtitleMetadata } from "./subtitles";
 
 export abstract class Muxer {
 	output: Output;
+	mutex = new AsyncMutex();
 
 	constructor(output: Output) {
 		this.output = output;
 	}
 
-	abstract start(): void;
-	abstract addEncodedVideoChunk(track: OutputVideoTrack, chunk: EncodedVideoChunk, meta?: EncodedVideoChunkMetadata): void;
-	abstract addEncodedAudioChunk(track: OutputAudioTrack, chunk: EncodedAudioChunk, meta?: EncodedAudioChunkMetadata): void;
-	abstract addSubtitleCue(track: OutputSubtitleTrack, cue: SubtitleCue, meta?: SubtitleMetadata): void;
-	abstract finalize(): void;
+	abstract start(): Promise<void>;
+	abstract addEncodedVideoChunk(track: OutputVideoTrack, chunk: EncodedVideoChunk, meta?: EncodedVideoChunkMetadata): Promise<void>;
+	abstract addEncodedAudioChunk(track: OutputAudioTrack, chunk: EncodedAudioChunk, meta?: EncodedAudioChunkMetadata): Promise<void>;
+	abstract addSubtitleCue(track: OutputSubtitleTrack, cue: SubtitleCue, meta?: SubtitleMetadata): Promise<void>;
+	abstract finalize(): Promise<void>;
 
 	beforeTrackAdd(track: OutputTrack) {}
 	onTrackClose(track: OutputTrack) {}

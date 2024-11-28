@@ -10,10 +10,16 @@ export abstract class OutputFormat {
 }
 
 /** @public */
+export type Mp4OutputFormatOptions = {
+	fastStart?: false | 'in-memory' | 'fragmented'
+};
+
+/** @public */
 export class Mp4OutputFormat extends OutputFormat {
-	constructor(public options: {
-		fastStart?: false | 'in-memory' | 'fragmented',
-	} = {}) {
+	/** @internal */
+	_options: Mp4OutputFormatOptions;
+
+	constructor(options: Mp4OutputFormatOptions = {}) {
 		if (!options || typeof options !== 'object') {
 			throw new TypeError('options must be an object.');
 		}
@@ -22,6 +28,8 @@ export class Mp4OutputFormat extends OutputFormat {
 		}
 
 		super();
+
+		this._options = options;
 	}
 
 	/** @internal */
@@ -31,10 +39,16 @@ export class Mp4OutputFormat extends OutputFormat {
 }
 
 /** @public */
+export type MkvOutputFormatOptions = {
+	streamable?: boolean
+};
+
+/** @public */
 export class MkvOutputFormat extends OutputFormat {
-	constructor(public options: {
-		streamable?: boolean
-	} = {}) {
+	/** @internal */
+	_options: MkvOutputFormatOptions;
+
+	constructor(options: MkvOutputFormatOptions = {}) {
 		if (!options || typeof options !== 'object') {
 			throw new TypeError('options must be an object.');
 		}
@@ -43,6 +57,8 @@ export class MkvOutputFormat extends OutputFormat {
 		}
 
 		super();
+
+		this._options = options;
 	}
 
 	/** @internal */
@@ -50,6 +66,9 @@ export class MkvOutputFormat extends OutputFormat {
 		return new MatroskaMuxer(output, this);
 	}
 }
+
+/** @public */
+export type WebMOutputFormatOptions = MkvOutputFormatOptions;
 
 /** @public */
 export class WebMOutputFormat extends MkvOutputFormat {}

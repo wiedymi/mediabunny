@@ -19,7 +19,7 @@
   "license": "MIT",
   "dependencies": {
     "@types/dom-mediacapture-transform": "^0.1.10",
-    "@types/dom-webcodecs": "^0.1.11"
+    "@types/dom-webcodecs": "^0.1.13"
   },
   "devDependencies": {
     "@microsoft/api-extractor": "^7.48.0",

@@ -1,15 +1,17 @@
 import { Output } from "./output";
-import { ArrayBufferTargetWriter, ChunkedStreamTargetWriter, FileSystemWritableFileStreamTargetWriter, StreamTargetWriter, Writer } from "./writer";
+import { ArrayBufferTargetWriter, ChunkedStreamTargetWriter, StreamTargetWriter, Writer } from "./writer";
 
 /** @public */
 export abstract class Target {
-	output: Output | null = null;
+	/** @internal */
+	_output: Output | null = null;
 
 	/** @internal */
 	abstract _createWriter(): Writer;
 }
 
 /** @public */
+// TODO: Switch to Uint8ArrayTarget for efficiency?
 export class ArrayBufferTarget extends Target {
 	buffer: ArrayBuffer | null = null;
 
@@ -20,30 +22,36 @@ export class ArrayBufferTarget extends Target {
 }
 
 /** @public */
+export type StreamTargetChunk = {
+	type: 'write', // This ensures automatic compatibility with FileSystemWritableFileStream
+	data: Uint8Array,
+	position: number
+};
+
+/** @public */
+export type StreamTargetOptions = {
+	chunked?: boolean,
+	chunkSize?: number
+};
+
+/** @public */
 export class StreamTarget extends Target {
-	constructor(public options: {
-		onData?: (data: Uint8Array, position: number) => void,
-		chunked?: boolean,
-		chunkSize?: number
-	}) {
+	/** @internal */
+	_writable: WritableStream<StreamTargetChunk>;
+	/** @internal */
+	_options: StreamTargetOptions;
+
+	constructor(
+		writable: WritableStream<StreamTargetChunk>,
+		options: StreamTargetOptions = {}
+	) {
 		super();
 
-		if (typeof options !== 'object') {
-			throw new TypeError('StreamTarget requires an options object to be passed to its constructor.');
+		if (!(writable instanceof WritableStream)) {
+			throw new TypeError('StreamTarget requires a WritableStream instance.');
 		}
-		if (options.onData) {
-			if (typeof options.onData !== 'function') {
-				throw new TypeError('options.onData, when provided, must be a function.');
-			}
-			if (options.onData.length < 2) {
-				// Checking the amount of parameters here is an important validation step as it catches a common error
-				// where people do not respect the position argument.
-				throw new TypeError(
-					'options.onData, when provided, must be a function that takes in at least two arguments (data and '
-					+ 'position). Ignoring the position argument, which specifies the byte offset at which the data is '
-					+ 'to be written, can lead to broken outputs.'
-				);
-			}
+		if (options != null && typeof options !== 'object') {
+			throw new TypeError('StreamTarget options, when provided, must be an object.');
 		}
 		if (options.chunked !== undefined && typeof options.chunked !== 'boolean') {
 			throw new TypeError('options.chunked, when provided, must be a boolean.');
@@ -51,37 +59,13 @@ export class StreamTarget extends Target {
 		if (options.chunkSize !== undefined && (!Number.isInteger(options.chunkSize) || options.chunkSize <= 0)) {
 			throw new TypeError('options.chunkSize, when provided, must be a positive integer.');
 		}
+
+		this._writable = writable;
+		this._options = options;
 	}
 
 	/** @internal */
 	_createWriter() {
-		return this.options.chunked ? new ChunkedStreamTargetWriter(this) : new StreamTargetWriter(this);
-	}
-}
-
-/** @public */
-export class FileSystemWritableFileStreamTarget extends Target {
-	constructor(
-		public stream: FileSystemWritableFileStream,
-		public options?: { chunkSize?: number }
-	) {
-		super();
-
-		if (!(stream instanceof FileSystemWritableFileStream)) {
-			throw new TypeError('FileSystemWritableFileStreamTarget requires a FileSystemWritableFileStream instance.');
-		}
-		if (options !== undefined && typeof options !== 'object') {
-			throw new TypeError("FileSystemWritableFileStreamTarget's options, when provided, must be an object.");
-		}
-		if (options) {
-			if (options.chunkSize !== undefined && (!Number.isInteger(options.chunkSize) || options.chunkSize <= 0)) {
-				throw new TypeError('options.chunkSize, when provided, must be a positive integer');
-			}
-		}
-	}
-
-	/** @internal */
-	_createWriter() {
-		return new FileSystemWritableFileStreamTargetWriter(this);
+		return this._options.chunked ? new ChunkedStreamTargetWriter(this) : new StreamTargetWriter(this);
 	}
 }

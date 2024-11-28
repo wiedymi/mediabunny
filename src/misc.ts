@@ -80,3 +80,21 @@ export const isAllowSharedBufferSource = (x: unknown) => {
 	// Quite a mouthful:
 	return x instanceof ArrayBuffer || (typeof SharedArrayBuffer !== 'undefined' && x instanceof SharedArrayBuffer) || (ArrayBuffer.isView(x) && !(x instanceof DataView));
 };
+
+export class AsyncMutex {
+	currentPromise = Promise.resolve();
+
+	async acquire() {
+		let resolver: () => void;
+		let nextPromise = new Promise<void>(resolve => {
+			resolver = resolve;
+		});
+
+		let currentPromiseAlias = this.currentPromise;
+		this.currentPromise = nextPromise;
+
+		await currentPromiseAlias;
+
+		return resolver!;
+	}
+}

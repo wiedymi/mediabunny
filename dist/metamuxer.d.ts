@@ -9,7 +9,7 @@ export declare const AUDIO_CODECS: readonly ["aac", "opus"];
 /** @public */
 export declare class AudioBufferSource extends AudioSource {
     constructor(codecConfig: AudioCodecConfig);
-    digest(audioBuffer: AudioBuffer): void;
+    digest(audioBuffer: AudioBuffer): Promise<void>;
 }
 
 /** @public */
@@ -24,7 +24,7 @@ export declare type AudioCodecConfig = {
 /** @public */
 export declare class AudioDataSource extends AudioSource {
     constructor(codecConfig: AudioCodecConfig);
-    digest(audioData: AudioData): void;
+    digest(audioData: AudioData): Promise<void>;
 }
 
 /** @public */
@@ -38,30 +38,19 @@ export declare type AudioTrackMetadata = {};
 /** @public */
 export declare class CanvasSource extends VideoSource {
     constructor(canvas: HTMLCanvasElement, codecConfig: VideoCodecConfig);
-    digest(timestamp: number, duration?: number): void;
+    digest(timestamp: number, duration?: number): Promise<void>;
 }
 
 /** @public */
 export declare class EncodedAudioChunkSource extends AudioSource {
     constructor(codec: AudioCodec);
-    digest(chunk: EncodedAudioChunk, meta?: EncodedAudioChunkMetadata): void;
+    digest(chunk: EncodedAudioChunk, meta?: EncodedAudioChunkMetadata): Promise<void>;
 }
 
 /** @public */
 export declare class EncodedVideoChunkSource extends VideoSource {
     constructor(codec: VideoCodec);
-    digest(chunk: EncodedVideoChunk, meta?: EncodedVideoChunkMetadata): void;
-}
-
-/** @public */
-export declare class FileSystemWritableFileStreamTarget extends Target {
-    stream: FileSystemWritableFileStream;
-    options?: {
-        chunkSize?: number;
-    } | undefined;
-    constructor(stream: FileSystemWritableFileStream, options?: {
-        chunkSize?: number;
-    } | undefined);
+    digest(chunk: EncodedVideoChunk, meta?: EncodedVideoChunkMetadata): Promise<void>;
 }
 
 /** @public */
@@ -72,7 +61,6 @@ export { MediaSource_2 as MediaSource }
 
 /** @public */
 export declare class MediaStreamAudioTrackSource extends AudioSource {
-    _offsetTimestamps: boolean;
     constructor(track: MediaStreamAudioTrack, codecConfig: AudioCodecConfig);
 }
 
@@ -83,23 +71,23 @@ export declare class MediaStreamVideoTrackSource extends VideoSource {
 
 /** @public */
 export declare class MkvOutputFormat extends OutputFormat {
-    options: {
-        streamable?: boolean;
-    };
-    constructor(options?: {
-        streamable?: boolean;
-    });
+    constructor(options?: MkvOutputFormatOptions);
 }
 
 /** @public */
+export declare type MkvOutputFormatOptions = {
+    streamable?: boolean;
+};
+
+/** @public */
 export declare class Mp4OutputFormat extends OutputFormat {
-    options: {
-        fastStart?: false | 'in-memory' | 'fragmented';
-    };
-    constructor(options?: {
-        fastStart?: false | 'in-memory' | 'fragmented';
-    });
+    constructor(options?: Mp4OutputFormatOptions);
 }
+
+/** @public */
+export declare type Mp4OutputFormatOptions = {
+    fastStart?: false | 'in-memory' | 'fragmented';
+};
 
 /** @public */
 export declare class Output {
@@ -107,7 +95,7 @@ export declare class Output {
     addVideoTrack(source: VideoSource, metadata?: VideoTrackMetadata): void;
     addAudioTrack(source: AudioSource, metadata?: AudioTrackMetadata): void;
     addSubtitleTrack(source: SubtitleSource, metadata?: SubtitleTrackMetadata): void;
-    start(): void;
+    start(): Promise<void>;
     finalize(): Promise<void>;
 }
 
@@ -123,17 +111,21 @@ export declare type OutputOptions = {
 
 /** @public */
 export declare class StreamTarget extends Target {
-    options: {
-        onData?: (data: Uint8Array, position: number) => void;
-        chunked?: boolean;
-        chunkSize?: number;
-    };
-    constructor(options: {
-        onData?: (data: Uint8Array, position: number) => void;
-        chunked?: boolean;
-        chunkSize?: number;
-    });
+    constructor(writable: WritableStream<StreamTargetChunk>, options?: StreamTargetOptions);
 }
+
+/** @public */
+export declare type StreamTargetChunk = {
+    type: 'write';
+    data: Uint8Array;
+    position: number;
+};
+
+/** @public */
+export declare type StreamTargetOptions = {
+    chunked?: boolean;
+    chunkSize?: number;
+};
 
 /** @public */
 export declare const SUBTITLE_CODECS: readonly ["webvtt"];
@@ -151,13 +143,12 @@ export declare type SubtitleTrackMetadata = {};
 
 /** @public */
 export declare abstract class Target {
-    output: Output | null;
 }
 
 /** @public */
 export declare class TextSubtitleSource extends SubtitleSource {
     constructor(codec: SubtitleCodec);
-    digest(text: string): void;
+    digest(text: string): Promise<void>;
 }
 
 /** @public */
@@ -179,7 +170,7 @@ export declare type VideoCodecConfig = {
 /** @public */
 export declare class VideoFrameSource extends VideoSource {
     constructor(codecConfig: VideoCodecConfig);
-    digest(videoFrame: VideoFrame): void;
+    digest(videoFrame: VideoFrame): Promise<void>;
 }
 
 /** @public */
@@ -196,6 +187,9 @@ export declare type VideoTrackMetadata = {
 /** @public */
 export declare class WebMOutputFormat extends MkvOutputFormat {
 }
+
+/** @public */
+export declare type WebmOutputFormatOptions = MkvOutputFormatOptions;
 
 export { }
 

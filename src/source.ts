@@ -1,5 +1,6 @@
 import { buildAudioCodecString, buildVideoCodecString } from "./codec";
 import { assert } from "./misc";
+import { Muxer } from "./muxer";
 import { OutputAudioTrack, OutputSubtitleTrack, OutputTrack, OutputVideoTrack } from "./output";
 import { SubtitleParser } from "./subtitles";
 
@@ -104,7 +105,7 @@ export class EncodedVideoChunkSource extends VideoSource {
 		}
 
 		this._ensureValidDigest();
-		this._connectedTrack?.output._muxer.addEncodedVideoChunk(this._connectedTrack, chunk, meta);
+		return this._connectedTrack!.output._muxer.addEncodedVideoChunk(this._connectedTrack!, chunk, meta);
 	}
 }
 
@@ -134,6 +135,7 @@ const validateVideoCodecConfig = (config: VideoCodecConfig) => {
 
 class VideoEncoderWrapper {
 	private encoder: VideoEncoder | null = null;
+	private muxer: Muxer | null = null;
 	private lastMultipleOfKeyFrameInterval = -1;
 	private lastWidth: number | null = null;
 	private lastHeight: number | null = null;
@@ -142,7 +144,7 @@ class VideoEncoderWrapper {
 		validateVideoCodecConfig(codecConfig);
 	}
 
-	digest(videoFrame: VideoFrame) {
+	async digest(videoFrame: VideoFrame) {
 		this.source._ensureValidDigest();
 
 		// Ensure video frame size remains constant
@@ -166,6 +168,13 @@ class VideoEncoderWrapper {
 		this.encoder.encode(videoFrame, { keyFrame: multipleOfKeyFrameInterval !== this.lastMultipleOfKeyFrameInterval });
 
 		this.lastMultipleOfKeyFrameInterval = multipleOfKeyFrameInterval;
+
+		// We need to do this after sending the frame to the encoder as the frame otherwise might be closed
+		if (this.encoder.encodeQueueSize >= 4) {
+			await new Promise(resolve => this.encoder!.addEventListener('dequeue', resolve, { once: true }));
+		}
+
+		await this.muxer!.mutex.currentPromise; // Allow the writer to apply backpressure
 	}
 
 	private ensureEncoder(videoFrame: VideoFrame) {
@@ -174,7 +183,7 @@ class VideoEncoderWrapper {
 		}
 
 		this.encoder = new VideoEncoder({
-			output: (chunk, meta) => this.source._connectedTrack?.output._muxer.addEncodedVideoChunk(this.source._connectedTrack, chunk, meta),
+			output: (chunk, meta) => this.muxer!.addEncodedVideoChunk(this.source._connectedTrack!, chunk, meta),
 			error: (error) => console.error('Video encode error:', error),
 		});
 
@@ -186,10 +195,16 @@ class VideoEncoderWrapper {
 			framerate: this.source._connectedTrack?.metadata.frameRate,
 			latencyMode: this.codecConfig.latencyMode,
 		});
+
+		assert(this.source._connectedTrack);
+		this.muxer = this.source._connectedTrack.output._muxer;
 	}
 	
 	async flush() {
-		return this.encoder?.flush();
+		if (this.encoder) {
+			await this.encoder.flush();
+			this.encoder.close();
+		}
 	}
 }
 
@@ -208,7 +223,7 @@ export class VideoFrameSource extends VideoSource {
 			throw new TypeError('videoFrame must be a VideoFrame.');
 		}
 
-		this._encoder.digest(videoFrame);
+		return this._encoder.digest(videoFrame);
 	}
 
 	/** @internal */
@@ -248,8 +263,10 @@ export class CanvasSource extends VideoSource {
 			alpha: 'discard',
 		});
 
-		this._encoder.digest(frame);
+		const promise = this._encoder.digest(frame);
 		frame.close();
+
+		return promise;
 	}
 
 	/** @internal */
@@ -350,7 +367,7 @@ export class EncodedAudioChunkSource extends AudioSource {
 		}
 
 		this._ensureValidDigest();
-		this._connectedTrack?.output._muxer.addEncodedAudioChunk(this._connectedTrack, chunk, meta);
+		return this._connectedTrack!.output._muxer.addEncodedAudioChunk(this._connectedTrack!, chunk, meta);
 	}
 }
 /** @public */
@@ -373,6 +390,7 @@ const validateAudioCodecConfig = (config: AudioCodecConfig) => {
 
 class AudioEncoderWrapper {
 	private encoder: AudioEncoder | null = null;
+	private muxer: Muxer | null = null;
 	private lastNumberOfChannels: number | null = null;
 	private lastSampleRate: number | null = null;
 
@@ -380,7 +398,7 @@ class AudioEncoderWrapper {
 		validateAudioCodecConfig(codecConfig);
 	}
 
-	digest(audioData: AudioData) {
+	async digest(audioData: AudioData) {
 		this.source._ensureValidDigest();
 
 		// Ensure audio parameters remain constant
@@ -397,6 +415,12 @@ class AudioEncoderWrapper {
 		assert(this.encoder);
 
 		this.encoder.encode(audioData);
+
+		if (this.encoder.encodeQueueSize >= 4) {
+			await new Promise(resolve => this.encoder!.addEventListener('dequeue', resolve, { once: true }));
+		}
+
+		await this.muxer!.mutex.currentPromise; // Allow the writer to apply backpressure
 	}
 
 	private ensureEncoder(audioData: AudioData) {
@@ -405,7 +429,7 @@ class AudioEncoderWrapper {
 		}
 
 		this.encoder = new AudioEncoder({
-			output: (chunk, meta) => this.source._connectedTrack?.output._muxer.addEncodedAudioChunk(this.source._connectedTrack, chunk, meta),
+			output: (chunk, meta) => this.muxer!.addEncodedAudioChunk(this.source._connectedTrack!, chunk, meta),
 			error: (error) => console.error('Audio encode error:', error),
 		});
 
@@ -415,10 +439,16 @@ class AudioEncoderWrapper {
 			sampleRate: audioData.sampleRate,
 			bitrate: this.codecConfig.bitrate,
 		});
+
+		assert(this.source._connectedTrack);
+		this.muxer = this.source._connectedTrack.output._muxer;
 	}
 	
 	async flush() {
-		return this.encoder?.flush();
+		if (this.encoder) {
+			await this.encoder.flush();
+			this.encoder.close();
+		}
 	}
 }
 
@@ -437,7 +467,7 @@ export class AudioDataSource extends AudioSource {
 			throw new TypeError('audioData must be an AudioData.');
 		}
 
-		this._encoder.digest(audioData);
+		return this._encoder.digest(audioData);
 	}
 
 	/** @internal */
@@ -483,10 +513,12 @@ export class AudioBufferSource extends AudioSource {
 			data: data
 		});
 
-		this._encoder.digest(audioData);
+		const promise = this._encoder.digest(audioData);
 		audioData.close();
 
 		this._accumulatedFrameCount += numberOfFrames;
+
+		return promise;
 	}
 
 	/** @internal */
@@ -504,6 +536,7 @@ export class MediaStreamAudioTrackSource extends AudioSource {
 	/** @internal */
 	private _track: MediaStreamAudioTrack;
 
+	/** @internal */
 	override _offsetTimestamps = true;
 
 	constructor(track: MediaStreamAudioTrack, codecConfig: AudioCodecConfig) {
@@ -590,5 +623,7 @@ export class TextSubtitleSource extends SubtitleSource {
 
 		this._ensureValidDigest();
 		this._parser.parse(text);
+
+		return this._connectedTrack!.output._muxer.mutex.currentPromise;
 	}
 }

@@ -1,4 +1,4 @@
-import { TransformationMatrix } from "./misc";
+import { AsyncMutex, TransformationMatrix } from "./misc";
 import { Muxer } from "./muxer";
 import { OutputFormat } from "./output-format";
 import { AudioSource, MediaSource, SubtitleSource, VideoSource } from "./source";
@@ -54,6 +54,8 @@ export class Output {
 	_started = false;
 	/** @internal */
 	_finalizing = false;
+	/** @internal */
+	_mutex = new AsyncMutex();
 
 	constructor(options: OutputOptions) {
 		if (!options || typeof options !== 'object') {
@@ -66,10 +68,10 @@ export class Output {
 			throw new TypeError('options.target must be a Target.');
 		}
 
-		if (options.target.output) {
+		if (options.target._output) {
 			throw new Error('Target is already used for another output.');
 		}
-		options.target.output = this;
+		options.target._output = this;
 
 		this._writer = options.target._createWriter();
 		this._muxer = options.format._createMuxer(this);
@@ -147,31 +149,44 @@ export class Output {
 		source._connectedTrack = track;
 	}
 
-	start() {
+	async start() {
 		if (this._started) {
 			throw new Error('Output already started.');
 		}
 
 		this._started = true;
-		this._muxer.start();
+		this._writer.start();
+
+		const release = await this._mutex.acquire();
+
+		await this._muxer.start();
 
 		for (const track of this._tracks) {
 			track.source._start();
 		}
+
+		release();
 	}
 
 	async finalize() {
+		if (!this._started) {
+			throw new Error('Cannot finalize before starting.');
+		}
 		if (this._finalizing) {
 			throw new Error('Cannot call finalize twice.');
 		}
 		this._finalizing = true;
 
+		const release = await this._mutex.acquire();
+
 		const promises = this._tracks.map(x => x.source._flush());
 		await Promise.all(promises);
 
-		this._muxer.finalize();
+		await this._muxer.finalize();
 
-		this._writer.flush();
-		this._writer.finalize();
+		await this._writer.flush();
+		await this._writer.finalize();
+
+		release();
 	}
 }

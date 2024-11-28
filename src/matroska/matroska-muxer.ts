@@ -123,7 +123,7 @@ export class MatroskaMuxer extends Muxer {
 		this.writer = output._writer;
 		this.format = format;
 
-		if (this.format.options.streamable) {
+		if (this.format._options.streamable) {
 			this.writer.ensureMonotonicity = true;
 		}
 	}
@@ -314,17 +314,21 @@ export class MatroskaMuxer extends Muxer {
 		}
 	}
 
-	start() {
+	async start() {
+		const release = await this.mutex.acquire();
+
 		this.writeEBMLHeader();
 
-		if (!this.format.options.streamable) {
+		if (!this.format._options.streamable) {
 			this.createSeekHead();
 		}
 
 		this.createSegmentInfo();
 		this.createCues();
 
-		this.writer.flush();
+		await this.writer.flush();
+
+		release();
 	}
 
 	private writeEBMLHeader() {
@@ -374,7 +378,7 @@ export class MatroskaMuxer extends Muxer {
 			{ id: EBMLId.TimestampScale, data: 1e6 },
 			{ id: EBMLId.MuxingApp, data: APP_NAME },
 			{ id: EBMLId.WritingApp, data: APP_NAME },
-			!this.format.options.streamable ? segmentDuration : null
+			!this.format._options.streamable ? segmentDuration : null
 		] };
 		this.segmentInfo = segmentInfo;
 	}
@@ -432,9 +436,9 @@ export class MatroskaMuxer extends Muxer {
 	private createSegment() {
 		let segment: EBML = {
 			id: EBMLId.Segment,
-			size: this.format.options.streamable ? -1 : SEGMENT_SIZE_BYTES,
+			size: this.format._options.streamable ? -1 : SEGMENT_SIZE_BYTES,
 			data: [
-				!this.format.options.streamable ? this.seekHead as EBML : null,
+				!this.format._options.streamable ? this.seekHead as EBML : null,
 				this.segmentInfo,
 				this.tracksElement
 			]
@@ -547,60 +551,78 @@ export class MatroskaMuxer extends Muxer {
 		return newTrackData;
 	}
 	
-	addEncodedVideoChunk(track: OutputVideoTrack, chunk: EncodedVideoChunk, meta?: EncodedVideoChunkMetadata) {
-		const trackData = this.getVideoTrackData(track, meta);
+	async addEncodedVideoChunk(track: OutputVideoTrack, chunk: EncodedVideoChunk, meta?: EncodedVideoChunkMetadata) {
+		const release = await this.mutex.acquire();
 
-		let data = new Uint8Array(chunk.byteLength);
-		chunk.copyTo(data);
-
-		let timestamp = this.validateAndNormalizeTimestamp(trackData.track, chunk.timestamp, chunk.type === 'key');
-		let videoChunk = this.createInternalChunk(data, timestamp, (chunk.duration ?? 0) / 1e6, chunk.type);
-		if (track.source._codec === 'vp9') this.fixVP9ColorSpace(trackData, videoChunk);
-
-		trackData.chunkQueue.push(videoChunk);	
-		this.interleaveChunks();
+		try {
+			const trackData = this.getVideoTrackData(track, meta);
+	
+			let data = new Uint8Array(chunk.byteLength);
+			chunk.copyTo(data);
+	
+			let timestamp = this.validateAndNormalizeTimestamp(trackData.track, chunk.timestamp, chunk.type === 'key');
+			let videoChunk = this.createInternalChunk(data, timestamp, (chunk.duration ?? 0) / 1e6, chunk.type);
+			if (track.source._codec === 'vp9') this.fixVP9ColorSpace(trackData, videoChunk);
+	
+			trackData.chunkQueue.push(videoChunk);	
+			await this.interleaveChunks();
+		} finally {
+			release();
+		}
 	}
 
-	addEncodedAudioChunk(track: OutputAudioTrack, chunk: EncodedAudioChunk, meta?: EncodedAudioChunkMetadata) {
-		const trackData = this.getAudioTrackData(track, meta);
+	async addEncodedAudioChunk(track: OutputAudioTrack, chunk: EncodedAudioChunk, meta?: EncodedAudioChunkMetadata) {
+		const release = await this.mutex.acquire();
 
-		let data = new Uint8Array(chunk.byteLength);
-		chunk.copyTo(data);
-
-		let timestamp = this.validateAndNormalizeTimestamp(trackData.track, chunk.timestamp, chunk.type === 'key');
-		let audioChunk = this.createInternalChunk(data, timestamp, (chunk.duration ?? 0) / 1e6, chunk.type);
-
-		trackData.chunkQueue.push(audioChunk);
-		this.interleaveChunks();
+		try {
+			const trackData = this.getAudioTrackData(track, meta);
+	
+			let data = new Uint8Array(chunk.byteLength);
+			chunk.copyTo(data);
+	
+			let timestamp = this.validateAndNormalizeTimestamp(trackData.track, chunk.timestamp, chunk.type === 'key');
+			let audioChunk = this.createInternalChunk(data, timestamp, (chunk.duration ?? 0) / 1e6, chunk.type);
+	
+			trackData.chunkQueue.push(audioChunk);
+			await this.interleaveChunks();
+		} finally {
+			release();
+		}
 	}
 	
-	addSubtitleCue(track: OutputSubtitleTrack, cue: SubtitleCue, meta?: SubtitleMetadata) {
-		const trackData = this.getSubtitleTrackData(track, meta);
+	async addSubtitleCue(track: OutputSubtitleTrack, cue: SubtitleCue, meta?: SubtitleMetadata) {
+		const release = await this.mutex.acquire();
 
-		const timestamp = this.validateAndNormalizeTimestamp(trackData.track, 1e6 * cue.timestamp, true);
-
-		let bodyText = cue.text;
-		const timestampMs = Math.floor(timestamp * 1000);
-
-		// Replace in-body timestamps so that they're relative to the cue start time
-		inlineTimestampRegex.lastIndex = 0;
-		bodyText = bodyText.replace(inlineTimestampRegex, (match) => {
-			let time = parseSubtitleTimestamp(match.slice(1, -1));
-			let offsetTime = time - timestampMs;
-
-			return `<${formatSubtitleTimestamp(offsetTime)}>`;
-		});
-
-		const body = textEncoder.encode(bodyText);
-		const additions = `${cue.settings ?? ''}\n${cue.identifier ?? ''}\n${cue.notes ?? ''}`;
-
-		let subtitleChunk = this.createInternalChunk(body, timestamp, cue.duration, 'key', additions.trim() ? textEncoder.encode(additions) : null);
-
-		trackData.chunkQueue.push(subtitleChunk);
-		this.interleaveChunks();
+		try {
+			const trackData = this.getSubtitleTrackData(track, meta);
+	
+			const timestamp = this.validateAndNormalizeTimestamp(trackData.track, 1e6 * cue.timestamp, true);
+	
+			let bodyText = cue.text;
+			const timestampMs = Math.floor(timestamp * 1000);
+	
+			// Replace in-body timestamps so that they're relative to the cue start time
+			inlineTimestampRegex.lastIndex = 0;
+			bodyText = bodyText.replace(inlineTimestampRegex, (match) => {
+				let time = parseSubtitleTimestamp(match.slice(1, -1));
+				let offsetTime = time - timestampMs;
+	
+				return `<${formatSubtitleTimestamp(offsetTime)}>`;
+			});
+	
+			const body = textEncoder.encode(bodyText);
+			const additions = `${cue.settings ?? ''}\n${cue.identifier ?? ''}\n${cue.notes ?? ''}`;
+	
+			let subtitleChunk = this.createInternalChunk(body, timestamp, cue.duration, 'key', additions.trim() ? textEncoder.encode(additions) : null);
+	
+			trackData.chunkQueue.push(subtitleChunk);
+			await this.interleaveChunks();
+		} finally {
+			release();
+		}
 	}
 
-	private interleaveChunks() {
+	private async interleaveChunks() {
 		for (const track of this.output._tracks) {
 			if (!track.source._closed && !this.trackDatas.some(x => x.track === track)) {
 				return; // We haven't seen a sample from this open track yet
@@ -631,7 +653,7 @@ export class MatroskaMuxer extends Muxer {
 			this.writeBlock(trackWithMinTimestamp, chunk);
 		}
 
-		this.writer.flush();
+		await this.writer.flush();
 	}
 
 	/** Due to [a bug in Chromium](https://bugs.chromium.org/p/chromium/issues/detail?id=1377842), VP9 streams often
@@ -778,7 +800,7 @@ export class MatroskaMuxer extends Muxer {
 
 	/** Creates a new Cluster element to contain media chunks. */
 	private createNewCluster(msTimestamp: number) {
-		if (this.currentCluster && !this.format.options.streamable) {
+		if (this.currentCluster && !this.format._options.streamable) {
 			this.finalizeCurrentCluster();
 		}
 
@@ -790,7 +812,7 @@ export class MatroskaMuxer extends Muxer {
 
 		this.currentCluster = {
 			id: EBMLId.Cluster,
-			size: this.format.options.streamable ? -1 : CLUSTER_SIZE_BYTES,
+			size: this.format._options.streamable ? -1 : CLUSTER_SIZE_BYTES,
 			data: [
 				{ id: EBMLId.Timestamp, data: msTimestamp }
 			]
@@ -836,13 +858,19 @@ export class MatroskaMuxer extends Muxer {
 		] });
 	}
 
-	override onTrackClose() {
+	override async onTrackClose() {
+		const release = await this.mutex.acquire();
+
 		// Since a track is now closed, we may be able to write out chunks that were previously waiting
-		this.interleaveChunks();
+		await this.interleaveChunks();
+
+		release();
 	}
 
 	/** Finalizes the file, making it ready for use. Must be called after all media chunks have been added. */
-	finalize() {
+	async finalize() {
+		const release = await this.mutex.acquire();
+
 		if (!this.segment) {
 			this.createTracks();
 			this.createSegment();
@@ -855,14 +883,14 @@ export class MatroskaMuxer extends Muxer {
 			}
 		}
 
-		if (!this.format.options.streamable && this.currentCluster) {
+		if (!this.format._options.streamable && this.currentCluster) {
 			this.finalizeCurrentCluster();
 		}
 
 		assert(this.cues);
 		this.writeEBML(this.cues);
 
-		if (!this.format.options.streamable) {
+		if (!this.format._options.streamable) {
 			let endPos = this.writer.getPos();
 
 			// Write the Segment size
@@ -888,5 +916,7 @@ export class MatroskaMuxer extends Muxer {
 
 			this.writer.seek(endPos);
 		}
+
+		release();
 	}
 }
