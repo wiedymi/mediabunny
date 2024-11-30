@@ -1,4 +1,4 @@
-import { buildAudioCodecString, buildVideoCodecString } from "./codec";
+import { buildAudioCodecString, buildVideoCodecString, getAudioEncoderConfigExtension, getVideoEncoderConfigExtension } from "./codec";
 import { assert } from "./misc";
 import { Muxer } from "./muxer";
 import { OutputAudioTrack, OutputSubtitleTrack, OutputTrack, OutputVideoTrack } from "./output";
@@ -194,6 +194,7 @@ class VideoEncoderWrapper {
 			bitrate: this.codecConfig.bitrate,
 			framerate: this.source._connectedTrack?.metadata.frameRate,
 			latencyMode: this.codecConfig.latencyMode,
+			...getVideoEncoderConfigExtension(this.codecConfig.codec)
 		});
 
 		assert(this.source._connectedTrack);
@@ -438,6 +439,7 @@ class AudioEncoderWrapper {
 			numberOfChannels: audioData.numberOfChannels,
 			sampleRate: audioData.sampleRate,
 			bitrate: this.codecConfig.bitrate,
+			...getAudioEncoderConfigExtension(this.codecConfig.codec)
 		});
 
 		assert(this.source._connectedTrack);

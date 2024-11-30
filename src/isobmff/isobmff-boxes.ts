@@ -696,7 +696,7 @@ export const dOps = (trackData: IsobmffAudioTrackData) => {
 	// https://www.rfc-editor.org/rfc/rfc7845#section-5
 	const description = trackData.info.decoderConfig?.description;
 	if (description) {
-		assert(description.byteLength < 18); // Is validated in an earlier step
+		assert(description.byteLength >= 18); // Is validated in an earlier step
 
 		const view = ArrayBuffer.isView(description)
 			? new DataView(description.buffer, description.byteOffset, description.byteLength)

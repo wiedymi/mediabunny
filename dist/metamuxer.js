@@ -817,7 +817,7 @@ var Metamuxer = (() => {
     let gain = 0;
     const description = trackData.info.decoderConfig?.description;
     if (description) {
-      assert(description.byteLength < 18);
+      assert(description.byteLength >= 18);
       const view2 = ArrayBuffer.isView(description) ? new DataView(description.buffer, description.byteOffset, description.byteLength) : new DataView(description);
       preskip = view2.getUint16(10, true);
       gain = view2.getInt16(14, true);
@@ -1684,6 +1684,41 @@ var Metamuxer = (() => {
     }
     throw new TypeError(`Unhandled codec '${codec}'.`);
   };
+  var getVideoEncoderConfigExtension = (codec) => {
+    if (codec === "avc") {
+      return {
+        avc: {
+          format: "avc"
+          // Ensure the format is not Annex B
+        }
+      };
+    } else if (codec === "hevc") {
+      return {
+        hevc: {
+          format: "hevc"
+          // Ensure the format is not Annex B
+        }
+      };
+    }
+    return {};
+  };
+  var getAudioEncoderConfigExtension = (codec) => {
+    if (codec === "aac") {
+      return {
+        aac: {
+          format: "aac"
+          // Ensure the format is not ADTS
+        }
+      };
+    } else if (codec === "opus") {
+      return {
+        opus: {
+          format: "opus"
+        }
+      };
+    }
+    return {};
+  };
   var validateVideoChunkMetadata = (metadata) => {
     if (!metadata) {
       throw new TypeError("Video chunk metadata must be provided.");
@@ -1768,6 +1803,9 @@ var Metamuxer = (() => {
       if (!isAllowSharedBufferSource(metadata.decoderConfig.description)) {
         throw new TypeError("Audio chunk metadata decoder configuration description, when defined, must be an ArrayBuffer or an ArrayBuffer view.");
       }
+    }
+    if (metadata.decoderConfig.codec.startsWith("mp4a") && !metadata.decoderConfig.description) {
+      throw new TypeError("Audio chunk metadata decoder configuration for AAC must include a description, which is expected to be an AudioSpecificConfig as specified in ISO 14496-3.");
     }
     if (metadata.decoderConfig.codec === "opus" && metadata.decoderConfig.description && metadata.decoderConfig.description.byteLength < 18) {
       throw new TypeError("Invalid decoder description provided for Opus; must be at least 18 bytes long.");
@@ -3259,7 +3297,8 @@ ${cue.notes ?? ""}`;
         height: videoFrame.codedHeight,
         bitrate: this.codecConfig.bitrate,
         framerate: this.source._connectedTrack?.metadata.frameRate,
-        latencyMode: this.codecConfig.latencyMode
+        latencyMode: this.codecConfig.latencyMode,
+        ...getVideoEncoderConfigExtension(this.codecConfig.codec)
       });
       assert(this.source._connectedTrack);
       this.muxer = this.source._connectedTrack.output._muxer;
@@ -3434,7 +3473,8 @@ ${cue.notes ?? ""}`;
         codec: buildAudioCodecString(this.codecConfig.codec, audioData.numberOfChannels, audioData.sampleRate),
         numberOfChannels: audioData.numberOfChannels,
         sampleRate: audioData.sampleRate,
-        bitrate: this.codecConfig.bitrate
+        bitrate: this.codecConfig.bitrate,
+        ...getAudioEncoderConfigExtension(this.codecConfig.codec)
       });
       assert(this.source._connectedTrack);
       this.muxer = this.source._connectedTrack.output._muxer;

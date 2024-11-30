@@ -181,6 +181,42 @@ export const buildAudioCodecString = (codec: AudioCodec, numberOfChannels: numbe
 	throw new TypeError(`Unhandled codec '${codec}'.`);
 };
 
+export const getVideoEncoderConfigExtension = (codec: VideoCodec) => {
+	if (codec === 'avc') {
+		return {
+			avc: {
+				format: 'avc' as const // Ensure the format is not Annex B
+			}
+		};
+	} else if (codec === 'hevc') {
+		return {
+			hevc: {
+				format: 'hevc' as const // Ensure the format is not Annex B
+			}
+		};
+	}
+
+	return {};
+};
+
+export const getAudioEncoderConfigExtension = (codec: AudioCodec) => {
+	if (codec === 'aac') {
+		return {
+			aac: {
+				format: 'aac' as const // Ensure the format is not ADTS
+			}
+		};
+	} else if (codec === 'opus') {
+		return {
+			opus: {
+				format: 'opus' as const
+			}
+		};
+	}
+
+	return {};
+};
+
 export const validateVideoChunkMetadata = (metadata: EncodedVideoChunkMetadata | undefined) => {
 	if (!metadata) {
 		throw new TypeError("Video chunk metadata must be provided.");
@@ -236,12 +272,9 @@ export const validateVideoChunkMetadata = (metadata: EncodedVideoChunkMetadata |
 	}
 
 	if ((metadata.decoderConfig.codec.startsWith('avc1') || metadata.decoderConfig.codec.startsWith('avc3')) && !metadata.decoderConfig.description) {
-		// TODO Technically not correct, they can also lack a description in which case the chunks are annexb. Generally,
-		// go through all the codec registrations and catch these edge cases.
 		throw new TypeError("Video chunk metadata decoder configuration for AVC must include a description, which is expected to be an AVCDecoderConfigurationRecord as specified in ISO 14496-15.");
 	}
 	if ((metadata.decoderConfig.codec.startsWith('hev1') || metadata.decoderConfig.codec.startsWith('hvc1')) && !metadata.decoderConfig.description) {
-		// TODO Same as above
 		throw new TypeError("Video chunk metadata decoder configuration for HEVC must include a description, which is expected to be an HEVCDecoderConfigurationRecord as specified in ISO 14496-15.");
 	}
 	if ((metadata.decoderConfig.codec === 'vp8' || metadata.decoderConfig.codec.startsWith('vp09')) && metadata.decoderConfig.colorSpace === undefined) {
@@ -278,6 +311,9 @@ export const validateAudioChunkMetadata = (metadata: EncodedAudioChunkMetadata |
 		}
 	}
 
+	if (metadata.decoderConfig.codec.startsWith('mp4a') && !metadata.decoderConfig.description) {
+		throw new TypeError("Audio chunk metadata decoder configuration for AAC must include a description, which is expected to be an AudioSpecificConfig as specified in ISO 14496-3.");
+	}
 	if (metadata.decoderConfig.codec === 'opus' && metadata.decoderConfig.description && metadata.decoderConfig.description.byteLength < 18) {
 		throw new TypeError('Invalid decoder description provided for Opus; must be at least 18 bytes long.');
 	}
