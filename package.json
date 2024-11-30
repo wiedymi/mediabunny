@@ -10,6 +10,12 @@
     "import": "./dist/metamuxer.mjs",
     "require": "./dist/metamuxer.js"
   },
+  "files": [
+    "README.md",
+    "package.json",
+    "LICENSE",
+    "dist"
+  ],
   "scripts": {
     "build": "node build.mjs && tsc && api-extractor run && node append-namespace.mjs",
     "build-local": "node build.mjs && tsc && api-extractor run --local --verbose && node append-namespace.mjs",

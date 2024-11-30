@@ -1,118 +1,158 @@
-import { COLOR_PRIMARIES_MAP, isAllowSharedBufferSource, MATRIX_COEFFICIENTS_MAP, TRANSFER_CHARACTERISTICS_MAP } from "./misc";
+import { COLOR_PRIMARIES_MAP, isAllowSharedBufferSource, last, MATRIX_COEFFICIENTS_MAP, TRANSFER_CHARACTERISTICS_MAP } from "./misc";
 import { AudioCodec, VideoCodec } from "./source";
 import { SubtitleMetadata } from "./subtitles";
 
-export const buildVideoCodecString = (codec: VideoCodec, width: number, height: number) => {
-	if (codec === 'avc') {
-		let profileIndication = 0x64; // Default to High Profile
+// https://en.wikipedia.org/wiki/Advanced_Video_Coding
+const AVC_LEVEL_TABLE = [
+    { maxMacroblocks: 99, maxBitrate: 64000, level: 0x0A },  // Level 1
+    { maxMacroblocks: 396, maxBitrate: 192000, level: 0x0B }, // Level 1.1
+    { maxMacroblocks: 396, maxBitrate: 384000, level: 0x0C }, // Level 1.2
+    { maxMacroblocks: 396, maxBitrate: 768000, level: 0x0D }, // Level 1.3
+    { maxMacroblocks: 396, maxBitrate: 2000000, level: 0x14 }, // Level 2
+    { maxMacroblocks: 792, maxBitrate: 4000000, level: 0x15 }, // Level 2.1
+    { maxMacroblocks: 1620, maxBitrate: 4000000, level: 0x16 }, // Level 2.2
+    { maxMacroblocks: 1620, maxBitrate: 10000000, level: 0x1E }, // Level 3
+    { maxMacroblocks: 3600, maxBitrate: 14000000, level: 0x1F }, // Level 3.1
+    { maxMacroblocks: 5120, maxBitrate: 20000000, level: 0x20 }, // Level 3.2
+    { maxMacroblocks: 8192, maxBitrate: 20000000, level: 0x28 }, // Level 4
+    { maxMacroblocks: 8192, maxBitrate: 50000000, level: 0x29 }, // Level 4.1
+    { maxMacroblocks: 8704, maxBitrate: 50000000, level: 0x2A }, // Level 4.2
+    { maxMacroblocks: 22080, maxBitrate: 135000000, level: 0x32 }, // Level 5
+    { maxMacroblocks: 36864, maxBitrate: 240000000, level: 0x33 }, // Level 5.1
+    { maxMacroblocks: 36864, maxBitrate: 240000000, level: 0x34 }, // Level 5.2
+    { maxMacroblocks: 139264, maxBitrate: 240000000, level: 0x3C }, // Level 6
+    { maxMacroblocks: 139264, maxBitrate: 480000000, level: 0x3D }, // Level 6.1
+    { maxMacroblocks: 139264, maxBitrate: 800000000, level: 0x3E }, // Level 6.2
+];
 
-		if (width <= 768 && height <= 432) {
-			profileIndication = 0x42; // Baseline for smaller videos
-		} else if (width <= 1920 && height <= 1080) {
-			profileIndication = 0x4D; // Main for HD
-		}
+// https://en.wikipedia.org/wiki/High_Efficiency_Video_Coding
+const HEVC_LEVEL_TABLE = [
+    { maxPictureSize: 36864, maxBitrate: 128000, tier: 'L', level: 30 },  // Level 1 (Low Tier)
+    { maxPictureSize: 122880, maxBitrate: 1500000, tier: 'L', level: 60 },  // Level 2 (Low Tier)
+    { maxPictureSize: 245760, maxBitrate: 3000000, tier: 'L', level: 63 },  // Level 2.1 (Low Tier)
+    { maxPictureSize: 552960, maxBitrate: 6000000, tier: 'L', level: 90 },  // Level 3 (Low Tier)
+    { maxPictureSize: 983040, maxBitrate: 10000000, tier: 'L', level: 93 },  // Level 3.1 (Low Tier)
+    { maxPictureSize: 2228224, maxBitrate: 12000000, tier: 'L', level: 120 },  // Level 4 (Low Tier)
+    { maxPictureSize: 2228224, maxBitrate: 30000000, tier: 'H', level: 120 },  // Level 4 (High Tier)
+    { maxPictureSize: 2228224, maxBitrate: 20000000, tier: 'L', level: 123 },  // Level 4.1 (Low Tier)
+    { maxPictureSize: 2228224, maxBitrate: 50000000, tier: 'H', level: 123 },  // Level 4.1 (High Tier)
+    { maxPictureSize: 8912896, maxBitrate: 25000000, tier: 'L', level: 150 },  // Level 5 (Low Tier)
+    { maxPictureSize: 8912896, maxBitrate: 100000000, tier: 'H', level: 150 },  // Level 5 (High Tier)
+    { maxPictureSize: 8912896, maxBitrate: 40000000, tier: 'L', level: 153 },  // Level 5.1 (Low Tier)
+    { maxPictureSize: 8912896, maxBitrate: 160000000, tier: 'H', level: 153 },  // Level 5.1 (High Tier)
+    { maxPictureSize: 8912896, maxBitrate: 60000000, tier: 'L', level: 156 },  // Level 5.2 (Low Tier)
+    { maxPictureSize: 8912896, maxBitrate: 240000000, tier: 'H', level: 156 },  // Level 5.2 (High Tier)
+    { maxPictureSize: 35651584, maxBitrate: 60000000, tier: 'L', level: 180 },  // Level 6 (Low Tier)
+    { maxPictureSize: 35651584, maxBitrate: 240000000, tier: 'H', level: 180 },  // Level 6 (High Tier)
+    { maxPictureSize: 35651584, maxBitrate: 120000000, tier: 'L', level: 183 },  // Level 6.1 (Low Tier)
+    { maxPictureSize: 35651584, maxBitrate: 480000000, tier: 'H', level: 183 },  // Level 6.1 (High Tier)
+    { maxPictureSize: 35651584, maxBitrate: 240000000, tier: 'L', level: 186 },  // Level 6.2 (Low Tier)
+    { maxPictureSize: 35651584, maxBitrate: 800000000, tier: 'H', level: 186 },  // Level 6.2 (High Tier)
+];
 
-		const profileCompatibility = 0x00;
+// https://en.wikipedia.org/wiki/VP9
+const VP9_LEVEL_TABLE = [
+    { maxPictureSize: 36864, maxBitrate: 200000, level: 10 },  // Level 1
+    { maxPictureSize: 73728, maxBitrate: 800000, level: 11 },  // Level 1.1
+    { maxPictureSize: 122880, maxBitrate: 1800000, level: 20 },  // Level 2
+    { maxPictureSize: 245760, maxBitrate: 3600000, level: 21 },  // Level 2.1
+    { maxPictureSize: 552960, maxBitrate: 7200000, level: 30 },  // Level 3
+    { maxPictureSize: 983040, maxBitrate: 12000000, level: 31 },  // Level 3.1
+    { maxPictureSize: 2228224, maxBitrate: 18000000, level: 40 },  // Level 4
+    { maxPictureSize: 2228224, maxBitrate: 30000000, level: 41 },  // Level 4.1
+    { maxPictureSize: 8912896, maxBitrate: 60000000, level: 50 },  // Level 5
+    { maxPictureSize: 8912896, maxBitrate: 120000000, level: 51 },  // Level 5.1
+    { maxPictureSize: 8912896, maxBitrate: 180000000, level: 52 },  // Level 5.2
+    { maxPictureSize: 35651584, maxBitrate: 180000000, level: 60 },  // Level 6
+    { maxPictureSize: 35651584, maxBitrate: 240000000, level: 61 },  // Level 6.1
+    { maxPictureSize: 35651584, maxBitrate: 480000000, level: 62 },  // Level 6.2
+];
 
-		// TODO this is not correct. Fails for 3000x3000 for example. This logic needs to be more complex
-		// Default to Level 4.1 (0x29) for most content, only bump to Level 5.0 (0x32) for 4K content
-		const levelIndication = (width > 1920 || height > 1080) ? 0x32 : 0x29;
+// https://en.wikipedia.org/wiki/AV1
+const AV1_LEVEL_TABLE = [
+    { maxPictureSize: 147456, maxBitrate: 1500000, tier: 'M', level: 0 },  // Level 2.0 (Main Tier)
+    { maxPictureSize: 278784, maxBitrate: 3000000, tier: 'M', level: 1 },  // Level 2.1 (Main Tier)
+    { maxPictureSize: 665856, maxBitrate: 6000000, tier: 'M', level: 4 },  // Level 3.0 (Main Tier)
+    { maxPictureSize: 1065024, maxBitrate: 10000000, tier: 'M', level: 5 },  // Level 3.1 (Main Tier)
+    { maxPictureSize: 2359296, maxBitrate: 12000000, tier: 'M', level: 8 },  // Level 4.0 (Main Tier)
+    { maxPictureSize: 2359296, maxBitrate: 30000000, tier: 'H', level: 8 },  // Level 4.0 (High Tier)
+    { maxPictureSize: 2359296, maxBitrate: 20000000, tier: 'M', level: 9 },  // Level 4.1 (Main Tier)
+    { maxPictureSize: 2359296, maxBitrate: 50000000, tier: 'H', level: 9 },  // Level 4.1 (High Tier)
+    { maxPictureSize: 8912896, maxBitrate: 30000000, tier: 'M', level: 12 },  // Level 5.0 (Main Tier)
+    { maxPictureSize: 8912896, maxBitrate: 100000000, tier: 'H', level: 12 },  // Level 5.0 (High Tier)
+    { maxPictureSize: 8912896, maxBitrate: 40000000, tier: 'M', level: 13 },  // Level 5.1 (Main Tier)
+    { maxPictureSize: 8912896, maxBitrate: 160000000, tier: 'H', level: 13 },  // Level 5.1 (High Tier)
+    { maxPictureSize: 8912896, maxBitrate: 60000000, tier: 'M', level: 14 },  // Level 5.2 (Main Tier)
+    { maxPictureSize: 8912896, maxBitrate: 240000000, tier: 'H', level: 14 },  // Level 5.2 (High Tier)
+    { maxPictureSize: 35651584, maxBitrate: 60000000, tier: 'M', level: 15 },  // Level 5.3 (Main Tier)
+    { maxPictureSize: 35651584, maxBitrate: 240000000, tier: 'H', level: 15 },  // Level 5.3 (High Tier)
+    { maxPictureSize: 35651584, maxBitrate: 60000000, tier: 'M', level: 16 },  // Level 6.0 (Main Tier)
+    { maxPictureSize: 35651584, maxBitrate: 240000000, tier: 'H', level: 16 },  // Level 6.0 (High Tier)
+    { maxPictureSize: 35651584, maxBitrate: 100000000, tier: 'M', level: 17 },  // Level 6.1 (Main Tier)
+    { maxPictureSize: 35651584, maxBitrate: 480000000, tier: 'H', level: 17 },  // Level 6.1 (High Tier)
+    { maxPictureSize: 35651584, maxBitrate: 160000000, tier: 'M', level: 18 },  // Level 6.2 (Main Tier)
+    { maxPictureSize: 35651584, maxBitrate: 800000000, tier: 'H', level: 18 },  // Level 6.2 (High Tier)
+    { maxPictureSize: 35651584, maxBitrate: 160000000, tier: 'M', level: 19 },  // Level 6.3 (Main Tier)
+    { maxPictureSize: 35651584, maxBitrate: 800000000, tier: 'H', level: 19 },  // Level 6.3 (High Tier)
+];
 
-		const hexProfileIndication = profileIndication.toString(16).padStart(2, '0');
-		const hexProfileCompatibility = profileCompatibility.toString(16).padStart(2, '0');
-		const hexLevelIndication = levelIndication.toString(16).padStart(2, '0');
+export const buildVideoCodecString = (codec: VideoCodec, width: number, height: number, bitrate: number) => {
+    if (codec === 'avc') {
+        const profileIndication = 0x64; // High Profile
+        const totalMacroblocks = Math.ceil(width / 16) * Math.ceil(height / 16);
 
-		return `avc1.${hexProfileIndication}${hexProfileCompatibility}${hexLevelIndication}`;
-	} else if (codec === 'hevc') {
-		// Start with general_profile_space and general_profile_idc
-		let profileSpace = 0; // Assuming general_profile_space == 0 (most common)
-		let profileIdc = 1;   // Assuming Main Profile (1)
+        // Determine the level based on the table
+        const levelInfo = AVC_LEVEL_TABLE.find(
+            (level) => totalMacroblocks <= level.maxMacroblocks && bitrate <= level.maxBitrate
+        ) ?? last(AVC_LEVEL_TABLE)!;
+        const levelIndication = levelInfo ? levelInfo.level : 0;
+
+        const hexProfileIndication = profileIndication.toString(16).padStart(2, '0');
+        const hexProfileCompatibility = '00';
+        const hexLevelIndication = levelIndication.toString(16).padStart(2, '0');
+
+        return `avc1.${hexProfileIndication}${hexProfileCompatibility}${hexLevelIndication}`;
+    } else if (codec === 'hevc') {
+		let profileSpace = 0;
+		let profileIdc = 1; // Main Profile
 		
-		// Generate compatibility flags (32 bits in reverse order)
-		// For basic compatibility, we'll set the main profile bit
-		const compatibilityFlags = Array(32).fill(0);
-		compatibilityFlags[profileIdc] = 1;  // Set bit for current profile
-		const compatibilityHex = parseInt(compatibilityFlags.reverse().join(''), 2)
-			.toString(16)
-			.replace(/^0+/, ''); // Remove leading zeroes
-			
-		// Determine tier and level based on resolution
-		let tier = 'L';  // L for Main Tier, H for High Tier
-		let level = 120; // Default level 4.0 (120)
+		const compatibilityFlags = '6'; // Taken from the example in ISO 14496-15
+
+		const pictureSize = width * height;
+		const levelInfo = HEVC_LEVEL_TABLE.find(
+			(level) => pictureSize <= level.maxPictureSize && bitrate <= level.maxBitrate
+		) ?? last(HEVC_LEVEL_TABLE)!;
 		
-		// Adjust level based on resolution (simplified)
-		if (width <= 1280 && height <= 720) {
-			level = 93;  // Level 3.1
-		} else if (width <= 1920 && height <= 1080) {
-			level = 120; // Level 4.0
-		} else if (width <= 3840 && height <= 2160) {
-			level = 150; // Level 5.0
-		} else {
-			tier = 'H';  // Use High Tier for very high resolutions
-			level = 180; // Level 6.0
-		}
+		const constraintFlags = 'B0'; // Progressive source flag
 		
-		// Generate constraint flags (6 bytes)
-		// Using B0 as a simple default (progressive source flag)
-		const constraintFlags = 'B0';
-		
-		// Construct the final string following the format
-		// If profile_space is 0, start with the profile_idc directly
 		const profilePrefix = profileSpace === 0 ? '' : 
 			String.fromCharCode(65 + profileSpace - 1);
 		
-		return `hev1.${profilePrefix}${profileIdc}.${compatibilityHex}.${tier}${level}.${constraintFlags}`;
+		return `hev1.${profilePrefix}${profileIdc}.${compatibilityFlags}.${levelInfo.tier}${levelInfo.level}.${constraintFlags}`;
 	} else if (codec === 'vp8') {
 		return 'vp8'; // Easy, this one
 	} else if (codec === 'vp9') {
-		// Default to Profile 0 (most common)
-		const profile = "00";
+		const profile = "00"; // Profile 0
 		
-		// Determine level based on resolution
-		// VP9 levels are specified as two digits: major.minor
-		let level;
-		if (width <= 854 && height <= 480) {
-			level = "21"; // Level 2.1
-		} else if (width <= 1280 && height <= 720) {
-			level = "31"; // Level 3.1
-		} else if (width <= 1920 && height <= 1080) {
-			level = "41"; // Level 4.1
-		} else if (width <= 3840 && height <= 2160) {
-			level = "51"; // Level 5.1
-		} else {
-			level = "61"; // Level 6.1
-		}
+		const pictureSize = width * height;
+		const levelInfo = VP9_LEVEL_TABLE.find(
+			(level) => pictureSize <= level.maxPictureSize && bitrate <= level.maxBitrate
+		) ?? last(VP9_LEVEL_TABLE)!;
 		
-		// Default to 8-bit depth
-		const bitDepth = "08";
+		const bitDepth = "08"; // 8-bit
 		
-		return `vp09.${profile}.${level}.${bitDepth}`;
+		return `vp09.${profile}.${levelInfo.level}.${bitDepth}`;
 	} else if (codec === 'av1') {
-		// Default to Main Profile (0)
-		const profile = 0;
+		const profile = 0; // Main Profile
 		
-		// Determine level based on resolution
-		// Using a simplified level selection based on common resolutions
-		let level;
-		if (width <= 854 && height <= 480) {
-			level = "01"; // Level 2.1
-		} else if (width <= 1280 && height <= 720) {
-			level = "03"; // Level 2.3
-		} else if (width <= 1920 && height <= 1080) {
-			level = "04"; // Level 3.0
-		} else if (width <= 3840 && height <= 2160) {
-			level = "07"; // Level 4.0
-		} else {
-			level = "09"; // Level 4.2
-		}
+		const pictureSize = width * height;
+		const levelInfo = AV1_LEVEL_TABLE.find(
+			(level) => pictureSize <= level.maxPictureSize && bitrate <= level.maxBitrate
+		) ?? last(AV1_LEVEL_TABLE)!;
 		
-		// Default to Main tier
-		const tier = "M";
-		
-		// Default to 8-bit depth
-		const bitDepth = "08";
+		const bitDepth = "08"; // 8-bit
 	
-		return `av01.${profile}.${level}${tier}.${bitDepth}`;
+		return `av01.${profile}.${levelInfo.level.toString().padStart(2, '0')}${levelInfo.tier}.${bitDepth}`;
 	}
 
 	throw new TypeError(`Unhandled codec '${codec}'.`);

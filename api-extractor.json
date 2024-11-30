@@ -12,7 +12,9 @@
   "dtsRollup": {
     "enabled": true
   },
-  "tsdocMetadata": {},
+  "tsdocMetadata": {
+		"enabled": false
+	},
   "messages": {
     "compilerMessageReporting": {
       "default": {

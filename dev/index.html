@@ -32,8 +32,8 @@
 	}
 
 	const canvas = document.createElement('canvas');
-	canvas.width = 1280;
-	canvas.height = 720;
+	canvas.width = 3840;
+	canvas.height = 3840;
 	const context = canvas.getContext('2d');
 
 	let format = new Metamuxer.WebMOutputFormat({ streamable: true });
@@ -80,7 +80,7 @@
 	*/
 
 	let videoSource = new Metamuxer.CanvasSource(canvas, {
-		codec: 'avc',
+		codec: 'av1',
 		bitrate: 1e6
 	});
 	let audioSource = new Metamuxer.AudioBufferSource({

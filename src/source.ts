@@ -188,7 +188,7 @@ class VideoEncoderWrapper {
 		});
 
 		this.encoder.configure({
-			codec: buildVideoCodecString(this.codecConfig.codec, videoFrame.codedWidth, videoFrame.codedHeight),
+			codec: buildVideoCodecString(this.codecConfig.codec, videoFrame.codedWidth, videoFrame.codedHeight, this.codecConfig.bitrate),
 			width: videoFrame.codedWidth,
 			height: videoFrame.codedHeight,
 			bitrate: this.codecConfig.bitrate,
