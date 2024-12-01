@@ -1,6 +1,6 @@
-import { AsyncMutex } from "./misc";
-import { Output, OutputAudioTrack, OutputSubtitleTrack, OutputTrack, OutputVideoTrack } from "./output";
-import { SubtitleCue, SubtitleMetadata } from "./subtitles";
+import { AsyncMutex } from './misc';
+import { Output, OutputAudioTrack, OutputSubtitleTrack, OutputTrack, OutputVideoTrack } from './output';
+import { SubtitleCue, SubtitleMetadata } from './subtitles';
 
 export abstract class Muxer {
 	output: Output;
@@ -11,18 +11,28 @@ export abstract class Muxer {
 	}
 
 	abstract start(): Promise<void>;
-	abstract addEncodedVideoChunk(track: OutputVideoTrack, chunk: EncodedVideoChunk, meta?: EncodedVideoChunkMetadata): Promise<void>;
-	abstract addEncodedAudioChunk(track: OutputAudioTrack, chunk: EncodedAudioChunk, meta?: EncodedAudioChunkMetadata): Promise<void>;
+	abstract addEncodedVideoChunk(
+		track: OutputVideoTrack,
+		chunk: EncodedVideoChunk,
+		meta?: EncodedVideoChunkMetadata
+	): Promise<void>;
+	abstract addEncodedAudioChunk(
+		track: OutputAudioTrack,
+		chunk: EncodedAudioChunk,
+		meta?: EncodedAudioChunkMetadata
+	): Promise<void>;
 	abstract addSubtitleCue(track: OutputSubtitleTrack, cue: SubtitleCue, meta?: SubtitleMetadata): Promise<void>;
 	abstract finalize(): Promise<void>;
 
+	// eslint-disable-next-line @typescript-eslint/no-unused-vars
 	beforeTrackAdd(track: OutputTrack) {}
+	// eslint-disable-next-line @typescript-eslint/no-unused-vars
 	onTrackClose(track: OutputTrack) {}
 
 	private trackTimestampInfo = new WeakMap<OutputTrack, {
-		timestampOffset: number,
-		maxTimestamp: number,
-		lastKeyFrameTimestamp: number
+		timestampOffset: number;
+		maxTimestamp: number;
+		lastKeyFrameTimestamp: number;
 	}>();
 
 	abstract timestampsMustStartAtZero: boolean;
@@ -42,7 +52,7 @@ export abstract class Muxer {
 			timestampInfo = {
 				timestampOffset: timestampInSeconds,
 				maxTimestamp: track.source._offsetTimestamps ? 0 : timestampInSeconds,
-				lastKeyFrameTimestamp: track.source._offsetTimestamps ? 0 : timestampInSeconds
+				lastKeyFrameTimestamp: track.source._offsetTimestamps ? 0 : timestampInSeconds,
 			};
 			this.trackTimestampInfo.set(track, timestampInfo);
 		}
@@ -56,17 +66,23 @@ export abstract class Muxer {
 		}
 
 		if (timestampInSeconds < timestampInfo.lastKeyFrameTimestamp) {
-			throw new Error(`Timestamp cannot be smaller than last key frame's timestamp (got ${timestampInSeconds}s, last key frame at ${timestampInfo.lastKeyFrameTimestamp}s).`);
+			throw new Error(
+				`Timestamp cannot be smaller than last key frame's timestamp (got ${timestampInSeconds}s,`
+				+ ` last key frame at ${timestampInfo.lastKeyFrameTimestamp}s).`,
+			);
 		}
 
 		if (isKeyFrame) {
 			if (timestampInSeconds < timestampInfo.maxTimestamp) {
-				throw new Error(`Key frame timestamps cannot be smaller than any timestamp that came before (got ${timestampInSeconds}s, max timestamp was ${timestampInfo.maxTimestamp}s).`);
+				throw new Error(
+					`Key frame timestamps cannot be smaller than any timestamp that came before`
+					+ ` (got ${timestampInSeconds}s, max timestamp was ${timestampInfo.maxTimestamp}s).`,
+				);
 			}
 
 			timestampInfo.lastKeyFrameTimestamp = timestampInSeconds;
 		}
-		
+
 		timestampInfo.maxTimestamp = Math.max(timestampInfo.maxTimestamp, timestampInSeconds);
 
 		return timestampInSeconds;

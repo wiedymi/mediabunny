@@ -1,7 +1,7 @@
-import { IsobmffMuxer } from "./isobmff/isobmff-muxer";
-import { MatroskaMuxer } from "./matroska/matroska-muxer";
-import { Muxer } from "./muxer";
-import { Output } from "./output";
+import { IsobmffMuxer } from './isobmff/isobmff-muxer';
+import { MatroskaMuxer } from './matroska/matroska-muxer';
+import { Muxer } from './muxer';
+import { Output } from './output';
 
 /** @public */
 export abstract class OutputFormat {
@@ -11,7 +11,7 @@ export abstract class OutputFormat {
 
 /** @public */
 export type Mp4OutputFormatOptions = {
-	fastStart?: false | 'in-memory' | 'fragmented'
+	fastStart?: false | 'in-memory' | 'fragmented';
 };
 
 /** @public */
@@ -40,7 +40,7 @@ export class Mp4OutputFormat extends OutputFormat {
 
 /** @public */
 export type MkvOutputFormatOptions = {
-	streamable?: boolean
+	streamable?: boolean;
 };
 
 /** @public */

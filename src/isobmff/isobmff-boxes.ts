@@ -1,8 +1,27 @@
-import { toUint8Array, assert, isU32, last, TransformationMatrix, textEncoder, COLOR_PRIMARIES_MAP, TRANSFER_CHARACTERISTICS_MAP, MATRIX_COEFFICIENTS_MAP, colorSpaceIsComplete } from '../misc';
-import { AudioCodec, AudioSource, SubtitleCodec, VideoCodec, VideoSource } from '../source';
+import {
+	toUint8Array,
+	assert,
+	isU32,
+	last,
+	TransformationMatrix,
+	textEncoder,
+	COLOR_PRIMARIES_MAP,
+	TRANSFER_CHARACTERISTICS_MAP,
+	MATRIX_COEFFICIENTS_MAP,
+	colorSpaceIsComplete,
+} from '../misc';
+import { AudioCodec, SubtitleCodec, VideoCodec } from '../source';
 import { formatSubtitleTimestamp } from '../subtitles';
 import { Writer } from '../writer';
-import { GLOBAL_TIMESCALE, intoTimescale, IsobmffAudioTrackData, IsobmffSubtitleTrackData, IsobmffTrackData, IsobmffVideoTrackData, Sample } from './isobmff-muxer';
+import {
+	GLOBAL_TIMESCALE,
+	intoTimescale,
+	IsobmffAudioTrackData,
+	IsobmffSubtitleTrackData,
+	IsobmffTrackData,
+	IsobmffVideoTrackData,
+	Sample,
+} from './isobmff-muxer';
 
 export class IsobmffBoxWriter {
 	private helper = new Uint8Array(8);
@@ -22,7 +41,7 @@ export class IsobmffBoxWriter {
 	}
 
 	writeU64(value: number) {
-		this.helperView.setUint32(0, Math.floor(value / 2**32), false);
+		this.helperView.setUint32(0, Math.floor(value / 2 ** 32), false);
 		this.helperView.setUint32(4, value, false);
 		this.writer.write(this.helper.subarray(0, 8));
 	}
@@ -45,14 +64,14 @@ export class IsobmffBoxWriter {
 			this.writeBoxHeader(box, box.size ?? box.contents.byteLength + 8);
 			this.writer.write(box.contents);
 		} else {
-			let startPos = this.writer.getPos();
+			const startPos = this.writer.getPos();
 			this.writeBoxHeader(box, 0);
 
 			if (box.contents) this.writer.write(box.contents);
-			if (box.children) for (let child of box.children) if (child) this.writeBox(child);
+			if (box.children) for (const child of box.children) if (child) this.writeBox(child);
 
-			let endPos = this.writer.getPos();
-			let size = box.size ?? endPos - startPos;
+			const endPos = this.writer.getPos();
+			const size = box.size ?? endPos - startPos;
 			this.writer.seek(startPos);
 			this.writeBoxHeader(box, size);
 			this.writer.seek(endPos);
@@ -73,7 +92,7 @@ export class IsobmffBoxWriter {
 		const boxOffset = this.offsets.get(box);
 		assert(boxOffset !== undefined);
 
-		let endPos = this.writer.getPos();
+		const endPos = this.writer.getPos();
 		this.writer.seek(boxOffset);
 		this.writeBox(box);
 		this.writer.seek(endPos);
@@ -81,20 +100,20 @@ export class IsobmffBoxWriter {
 
 	measureBox(box: Box) {
 		if (box.contents && !box.children) {
-			let headerSize = this.measureBoxHeader(box);
+			const headerSize = this.measureBoxHeader(box);
 			return headerSize + box.contents.byteLength;
 		} else {
 			let result = this.measureBoxHeader(box);
 			if (box.contents) result += box.contents.byteLength;
-			if (box.children) for (let child of box.children) if (child) result += this.measureBox(child);
+			if (box.children) for (const child of box.children) if (child) result += this.measureBox(child);
 
 			return result;
 		}
 	}
 }
 
-let bytes = new Uint8Array(8);
-let view = new DataView(bytes.buffer);
+const bytes = new Uint8Array(8);
+const view = new DataView(bytes.buffer);
 
 const u8 = (value: number) => {
 	return [(value % 0x100 + 0x100) % 0x100];
@@ -126,40 +145,40 @@ const i32 = (value: number) => {
 };
 
 const u64 = (value: number) => {
-	view.setUint32(0, Math.floor(value / 2**32), false);
+	view.setUint32(0, Math.floor(value / 2 ** 32), false);
 	view.setUint32(4, value, false);
 	return [bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7]] as number[];
 };
 
 const fixed_8_8 = (value: number) => {
-	view.setInt16(0, 2**8 * value, false);
+	view.setInt16(0, 2 ** 8 * value, false);
 	return [bytes[0], bytes[1]] as number[];
 };
 
 const fixed_16_16 = (value: number) => {
-	view.setInt32(0, 2**16 * value, false);
+	view.setInt32(0, 2 ** 16 * value, false);
 	return [bytes[0], bytes[1], bytes[2], bytes[3]] as number[];
 };
 
 const fixed_2_30 = (value: number) => {
-	view.setInt32(0, 2**30 * value, false);
+	view.setInt32(0, 2 ** 30 * value, false);
 	return [bytes[0], bytes[1], bytes[2], bytes[3]] as number[];
 };
 
 const variableUnsignedInt = (value: number, byteLength?: number) => {
-	let bytes: number[] = [];
+	const bytes: number[] = [];
 	let remaining = value;
 
 	do {
 		let byte = remaining & 0x7f;
 		remaining >>= 7;
-		
+
 		// If this isn't the first byte we're adding (meaning there will be more bytes after it
 		// when we reverse the array), set the continuation bit
 		if (bytes.length > 0) {
 			byte |= 0x80;
 		}
-		
+
 		bytes.push(byte);
 
 		if (byteLength !== undefined) {
@@ -172,7 +191,7 @@ const variableUnsignedInt = (value: number, byteLength?: number) => {
 };
 
 const ascii = (text: string, nullTerminated = false) => {
-	let bytes = Array(text.length).fill(null).map((_, i) => text.charCodeAt(i));
+	const bytes = Array(text.length).fill(null).map((_, i) => text.charCodeAt(i));
 	if (nullTerminated) bytes.push(0x00);
 	return bytes;
 };
@@ -180,7 +199,7 @@ const ascii = (text: string, nullTerminated = false) => {
 const lastPresentedSample = (samples: Sample[]) => {
 	let result: Sample | null = null;
 
-	for (let sample of samples) {
+	for (const sample of samples) {
 		if (!result || sample.timestamp > result.timestamp) {
 			result = sample;
 		}
@@ -190,15 +209,15 @@ const lastPresentedSample = (samples: Sample[]) => {
 };
 
 const rotationMatrix = (rotationInDegrees: number): TransformationMatrix => {
-	let theta = rotationInDegrees * (Math.PI / 180);
-	let cosTheta = Math.cos(theta);
-	let sinTheta = Math.sin(theta);
+	const theta = rotationInDegrees * (Math.PI / 180);
+	const cosTheta = Math.cos(theta);
+	const sinTheta = Math.sin(theta);
 
 	// Matrices are post-multiplied in ISOBMFF, meaning this is the transpose of your typical rotation matrix
 	return [
 		cosTheta, sinTheta, 0,
 		-sinTheta, cosTheta, 0,
-		0, 0, 1
+		0, 0, 1,
 	];
 };
 
@@ -208,16 +227,16 @@ const matrixToBytes = (matrix: TransformationMatrix) => {
 	return [
 		fixed_16_16(matrix[0]), fixed_16_16(matrix[1]), fixed_2_30(matrix[2]),
 		fixed_16_16(matrix[3]), fixed_16_16(matrix[4]), fixed_2_30(matrix[5]),
-		fixed_16_16(matrix[6]), fixed_16_16(matrix[7]), fixed_2_30(matrix[8])
+		fixed_16_16(matrix[6]), fixed_16_16(matrix[7]), fixed_2_30(matrix[8]),
 	];
 };
 
 export interface Box {
-	type: string,
-	contents?: Uint8Array,
-	children?: (Box | null)[],
-	size?: number,
-	largeSize?: boolean
+	type: string;
+	contents?: Uint8Array;
+	children?: (Box | null)[];
+	size?: number;
+	largeSize?: boolean;
 }
 
 type NestedNumberArray = (number | NestedNumberArray)[];
@@ -225,7 +244,7 @@ type NestedNumberArray = (number | NestedNumberArray)[];
 export const box = (type: string, contents?: NestedNumberArray, children?: (Box | null)[]): Box => ({
 	type,
 	contents: contents && new Uint8Array(contents.flat(10) as number[]),
-	children
+	children,
 });
 
 /** A FullBox always starts with a version byte, followed by three flag bytes. */
@@ -234,11 +253,11 @@ export const fullBox = (
 	version: number,
 	flags: number,
 	contents?: NestedNumberArray,
-	children?: Box[]
+	children?: Box[],
 ) => box(
 	type,
 	[u8(version), u24(flags), contents ?? []],
-	children
+	children,
 );
 
 /**
@@ -246,14 +265,14 @@ export const fullBox = (
  * reader understands.
  */
 export const ftyp = (details: {
-	holdsAvc: boolean,
-	fragmented: boolean
+	holdsAvc: boolean;
+	fragmented: boolean;
 }) => {
 	// You can find the full logic for this at
 	// https://github.com/FFmpeg/FFmpeg/blob/de2fb43e785773738c660cdafb9309b1ef1bc80d/libavformat/movenc.c#L5518
 	// Obviously, this lib only needs a small subset of that logic.
 
-	let minorVersion = 0x200;
+	const minorVersion = 0x200;
 
 	if (details.fragmented) return box('ftyp', [
 		ascii('iso5'), // Major brand
@@ -261,7 +280,7 @@ export const ftyp = (details: {
 		// Compatible brands
 		ascii('iso5'),
 		ascii('iso6'),
-		ascii('mp41')
+		ascii('mp41'),
 	]);
 
 	return box('ftyp', [
@@ -270,7 +289,7 @@ export const ftyp = (details: {
 		// Compatible brands
 		ascii('isom'),
 		details.holdsAvc ? ascii('avc1') : [],
-		ascii('mp41')
+		ascii('mp41'),
 	]);
 };
 
@@ -284,31 +303,35 @@ export const free = (size: number): Box => ({ type: 'free', size });
  * Movie Box: Used to specify the information that defines a movie - that is, the information that allows
  * an application to interpret the sample data that is stored elsewhere.
  */
-export const moov = (trackDatas: IsobmffTrackData[], creationTime: number, fragmented = false) => box('moov', undefined, [
+export const moov = (
+	trackDatas: IsobmffTrackData[],
+	creationTime: number,
+	fragmented = false,
+) => box('moov', undefined, [
 	mvhd(creationTime, trackDatas),
 	...trackDatas.map(x => trak(x, creationTime)),
-	fragmented ? mvex(trackDatas) : null
+	fragmented ? mvex(trackDatas) : null,
 ]);
 
 /** Movie Header Box: Used to specify the characteristics of the entire movie, such as timescale and duration. */
 export const mvhd = (
 	creationTime: number,
-	trackDatas: IsobmffTrackData[]
+	trackDatas: IsobmffTrackData[],
 ) => {
-	let duration = intoTimescale(Math.max(
+	const duration = intoTimescale(Math.max(
 		0,
-		...trackDatas.
-			filter(x => x.samples.length > 0).
-			map(x => {
+		...trackDatas
+			.filter(x => x.samples.length > 0)
+			.map((x) => {
 				const lastSample = lastPresentedSample(x.samples)!;
 				return lastSample.timestamp + lastSample.duration;
-			})
+			}),
 	), GLOBAL_TIMESCALE);
-	let nextTrackId = Math.max(0, ...trackDatas.map(x => x.track.id)) + 1;
+	const nextTrackId = Math.max(0, ...trackDatas.map(x => x.track.id)) + 1;
 
 	// Conditionally use u64 if u32 isn't enough
-	let needsU64 = !isU32(creationTime) || !isU32(duration);
-	let u32OrU64 = needsU64 ? u64 : u32;
+	const needsU64 = !isU32(creationTime) || !isU32(duration);
+	const u32OrU64 = needsU64 ? u64 : u32;
 
 	return fullBox('mvhd', +needsU64, 0, [
 		u32OrU64(creationTime), // Creation time
@@ -320,7 +343,7 @@ export const mvhd = (
 		Array(10).fill(0), // Reserved
 		matrixToBytes(IDENTITY_MATRIX), // Matrix
 		Array(24).fill(0), // Pre-defined
-		u32(nextTrackId) // Next track ID
+		u32(nextTrackId), // Next track ID
 	]);
 };
 
@@ -331,22 +354,22 @@ export const mvhd = (
  */
 export const trak = (trackData: IsobmffTrackData, creationTime: number) => box('trak', undefined, [
 	tkhd(trackData, creationTime),
-	mdia(trackData, creationTime)
+	mdia(trackData, creationTime),
 ]);
 
 /** Track Header Box: Specifies the characteristics of a single track within a movie. */
 export const tkhd = (
 	trackData: IsobmffTrackData,
-	creationTime: number
+	creationTime: number,
 ) => {
-	let lastSample = lastPresentedSample(trackData.samples);
-	let durationInGlobalTimescale = intoTimescale(
+	const lastSample = lastPresentedSample(trackData.samples);
+	const durationInGlobalTimescale = intoTimescale(
 		lastSample ? lastSample.timestamp + lastSample.duration : 0,
-		GLOBAL_TIMESCALE
+		GLOBAL_TIMESCALE,
 	);
 
-	let needsU64 = !isU32(creationTime) || !isU32(durationInGlobalTimescale);
-	let u32OrU64 = needsU64 ? u64 : u32;
+	const needsU64 = !isU32(creationTime) || !isU32(durationInGlobalTimescale);
+	const u32OrU64 = needsU64 ? u64 : u32;
 
 	let matrix: TransformationMatrix;
 	if (trackData.type === 'video') {
@@ -369,7 +392,7 @@ export const tkhd = (
 		u16(0), // Reserved
 		matrixToBytes(matrix), // Matrix
 		fixed_16_16(trackData.type === 'video' ? trackData.info.width : 0), // Track width
-		fixed_16_16(trackData.type === 'video' ? trackData.info.height : 0) // Track height
+		fixed_16_16(trackData.type === 'video' ? trackData.info.height : 0), // Track height
 	]);
 };
 
@@ -377,22 +400,22 @@ export const tkhd = (
 export const mdia = (trackData: IsobmffTrackData, creationTime: number) => box('mdia', undefined, [
 	mdhd(trackData, creationTime),
 	hdlr(trackData),
-	minf(trackData)
+	minf(trackData),
 ]);
 
 /** Media Header Box: Specifies the characteristics of a media, including timescale and duration. */
 export const mdhd = (
 	trackData: IsobmffTrackData,
-	creationTime: number
+	creationTime: number,
 ) => {
-	let lastSample = lastPresentedSample(trackData.samples);
-	let localDuration = intoTimescale(
+	const lastSample = lastPresentedSample(trackData.samples);
+	const localDuration = intoTimescale(
 		lastSample ? lastSample.timestamp + lastSample.duration : 0,
-		trackData.timescale
+		trackData.timescale,
 	);
 
-	let needsU64 = !isU32(creationTime) || !isU32(localDuration);
-	let u32OrU64 = needsU64 ? u64 : u32;
+	const needsU64 = !isU32(creationTime) || !isU32(localDuration);
+	const u32OrU64 = needsU64 ? u64 : u32;
 
 	return fullBox('mdhd', +needsU64, 0, [
 		u32OrU64(creationTime), // Creation time
@@ -400,20 +423,20 @@ export const mdhd = (
 		u32(trackData.timescale), // Timescale
 		u32OrU64(localDuration), // Duration
 		u16(0b01010101_11000100), // Language ("und", undetermined)
-		u16(0) // Quality
+		u16(0), // Quality
 	]);
 };
 
 const TRACK_TYPE_TO_COMPONENT_SUBTYPE: Record<IsobmffTrackData['type'], string> = {
 	video: 'vide',
 	audio: 'soun',
-	subtitle: 'text'
+	subtitle: 'text',
 };
 
 const TRACK_TYPE_TO_HANDLER_NAME: Record<IsobmffTrackData['type'], string> = {
 	video: 'VideoHandler',
 	audio: 'SoundHandler',
-	subtitle: 'TextHandler'
+	subtitle: 'TextHandler',
 };
 
 /** Handler Reference Box: Specifies the media handler component that is to be used to interpret the media's data. */
@@ -423,7 +446,7 @@ export const hdlr = (trackData: IsobmffTrackData) => fullBox('hdlr', 0, 0, [
 	u32(0), // Component manufacturer
 	u32(0), // Component flags
 	u32(0), // Component flags mask
-	ascii(TRACK_TYPE_TO_HANDLER_NAME[trackData.type], true) // Component name
+	ascii(TRACK_TYPE_TO_HANDLER_NAME[trackData.type], true), // Component name
 ]);
 
 /**
@@ -433,7 +456,7 @@ export const hdlr = (trackData: IsobmffTrackData) => fullBox('hdlr', 0, 0, [
 export const minf = (trackData: IsobmffTrackData) => box('minf', undefined, [
 	TRACK_TYPE_TO_HEADER_BOX[trackData.type](),
 	dinf(),
-	stbl(trackData)
+	stbl(trackData),
 ]);
 
 /** Video Media Information Header Box: Defines specific color and graphics mode information. */
@@ -441,22 +464,22 @@ export const vmhd = () => fullBox('vmhd', 0, 1, [
 	u16(0), // Graphics mode
 	u16(0), // Opcolor R
 	u16(0), // Opcolor G
-	u16(0) // Opcolor B
+	u16(0), // Opcolor B
 ]);
 
 /** Sound Media Information Header Box: Stores the sound media's control information, such as balance. */
 export const smhd = () => fullBox('smhd', 0, 0, [
 	u16(0), // Balance
-	u16(0) // Reserved
+	u16(0), // Reserved
 ]);
 
 /** Null Media Header Box. */
-export const nmhd = () => fullBox('nmhd', 0, 0);	
+export const nmhd = () => fullBox('nmhd', 0, 0);
 
 const TRACK_TYPE_TO_HEADER_BOX: Record<IsobmffTrackData['type'], () => Box> = {
 	video: vmhd,
 	audio: smhd,
-	subtitle: nmhd
+	subtitle: nmhd,
 };
 
 /**
@@ -464,16 +487,16 @@ const TRACK_TYPE_TO_HEADER_BOX: Record<IsobmffTrackData['type'], () => Box> = {
  * media data. The data handler component uses the Data Information Box to interpret the media's data.
  */
 export const dinf = () => box('dinf', undefined, [
-	dref()
+	dref(),
 ]);
 
 /**
  * Data Reference Box: Contains tabular data that instructs the data handler component how to access the media's data.
  */
 export const dref = () => fullBox('dref', 0, 0, [
-	u32(1) // Entry count
+	u32(1), // Entry count
 ], [
-	url()
+	url(),
 ]);
 
 export const url = () => fullBox('url ', 0, 1); // Self-reference flag enabled
@@ -483,8 +506,8 @@ export const url = () => fullBox('url ', 0, 1); // Self-reference flag enabled
  * also indicates how to interpret the sample (for example, whether to decompress the video data and, if so, how).
  */
 export const stbl = (trackData: IsobmffTrackData) => {
-	const needsCtts = trackData.compositionTimeOffsetTable.length > 1 ||
-		trackData.compositionTimeOffsetTable.some((x) => x.sampleCompositionTimeOffset !== 0);
+	const needsCtts = trackData.compositionTimeOffsetTable.length > 1
+		|| trackData.compositionTimeOffsetTable.some(x => x.sampleCompositionTimeOffset !== 0);
 
 	return box('stbl', undefined, [
 		stsd(trackData),
@@ -493,7 +516,7 @@ export const stbl = (trackData: IsobmffTrackData) => {
 		stsc(trackData),
 		stsz(trackData),
 		stco(trackData),
-		needsCtts ? ctts(trackData) : null
+		needsCtts ? ctts(trackData) : null,
 	]);
 };
 
@@ -507,33 +530,33 @@ export const stsd = (trackData: IsobmffTrackData) => {
 	if (trackData.type === 'video') {
 		sampleDescription = videoSampleDescription(
 			VIDEO_CODEC_TO_BOX_NAME[trackData.track.source._codec],
-			trackData
-		)
+			trackData,
+		);
 	} else if (trackData.type === 'audio') {
 		sampleDescription = soundSampleDescription(
 			AUDIO_CODEC_TO_BOX_NAME[trackData.track.source._codec],
-			trackData
+			trackData,
 		);
 	} else if (trackData.type === 'subtitle') {
 		sampleDescription = subtitleSampleDescription(
 			SUBTITLE_CODEC_TO_BOX_NAME[trackData.track.source._codec],
-			trackData
+			trackData,
 		);
 	}
 
 	assert(sampleDescription!);
 
 	return fullBox('stsd', 0, 0, [
-		u32(1) // Entry count
+		u32(1), // Entry count
 	], [
-		sampleDescription
+		sampleDescription,
 	]);
 };
 
 /** Video Sample Description Box: Contains information that defines how to interpret video media data. */
 export const videoSampleDescription = (
 	compressionType: string,
-	trackData: IsobmffVideoTrackData
+	trackData: IsobmffVideoTrackData,
 ) => box(compressionType, [
 	Array(6).fill(0), // Reserved
 	u16(1), // Data reference index
@@ -548,10 +571,10 @@ export const videoSampleDescription = (
 	u16(1), // Frame count
 	Array(32).fill(0), // Compressor name
 	u16(0x0018), // Depth
-	i16(0xffff) // Pre-defined
+	i16(0xffff), // Pre-defined
 ], [
 	VIDEO_CODEC_TO_CONFIGURATION_BOX[trackData.track.source._codec](trackData),
-	colorSpaceIsComplete(trackData.info.decoderConfig.colorSpace) ? colr(trackData) : null
+	colorSpaceIsComplete(trackData.info.decoderConfig.colorSpace) ? colr(trackData) : null,
 ]);
 
 /** Colour Information Box: Specifies the color space of the video. */
@@ -560,19 +583,19 @@ export const colr = (trackData: IsobmffVideoTrackData) => box('colr', [
 	u16(COLOR_PRIMARIES_MAP[trackData.info.decoderConfig.colorSpace!.primaries!]), // Colour primaries
 	u16(TRANSFER_CHARACTERISTICS_MAP[trackData.info.decoderConfig.colorSpace!.transfer!]), // Transfer characteristics
 	u16(MATRIX_COEFFICIENTS_MAP[trackData.info.decoderConfig.colorSpace!.matrix!]), // Matrix coefficients
-	u8((trackData.info.decoderConfig.colorSpace!.fullRange ? 1 : 0) << 7) // Full range flag
+	u8((trackData.info.decoderConfig.colorSpace!.fullRange ? 1 : 0) << 7), // Full range flag
 ]);
 
 /** AVC Configuration Box: Provides additional information to the decoder. */
 export const avcC = (trackData: IsobmffVideoTrackData) => trackData.info.decoderConfig && box('avcC', [
 	// For AVC, description is an AVCDecoderConfigurationRecord, so nothing else to do here
-	...toUint8Array(trackData.info.decoderConfig.description!)
+	...toUint8Array(trackData.info.decoderConfig.description!),
 ]);
 
 /** HEVC Configuration Box: Provides additional information to the decoder. */
 export const hvcC = (trackData: IsobmffVideoTrackData) => trackData.info.decoderConfig && box('hvcC', [
 	// For HEVC, description is an HEVCDecoderConfigurationRecord, so nothing else to do here
-	...toUint8Array(trackData.info.decoderConfig.description!)
+	...toUint8Array(trackData.info.decoderConfig.description!),
 ]);
 
 /** VP Configuration Box: Provides additional information to the decoder. */
@@ -583,21 +606,21 @@ export const vpcC = (trackData: IsobmffVideoTrackData) => {
 		return null;
 	}
 
-	let decoderConfig = trackData.info.decoderConfig;
+	const decoderConfig = trackData.info.decoderConfig;
 	assert(decoderConfig.colorSpace); // This is guaranteed by an earlier validation step
 
-	let parts = decoderConfig.codec.split('.');
-	let profile = Number(parts[1]);
-	let level = Number(parts[2]);
+	const parts = decoderConfig.codec.split('.');
+	const profile = Number(parts[1]);
+	const level = Number(parts[2]);
 
-	let bitDepth = Number(parts[3]);
-	let chromaSubsampling = 0;
-	let thirdByte = (bitDepth << 4) + (chromaSubsampling << 1) + Number(decoderConfig.colorSpace.fullRange);
+	const bitDepth = Number(parts[3]);
+	const chromaSubsampling = 0;
+	const thirdByte = (bitDepth << 4) + (chromaSubsampling << 1) + Number(decoderConfig.colorSpace.fullRange);
 
 	// Set all to undetermined. We could determine them using the codec color space info, but there's no need.
-	let colourPrimaries = 2;
-	let transferCharacteristics = 2;
-	let matrixCoefficients = 2;
+	const colourPrimaries = 2;
+	const transferCharacteristics = 2;
+	const matrixCoefficients = 2;
 
 	return fullBox('vpcC', 1, 0, [
 		u8(profile), // Profile
@@ -606,7 +629,7 @@ export const vpcC = (trackData: IsobmffVideoTrackData) => {
 		u8(colourPrimaries), // Colour primaries
 		u8(transferCharacteristics), // Transfer characteristics
 		u8(matrixCoefficients), // Matrix coefficients
-		u16(0) // Codec initialization data size
+		u16(0), // Codec initialization data size
 	]);
 };
 
@@ -614,9 +637,9 @@ export const vpcC = (trackData: IsobmffVideoTrackData) => {
 export const av1C = () => {
 	// Reference: https://aomediacodec.github.io/av1-isobmff/
 
-	let marker = 1;
-	let version = 1;
-	let firstByte = (marker << 7) + version;
+	const marker = 1;
+	const version = 1;
+	const firstByte = (marker << 7) + version;
 
 	// The box contents are not correct like this, but its length is. Getting the values for the last three bytes
 	// requires peeking into the bitstream of the coded chunks. Might come back later.
@@ -624,14 +647,14 @@ export const av1C = () => {
 		firstByte,
 		0,
 		0,
-		0
+		0,
 	]);
 };
 
 /** Sound Sample Description Box: Contains information that defines how to interpret sound media data. */
 export const soundSampleDescription = (
 	compressionType: string,
-	trackData: IsobmffAudioTrackData
+	trackData: IsobmffAudioTrackData,
 ) => box(compressionType, [
 	Array(6).fill(0), // Reserved
 	u16(1), // Data reference index
@@ -642,20 +665,20 @@ export const soundSampleDescription = (
 	u16(16), // Sample size (bits)
 	u16(0), // Compression ID
 	u16(0), // Packet size
-	fixed_16_16(trackData.info.sampleRate) // Sample rate
+	fixed_16_16(trackData.info.sampleRate), // Sample rate
 ], [
-	AUDIO_CODEC_TO_CONFIGURATION_BOX[trackData.track.source._codec](trackData)
+	AUDIO_CODEC_TO_CONFIGURATION_BOX[trackData.track.source._codec](trackData),
 ]);
 
 /** MPEG-4 Elementary Stream Descriptor Box. */
 export const esds = (trackData: IsobmffAudioTrackData) => {
-	let description = toUint8Array(trackData.info.decoderConfig.description ?? new ArrayBuffer(0));
+	const description = toUint8Array(trackData.info.decoderConfig.description ?? new ArrayBuffer(0));
 
 	// Adapted from https://stackoverflow.com/a/54803118
 	// We build up the bytes in a layered way which reflects the nested structure
 
 	let bytes = [
-		...description
+		...description,
 	];
 	bytes = [
 		...u8(0x40), // MPEG-4 Audio
@@ -665,7 +688,7 @@ export const esds = (trackData: IsobmffAudioTrackData) => {
 		...u32(0), // avg bitrate
 		...u8(0x05), // TAG(5) = ASC ([2],[3]) embedded in above OD
 		...variableUnsignedInt(bytes.length),
-		...bytes
+		...bytes,
 	];
 	bytes = [
 		...u16(1), // ES_ID = 1
@@ -675,12 +698,12 @@ export const esds = (trackData: IsobmffAudioTrackData) => {
 		...bytes,
 		...u8(0x06), // TAG(6)
 		...u8(0x01), // length
-		...u8(0x02) // data
+		...u8(0x02), // data
 	];
 	bytes = [
 		...u8(0x03), // TAG(3) = Object Descriptor ([2])
 		...variableUnsignedInt(bytes.length),
-		...bytes
+		...bytes,
 	];
 
 	return fullBox('esds', 0, 0, bytes);
@@ -711,26 +734,26 @@ export const dOps = (trackData: IsobmffAudioTrackData) => {
 		u16(preskip),
 		u32(trackData.info.sampleRate), // InputSampleRate
 		fixed_8_8(gain), // OutputGain
-		u8(0) // ChannelMappingFamily
+		u8(0), // ChannelMappingFamily
 	]);
 };
 
 export const subtitleSampleDescription = (
 	compressionType: string,
-	trackData: IsobmffSubtitleTrackData
+	trackData: IsobmffSubtitleTrackData,
 ) => box(compressionType, [
 	Array(6).fill(0), // Reserved
 	u16(1), // Data reference index
 ], [
-	SUBTITLE_CODEC_TO_CONFIGURATION_BOX[trackData.track.source._codec](trackData)
-])
+	SUBTITLE_CODEC_TO_CONFIGURATION_BOX[trackData.track.source._codec](trackData),
+]);
 
 export const vttC = (trackData: IsobmffSubtitleTrackData) => box('vttC', [
-	...textEncoder.encode(trackData.info.config.description)
+	...textEncoder.encode(trackData.info.config.description),
 ]);
 
 export const txtC = (textConfig: Uint8Array) => fullBox('txtC', 0, 0, [
-	...textConfig, 0 // Text config (null-terminated)
+	...textConfig, 0, // Text config (null-terminated)
 ]);
 
 /**
@@ -743,8 +766,8 @@ export const stts = (trackData: IsobmffTrackData) => {
 		u32(trackData.timeToSampleTable.length), // Number of entries
 		trackData.timeToSampleTable.map(x => [ // Time-to-sample table
 			u32(x.sampleCount), // Sample count
-			u32(x.sampleDelta) // Sample duration
-		])
+			u32(x.sampleDelta), // Sample duration
+		]),
 	]);
 };
 
@@ -752,10 +775,10 @@ export const stts = (trackData: IsobmffTrackData) => {
 export const stss = (trackData: IsobmffTrackData) => {
 	if (trackData.samples.every(x => x.type === 'key')) return null; // No stss box -> every frame is a key frame
 
-	let keySamples = [...trackData.samples.entries()].filter(([, sample]) => sample.type === 'key');
+	const keySamples = [...trackData.samples.entries()].filter(([, sample]) => sample.type === 'key');
 	return fullBox('stss', 0, 0, [
 		u32(keySamples.length), // Number of entries
-		keySamples.map(([index]) => u32(index + 1)) // Sync sample table
+		keySamples.map(([index]) => u32(index + 1)), // Sync sample table
 	]);
 };
 
@@ -771,8 +794,8 @@ export const stsc = (trackData: IsobmffTrackData) => {
 		trackData.compactlyCodedChunkTable.map(x => [ // Sample-to-chunk table
 			u32(x.firstChunk), // First chunk
 			u32(x.samplesPerChunk), // Samples per chunk
-			u32(1) // Sample description index
-		])
+			u32(1), // Sample description index
+		]),
 	]);
 };
 
@@ -780,22 +803,22 @@ export const stsc = (trackData: IsobmffTrackData) => {
 export const stsz = (trackData: IsobmffTrackData) => fullBox('stsz', 0, 0, [
 	u32(0), // Sample size (0 means non-constant size)
 	u32(trackData.samples.length), // Number of entries
-	trackData.samples.map(x => u32(x.size)) // Sample size table
+	trackData.samples.map(x => u32(x.size)), // Sample size table
 ]);
 
 /** Chunk Offset Box: Identifies the location of each chunk of data in the media's data stream, relative to the file. */
 export const stco = (trackData: IsobmffTrackData) => {
-	if (trackData.finalizedChunks.length > 0 && last(trackData.finalizedChunks)!.offset! >= 2**32) {
+	if (trackData.finalizedChunks.length > 0 && last(trackData.finalizedChunks)!.offset! >= 2 ** 32) {
 		// If the file is large, use the co64 box
 		return fullBox('co64', 0, 0, [
 			u32(trackData.finalizedChunks.length), // Number of entries
-			trackData.finalizedChunks.map(x => u64(x.offset!)) // Chunk offset table
+			trackData.finalizedChunks.map(x => u64(x.offset!)), // Chunk offset table
 		]);
 	}
 
 	return fullBox('stco', 0, 0, [
 		u32(trackData.finalizedChunks.length), // Number of entries
-		trackData.finalizedChunks.map(x => u32(x.offset!)) // Chunk offset table
+		trackData.finalizedChunks.map(x => u32(x.offset!)), // Chunk offset table
 	]);
 };
 
@@ -807,8 +830,8 @@ export const ctts = (trackData: IsobmffTrackData) => {
 		u32(trackData.compositionTimeOffsetTable.length), // Number of entries
 		trackData.compositionTimeOffsetTable.map(x => [ // Time-to-sample table
 			u32(x.sampleCount), // Sample count
-			u32(x.sampleCompositionTimeOffset) // Sample offset
-		])
+			u32(x.sampleCompositionTimeOffset), // Sample offset
+		]),
 	]);
 };
 
@@ -827,7 +850,7 @@ export const trex = (trackData: IsobmffTrackData) => {
 		u32(1), // Default sample description index
 		u32(0), // Default sample duration
 		u32(0), // Default sample size
-		u32(0) // Default sample flags
+		u32(0), // Default sample flags
 	]);
 };
 
@@ -838,24 +861,24 @@ export const trex = (trackData: IsobmffTrackData) => {
 export const moof = (sequenceNumber: number, trackDatas: IsobmffTrackData[]) => {
 	return box('moof', undefined, [
 		mfhd(sequenceNumber),
-		...trackDatas.map(traf)
+		...trackDatas.map(traf),
 	]);
 };
 
 /** Movie Fragment Header Box: Contains a sequence number as a safety check. */
 export const mfhd = (sequenceNumber: number) => {
 	return fullBox('mfhd', 0, 0, [
-		u32(sequenceNumber) // Sequence number
+		u32(sequenceNumber), // Sequence number
 	]);
 };
 
 const fragmentSampleFlags = (sample: Sample) => {
 	let byte1 = 0;
 	let byte2 = 0;
-	let byte3 = 0;
-	let byte4 = 0;
+	const byte3 = 0;
+	const byte4 = 0;
 
-	let sampleIsDifferenceSample = sample.type === 'delta';
+	const sampleIsDifferenceSample = sample.type === 'delta';
 	byte2 |= +sampleIsDifferenceSample;
 
 	if (sampleIsDifferenceSample) {
@@ -873,7 +896,7 @@ export const traf = (trackData: IsobmffTrackData) => {
 	return box('traf', undefined, [
 		tfhd(trackData),
 		tfdt(trackData),
-		trun(trackData)
+		trun(trackData),
 	]);
 };
 
@@ -888,18 +911,18 @@ export const tfhd = (trackData: IsobmffTrackData) => {
 	tfFlags |= 0x20000; // Default base is moof
 
 	// Prefer the second sample over the first one, as the first one is a sync sample and therefore the "odd one out"
-	let referenceSample = trackData.currentChunk.samples[1] ?? trackData.currentChunk.samples[0]!;
-	let referenceSampleInfo = {
+	const referenceSample = trackData.currentChunk.samples[1] ?? trackData.currentChunk.samples[0]!;
+	const referenceSampleInfo = {
 		duration: referenceSample.timescaleUnitsToNextSample,
 		size: referenceSample.size,
-		flags: fragmentSampleFlags(referenceSample)
+		flags: fragmentSampleFlags(referenceSample),
 	};
 
 	return fullBox('tfhd', 0, tfFlags, [
 		u32(trackData.track.id), // Track ID
 		u32(referenceSampleInfo.duration), // Default sample duration
 		u32(referenceSampleInfo.size), // Default sample size
-		u32(referenceSampleInfo.flags) // Default sample flags
+		u32(referenceSampleInfo.flags), // Default sample flags
 	]);
 };
 
@@ -911,7 +934,7 @@ export const tfdt = (trackData: IsobmffTrackData) => {
 	assert(trackData.currentChunk);
 
 	return fullBox('tfdt', 1, 0, [
-		u64(intoTimescale(trackData.currentChunk.startTimestamp, trackData.timescale)) // Base Media Decode Time
+		u64(intoTimescale(trackData.currentChunk.startTimestamp, trackData.timescale)), // Base Media Decode Time
 	]);
 };
 
@@ -919,23 +942,23 @@ export const tfdt = (trackData: IsobmffTrackData) => {
 export const trun = (trackData: IsobmffTrackData) => {
 	assert(trackData.currentChunk);
 
-	let allSampleDurations = trackData.currentChunk.samples.map(x => x.timescaleUnitsToNextSample);
-	let allSampleSizes = trackData.currentChunk.samples.map(x => x.size);
-	let allSampleFlags = trackData.currentChunk.samples.map(fragmentSampleFlags);
-	let allSampleCompositionTimeOffsets = trackData.currentChunk.samples.
-		map(x => intoTimescale(x.timestamp - x.decodeTimestamp, trackData.timescale));
+	const allSampleDurations = trackData.currentChunk.samples.map(x => x.timescaleUnitsToNextSample);
+	const allSampleSizes = trackData.currentChunk.samples.map(x => x.size);
+	const allSampleFlags = trackData.currentChunk.samples.map(fragmentSampleFlags);
+	const allSampleCompositionTimeOffsets = trackData.currentChunk.samples
+		.map(x => intoTimescale(x.timestamp - x.decodeTimestamp, trackData.timescale));
 
-	let uniqueSampleDurations = new Set(allSampleDurations);
-	let uniqueSampleSizes = new Set(allSampleSizes);
-	let uniqueSampleFlags = new Set(allSampleFlags);
-	let uniqueSampleCompositionTimeOffsets = new Set(allSampleCompositionTimeOffsets);
+	const uniqueSampleDurations = new Set(allSampleDurations);
+	const uniqueSampleSizes = new Set(allSampleSizes);
+	const uniqueSampleFlags = new Set(allSampleFlags);
+	const uniqueSampleCompositionTimeOffsets = new Set(allSampleCompositionTimeOffsets);
 
-	let firstSampleFlagsPresent = uniqueSampleFlags.size === 2 && allSampleFlags[0] !== allSampleFlags[1];
-	let sampleDurationPresent = uniqueSampleDurations.size > 1;
-	let sampleSizePresent = uniqueSampleSizes.size > 1;
-	let sampleFlagsPresent = !firstSampleFlagsPresent && uniqueSampleFlags.size > 1;
-	let sampleCompositionTimeOffsetsPresent =
-		uniqueSampleCompositionTimeOffsets.size > 1 || [...uniqueSampleCompositionTimeOffsets].some(x => x !== 0);
+	const firstSampleFlagsPresent = uniqueSampleFlags.size === 2 && allSampleFlags[0] !== allSampleFlags[1];
+	const sampleDurationPresent = uniqueSampleDurations.size > 1;
+	const sampleSizePresent = uniqueSampleSizes.size > 1;
+	const sampleFlagsPresent = !firstSampleFlagsPresent && uniqueSampleFlags.size > 1;
+	const sampleCompositionTimeOffsetsPresent
+		= uniqueSampleCompositionTimeOffsets.size > 1 || [...uniqueSampleCompositionTimeOffsets].some(x => x !== 0);
 
 	let flags = 0;
 	flags |= 0x0001; // Data offset present
@@ -954,8 +977,8 @@ export const trun = (trackData: IsobmffTrackData) => {
 			sampleSizePresent ? u32(allSampleSizes[i]!) : [], // Sample size
 			sampleFlagsPresent ? u32(allSampleFlags[i]!) : [], // Sample flags
 			// Sample composition time offsets
-			sampleCompositionTimeOffsetsPresent ? i32(allSampleCompositionTimeOffsets[i]!) : []
-		])
+			sampleCompositionTimeOffsetsPresent ? i32(allSampleCompositionTimeOffsets[i]!) : [],
+		]),
 	]);
 };
 
@@ -966,13 +989,13 @@ export const trun = (trackData: IsobmffTrackData) => {
 export const mfra = (trackDatas: IsobmffTrackData[]) => {
 	return box('mfra', undefined, [
 		...trackDatas.map(tfra),
-		mfro()
+		mfro(),
 	]);
 };
 
 /** Track Fragment Random Access Box: Provides pointers to sync samples within the file for random access. */
 export const tfra = (trackData: IsobmffTrackData, trackIndex: number) => {
-	let version = 1; // Using this version allows us to use 64-bit time and offset values
+	const version = 1; // Using this version allows us to use 64-bit time and offset values
 
 	return fullBox('tfra', version, 0, [
 		u32(trackData.track.id), // Track ID
@@ -983,8 +1006,8 @@ export const tfra = (trackData: IsobmffTrackData, trackIndex: number) => {
 			u64(chunk.moofOffset!), // moof offset
 			u32(trackIndex + 1), // traf number
 			u32(1), // trun number
-			u32(1) // Sample number
-		])
+			u32(1), // Sample number
+		]),
 	]);
 };
 
@@ -996,7 +1019,7 @@ export const mfro = () => {
 	return fullBox('mfro', 0, 0, [
 		// This value needs to be overwritten manually from the outside, where the actual size of the enclosing mfra box
 		// is known
-		u32(0) // Size
+		u32(0), // Size
 	]);
 };
 
@@ -1004,47 +1027,56 @@ export const mfro = () => {
 export const vtte = () => box('vtte');
 
 /** VTT Cue Box */
-export const vttc = (payload: string, timestamp: number | null, identifier: string | null, settings: string | null, sourceId: number | null) => box('vttc', undefined, [
+export const vttc = (
+	payload: string,
+	timestamp: number | null,
+	identifier: string | null,
+	settings: string | null,
+	sourceId: number | null,
+) => box('vttc', undefined, [
 	sourceId !== null ? box('vsid', [i32(sourceId)]) : null,
 	identifier !== null ? box('iden', [...textEncoder.encode(identifier)]) : null,
 	timestamp !== null ? box('ctim', [...textEncoder.encode(formatSubtitleTimestamp(timestamp))]) : null,
 	settings !== null ? box('sttg', [...textEncoder.encode(settings)]) : null,
-	box('payl', [...textEncoder.encode(payload)])
+	box('payl', [...textEncoder.encode(payload)]),
 ]);
 
 /** VTT Additional Text Box */
 export const vtta = (notes: string) => box('vtta', [...textEncoder.encode(notes)]);
 
 const VIDEO_CODEC_TO_BOX_NAME: Record<VideoCodec, string> = {
-	'avc': 'avc1',
-	'hevc': 'hvc1',
-	'vp8': 'vp08',
-	'vp9': 'vp09',
-	'av1': 'av01'
+	avc: 'avc1',
+	hevc: 'hvc1',
+	vp8: 'vp08',
+	vp9: 'vp09',
+	av1: 'av01',
 };
 
 const VIDEO_CODEC_TO_CONFIGURATION_BOX: Record<VideoCodec, (trackData: IsobmffVideoTrackData) => Box | null> = {
-	'avc': avcC,
-	'hevc': hvcC,
-	'vp8': vpcC,
-	'vp9': vpcC,
-	'av1': av1C
+	avc: avcC,
+	hevc: hvcC,
+	vp8: vpcC,
+	vp9: vpcC,
+	av1: av1C,
 };
 
 const AUDIO_CODEC_TO_BOX_NAME: Record<AudioCodec, string> = {
-	'aac': 'mp4a',
-	'opus': 'Opus'
+	aac: 'mp4a',
+	opus: 'Opus',
 };
 
 const AUDIO_CODEC_TO_CONFIGURATION_BOX: Record<AudioCodec, (trackData: IsobmffAudioTrackData) => Box | null> = {
-	'aac': esds,
-	'opus': dOps
+	aac: esds,
+	opus: dOps,
 };
 
 const SUBTITLE_CODEC_TO_BOX_NAME: Record<SubtitleCodec, string> = {
-	'webvtt': 'wvtt'
+	webvtt: 'wvtt',
 };
 
-const SUBTITLE_CODEC_TO_CONFIGURATION_BOX: Record<SubtitleCodec, (trackData: IsobmffSubtitleTrackData) => Box | null> = {
-	'webvtt': vttC
+const SUBTITLE_CODEC_TO_CONFIGURATION_BOX: Record<
+	SubtitleCodec,
+	(trackData: IsobmffSubtitleTrackData) => Box | null
+> = {
+	webvtt: vttC,
 };

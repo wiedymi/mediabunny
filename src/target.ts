@@ -1,5 +1,5 @@
-import { Output } from "./output";
-import { ArrayBufferTargetWriter, ChunkedStreamTargetWriter, StreamTargetWriter, Writer } from "./writer";
+import { ArrayBufferTargetWriter, ChunkedStreamTargetWriter, StreamTargetWriter, Writer } from './writer';
+import { Output } from './output';
 
 /** @public */
 export abstract class Target {
@@ -23,15 +23,15 @@ export class ArrayBufferTarget extends Target {
 
 /** @public */
 export type StreamTargetChunk = {
-	type: 'write', // This ensures automatic compatibility with FileSystemWritableFileStream
-	data: Uint8Array,
-	position: number
+	type: 'write'; // This ensures automatic compatibility with FileSystemWritableFileStream
+	data: Uint8Array;
+	position: number;
 };
 
 /** @public */
 export type StreamTargetOptions = {
-	chunked?: boolean,
-	chunkSize?: number
+	chunked?: boolean;
+	chunkSize?: number;
 };
 
 /** @public */
@@ -43,7 +43,7 @@ export class StreamTarget extends Target {
 
 	constructor(
 		writable: WritableStream<StreamTargetChunk>,
-		options: StreamTargetOptions = {}
+		options: StreamTargetOptions = {},
 	) {
 		super();
 

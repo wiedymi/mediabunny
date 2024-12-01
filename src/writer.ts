@@ -1,5 +1,5 @@
-import { assert } from './misc';
 import { ArrayBufferTarget, StreamTarget, StreamTargetChunk } from './target';
+import { assert } from './misc';
 
 export abstract class Writer {
 	/** Setting this to true will cause the writer to ensure data is written in a strictly monotonic, streamable way. */
@@ -13,7 +13,7 @@ export abstract class Writer {
 	abstract seek(newPos: number): void;
 	/** Returns the current position. */
 	abstract getPos(): number;
-	/** Signals to the writer that it may be time to flush. */	
+	/** Signals to the writer that it may be time to flush. */
 	abstract flush(): Promise<void>;
 	/** Called after muxing has finished. */
 	abstract finalize(): Promise<void>;
@@ -26,7 +26,7 @@ export abstract class Writer {
 export class ArrayBufferTargetWriter extends Writer {
 	private pos = 0;
 	private target: ArrayBufferTarget;
-	private buffer = new ArrayBuffer(2**16);
+	private buffer = new ArrayBuffer(2 ** 16);
 	private bytes = new Uint8Array(this.buffer);
 	private maxPos = 0;
 
@@ -42,8 +42,8 @@ export class ArrayBufferTargetWriter extends Writer {
 
 		if (newLength === this.buffer.byteLength) return;
 
-		let newBuffer = new ArrayBuffer(newLength);
-		let newBytes = new Uint8Array(newBuffer);
+		const newBuffer = new ArrayBuffer(newLength);
+		const newBytes = new Uint8Array(newBuffer);
 		newBytes.set(this.bytes, 0);
 
 		this.buffer = newBuffer;
@@ -69,6 +69,7 @@ export class ArrayBufferTargetWriter extends Writer {
 
 	async flush() {}
 
+	// eslint-disable-next-line @typescript-eslint/require-await
 	async finalize() {
 		this.ensureSize(this.pos);
 		this.target.buffer = this.buffer.slice(0, Math.max(this.maxPos, this.pos));
@@ -87,9 +88,10 @@ export class StreamTargetWriter extends Writer {
 	private pos = 0;
 	private target: StreamTarget;
 	private sections: {
-		data: Uint8Array,
-		start: number
+		data: Uint8Array;
+		start: number;
 	}[] = [];
+
 	private lastFlushEnd = 0;
 	private writer: WritableStreamDefaultWriter<StreamTargetChunk> | null = null;
 
@@ -106,7 +108,7 @@ export class StreamTargetWriter extends Writer {
 	write(data: Uint8Array) {
 		this.sections.push({
 			data: data.slice(),
-			start: this.pos
+			start: this.pos,
 		});
 		this.pos += data.byteLength;
 	}
@@ -123,38 +125,38 @@ export class StreamTargetWriter extends Writer {
 		assert(this.writer);
 		if (this.sections.length === 0) return;
 
-		let chunks: {
-			start: number,
-			size: number,
-			data?: Uint8Array
+		const chunks: {
+			start: number;
+			size: number;
+			data?: Uint8Array;
 		}[] = [];
-		let sorted = [...this.sections].sort((a, b) => a.start - b.start);
+		const sorted = [...this.sections].sort((a, b) => a.start - b.start);
 
 		chunks.push({
 			start: sorted[0]!.start,
-			size: sorted[0]!.data.byteLength
+			size: sorted[0]!.data.byteLength,
 		});
 
 		// Figure out how many contiguous chunks we have
 		for (let i = 1; i < sorted.length; i++) {
-			let lastChunk = chunks[chunks.length - 1]!;
-			let section = sorted[i]!;
+			const lastChunk = chunks[chunks.length - 1]!;
+			const section = sorted[i]!;
 
 			if (section.start <= lastChunk.start + lastChunk.size) {
 				lastChunk.size = Math.max(lastChunk.size, section.start + section.data.byteLength - lastChunk.start);
 			} else {
 				chunks.push({
 					start: section.start,
-					size: section.data.byteLength
+					size: section.data.byteLength,
 				});
 			}
 		}
 
-		for (let chunk of chunks) {
+		for (const chunk of chunks) {
 			chunk.data = new Uint8Array(chunk.size);
 
 			// Make sure to write the data in the correct order for correct overwriting
-			for (let section of this.sections) {
+			for (const section of this.sections) {
 				// Check if the section is in the chunk
 				if (chunk.start <= section.start && section.start < chunk.start + chunk.size) {
 					chunk.data.set(section.data, section.start - chunk.start);
@@ -169,11 +171,11 @@ export class StreamTargetWriter extends Writer {
 				await this.writer.ready; // Allow the writer to apply backpressure
 			}
 
-			this.writer.write({
+			void this.writer.write({
 				type: 'write',
 				data: chunk.data,
-				position: chunk.start
-			});	
+				position: chunk.start,
+			});
 			this.lastFlushEnd = chunk.start + chunk.data.byteLength;
 		}
 
@@ -186,19 +188,19 @@ export class StreamTargetWriter extends Writer {
 	}
 }
 
-const DEFAULT_CHUNK_SIZE = 2**24;
+const DEFAULT_CHUNK_SIZE = 2 ** 24;
 const MAX_CHUNKS_AT_ONCE = 2;
 
 interface Chunk {
-	start: number,
-	written: ChunkSection[],
-	data: Uint8Array,
-	shouldFlush: boolean
+	start: number;
+	written: ChunkSection[];
+	data: Uint8Array;
+	shouldFlush: boolean;
 }
 
 interface ChunkSection {
-	start: number,
-	end: number
+	start: number;
+	end: number;
 }
 
 /**
@@ -224,7 +226,7 @@ export class ChunkedStreamTargetWriter extends Writer {
 		this.target = target;
 		this.chunkSize = target._options?.chunkSize ?? DEFAULT_CHUNK_SIZE;
 
-		if (!Number.isInteger(this.chunkSize) || this.chunkSize < 2**10) {
+		if (!Number.isInteger(this.chunkSize) || this.chunkSize < 2 ** 10) {
 			throw new Error('Invalid StreamTarget options: chunkSize must be an integer not smaller than 1024.');
 		}
 	}
@@ -252,17 +254,17 @@ export class ChunkedStreamTargetWriter extends Writer {
 		// First, find the chunk to write the data into, or create one if none exists
 		let chunkIndex = this.chunks.findIndex(x => x.start <= position && position < x.start + this.chunkSize);
 		if (chunkIndex === -1) chunkIndex = this.createChunk(position);
-		let chunk = this.chunks[chunkIndex]!;
+		const chunk = this.chunks[chunkIndex]!;
 
 		// Figure out how much to write to the chunk, and then write to the chunk
-		let relativePosition = position - chunk.start;
-		let toWrite = data.subarray(0, Math.min(this.chunkSize - relativePosition, data.byteLength));
+		const relativePosition = position - chunk.start;
+		const toWrite = data.subarray(0, Math.min(this.chunkSize - relativePosition, data.byteLength));
 		chunk.data.set(toWrite, relativePosition);
 
 		// Create a section describing the region of data that was just written to
-		let section: ChunkSection = {
+		const section: ChunkSection = {
 			start: relativePosition,
-			end: relativePosition + toWrite.byteLength
+			end: relativePosition + toWrite.byteLength,
 		};
 		this.insertSectionIntoChunk(chunk, section);
 
@@ -274,7 +276,7 @@ export class ChunkedStreamTargetWriter extends Writer {
 		// Make sure we don't hold too many chunks in memory at once to keep memory usage down
 		if (this.chunks.length > MAX_CHUNKS_AT_ONCE) {
 			// Flush all but the last chunk
-			for (let i = 0; i < this.chunks.length-1; i++) {
+			for (let i = 0; i < this.chunks.length - 1; i++) {
 				this.chunks[i]!.shouldFlush = true;
 			}
 			this.queueChunksForFlush();
@@ -293,7 +295,7 @@ export class ChunkedStreamTargetWriter extends Writer {
 
 		// Do a binary search to find the last section with a start not larger than `section`'s start
 		while (low <= high) {
-			let mid = Math.floor(low + (high - low + 1) / 2);
+			const mid = Math.floor(low + (high - low + 1) / 2);
 
 			if (chunk.written[mid]!.start <= section.start) {
 				low = mid + 1;
@@ -315,12 +317,12 @@ export class ChunkedStreamTargetWriter extends Writer {
 	}
 
 	private createChunk(includesPosition: number) {
-		let start = Math.floor(includesPosition / this.chunkSize) * this.chunkSize;
-		let chunk: Chunk = {
+		const start = Math.floor(includesPosition / this.chunkSize) * this.chunkSize;
+		const chunk: Chunk = {
 			start,
 			data: new Uint8Array(this.chunkSize),
 			written: [],
-			shouldFlush: false
+			shouldFlush: false,
 		};
 		this.chunks.push(chunk);
 		this.chunks.sort((a, b) => a.start - b.start);
@@ -332,10 +334,10 @@ export class ChunkedStreamTargetWriter extends Writer {
 		assert(this.writer);
 
 		for (let i = 0; i < this.chunks.length; i++) {
-			let chunk = this.chunks[i]!;
+			const chunk = this.chunks[i]!;
 			if (!chunk.shouldFlush && !force) continue;
 
-			for (let section of chunk.written) {
+			for (const section of chunk.written) {
 				if (this.ensureMonotonicity && chunk.start + section.start !== this.lastFlushEnd) {
 					throw new Error('Internal error: Monotonicity violation.');
 				}
@@ -343,7 +345,7 @@ export class ChunkedStreamTargetWriter extends Writer {
 				this.flushedChunkQueue.push({
 					type: 'write',
 					data: chunk.data.subarray(section.start, section.end),
-					position: chunk.start + section.start
+					position: chunk.start + section.start,
 				});
 				this.lastFlushEnd = chunk.start + section.end;
 			}
@@ -355,12 +357,12 @@ export class ChunkedStreamTargetWriter extends Writer {
 		assert(this.writer);
 		if (this.flushedChunkQueue.length === 0) return;
 
-		for (let chunk of this.flushedChunkQueue) {
+		for (const chunk of this.flushedChunkQueue) {
 			if (this.writer.desiredSize !== null && this.writer.desiredSize <= 0) {
 				await this.writer.ready; // Allow the writer to apply backpressure
 			}
 
-			this.writer.write(chunk);
+			void this.writer.write(chunk);
 		}
 
 		this.flushedChunkQueue.length = 0;

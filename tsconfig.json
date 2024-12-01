@@ -10,7 +10,8 @@
 		"outDir": "build",
 		"declaration": true,
 		"stripInternal": true,
-		"skipLibCheck": true
+		"skipLibCheck": true,
+		"allowJs": true
 	},
 	"include": [
 		"src/**/*"

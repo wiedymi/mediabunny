@@ -1,31 +1,31 @@
-import { AsyncMutex, TransformationMatrix } from "./misc";
-import { Muxer } from "./muxer";
-import { OutputFormat } from "./output-format";
-import { AudioSource, MediaSource, SubtitleSource, VideoSource } from "./source";
-import { Target } from "./target";
-import { Writer } from "./writer";
+import { AsyncMutex, TransformationMatrix } from './misc';
+import { Muxer } from './muxer';
+import { OutputFormat } from './output-format';
+import { AudioSource, MediaSource, SubtitleSource, VideoSource } from './source';
+import { Target } from './target';
+import { Writer } from './writer';
 
 /** @public */
 export type OutputOptions = {
-	format: OutputFormat,
-	target: Target
+	format: OutputFormat;
+	target: Target;
 };
 
 export type OutputTrack = {
-	id: number,
-	output: Output
+	id: number;
+	output: Output;
 } & ({
-	type: 'video',
-	source: VideoSource,
-	metadata: VideoTrackMetadata
+	type: 'video';
+	source: VideoSource;
+	metadata: VideoTrackMetadata;
 } | {
-	type: 'audio',
-	source: AudioSource,
-	metadata: AudioTrackMetadata
+	type: 'audio';
+	source: AudioSource;
+	metadata: AudioTrackMetadata;
 } | {
-	type: 'subtitle',
-	source: SubtitleSource,
-	metadata: SubtitleTrackMetadata
+	type: 'subtitle';
+	source: SubtitleSource;
+	metadata: SubtitleTrackMetadata;
 });
 
 export type OutputVideoTrack = OutputTrack & { type: 'video' };
@@ -34,8 +34,8 @@ export type OutputSubtitleTrack = OutputTrack & { type: 'subtitle' };
 
 /** @public */
 export type VideoTrackMetadata = {
-	rotation?: 0 | 90 | 180 | 270 | TransformationMatrix, // TODO respect this field for Matroska
-	frameRate?: number
+	rotation?: 0 | 90 | 180 | 270 | TransformationMatrix; // TODO respect this field for Matroska
+	frameRate?: number;
 };
 /** @public */
 export type AudioTrackMetadata = {};
@@ -87,17 +87,17 @@ export class Output {
 		if (typeof metadata.rotation === 'number' && ![0, 90, 180, 270].includes(metadata.rotation)) {
 			throw new TypeError(`Invalid video rotation: ${metadata.rotation}. Has to be 0, 90, 180 or 270.`);
 		} else if (
-			Array.isArray(metadata.rotation) &&
-			(metadata.rotation.length !== 9 || metadata.rotation.some(value => !Number.isFinite(value)))
+			Array.isArray(metadata.rotation)
+			&& (metadata.rotation.length !== 9 || metadata.rotation.some(value => !Number.isFinite(value)))
 		) {
 			throw new TypeError(`Invalid video transformation matrix: ${metadata.rotation.join()}`);
 		}
 		if (
-			metadata.frameRate !== undefined &&
-			(!Number.isInteger(metadata.frameRate) || metadata.frameRate <= 0)
+			metadata.frameRate !== undefined
+			&& (!Number.isInteger(metadata.frameRate) || metadata.frameRate <= 0)
 		) {
 			throw new TypeError(
-				`Invalid video frame rate: ${metadata.frameRate}. Must be a positive integer.`
+				`Invalid video frame rate: ${metadata.frameRate}. Must be a positive integer.`,
 			);
 		}
 
@@ -139,8 +139,8 @@ export class Output {
 			id: this._tracks.length + 1,
 			output: this,
 			type,
-			source: source as any,
-			metadata
+			source: source as unknown,
+			metadata,
 		} as OutputTrack;
 
 		this._muxer.beforeTrackAdd(track);

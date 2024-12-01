@@ -1,7 +1,7 @@
 export interface EBMLElement {
-	id: number,
-	size?: number,
-	data: number | string | Uint8Array | EBMLFloat32 | EBMLFloat64 | EBMLSignedInt | (EBML | null)[]
+	id: number;
+	size?: number;
+	data: number | string | Uint8Array | EBMLFloat32 | EBMLFloat64 | EBMLSignedInt | (EBML | null)[];
 }
 
 export type EBML = EBMLElement | Uint8Array | (EBML | null)[];
@@ -89,7 +89,7 @@ export enum EBMLId {
 	MatrixCoefficients = 0x55b1,
 	TransferCharacteristics = 0x55ba,
 	Primaries = 0x55bb,
-	Range = 0x55b9
+	Range = 0x55b9,
 }
 
 export const measureUnsignedInt = (value: number) => {
@@ -99,9 +99,9 @@ export const measureUnsignedInt = (value: number) => {
 		return 2;
 	} else if (value < (1 << 24)) {
 		return 3;
-	} else if (value < 2**32) {
+	} else if (value < 2 ** 32) {
 		return 4;
-	} else if (value < 2**40) {
+	} else if (value < 2 ** 40) {
 		return 5;
 	} else {
 		return 6;
@@ -117,7 +117,7 @@ export const measureSignedInt = (value: number) => {
 		return 3;
 	} else if (value >= -(1 << 27) && value < (1 << 27)) {
 		return 4;
-	} else if (value >= -(2**34) && value < 2**34) {
+	} else if (value >= -(2 ** 34) && value < 2 ** 34) {
 		return 5;
 	} else {
 		return 6;
@@ -137,9 +137,9 @@ export const measureEBMLVarInt = (value: number) => {
 		return 3;
 	} else if (value < (1 << 28) - 1) {
 		return 4;
-	} else if (value < 2**35-1) {
+	} else if (value < 2 ** 35 - 1) {
 		return 5;
-	} else if (value < 2**42-1) {
+	} else if (value < 2 ** 42 - 1) {
 		return 6;
 	} else {
 		throw new Error('EBML VINT size not supported ' + value);

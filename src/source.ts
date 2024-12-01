@@ -1,8 +1,13 @@
-import { buildAudioCodecString, buildVideoCodecString, getAudioEncoderConfigExtension, getVideoEncoderConfigExtension } from "./codec";
-import { assert } from "./misc";
-import { Muxer } from "./muxer";
-import { OutputAudioTrack, OutputSubtitleTrack, OutputTrack, OutputVideoTrack } from "./output";
-import { SubtitleParser } from "./subtitles";
+import {
+	buildAudioCodecString,
+	buildVideoCodecString,
+	getAudioEncoderConfigExtension,
+	getVideoEncoderConfigExtension,
+} from './codec';
+import { OutputAudioTrack, OutputSubtitleTrack, OutputTrack, OutputVideoTrack } from './output';
+import { assert } from './misc';
+import { Muxer } from './muxer';
+import { SubtitleParser } from './subtitles';
 
 /** @public */
 export const VIDEO_CODECS = ['avc', 'hevc', 'vp8', 'vp9', 'av1'] as const;
@@ -113,9 +118,9 @@ const KEY_FRAME_INTERVAL = 5;
 
 /** @public */
 export type VideoCodecConfig = {
-	codec: VideoCodec,
-	bitrate: number,
-	latencyMode?: VideoEncoderConfig['latencyMode']
+	codec: VideoCodec;
+	bitrate: number;
+	latencyMode?: VideoEncoderConfig['latencyMode'];
 };
 
 const validateVideoCodecConfig = (config: VideoCodecConfig) => {
@@ -128,8 +133,8 @@ const validateVideoCodecConfig = (config: VideoCodecConfig) => {
 	if (!Number.isInteger(config.bitrate) || config.bitrate <= 0) {
 		throw new TypeError('config.bitrate must be a positive integer.');
 	}
-	if (config.latencyMode !== undefined && ['quality', 'realtime'].includes(config.latencyMode)) {
-		throw new TypeError("config.latencyMode, when provided, must be 'quality' or 'realtime'.");
+	if (config.latencyMode !== undefined && !['quality', 'realtime'].includes(config.latencyMode)) {
+		throw new TypeError('config.latencyMode, when provided, must be \'quality\' or \'realtime\'.');
 	}
 };
 
@@ -150,7 +155,10 @@ class VideoEncoderWrapper {
 		// Ensure video frame size remains constant
 		if (this.lastWidth !== null && this.lastHeight !== null) {
 			if (videoFrame.codedWidth !== this.lastWidth || videoFrame.codedHeight !== this.lastHeight) {
-				throw new Error(`Video frame size must remain constant. Expected ${this.lastWidth}x${this.lastHeight}, got ${videoFrame.codedWidth}x${videoFrame.codedHeight}.`);
+				throw new Error(
+					`Video frame size must remain constant. Expected ${this.lastWidth}x${this.lastHeight},`
+					+ ` got ${videoFrame.codedWidth}x${videoFrame.codedHeight}.`,
+				);
 			}
 		} else {
 			this.lastWidth = videoFrame.codedWidth;
@@ -165,7 +173,9 @@ class VideoEncoderWrapper {
 		// Ensure a key frame every KEY_FRAME_INTERVAL seconds. It is important that all video tracks follow the same
 		// "key frame" rhythm, because aligned key frames are required to start new fragments in ISOBMFF or clusters
 		// in Matroska.
-		this.encoder.encode(videoFrame, { keyFrame: multipleOfKeyFrameInterval !== this.lastMultipleOfKeyFrameInterval });
+		this.encoder.encode(videoFrame, {
+			keyFrame: multipleOfKeyFrameInterval !== this.lastMultipleOfKeyFrameInterval,
+		});
 
 		this.lastMultipleOfKeyFrameInterval = multipleOfKeyFrameInterval;
 
@@ -183,24 +193,29 @@ class VideoEncoderWrapper {
 		}
 
 		this.encoder = new VideoEncoder({
-			output: (chunk, meta) => this.muxer!.addEncodedVideoChunk(this.source._connectedTrack!, chunk, meta),
-			error: (error) => console.error('Video encode error:', error),
+			output: (chunk, meta) => void this.muxer!.addEncodedVideoChunk(this.source._connectedTrack!, chunk, meta),
+			error: error => console.error('Video encode error:', error),
 		});
 
 		this.encoder.configure({
-			codec: buildVideoCodecString(this.codecConfig.codec, videoFrame.codedWidth, videoFrame.codedHeight, this.codecConfig.bitrate),
+			codec: buildVideoCodecString(
+				this.codecConfig.codec,
+				videoFrame.codedWidth,
+				videoFrame.codedHeight,
+				this.codecConfig.bitrate,
+			),
 			width: videoFrame.codedWidth,
 			height: videoFrame.codedHeight,
 			bitrate: this.codecConfig.bitrate,
 			framerate: this.source._connectedTrack?.metadata.frameRate,
 			latencyMode: this.codecConfig.latencyMode,
-			...getVideoEncoderConfigExtension(this.codecConfig.codec)
+			...getVideoEncoderConfigExtension(this.codecConfig.codec),
 		});
 
 		assert(this.source._connectedTrack);
 		this.muxer = this.source._connectedTrack.output._muxer;
 	}
-	
+
 	async flush() {
 		if (this.encoder) {
 			await this.encoder.flush();
@@ -238,9 +253,9 @@ export class CanvasSource extends VideoSource {
 	/** @internal */
 	private _encoder: VideoEncoderWrapper;
 	/** @internal */
-	private _canvas: HTMLCanvasElement;
+	private _canvas: HTMLCanvasElement | OffscreenCanvas;
 
-	constructor(canvas: HTMLCanvasElement, codecConfig: VideoCodecConfig) {
+	constructor(canvas: HTMLCanvasElement | OffscreenCanvas, codecConfig: VideoCodecConfig) {
 		if (!(canvas instanceof HTMLCanvasElement)) {
 			throw new TypeError('canvas must be an HTMLCanvasElement.');
 		}
@@ -295,7 +310,7 @@ export class MediaStreamVideoTrackSource extends VideoSource {
 
 		codecConfig = {
 			...codecConfig,
-			latencyMode: 'realtime'
+			latencyMode: 'realtime',
 		};
 
 		super(codecConfig.codec);
@@ -306,19 +321,19 @@ export class MediaStreamVideoTrackSource extends VideoSource {
 	/** @internal */
 	override _start() {
 		this._abortController = new AbortController();
-		
+
 		const processor = new MediaStreamTrackProcessor({ track: this._track });
 		const consumer = new WritableStream<VideoFrame>({
 			write: (videoFrame) => {
 				// TODO: Drop frames if encoder overloaded
-				this._encoder.digest(videoFrame);
+				void this._encoder.digest(videoFrame);
 				videoFrame.close();
-			}
+			},
 		});
 
 		processor.readable.pipeTo(consumer, {
-			signal: this._abortController.signal
-		}).catch(err => {
+			signal: this._abortController.signal,
+		}).catch((err) => {
 			// Handle abort error silently
 			if (err instanceof DOMException && err.name === 'AbortError') return;
 			// Handle other errors
@@ -373,8 +388,8 @@ export class EncodedAudioChunkSource extends AudioSource {
 }
 /** @public */
 export type AudioCodecConfig = {
-	codec: AudioCodec,
-	bitrate: number
+	codec: AudioCodec;
+	bitrate: number;
 };
 
 const validateAudioCodecConfig = (config: AudioCodecConfig) => {
@@ -404,8 +419,15 @@ class AudioEncoderWrapper {
 
 		// Ensure audio parameters remain constant
 		if (this.lastNumberOfChannels !== null && this.lastSampleRate !== null) {
-			if (audioData.numberOfChannels !== this.lastNumberOfChannels || audioData.sampleRate !== this.lastSampleRate) {
-				throw new Error(`Audio parameters must remain constant. Expected ${this.lastNumberOfChannels} channels at ${this.lastSampleRate} Hz, got ${audioData.numberOfChannels} channels at ${audioData.sampleRate} Hz.`);
+			if (
+				audioData.numberOfChannels !== this.lastNumberOfChannels
+				|| audioData.sampleRate !== this.lastSampleRate
+			) {
+				throw new Error(
+					`Audio parameters must remain constant. Expected ${this.lastNumberOfChannels} channels at`
+					+ ` ${this.lastSampleRate} Hz, got ${audioData.numberOfChannels} channels at`
+					+ ` ${audioData.sampleRate} Hz.`,
+				);
 			}
 		} else {
 			this.lastNumberOfChannels = audioData.numberOfChannels;
@@ -430,8 +452,8 @@ class AudioEncoderWrapper {
 		}
 
 		this.encoder = new AudioEncoder({
-			output: (chunk, meta) => this.muxer!.addEncodedAudioChunk(this.source._connectedTrack!, chunk, meta),
-			error: (error) => console.error('Audio encode error:', error),
+			output: (chunk, meta) => void this.muxer!.addEncodedAudioChunk(this.source._connectedTrack!, chunk, meta),
+			error: error => console.error('Audio encode error:', error),
 		});
 
 		this.encoder.configure({
@@ -439,13 +461,13 @@ class AudioEncoderWrapper {
 			numberOfChannels: audioData.numberOfChannels,
 			sampleRate: audioData.sampleRate,
 			bitrate: this.codecConfig.bitrate,
-			...getAudioEncoderConfigExtension(this.codecConfig.codec)
+			...getAudioEncoderConfigExtension(this.codecConfig.codec),
 		});
 
 		assert(this.source._connectedTrack);
 		this.muxer = this.source._connectedTrack.output._muxer;
 	}
-	
+
 	async flush() {
 		if (this.encoder) {
 			await this.encoder.flush();
@@ -498,7 +520,7 @@ export class AudioBufferSource extends AudioSource {
 		const numberOfChannels = audioBuffer.numberOfChannels;
 		const sampleRate = audioBuffer.sampleRate;
 		const numberOfFrames = audioBuffer.length;
-		
+
 		// Create a planar F32 array containing all channels
 		const data = new Float32Array(numberOfChannels * numberOfFrames);
 		for (let channel = 0; channel < numberOfChannels; channel++) {
@@ -512,7 +534,7 @@ export class AudioBufferSource extends AudioSource {
 			numberOfFrames,
 			numberOfChannels,
 			timestamp: Math.round(1e6 * this._accumulatedFrameCount / sampleRate),
-			data: data
+			data: data,
 		});
 
 		const promise = this._encoder.digest(audioData);
@@ -554,19 +576,19 @@ export class MediaStreamAudioTrackSource extends AudioSource {
 	/** @internal */
 	override _start() {
 		this._abortController = new AbortController();
-		
+
 		const processor = new MediaStreamTrackProcessor({ track: this._track });
 		const consumer = new WritableStream<AudioData>({
 			write: (audioData) => {
 				// TODO: Drop frames if encoder overloaded
-				this._encoder.digest(audioData);
+				void this._encoder.digest(audioData);
 				audioData.close();
-			}
+			},
 		});
 
 		processor.readable.pipeTo(consumer, {
-			signal: this._abortController.signal
-		}).catch(err => {
+			signal: this._abortController.signal,
+		}).catch((err) => {
 			// Handle abort error silently
 			if (err instanceof DOMException && err.name === 'AbortError') return;
 			// Handle other errors
@@ -613,8 +635,9 @@ export class TextSubtitleSource extends SubtitleSource {
 
 		this._parser = new SubtitleParser({
 			codec,
-			output: (cue, metadata) => this._connectedTrack?.output._muxer.addSubtitleCue(this._connectedTrack, cue, metadata),
-			error: (error) => console.error('Subtitle parse error:', error)
+			output: (cue, metadata) =>
+				this._connectedTrack?.output._muxer.addSubtitleCue(this._connectedTrack, cue, metadata),
+			error: error => console.error('Subtitle parse error:', error),
 		});
 	}
 

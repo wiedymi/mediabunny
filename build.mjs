@@ -4,7 +4,7 @@ import process from 'node:process';
 const baseConfig = {
 	entryPoints: ['src/index.ts'],
 	bundle: true,
-	logLevel: 'info'
+	logLevel: 'info',
 };
 
 const umdConfig = {
@@ -16,32 +16,32 @@ const umdConfig = {
 
 	footer: {
 		js:
-`if (typeof module === "object" && typeof module.exports === "object") Object.assign(module.exports, Metamuxer)`
-	}
+`if (typeof module === "object" && typeof module.exports === "object") Object.assign(module.exports, Metamuxer)`,
+	},
 };
 
 const esmConfig = {
 	...baseConfig,
-	format: 'esm'
+	format: 'esm',
 };
 
 let ctxUmd = await esbuild.context({
 	...umdConfig,
-	outfile: 'dist/metamuxer.js'
+	outfile: 'dist/metamuxer.js',
 });
 let ctxEsm = await esbuild.context({
 	...esmConfig,
-	outfile: 'dist/metamuxer.mjs'
+	outfile: 'dist/metamuxer.mjs',
 });
 let ctxUmdMinified = await esbuild.context({
 	...umdConfig,
 	outfile: 'dist/metamuxer.min.js',
-	minify: true
+	minify: true,
 });
 let ctxEsmMinified = await esbuild.context({
 	...esmConfig,
 	outfile: 'dist/metamuxer.min.mjs',
-	minify: true
+	minify: true,
 });
 
 if (process.argv[2] === '--watch') {

@@ -19,7 +19,8 @@
   "scripts": {
     "build": "node build.mjs && tsc && api-extractor run && node append-namespace.mjs",
     "build-local": "node build.mjs && tsc && api-extractor run --local --verbose && node append-namespace.mjs",
-    "watch": "node build.mjs --watch"
+    "watch": "node build.mjs --watch",
+    "lint": "eslint ."
   },
   "author": "",
   "license": "MIT",
@@ -28,8 +29,12 @@
     "@types/dom-webcodecs": "^0.1.13"
   },
   "devDependencies": {
+    "@eslint/js": "^9.16.0",
     "@microsoft/api-extractor": "^7.48.0",
+    "@stylistic/eslint-plugin": "^2.11.0",
     "esbuild": "^0.23.1",
-    "typescript": "^5.5.4"
+    "eslint": "^9.16.0",
+    "typescript": "^5.5.4",
+    "typescript-eslint": "^8.16.0"
   }
 }

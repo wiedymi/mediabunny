@@ -37,7 +37,7 @@ export declare type AudioTrackMetadata = {};
 
 /** @public */
 export declare class CanvasSource extends VideoSource {
-    constructor(canvas: HTMLCanvasElement, codecConfig: VideoCodecConfig);
+    constructor(canvas: HTMLCanvasElement | OffscreenCanvas, codecConfig: VideoCodecConfig);
     digest(timestamp: number, duration?: number): Promise<void>;
 }
 
@@ -189,7 +189,7 @@ export declare class WebMOutputFormat extends MkvOutputFormat {
 }
 
 /** @public */
-export declare type WebmOutputFormatOptions = MkvOutputFormatOptions;
+export declare type WebMOutputFormatOptions = MkvOutputFormatOptions;
 
 export { }
 
