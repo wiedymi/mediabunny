@@ -11,9 +11,11 @@ export type InputOptions = {
 
 export class Input {
 	/** @internal */
+	_source: Source;
+	/** @internal */
 	_formats: InputFormat[];
 	/** @internal */
-	_reader: Reader;
+	_mainReader: Reader;
 	/** @internal */
 	_demuxerPromise: Promise<Demuxer> | null = null;
 	/** @internal */
@@ -21,7 +23,8 @@ export class Input {
 
 	constructor(options: InputOptions) {
 		this._formats = options.formats;
-		this._reader = new Reader(options.source);
+		this._source = options.source;
+		this._mainReader = new Reader(options.source);
 	}
 
 	/** @internal */

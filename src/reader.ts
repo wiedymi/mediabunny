@@ -1,3 +1,4 @@
+import { assert, binarySearchLessOrEqual, removeItem } from './misc';
 import { Source } from './source';
 
 const PAGE_SIZE = 4096;
@@ -7,125 +8,128 @@ type ReadSegment = {
 	end: number;
 	bytes: Uint8Array;
 	view: DataView;
+	age: number;
+};
+
+type LoadingSegment = {
+	start: number;
+	end: number;
+	promise: Promise<Uint8Array>;
 };
 
 export class Reader {
 	loadedSegments: ReadSegment[] = [];
+	loadingSegments: LoadingSegment[] = [];
 	sourceSizePromise: Promise<number> | null = null;
+	nextAge = 0;
+	totalStoredBytes = 0;
 
-	constructor(public source: Source) {}
-
-	getSourceSize() {
-		if (this.sourceSizePromise) {
-			return this.sourceSizePromise;
-		} else {
-			return this.sourceSizePromise = this.source._getSize();
-		}
-	}
+	constructor(public source: Source, public maxStorableBytes = Infinity) {}
 
 	async loadRange(start: number, end: number) {
 		// Read rounded to the nearest page
-		let alignedStart = Math.floor(start / PAGE_SIZE) * PAGE_SIZE;
+		const alignedStart = Math.floor(start / PAGE_SIZE) * PAGE_SIZE;
 		let alignedEnd = Math.ceil(end / PAGE_SIZE) * PAGE_SIZE;
-		alignedEnd = Math.min(alignedEnd, await this.getSourceSize());
+		alignedEnd = Math.min(alignedEnd, await this.source._getSize());
 
-		const thing = this.loadedSegments.find(x => x.start <= alignedStart);
-		if (thing) {
-			alignedStart = Math.max(alignedStart, thing.end);
+		const matchingLoadingSegment = this.loadingSegments.find(x => x.start <= alignedStart && x.end >= alignedEnd);
+		if (matchingLoadingSegment) {
+			// Simply wait for the existing promise to finish to avoid loading the same range twice
+			await matchingLoadingSegment.promise;
+			return;
 		}
 
-		const thing2 = this.loadedSegments.find(x => x.end >= alignedEnd);
-		if (thing2) {
-			alignedEnd = Math.min(alignedEnd, thing2.start);
-		}
-
-		if (alignedStart >= alignedEnd) {
+		const encasingSegmentExists = this.loadedSegments.some(x => x.start <= alignedStart && x.end >= alignedEnd);
+		if (encasingSegmentExists) {
 			// Nothing to load
 			return;
 		}
 
-		const bytes = await this.source._read(alignedStart, alignedEnd);
+		const bytesPromise = this.source._read(alignedStart, alignedEnd);
+		const loadingSegment: LoadingSegment = { start: alignedStart, end: alignedEnd, promise: bytesPromise };
+		this.loadingSegments.push(loadingSegment);
+
+		const bytes = await bytesPromise;
+		removeItem(this.loadingSegments, loadingSegment);
+
 		this.insertIntoLoadedSegments(alignedStart, bytes);
 	}
 
 	private insertIntoLoadedSegments(start: number, bytes: Uint8Array) {
-		/*
-        let index = -1;
-        let low = 0;
-        let high = this.loadedSegments.length - 1;
-
-        while (low <= high) {
-            let mid = Math.floor(low + (high - low + 1) / 2);
-            let midVal = this.loadedSegments[mid].start;
-
-            if (midVal >= start) {
-                index = mid;
-                high = mid - 1;
-            } else {
-                low = mid + 1;
-            }
-        }
-        */
-
 		const segment: ReadSegment = {
 			start,
 			end: start + bytes.byteLength,
 			bytes,
 			view: new DataView(bytes.buffer),
+			age: this.nextAge++,
 		};
-		let index = this.loadedSegments.findLastIndex(x => x.start <= start);
 
-		this.loadedSegments.splice(index + 1, 0, segment);
-		if (index === -1 || this.loadedSegments[index]!.end < segment.start) {
+		let index = binarySearchLessOrEqual(this.loadedSegments, start, x => x.start);
+		if (index === -1 || this.loadedSegments[index]!.start < segment.start) {
 			index++;
 		}
 
-		const mergeSectionStartIndex = index;
-		const mergeSectionStart = this.loadedSegments[mergeSectionStartIndex]!.start;
-		let mergeSectionEndIndex = index;
-		let mergeSectionEnd = this.loadedSegments[mergeSectionEndIndex]!.end;
+		// Insert the segment at the right place so that the array remains sorted by start offset
+		this.loadedSegments.splice(index, 0, segment);
+		this.totalStoredBytes += bytes.byteLength;
 
-		while (
-			this.loadedSegments.length - 1 > mergeSectionEndIndex
-			&& this.loadedSegments[mergeSectionEndIndex + 1]!.start <= mergeSectionEnd
-		) {
-			mergeSectionEndIndex++;
-			mergeSectionEnd = Math.max(mergeSectionEnd, this.loadedSegments[mergeSectionEndIndex]!.end);
-		}
+		// Remove all other segments from the array that are completely covered by the newly-inserted segment
+		for (let i = index + 1; i < this.loadedSegments.length; i++) {
+			const otherSegment = this.loadedSegments[i]!;
+			if (otherSegment.start >= segment.end) {
+				break;
+			}
 
-		if (mergeSectionStartIndex === mergeSectionEndIndex) {
-			return;
-		}
-
-		for (let i = mergeSectionStartIndex; i <= mergeSectionEndIndex; i++) {
-			const segment = this.loadedSegments[i]!;
-			const coversEntireMergeSection = segment.start === mergeSectionStart && segment.end === mergeSectionEnd;
-
-			if (coversEntireMergeSection) {
-				this.loadedSegments.splice(i + 1, mergeSectionEndIndex - i);
-				this.loadedSegments.splice(mergeSectionStartIndex, i - mergeSectionStartIndex);
-
-				return;
+			if (segment.start <= otherSegment.start && otherSegment.end <= segment.end) {
+				this.loadedSegments.splice(i, 1);
+				i--;
 			}
 		}
 
-		const unifiedBytes = new Uint8Array(mergeSectionEnd - mergeSectionStart);
-		for (let i = mergeSectionStartIndex; i <= mergeSectionEndIndex; i++) {
-			const segment = this.loadedSegments[i]!;
-			unifiedBytes.set(segment.bytes, segment.start - mergeSectionStart);
-		}
+		// If we overshoot the max amount of permitted bytes, let's start evicting the oldest segments
+		while (this.totalStoredBytes > this.maxStorableBytes && this.loadedSegments.length > 1) {
+			let oldestSegment: ReadSegment | null = null;
+			let oldestSegmentIndex = -1;
 
-		this.loadedSegments.splice(mergeSectionStartIndex + 1, mergeSectionEndIndex - mergeSectionStartIndex);
-		this.loadedSegments[mergeSectionStartIndex]!.end = mergeSectionEnd;
-		this.loadedSegments[mergeSectionStartIndex]!.bytes = unifiedBytes;
-		this.loadedSegments[mergeSectionStartIndex]!.view = new DataView(unifiedBytes.buffer);
+			for (let i = 0; i < this.loadedSegments.length; i++) {
+				const candidate = this.loadedSegments[i]!;
+				if (!oldestSegment || candidate.age < oldestSegment.age) {
+					oldestSegment = candidate;
+					oldestSegmentIndex = i;
+				}
+			}
+
+			assert(oldestSegment);
+
+			this.totalStoredBytes -= oldestSegment.bytes.byteLength;
+			this.loadedSegments.splice(oldestSegmentIndex, 1);
+		}
 	}
 
 	getViewAndOffset(start: number, end: number) {
-		const segment = this.loadedSegments.find(x => x.start <= start && end <= x.end);
+		const startIndex = binarySearchLessOrEqual(this.loadedSegments, start, x => x.start);
+		let segment: ReadSegment | null = null;
+
+		if (startIndex !== -1) {
+			for (let i = startIndex; i < this.loadedSegments.length; i++) {
+				const candidate = this.loadedSegments[i]!;
+
+				if (candidate.start > start) {
+					break;
+				}
+
+				if (end <= candidate.end) {
+					segment = candidate;
+					break;
+				}
+			}
+		}
+
 		if (!segment) {
 			throw new Error(`No segment loaded for range [${start}, ${end}).`);
 		}
+
+		segment.age = this.nextAge++;
 
 		return {
 			view: segment.view,

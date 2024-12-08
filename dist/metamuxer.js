@@ -224,6 +224,12 @@ var Metamuxer = (() => {
     });
     return { promise, resolve, reject };
   };
+  var removeItem = (arr, item) => {
+    const index = arr.indexOf(item);
+    if (index !== -1) {
+      arr.splice(index, 1);
+    }
+  };
 
   // src/subtitles.ts
   var cueBlockHeaderRegex = /(?:(.+?)\n)?((?:\d{2}:)?\d{2}:\d{2}.\d{3})\s+-->\s+((?:\d{2}:)?\d{2}:\d{2}.\d{3})/g;
@@ -4021,6 +4027,12 @@ ${cue.notes ?? ""}`;
 
   // src/source.ts
   var Source = class {
+    /** @internal */
+    _sizePromise = null;
+    /** @internal */
+    _getSize() {
+      return this._sizePromise ??= this._retrieveSize();
+    }
   };
   var ArrayBufferSource = class extends Source {
     constructor(buffer) {
@@ -4032,7 +4044,7 @@ ${cue.notes ?? ""}`;
       return new Uint8Array(this.buffer, start, end - start);
     }
     /** @internal */
-    async _getSize() {
+    async _retrieveSize() {
       return this.buffer.byteLength;
     }
   };
@@ -4048,7 +4060,7 @@ ${cue.notes ?? ""}`;
       return new Uint8Array(buffer);
     }
     /** @internal */
-    async _getSize() {
+    async _retrieveSize() {
       return this.blob.size;
     }
   };
@@ -4130,6 +4142,103 @@ ${cue.notes ?? ""}`;
     async getCodecMimeType() {
       const decoderConfig = await this.getDecoderConfig();
       return decoderConfig.codec;
+    }
+  };
+
+  // src/reader.ts
+  var PAGE_SIZE = 4096;
+  var Reader = class {
+    constructor(source, maxStorableBytes = Infinity) {
+      this.source = source;
+      this.maxStorableBytes = maxStorableBytes;
+    }
+    loadedSegments = [];
+    loadingSegments = [];
+    sourceSizePromise = null;
+    nextAge = 0;
+    totalStoredBytes = 0;
+    async loadRange(start, end) {
+      const alignedStart = Math.floor(start / PAGE_SIZE) * PAGE_SIZE;
+      let alignedEnd = Math.ceil(end / PAGE_SIZE) * PAGE_SIZE;
+      alignedEnd = Math.min(alignedEnd, await this.source._getSize());
+      const matchingLoadingSegment = this.loadingSegments.find((x) => x.start <= alignedStart && x.end >= alignedEnd);
+      if (matchingLoadingSegment) {
+        await matchingLoadingSegment.promise;
+        return;
+      }
+      const encasingSegmentExists = this.loadedSegments.some((x) => x.start <= alignedStart && x.end >= alignedEnd);
+      if (encasingSegmentExists) {
+        return;
+      }
+      const bytesPromise = this.source._read(alignedStart, alignedEnd);
+      const loadingSegment = { start: alignedStart, end: alignedEnd, promise: bytesPromise };
+      this.loadingSegments.push(loadingSegment);
+      const bytes2 = await bytesPromise;
+      removeItem(this.loadingSegments, loadingSegment);
+      this.insertIntoLoadedSegments(alignedStart, bytes2);
+    }
+    insertIntoLoadedSegments(start, bytes2) {
+      const segment = {
+        start,
+        end: start + bytes2.byteLength,
+        bytes: bytes2,
+        view: new DataView(bytes2.buffer),
+        age: this.nextAge++
+      };
+      let index = binarySearchLessOrEqual(this.loadedSegments, start, (x) => x.start);
+      if (index === -1 || this.loadedSegments[index].start < segment.start) {
+        index++;
+      }
+      this.loadedSegments.splice(index, 0, segment);
+      this.totalStoredBytes += bytes2.byteLength;
+      for (let i = index + 1; i < this.loadedSegments.length; i++) {
+        const otherSegment = this.loadedSegments[i];
+        if (otherSegment.start >= segment.end) {
+          break;
+        }
+        if (segment.start <= otherSegment.start && otherSegment.end <= segment.end) {
+          this.loadedSegments.splice(i, 1);
+          i--;
+        }
+      }
+      while (this.totalStoredBytes > this.maxStorableBytes && this.loadedSegments.length > 1) {
+        let oldestSegment = null;
+        let oldestSegmentIndex = -1;
+        for (let i = 0; i < this.loadedSegments.length; i++) {
+          const candidate = this.loadedSegments[i];
+          if (!oldestSegment || candidate.age < oldestSegment.age) {
+            oldestSegment = candidate;
+            oldestSegmentIndex = i;
+          }
+        }
+        assert(oldestSegment);
+        this.totalStoredBytes -= oldestSegment.bytes.byteLength;
+        this.loadedSegments.splice(oldestSegmentIndex, 1);
+      }
+    }
+    getViewAndOffset(start, end) {
+      const startIndex = binarySearchLessOrEqual(this.loadedSegments, start, (x) => x.start);
+      let segment = null;
+      if (startIndex !== -1) {
+        for (let i = startIndex; i < this.loadedSegments.length; i++) {
+          const candidate = this.loadedSegments[i];
+          if (candidate.start > start) {
+            break;
+          }
+          if (end <= candidate.end) {
+            segment = candidate;
+            break;
+          }
+        }
+      }
+      if (!segment) {
+        throw new Error(`No segment loaded for range [${start}, ${end}).`);
+      }
+      segment.age = this.nextAge++;
+      return {
+        view: segment.view,
+        offset: segment.bytes.byteOffset + start - segment.start
+      };
     }
   };
 
@@ -4234,9 +4343,11 @@ ${cue.notes ?? ""}`;
     metadataPromise = null;
     movieTimescale = -1;
     movieDurationInTimescale = -1;
+    chunkReader;
     constructor(input) {
       super(input);
-      this.isobmffReader = new IsobmffReader(input._reader);
+      this.isobmffReader = new IsobmffReader(input._mainReader);
+      this.chunkReader = new IsobmffReader(new Reader(input._source, 64 * 2 ** 20));
     }
     async getDuration() {
       await this.readMetadata();
@@ -4261,7 +4372,7 @@ ${cue.notes ?? ""}`;
     }
     readMetadata() {
       return this.metadataPromise ??= (async () => {
-        const sourceSize = await this.isobmffReader.reader.getSourceSize();
+        const sourceSize = await this.isobmffReader.reader.source._getSize();
         while (this.isobmffReader.pos < sourceSize) {
           await this.isobmffReader.reader.loadRange(this.isobmffReader.pos, this.isobmffReader.pos + 16);
           const startPos = this.isobmffReader.pos;
@@ -4837,9 +4948,13 @@ ${cue.notes ?? ""}`;
       if (!sampleInfo) {
         return null;
       }
-      const data = await this.internalTrack.demuxer.isobmffReader.reader.source._read(
-        sampleInfo.byteOffset,
-        sampleInfo.byteOffset + sampleInfo.byteSize
+      await this.internalTrack.demuxer.chunkReader.reader.loadRange(
+        sampleInfo.chunkOffset,
+        sampleInfo.chunkOffset + sampleInfo.chunkSize
+      );
+      const data = this.internalTrack.demuxer.chunkReader.readRange(
+        sampleInfo.sampleOffset,
+        sampleInfo.sampleOffset + sampleInfo.sampleSize
       );
       const chunk = new EncodedVideoChunk({
         data,
@@ -4940,20 +5055,28 @@ ${cue.notes ?? ""}`;
     assert(chunkEntry);
     const chunkIndex = chunkEntry.startChunkIndex + Math.floor((sampleIndex - chunkEntry.startSampleIndex) / chunkEntry.samplesPerChunk);
     const chunkOffset = sampleTable.chunkOffsets[chunkIndex];
+    let chunkSize = 0;
     let sampleOffset = chunkOffset;
     if (sampleTable.sampleSizes.length === 1) {
       sampleOffset += sampleSize * (sampleIndex - chunkEntry.startSampleIndex);
+      chunkSize += sampleSize * chunkEntry.samplesPerChunk;
     } else {
       const startSampleIndex = chunkEntry.startSampleIndex + (chunkIndex - chunkEntry.startChunkIndex) * chunkEntry.samplesPerChunk;
-      for (let i = startSampleIndex; i < sampleIndex; i++) {
-        sampleOffset += sampleTable.sampleSizes[i];
+      for (let i = startSampleIndex; i < startSampleIndex + chunkEntry.samplesPerChunk; i++) {
+        const sampleSize2 = sampleTable.sampleSizes[i];
+        if (i < sampleIndex) {
+          sampleOffset += sampleSize2;
+        }
+        chunkSize += sampleSize2;
       }
     }
     return {
       presentationTimestamp,
       duration: timingEntry.delta,
-      byteOffset: sampleOffset,
-      byteSize: sampleSize,
+      sampleOffset,
+      sampleSize,
+      chunkOffset,
+      chunkSize,
       isKeyFrame: sampleTable.keySampleIndices ? binarySearchExact(sampleTable.keySampleIndices, sampleIndex, (x) => x) !== -1 : true
     };
   };
@@ -4982,12 +5105,12 @@ ${cue.notes ?? ""}`;
   var IsobmffInputFormat = class extends InputFormat {
     /** @internal */
     async _canReadInput(input) {
-      const sourceSize = await input._reader.getSourceSize();
+      const sourceSize = await input._mainReader.source._getSize();
       if (sourceSize < 8) {
         return false;
       }
-      await input._reader.loadRange(4, 8);
-      const isobmffReader = new IsobmffReader(input._reader);
+      await input._mainReader.loadRange(4, 8);
+      const isobmffReader = new IsobmffReader(input._mainReader);
       isobmffReader.pos = 4;
       const fourCc = isobmffReader.readAscii(4);
       return fourCc === "ftyp";
@@ -5013,106 +5136,22 @@ ${cue.notes ?? ""}`;
   var WEBM = MATROSKA;
   var ALL_FORMATS = [ISOBMFF, MKV];
 
-  // src/reader.ts
-  var PAGE_SIZE = 4096;
-  var Reader = class {
-    constructor(source) {
-      this.source = source;
-    }
-    loadedSegments = [];
-    sourceSizePromise = null;
-    getSourceSize() {
-      if (this.sourceSizePromise) {
-        return this.sourceSizePromise;
-      } else {
-        return this.sourceSizePromise = this.source._getSize();
-      }
-    }
-    async loadRange(start, end) {
-      let alignedStart = Math.floor(start / PAGE_SIZE) * PAGE_SIZE;
-      let alignedEnd = Math.ceil(end / PAGE_SIZE) * PAGE_SIZE;
-      alignedEnd = Math.min(alignedEnd, await this.getSourceSize());
-      const thing = this.loadedSegments.find((x) => x.start <= alignedStart);
-      if (thing) {
-        alignedStart = Math.max(alignedStart, thing.end);
-      }
-      const thing2 = this.loadedSegments.find((x) => x.end >= alignedEnd);
-      if (thing2) {
-        alignedEnd = Math.min(alignedEnd, thing2.start);
-      }
-      if (alignedStart >= alignedEnd) {
-        return;
-      }
-      const bytes2 = await this.source._read(alignedStart, alignedEnd);
-      this.insertIntoLoadedSegments(alignedStart, bytes2);
-    }
-    insertIntoLoadedSegments(start, bytes2) {
-      const segment = {
-        start,
-        end: start + bytes2.byteLength,
-        bytes: bytes2,
-        view: new DataView(bytes2.buffer)
-      };
-      let index = this.loadedSegments.findLastIndex((x) => x.start <= start);
-      this.loadedSegments.splice(index + 1, 0, segment);
-      if (index === -1 || this.loadedSegments[index].end < segment.start) {
-        index++;
-      }
-      const mergeSectionStartIndex = index;
-      const mergeSectionStart = this.loadedSegments[mergeSectionStartIndex].start;
-      let mergeSectionEndIndex = index;
-      let mergeSectionEnd = this.loadedSegments[mergeSectionEndIndex].end;
-      while (this.loadedSegments.length - 1 > mergeSectionEndIndex && this.loadedSegments[mergeSectionEndIndex + 1].start <= mergeSectionEnd) {
-        mergeSectionEndIndex++;
-        mergeSectionEnd = Math.max(mergeSectionEnd, this.loadedSegments[mergeSectionEndIndex].end);
-      }
-      if (mergeSectionStartIndex === mergeSectionEndIndex) {
-        return;
-      }
-      for (let i = mergeSectionStartIndex; i <= mergeSectionEndIndex; i++) {
-        const segment2 = this.loadedSegments[i];
-        const coversEntireMergeSection = segment2.start === mergeSectionStart && segment2.end === mergeSectionEnd;
-        if (coversEntireMergeSection) {
-          this.loadedSegments.splice(i + 1, mergeSectionEndIndex - i);
-          this.loadedSegments.splice(mergeSectionStartIndex, i - mergeSectionStartIndex);
-          return;
-        }
-      }
-      const unifiedBytes = new Uint8Array(mergeSectionEnd - mergeSectionStart);
-      for (let i = mergeSectionStartIndex; i <= mergeSectionEndIndex; i++) {
-        const segment2 = this.loadedSegments[i];
-        unifiedBytes.set(segment2.bytes, segment2.start - mergeSectionStart);
-      }
-      this.loadedSegments.splice(mergeSectionStartIndex + 1, mergeSectionEndIndex - mergeSectionStartIndex);
-      this.loadedSegments[mergeSectionStartIndex].end = mergeSectionEnd;
-      this.loadedSegments[mergeSectionStartIndex].bytes = unifiedBytes;
-      this.loadedSegments[mergeSectionStartIndex].view = new DataView(unifiedBytes.buffer);
-    }
-    getViewAndOffset(start, end) {
-      const segment = this.loadedSegments.find((x) => x.start <= start && end <= x.end);
-      if (!segment) {
-        throw new Error(`No segment loaded for range [${start}, ${end}).`);
-      }
-      return {
-        view: segment.view,
-        offset: segment.bytes.byteOffset + start - segment.start
-      };
-    }
-  };
-
   // src/input.ts
   var Input = class {
     /** @internal */
+    _source;
+    /** @internal */
     _formats;
     /** @internal */
-    _reader;
+    _mainReader;
     /** @internal */
     _demuxerPromise = null;
     /** @internal */
     _format = null;
     constructor(options) {
       this._formats = options.formats;
-      this._reader = new Reader(options.source);
+      this._source = options.source;
+      this._mainReader = new Reader(options.source);
     }
     /** @internal */
     _getDemuxer() {
@@ -5182,11 +5221,51 @@ ${cue.notes ?? ""}`;
     getNextKeyChunk(chunk) {
       return this.videoTrack._backing.getNextKeyChunk(chunk);
     }
-    async *chunks(startTimestamp = 0) {
-      let chunk = await this.getChunk(startTimestamp);
-      while (chunk) {
-        yield chunk;
-        chunk = await this.getNextChunk(chunk);
+    async *chunks(startChunk, endTimestamp = Infinity) {
+      const chunkQueue = [];
+      let { promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers();
+      let { promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers();
+      let ended = false;
+      const timestamps = [];
+      const maxQueueSize = () => Math.max(2, timestamps.length);
+      void (async () => {
+        let chunk = startChunk ?? await this.getFirstChunk();
+        while (chunk && !ended) {
+          if (chunk.timestamp / 1e6 >= endTimestamp) {
+            break;
+          }
+          if (chunkQueue.length > maxQueueSize()) {
+            ({ promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers());
+            await queueDequeue;
+            continue;
+          }
+          chunkQueue.push(chunk);
+          onQueueNotEmpty();
+          ({ promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers());
+          chunk = await this.getNextChunk(chunk);
+        }
+        ended = true;
+        onQueueNotEmpty();
+      })();
+      try {
+        while (true) {
+          if (chunkQueue.length > 0) {
+            yield chunkQueue.shift();
+            const now = performance.now();
+            timestamps.push(now);
+            while (timestamps.length > 0 && now - timestamps[0] >= 1e3) {
+              timestamps.shift();
+            }
+            onQueueDequeue();
+          } else if (!ended) {
+            await queueNotEmpty;
+          } else {
+            break;
+          }
+        }
+      } finally {
+        ended = true;
+        onQueueDequeue();
       }
     }
   };
@@ -5249,18 +5328,21 @@ ${cue.notes ?? ""}`;
       decoder.close();
       return result;
     }
-    async *frames(startTimestamp = 0) {
+    async *frames(startTimestamp = 0, endTimestamp = Infinity) {
       const frameQueue = [];
       let firstFrameQueued = false;
       let lastFrame = null;
-      let { promise: queueNonEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers();
+      let { promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers();
       let ended = false;
       const decoder = await this.createDecoder((frame) => {
+        const frameTimestamp = frame.timestamp / 1e6;
+        if (frameTimestamp >= endTimestamp) {
+          ended = true;
+        }
         if (ended) {
           frame.close();
           return;
         }
-        const frameTimestamp = frame.timestamp / 1e6;
         if (lastFrame) {
           if (frameTimestamp > startTimestamp) {
             frameQueue.push(lastFrame);
@@ -5276,26 +5358,44 @@ ${cue.notes ?? ""}`;
         lastFrame = firstFrameQueued ? null : frame;
         if (frameQueue.length > 0) {
           onQueueNotEmpty();
-          ({ promise: queueNonEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers());
+          ({ promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers());
         }
       });
-      const keyChunk = await this.videoTrack._backing.getKeyChunk(startTimestamp);
+      const keyChunk = await this.videoTrack._backing.getKeyChunk(startTimestamp) ?? await this.videoTrack._backing.getFirstChunk();
       if (!keyChunk) {
         return;
       }
       let decoderIsFlushed = false;
       void (async () => {
         let currentChunk = keyChunk;
+        let chunksEndTimestamp = Infinity;
+        if (endTimestamp < Infinity) {
+          const endFrame = await this.videoTrack._backing.getChunk(endTimestamp);
+          const endKeyFrame = !endFrame ? null : endFrame.type === "key" && endFrame.timestamp / 1e6 === endTimestamp ? endFrame : await this.videoTrack._backing.getNextKeyChunk(endFrame);
+          if (endKeyFrame) {
+            chunksEndTimestamp = endKeyFrame.timestamp / 1e6;
+          }
+        }
+        const chunkDrain = new EncodedVideoChunkDrain(this.videoTrack);
+        const chunks = chunkDrain.chunks(keyChunk, chunksEndTimestamp);
+        await chunks.next();
         while (currentChunk && !ended) {
           decoder.decode(currentChunk);
           if (decoder.decodeQueueSize >= 10) {
             await new Promise((resolve) => decoder.addEventListener("dequeue", resolve, { once: true }));
           }
-          const nextChunk = await this.videoTrack._backing.getNextChunk(currentChunk);
-          currentChunk = nextChunk;
+          const chunkResult = await chunks.next();
+          if (chunkResult.done) {
+            break;
+          }
+          currentChunk = chunkResult.value;
         }
+        await chunks.return();
         await decoder.flush();
         decoder.close();
+        if (!firstFrameQueued && lastFrame) {
+          frameQueue.push(lastFrame);
+        }
         decoderIsFlushed = true;
         onQueueNotEmpty();
       })();
@@ -5304,7 +5404,7 @@ ${cue.notes ?? ""}`;
           if (frameQueue.length > 0) {
             yield frameQueue.shift();
           } else if (!decoderIsFlushed) {
-            await queueNonEmpty;
+            await queueNotEmpty;
           } else {
             break;
           }

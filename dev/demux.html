@@ -27,12 +27,10 @@
         const context = canvas.getContext('2d');
 
         // Top-level for await loop inside the event listener
-        for await (const frame of drain.frames(await videoTrack.getDuration() - 10)) {
+        for await (const frame of drain.frames()) {
             context.drawImage(frame, 0, 0, width, height);
             frame.close();
         }
-
-		console.log("Here??")
 
 		/*
 		const videoTrack = await input.getPrimaryVideoTrack();

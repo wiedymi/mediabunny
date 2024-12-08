@@ -15,14 +15,14 @@ export abstract class InputFormat {
 class IsobmffInputFormat extends InputFormat {
 	/** @internal */
 	override async _canReadInput(input: Input) {
-		const sourceSize = await input._reader.getSourceSize();
+		const sourceSize = await input._mainReader.source._getSize();
 		if (sourceSize < 8) {
 			return false;
 		}
 
-		await input._reader.loadRange(4, 8);
+		await input._mainReader.loadRange(4, 8);
 
-		const isobmffReader = new IsobmffReader(input._reader);
+		const isobmffReader = new IsobmffReader(input._mainReader);
 		isobmffReader.pos = 4;
 		const fourCc = isobmffReader.readAscii(4);
 

@@ -18,6 +18,7 @@ import {
 	binarySearchLessOrEqual,
 	binarySearchExact,
 } from '../misc';
+import { Reader } from '../reader';
 import { IsobmffReader } from './isobmff-reader';
 
 type InternalTrack = {
@@ -86,17 +87,20 @@ type SampleToChunkEntry = {
 const knownMatrixes = [rotationMatrix(0), rotationMatrix(90), rotationMatrix(180), rotationMatrix(270)];
 
 export class IsobmffDemuxer extends Demuxer {
-	isobmffReader: IsobmffReader;
+	private isobmffReader: IsobmffReader;
 	private currentTrack: InternalTrack | null = null;
 	private tracks: InternalTrack[] = [];
 	private metadataPromise: Promise<void> | null = null;
 	private movieTimescale = -1;
 	private movieDurationInTimescale = -1;
 
+	chunkReader: IsobmffReader;
+
 	constructor(input: Input) {
 		super(input);
 
-		this.isobmffReader = new IsobmffReader(input._reader);
+		this.isobmffReader = new IsobmffReader(input._mainReader);
+		this.chunkReader = new IsobmffReader(new Reader(input._source, 64 * 2 ** 20)); // Max 64 MiB of stored chunks
 	}
 
 	override async getDuration() {
@@ -131,7 +135,7 @@ export class IsobmffDemuxer extends Demuxer {
 
 	readMetadata() {
 		return this.metadataPromise ??= (async () => {
-			const sourceSize = await this.isobmffReader.reader.getSourceSize();
+			const sourceSize = await this.isobmffReader.reader.source._getSize();
 
 			while (this.isobmffReader.pos < sourceSize) {
 				await this.isobmffReader.reader.loadRange(this.isobmffReader.pos, this.isobmffReader.pos + 16);
@@ -832,9 +836,13 @@ class IsobmffVideoTrackBacking extends IsobmffTrackBacking implements InputVideo
 			return null;
 		}
 
-		const data = await this.internalTrack.demuxer.isobmffReader.reader.source._read(
-			sampleInfo.byteOffset,
-			sampleInfo.byteOffset + sampleInfo.byteSize,
+		await this.internalTrack.demuxer.chunkReader.reader.loadRange(
+			sampleInfo.chunkOffset,
+			sampleInfo.chunkOffset + sampleInfo.chunkSize,
+		);
+		const data = this.internalTrack.demuxer.chunkReader.readRange(
+			sampleInfo.sampleOffset,
+			sampleInfo.sampleOffset + sampleInfo.sampleSize,
 		);
 
 		const chunk = new EncodedVideoChunk({
@@ -934,8 +942,10 @@ const getSampleIndexForTimestamp = (sampleTable: SampleTable, timescaleUnits: nu
 type SampleInfo = {
 	presentationTimestamp: number;
 	duration: number;
-	byteOffset: number;
-	byteSize: number;
+	sampleOffset: number;
+	sampleSize: number;
+	chunkOffset: number;
+	chunkSize: number;
 	isKeyFrame: boolean;
 };
 
@@ -968,22 +978,33 @@ const getSampleInfo = (sampleTable: SampleTable, sampleIndex: number): SampleInf
 		+ Math.floor((sampleIndex - chunkEntry.startSampleIndex) / chunkEntry.samplesPerChunk);
 	const chunkOffset = sampleTable.chunkOffsets[chunkIndex]!;
 
+	let chunkSize = 0;
+
 	let sampleOffset = chunkOffset;
 	if (sampleTable.sampleSizes.length === 1) {
 		sampleOffset += sampleSize * (sampleIndex - chunkEntry.startSampleIndex);
+		chunkSize += sampleSize * chunkEntry.samplesPerChunk;
 	} else {
 		const startSampleIndex = chunkEntry.startSampleIndex
 			+ (chunkIndex - chunkEntry.startChunkIndex) * chunkEntry.samplesPerChunk;
-		for (let i = startSampleIndex; i < sampleIndex; i++) {
-			sampleOffset += sampleTable.sampleSizes[i]!;
+
+		for (let i = startSampleIndex; i < startSampleIndex + chunkEntry.samplesPerChunk; i++) {
+			const sampleSize = sampleTable.sampleSizes[i]!;
+
+			if (i < sampleIndex) {
+				sampleOffset += sampleSize;
+			}
+			chunkSize += sampleSize;
 		}
 	}
 
 	return {
 		presentationTimestamp,
 		duration: timingEntry.delta,
-		byteOffset: sampleOffset,
-		byteSize: sampleSize,
+		sampleOffset,
+		sampleSize,
+		chunkOffset,
+		chunkSize,
 		isKeyFrame: sampleTable.keySampleIndices
 			? binarySearchExact(sampleTable.keySampleIndices, sampleIndex, x => x) !== -1
 			: true,

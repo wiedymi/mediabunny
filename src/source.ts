@@ -2,7 +2,15 @@ export abstract class Source {
 	/** @internal */
 	abstract _read(start: number, end: number): Promise<Uint8Array>;
 	/** @internal */
-	abstract _getSize(): Promise<number>;
+	abstract _retrieveSize(): Promise<number>;
+
+	/** @internal */
+	_sizePromise: Promise<number> | null = null;
+
+	/** @internal */
+	_getSize() {
+		return this._sizePromise ??= this._retrieveSize();
+	}
 }
 
 export class ArrayBufferSource extends Source {
@@ -16,7 +24,7 @@ export class ArrayBufferSource extends Source {
 	}
 
 	/** @internal */
-	override async _getSize() {
+	override async _retrieveSize() {
 		return this.buffer.byteLength;
 	}
 }
@@ -34,7 +42,7 @@ export class BlobSource extends Source {
 	}
 
 	/** @internal */
-	override async _getSize() {
+	override async _retrieveSize() {
 		return this.blob.size;
 	}
 }
