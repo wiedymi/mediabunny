@@ -1,0 +1,102 @@
+<script src="../dist/metamuxer.js"></script>
+
+<script type="module">
+	const fileInput = document.createElement('input');
+	fileInput.type = 'file';
+	document.body.append(fileInput);
+
+	fileInput.addEventListener('change', async () => {
+		const file = fileInput.files[0];
+		const source = new Metamuxer.BlobSource(file);
+		const input = new Metamuxer.Input({
+			formats: Metamuxer.ALL_FORMATS,
+			source
+		});
+
+		const videoTrack = await input.getPrimaryVideoTrack();
+        const drain = new Metamuxer.VideoFrameDrain(videoTrack);
+
+        const width = await videoTrack.getWidth();
+        const height = await videoTrack.getHeight();
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        document.body.append(canvas);
+
+        const context = canvas.getContext('2d');
+
+        // Top-level for await loop inside the event listener
+        for await (const frame of drain.frames(await videoTrack.getDuration() - 10)) {
+            context.drawImage(frame, 0, 0, width, height);
+            frame.close();
+        }
+
+		console.log("Here??")
+
+		/*
+		const videoTrack = await input.getPrimaryVideoTrack();
+		const drain = new Metamuxer.VideoFrameDrain(videoTrack);
+
+		for await (const frame of drain.frames(0.01)) {
+			console.log(frame)
+			frame.close()
+			
+			if (frame.timestamp > 2e6) {
+				break;
+			}
+		}
+			*/
+
+		/*
+		const drain = new Metamuxer.EncodedVideoChunkDrain(videoTrack);
+
+		const decoder = new VideoDecoder({
+			output: console.log,
+			error: console.error
+		});
+		decoder.configure({
+			...await videoTrack.getDecoderConfig()
+		});
+
+		const firstChunk = await drain.getFirstChunk();
+		const secondChunk = await drain.getNextChunk(firstChunk);
+		const thirdChunk = await drain.getNextChunk(secondChunk);
+
+		console.log(firstChunk, secondChunk, thirdChunk);
+
+		decoder.decode(firstChunk);
+		decoder.decode(secondChunk);
+		decoder.decode(thirdChunk);
+		
+		decoder.flush();
+		*/
+
+
+		/*
+		const drain = new Metamuxer.VideoFrameDrain(videoTrack);
+
+		const frame = await drain.getKeyFrame(69);
+
+		const canvas = document.createElement('canvas')
+		canvas.width = await videoTrack.getWidth();
+		canvas.height = await videoTrack.getHeight();
+		const context = canvas.getContext('2d');
+		context.drawImage(frame, 0, 0);
+
+		document.body.append(canvas);
+		*/
+
+		/*
+		const drain = new Metamuxer.EncodedVideoChunkDrain(videoTrack);
+
+		for await (const chunk of drain.chunks()) {
+			console.log(chunk);
+
+			if (chunk.timestamp > 1e6) {
+				break;
+			}
+		}
+		*/
+	});
+</script>

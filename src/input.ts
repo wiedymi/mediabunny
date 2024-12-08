@@ -1,0 +1,82 @@
+import { Demuxer } from './demuxer';
+import { InputFormat } from './input-format';
+import { assert } from './misc';
+import { Reader } from './reader';
+import { Source } from './source';
+
+export type InputOptions = {
+	formats: InputFormat[];
+	source: Source;
+};
+
+export class Input {
+	/** @internal */
+	_formats: InputFormat[];
+	/** @internal */
+	_reader: Reader;
+	/** @internal */
+	_demuxerPromise: Promise<Demuxer> | null = null;
+	/** @internal */
+	_format: InputFormat | null = null;
+
+	constructor(options: InputOptions) {
+		this._formats = options.formats;
+		this._reader = new Reader(options.source);
+	}
+
+	/** @internal */
+	_getDemuxer() {
+		return this._demuxerPromise ??= (async () => {
+			for (const format of this._formats) {
+				const canRead = await format._canReadInput(this);
+				if (canRead) {
+					this._format = format;
+					return format._createDemuxer(this);
+				}
+			}
+
+			throw new Error('Input has an unrecognizable format.');
+		})();
+	}
+
+	async getFormat() {
+		await this._getDemuxer();
+		assert(this._format!);
+		return this._format;
+	}
+
+	async getDuration() {
+		const demuxer = await this._getDemuxer();
+		return demuxer.getDuration();
+	}
+
+	async getTracks() {
+		const demuxer = await this._getDemuxer();
+		return demuxer.getTracks();
+	}
+
+	async getVideoTracks() {
+		const tracks = await this.getTracks();
+		return tracks.filter(x => x.isVideoTrack());
+	}
+
+	async getPrimaryVideoTrack() {
+		const tracks = await this.getTracks();
+		return tracks.find(x => x.isVideoTrack()) ?? null;
+	}
+
+	async getAudioTracks() {
+		const tracks = await this.getTracks();
+		return tracks.filter(x => x.isAudioTrack());
+	}
+
+	async getPrimaryAudioTrack() {
+		const tracks = await this.getTracks();
+		return tracks.find(x => x.isAudioTrack()) ?? null;
+	}
+
+	async getMimeType() {
+		const demuxer = await this._getDemuxer();
+		return demuxer.getMimeType();
+	}
+}

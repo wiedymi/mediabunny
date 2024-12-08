@@ -9,8 +9,10 @@ import {
 	TRANSFER_CHARACTERISTICS_MAP,
 	MATRIX_COEFFICIENTS_MAP,
 	colorSpaceIsComplete,
+	IDENTITY_MATRIX,
+	rotationMatrix,
 } from '../misc';
-import { AudioCodec, SubtitleCodec, VideoCodec } from '../source';
+import { AudioCodec, SubtitleCodec, VideoCodec } from '../codec';
 import { formatSubtitleTimestamp } from '../subtitles';
 import { Writer } from '../writer';
 import {
@@ -207,21 +209,6 @@ const lastPresentedSample = (samples: Sample[]) => {
 
 	return result;
 };
-
-const rotationMatrix = (rotationInDegrees: number): TransformationMatrix => {
-	const theta = rotationInDegrees * (Math.PI / 180);
-	const cosTheta = Math.cos(theta);
-	const sinTheta = Math.sin(theta);
-
-	// Matrices are post-multiplied in ISOBMFF, meaning this is the transpose of your typical rotation matrix
-	return [
-		cosTheta, sinTheta, 0,
-		-sinTheta, cosTheta, 0,
-		0, 0, 1,
-	];
-};
-
-const IDENTITY_MATRIX = rotationMatrix(0);
 
 const matrixToBytes = (matrix: TransformationMatrix) => {
 	return [

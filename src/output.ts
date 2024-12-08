@@ -1,7 +1,7 @@
 import { AsyncMutex, TransformationMatrix } from './misc';
 import { Muxer } from './muxer';
 import { OutputFormat } from './output-format';
-import { AudioSource, MediaSource, SubtitleSource, VideoSource } from './source';
+import { AudioSource, MediaSource, SubtitleSource, VideoSource } from './media-source';
 import { Target } from './target';
 import { Writer } from './writer';
 

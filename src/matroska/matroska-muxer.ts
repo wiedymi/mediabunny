@@ -1,4 +1,3 @@
-import { AudioCodec, SubtitleCodec, VideoCodec } from '../source';
 import {
 	COLOR_PRIMARIES_MAP,
 	MATRIX_COEFFICIENTS_MAP,
@@ -31,7 +30,14 @@ import {
 	inlineTimestampRegex,
 	parseSubtitleTimestamp,
 } from '../subtitles';
-import { validateAudioChunkMetadata, validateSubtitleMetadata, validateVideoChunkMetadata } from '../codec';
+import {
+	AudioCodec,
+	SubtitleCodec,
+	VideoCodec,
+	validateAudioChunkMetadata,
+	validateSubtitleMetadata,
+	validateVideoChunkMetadata,
+} from '../codec';
 import { Muxer } from '../muxer';
 import { Writer } from '../writer';
 

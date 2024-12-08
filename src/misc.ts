@@ -53,6 +53,10 @@ export const toUint8Array = (source: AllowSharedBufferSource): Uint8Array => {
 
 export const textEncoder = new TextEncoder();
 
+const invertObject = <K extends PropertyKey, V extends PropertyKey>(object: Record<K, V>) => {
+	return Object.fromEntries(Object.entries(object).map(([key, value]) => [value, key])) as Record<V, K>;
+};
+
 // These maps are taken from https://www.matroska.org/technical/elements.html,
 // which references the tables in ITU-T H.273 - they should be valid for Matroska and ISOBMFF.
 export const COLOR_PRIMARIES_MAP: Record<VideoColorPrimaries, number> = {
@@ -60,17 +64,22 @@ export const COLOR_PRIMARIES_MAP: Record<VideoColorPrimaries, number> = {
 	bt470bg: 5, // ITU-R BT.470BG
 	smpte170m: 6, // ITU-R BT.601 525 - SMPTE 170M
 };
+export const COLOR_PRIMARIES_MAP_INVERSE = invertObject(COLOR_PRIMARIES_MAP);
+
 export const TRANSFER_CHARACTERISTICS_MAP: Record<VideoTransferCharacteristics, number> = {
 	'bt709': 1, // ITU-R BT.709
 	'smpte170m': 6, // SMPTE 170M
 	'iec61966-2-1': 13, // IEC 61966-2-1
 };
+export const TRANSFER_CHARACTERISTICS_MAP_INVERSE = invertObject(TRANSFER_CHARACTERISTICS_MAP);
+
 export const MATRIX_COEFFICIENTS_MAP: Record<VideoMatrixCoefficients, number> = {
 	rgb: 0, // Identity
 	bt709: 1, // ITU-R BT.709
 	bt470bg: 5, // ITU-R BT.470BG
 	smpte170m: 6, // SMPTE 170M
 };
+export const MATRIX_COEFFICIENTS_MAP_INVERSE = invertObject(MATRIX_COEFFICIENTS_MAP);
 
 export type RequiredNonNull<T> = {
 	[K in keyof T]-?: NonNullable<T[K]>;
@@ -114,3 +123,84 @@ export class AsyncMutex {
 		return resolver!;
 	}
 }
+
+export const rotationMatrix = (rotationInDegrees: number): TransformationMatrix => {
+	const theta = rotationInDegrees * (Math.PI / 180);
+	const cosTheta = Math.cos(theta);
+	const sinTheta = Math.sin(theta);
+
+	// Matrices are post-multiplied in ISOBMFF, meaning this is the transpose of your typical rotation matrix
+	return [
+		cosTheta, sinTheta, 0,
+		-sinTheta, cosTheta, 0,
+		0, 0, 1,
+	];
+};
+
+export const IDENTITY_MATRIX = rotationMatrix(0);
+
+export const bytesToHexString = (bytes: Uint8Array) => {
+	return [...bytes].map(x => x.toString(16).padStart(2, '0')).join('');
+};
+
+export const reverseBitsU32 = (x: number): number => {
+	x = ((x >> 1) & 0x55555555) | ((x & 0x55555555) << 1);
+	x = ((x >> 2) & 0x33333333) | ((x & 0x33333333) << 2);
+	x = ((x >> 4) & 0x0f0f0f0f) | ((x & 0x0f0f0f0f) << 4);
+	x = ((x >> 8) & 0x00ff00ff) | ((x & 0x00ff00ff) << 8);
+	x = ((x >> 16) & 0x0000ffff) | ((x & 0x0000ffff) << 16);
+	return x >>> 0; // Ensure it's treated as an unsigned 32-bit integer
+};
+
+export const binarySearchExact = <T>(arr: T[], key: number, valueGetter: (x: T) => number): number => {
+	let low = 0;
+	let high = arr.length - 1;
+	let res = -1;
+
+	while (low <= high) {
+		const mid = (low + high) >> 1;
+		const midVal = valueGetter(arr[mid]!);
+
+		if (midVal === key) {
+			res = mid;
+			high = mid - 1; // continue searching left to find the lowest index
+		} else if (midVal < key) {
+			low = mid + 1;
+		} else {
+			high = mid - 1;
+		}
+	}
+
+	return res;
+};
+
+export const binarySearchLessOrEqual = <T>(arr: T[], key: number, valueGetter: (x: T) => number) => {
+	let ans = -1;
+	let low = 0;
+	let high = arr.length - 1;
+
+	while (low <= high) {
+		const mid = (low + (high - low + 1) / 2) | 0;
+		const midVal = valueGetter(arr[mid]!);
+
+		if (midVal <= key) {
+			ans = mid;
+			low = mid + 1;
+		} else {
+			high = mid - 1;
+		}
+	}
+
+	return ans;
+};
+
+export const promiseWithResolvers = <T = void>() => {
+	let resolve: (value: T) => void;
+	let reject: (reason: unknown) => void;
+	const promise = new Promise<T>((res, rej) => {
+		resolve = res;
+		reject = rej;
+	});
+
+	return { promise, resolve: resolve!, reject: reject! };
+};

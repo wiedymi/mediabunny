@@ -69,7 +69,6 @@ export class ArrayBufferTargetWriter extends Writer {
 
 	async flush() {}
 
-	// eslint-disable-next-line @typescript-eslint/require-await
 	async finalize() {
 		this.ensureSize(this.pos);
 		this.target.buffer = this.buffer.slice(0, Math.max(this.maxPos, this.pos));

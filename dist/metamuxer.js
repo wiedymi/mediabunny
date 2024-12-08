@@ -21,14 +21,24 @@ var Metamuxer = (() => {
   // src/index.ts
   var src_exports = {};
   __export(src_exports, {
+    ALL_FORMATS: () => ALL_FORMATS,
     AUDIO_CODECS: () => AUDIO_CODECS,
+    ArrayBufferSource: () => ArrayBufferSource,
     ArrayBufferTarget: () => ArrayBufferTarget,
     AudioBufferSource: () => AudioBufferSource,
     AudioDataSource: () => AudioDataSource,
     AudioSource: () => AudioSource,
+    BlobSource: () => BlobSource,
     CanvasSource: () => CanvasSource,
     EncodedAudioChunkSource: () => EncodedAudioChunkSource,
+    EncodedVideoChunkDrain: () => EncodedVideoChunkDrain,
     EncodedVideoChunkSource: () => EncodedVideoChunkSource,
+    ISOBMFF: () => ISOBMFF,
+    Input: () => Input,
+    MATROSKA: () => MATROSKA,
+    MKV: () => MKV,
+    MOV: () => MOV,
+    MP4: () => MP4,
     MediaSource: () => MediaSource,
     MediaStreamAudioTrackSource: () => MediaStreamAudioTrackSource,
     MediaStreamVideoTrackSource: () => MediaStreamVideoTrackSource,
@@ -37,13 +47,16 @@ var Metamuxer = (() => {
     Output: () => Output,
     OutputFormat: () => OutputFormat,
     SUBTITLE_CODECS: () => SUBTITLE_CODECS,
+    Source: () => Source,
     StreamTarget: () => StreamTarget,
     SubtitleSource: () => SubtitleSource,
     Target: () => Target,
     TextSubtitleSource: () => TextSubtitleSource,
     VIDEO_CODECS: () => VIDEO_CODECS,
+    VideoFrameDrain: () => VideoFrameDrain,
     VideoFrameSource: () => VideoFrameSource,
     VideoSource: () => VideoSource,
+    WEBM: () => WEBM,
     WebMOutputFormat: () => WebMOutputFormat
   });
 
@@ -89,6 +102,9 @@ var Metamuxer = (() => {
     }
   };
   var textEncoder = new TextEncoder();
+  var invertObject = (object) => {
+    return Object.fromEntries(Object.entries(object).map(([key, value]) => [value, key]));
+  };
   var COLOR_PRIMARIES_MAP = {
     bt709: 1,
     // ITU-R BT.709
@@ -97,6 +113,7 @@ var Metamuxer = (() => {
     smpte170m: 6
     // ITU-R BT.601 525 - SMPTE 170M
   };
+  var COLOR_PRIMARIES_MAP_INVERSE = invertObject(COLOR_PRIMARIES_MAP);
   var TRANSFER_CHARACTERISTICS_MAP = {
     "bt709": 1,
     // ITU-R BT.709
@@ -105,6 +122,7 @@ var Metamuxer = (() => {
     "iec61966-2-1": 13
     // IEC 61966-2-1
   };
+  var TRANSFER_CHARACTERISTICS_MAP_INVERSE = invertObject(TRANSFER_CHARACTERISTICS_MAP);
   var MATRIX_COEFFICIENTS_MAP = {
     rgb: 0,
     // Identity
@@ -115,6 +133,7 @@ var Metamuxer = (() => {
     smpte170m: 6
     // SMPTE 170M
   };
+  var MATRIX_COEFFICIENTS_MAP_INVERSE = invertObject(MATRIX_COEFFICIENTS_MAP);
   var colorSpaceIsComplete = (colorSpace) => {
     return !!colorSpace && !!colorSpace.primaries && !!colorSpace.transfer && !!colorSpace.matrix && colorSpace.fullRange !== void 0;
   };
@@ -122,9 +141,7 @@ var Metamuxer = (() => {
     return x instanceof ArrayBuffer || typeof SharedArrayBuffer !== "undefined" && x instanceof SharedArrayBuffer || ArrayBuffer.isView(x) && !(x instanceof DataView);
   };
   var AsyncMutex = class {
-    constructor() {
-      this.currentPromise = Promise.resolve();
-    }
+    currentPromise = Promise.resolve();
     async acquire() {
       let resolver;
       const nextPromise = new Promise((resolve) => {
@@ -136,15 +153,87 @@ var Metamuxer = (() => {
       return resolver;
     }
   };
+  var rotationMatrix = (rotationInDegrees) => {
+    const theta = rotationInDegrees * (Math.PI / 180);
+    const cosTheta = Math.cos(theta);
+    const sinTheta = Math.sin(theta);
+    return [
+      cosTheta,
+      sinTheta,
+      0,
+      -sinTheta,
+      cosTheta,
+      0,
+      0,
+      0,
+      1
+    ];
+  };
+  var IDENTITY_MATRIX = rotationMatrix(0);
+  var bytesToHexString = (bytes2) => {
+    return [...bytes2].map((x) => x.toString(16).padStart(2, "0")).join("");
+  };
+  var reverseBitsU32 = (x) => {
+    x = x >> 1 & 1431655765 | (x & 1431655765) << 1;
+    x = x >> 2 & 858993459 | (x & 858993459) << 2;
+    x = x >> 4 & 252645135 | (x & 252645135) << 4;
+    x = x >> 8 & 16711935 | (x & 16711935) << 8;
+    x = x >> 16 & 65535 | (x & 65535) << 16;
+    return x >>> 0;
+  };
+  var binarySearchExact = (arr, key, valueGetter) => {
+    let low = 0;
+    let high = arr.length - 1;
+    let res = -1;
+    while (low <= high) {
+      const mid = low + high >> 1;
+      const midVal = valueGetter(arr[mid]);
+      if (midVal === key) {
+        res = mid;
+        high = mid - 1;
+      } else if (midVal < key) {
+        low = mid + 1;
+      } else {
+        high = mid - 1;
+      }
+    }
+    return res;
+  };
+  var binarySearchLessOrEqual = (arr, key, valueGetter) => {
+    let ans = -1;
+    let low = 0;
+    let high = arr.length - 1;
+    while (low <= high) {
+      const mid = low + (high - low + 1) / 2 | 0;
+      const midVal = valueGetter(arr[mid]);
+      if (midVal <= key) {
+        ans = mid;
+        low = mid + 1;
+      } else {
+        high = mid - 1;
+      }
+    }
+    return ans;
+  };
+  var promiseWithResolvers = () => {
+    let resolve;
+    let reject;
+    const promise = new Promise((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  };
 
   // src/subtitles.ts
   var cueBlockHeaderRegex = /(?:(.+?)\n)?((?:\d{2}:)?\d{2}:\d{2}.\d{3})\s+-->\s+((?:\d{2}:)?\d{2}:\d{2}.\d{3})/g;
   var preambleStartRegex = /^WEBVTT(.|\n)*?\n{2}/;
   var inlineTimestampRegex = /<(?:(\d{2}):)?(\d{2}):(\d{2}).(\d{3})>/g;
   var SubtitleParser = class {
+    options;
+    preambleText = null;
+    preambleEmitted = false;
     constructor(options) {
-      this.preambleText = null;
-      this.preambleEmitted = false;
       this.options = options;
     }
     parse(text) {
@@ -221,14 +310,14 @@ var Metamuxer = (() => {
   var IsobmffBoxWriter = class {
     constructor(writer) {
       this.writer = writer;
-      this.helper = new Uint8Array(8);
-      this.helperView = new DataView(this.helper.buffer);
-      /**
-       * Stores the position from the start of the file to where boxes elements have been written. This is used to
-       * rewrite/edit elements that were already added before, and to measure sizes of things.
-       */
-      this.offsets = /* @__PURE__ */ new WeakMap();
     }
+    helper = new Uint8Array(8);
+    helperView = new DataView(this.helper.buffer);
+    /**
+     * Stores the position from the start of the file to where boxes elements have been written. This is used to
+     * rewrite/edit elements that were already added before, and to measure sizes of things.
+     */
+    offsets = /* @__PURE__ */ new WeakMap();
     writeU32(value) {
       this.helperView.setUint32(0, value, false);
       this.writer.write(this.helper.subarray(0, 4));
@@ -368,23 +457,6 @@ var Metamuxer = (() => {
     }
     return result;
   };
-  var rotationMatrix = (rotationInDegrees) => {
-    const theta = rotationInDegrees * (Math.PI / 180);
-    const cosTheta = Math.cos(theta);
-    const sinTheta = Math.sin(theta);
-    return [
-      cosTheta,
-      sinTheta,
-      0,
-      -sinTheta,
-      cosTheta,
-      0,
-      0,
-      0,
-      1
-    ];
-  };
-  var IDENTITY_MATRIX = rotationMatrix(0);
   var matrixToBytes = (matrix) => {
     return [
       fixed_16_16(matrix[0]),
@@ -1120,9 +1192,9 @@ var Metamuxer = (() => {
 
   // src/muxer.ts
   var Muxer = class {
+    output;
+    mutex = new AsyncMutex();
     constructor(output) {
-      this.mutex = new AsyncMutex();
-      this.trackTimestampInfo = /* @__PURE__ */ new WeakMap();
       this.output = output;
     }
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -1131,6 +1203,7 @@ var Metamuxer = (() => {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     onTrackClose(track) {
     }
+    trackTimestampInfo = /* @__PURE__ */ new WeakMap();
     validateAndNormalizeTimestamp(track, rawTimestampInUs, isKeyFrame) {
       let timestampInSeconds = rawTimestampInUs / 1e6;
       let timestampInfo = this.trackTimestampInfo.get(track);
@@ -1174,20 +1247,19 @@ var Metamuxer = (() => {
 
   // src/writer.ts
   var Writer = class {
-    constructor() {
-      /** Setting this to true will cause the writer to ensure data is written in a strictly monotonic, streamable way. */
-      this.ensureMonotonicity = false;
-    }
+    /** Setting this to true will cause the writer to ensure data is written in a strictly monotonic, streamable way. */
+    ensureMonotonicity = false;
     start() {
     }
   };
   var ArrayBufferTargetWriter = class extends Writer {
+    pos = 0;
+    target;
+    buffer = new ArrayBuffer(2 ** 16);
+    bytes = new Uint8Array(this.buffer);
+    maxPos = 0;
     constructor(target) {
       super();
-      this.pos = 0;
-      this.buffer = new ArrayBuffer(2 ** 16);
-      this.bytes = new Uint8Array(this.buffer);
-      this.maxPos = 0;
       this.target = target;
     }
     ensureSize(size) {
@@ -1214,7 +1286,6 @@ var Metamuxer = (() => {
     }
     async flush() {
     }
-    // eslint-disable-next-line @typescript-eslint/require-await
     async finalize() {
       this.ensureSize(this.pos);
       this.target.buffer = this.buffer.slice(0, Math.max(this.maxPos, this.pos));
@@ -1224,12 +1295,13 @@ var Metamuxer = (() => {
     }
   };
   var StreamTargetWriter = class extends Writer {
+    pos = 0;
+    target;
+    sections = [];
+    lastFlushEnd = 0;
+    writer = null;
     constructor(target) {
       super();
-      this.pos = 0;
-      this.sections = [];
-      this.lastFlushEnd = 0;
-      this.writer = null;
       this.target = target;
     }
     start() {
@@ -1299,17 +1371,19 @@ var Metamuxer = (() => {
   var DEFAULT_CHUNK_SIZE = 2 ** 24;
   var MAX_CHUNKS_AT_ONCE = 2;
   var ChunkedStreamTargetWriter = class extends Writer {
+    pos = 0;
+    target;
+    chunkSize;
+    /**
+     * The data is divided up into fixed-size chunks, whose contents are first filled in RAM and then flushed out.
+     * A chunk is flushed if all of its contents have been written.
+     */
+    chunks = [];
+    lastFlushEnd = 0;
+    writer = null;
+    flushedChunkQueue = [];
     constructor(target) {
       super();
-      this.pos = 0;
-      /**
-       * The data is divided up into fixed-size chunks, whose contents are first filled in RAM and then flushed out.
-       * A chunk is flushed if all of its contents have been written.
-       */
-      this.chunks = [];
-      this.lastFlushEnd = 0;
-      this.writer = null;
-      this.flushedChunkQueue = [];
       this.target = target;
       this.chunkSize = target._options?.chunkSize ?? DEFAULT_CHUNK_SIZE;
       if (!Number.isInteger(this.chunkSize) || this.chunkSize < 2 ** 10) {
@@ -1427,22 +1501,21 @@ var Metamuxer = (() => {
 
   // src/target.ts
   var Target = class {
-    constructor() {
-      /** @internal */
-      this._output = null;
-    }
+    /** @internal */
+    _output = null;
   };
   var ArrayBufferTarget = class extends Target {
-    constructor() {
-      super(...arguments);
-      this.buffer = null;
-    }
+    buffer = null;
     /** @internal */
     _createWriter() {
       return new ArrayBufferTargetWriter(this);
     }
   };
   var StreamTarget = class extends Target {
+    /** @internal */
+    _writable;
+    /** @internal */
+    _options;
     constructor(writable, options = {}) {
       super();
       if (!(writable instanceof WritableStream)) {
@@ -1467,6 +1540,9 @@ var Metamuxer = (() => {
   };
 
   // src/codec.ts
+  var VIDEO_CODECS = ["avc", "hevc", "vp8", "vp9", "av1"];
+  var AUDIO_CODECS = ["aac", "opus"];
+  var SUBTITLE_CODECS = ["webvtt"];
   var AVC_LEVEL_TABLE = [
     { maxMacroblocks: 99, maxBitrate: 64e3, level: 10 },
     // Level 1
@@ -1674,6 +1750,43 @@ var Metamuxer = (() => {
     }
     throw new TypeError(`Unhandled codec '${codec}'.`);
   };
+  var extractVideoCodecString = (codec, description) => {
+    if (codec === "avc") {
+      if (!description || description.byteLength < 4) {
+        throw new TypeError("AVC description must be at least 4 bytes long.");
+      }
+      return `avc1.${bytesToHexString(description.subarray(1, 4))}`;
+    } else if (codec === "hevc") {
+      if (!description) {
+        throw new TypeError("HEVC description must be provided.");
+      }
+      const view2 = new DataView(description.buffer, description.byteOffset, description.byteLength);
+      let codecString = "hev1.";
+      const generalProfileSpace = description[1] >> 6 & 3;
+      const generalProfileIdc = description[1] & 31;
+      codecString += ["", "A", "B", "C"][generalProfileSpace] + generalProfileIdc;
+      codecString += ".";
+      const compatibilityFlags = reverseBitsU32(view2.getUint32(2));
+      codecString += compatibilityFlags.toString(16);
+      codecString += ".";
+      const generalTierFlag = description[1] >> 5 & 1;
+      const generalLevelIdc = description[12];
+      codecString += generalTierFlag === 0 ? "L" : "H";
+      codecString += generalLevelIdc;
+      codecString += ".";
+      const constraintFlags = [];
+      for (let i = 0; i < 6; i++) {
+        const byte = description[i + 13];
+        constraintFlags.push(byte);
+      }
+      while (constraintFlags[constraintFlags.length - 1] === 0) {
+        constraintFlags.pop();
+      }
+      codecString += constraintFlags.map((x) => x.toString(16)).join(".");
+      return codecString;
+    }
+    throw new TypeError(`Unhandled codec '${codec}'.`);
+  };
   var buildAudioCodecString = (codec, numberOfChannels, sampleRate) => {
     if (codec === "aac") {
       if (numberOfChannels >= 2 && sampleRate <= 24e3) {
@@ -1683,6 +1796,20 @@ var Metamuxer = (() => {
         return "mp4a.40.5";
       }
       return "mp4a.40.2";
+    } else if (codec === "opus") {
+      return "opus";
+    } else if (codec === "vorbis") {
+      return "vorbis";
+    }
+    throw new TypeError(`Unhandled codec '${codec}'.`);
+  };
+  var extractAudioCodecString = (codec, description) => {
+    if (codec === "aac") {
+      if (!description || description.byteLength < 2) {
+        throw new TypeError("AAC description must be at least 2 bytes long.");
+      }
+      const mpeg4AudioObjectType = description[0] >> 3;
+      return `mp4a.40.${mpeg4AudioObjectType}`;
     } else if (codec === "opus") {
       return "opus";
     } else if (codec === "vorbis") {
@@ -1871,18 +1998,21 @@ var Metamuxer = (() => {
     return round ? Math.round(value) : value;
   };
   var IsobmffMuxer = class extends Muxer {
+    timestampsMustStartAtZero = true;
+    writer;
+    boxWriter;
+    fastStart;
+    auxTarget = new ArrayBufferTarget();
+    auxWriter = this.auxTarget._createWriter();
+    auxBoxWriter = new IsobmffBoxWriter(this.auxWriter);
+    ftypSize = null;
+    mdat = null;
+    trackDatas = [];
+    creationTime = Math.floor(Date.now() / 1e3) + TIMESTAMP_OFFSET;
+    finalizedChunks = [];
+    nextFragmentNumber = 1;
     constructor(output, format) {
       super(output);
-      this.timestampsMustStartAtZero = true;
-      this.auxTarget = new ArrayBufferTarget();
-      this.auxWriter = this.auxTarget._createWriter();
-      this.auxBoxWriter = new IsobmffBoxWriter(this.auxWriter);
-      this.ftypSize = null;
-      this.mdat = null;
-      this.trackDatas = [];
-      this.creationTime = Math.floor(Date.now() / 1e3) + TIMESTAMP_OFFSET;
-      this.finalizedChunks = [];
-      this.nextFragmentNumber = 1;
       this.writer = output._writer;
       this.boxWriter = new IsobmffBoxWriter(this.writer);
       const fastStartDefault = this.writer instanceof ArrayBufferTargetWriter ? "in-memory" : false;
@@ -2471,16 +2601,19 @@ var Metamuxer = (() => {
 
   // src/matroska/ebml.ts
   var EBMLFloat32 = class {
+    value;
     constructor(value) {
       this.value = value;
     }
   };
   var EBMLFloat64 = class {
+    value;
     constructor(value) {
       this.value = value;
     }
   };
   var EBMLSignedInt = class {
+    value;
     constructor(value) {
       this.value = value;
     }
@@ -2554,29 +2687,31 @@ var Metamuxer = (() => {
     subtitle: 17
   };
   var MatroskaMuxer = class extends Muxer {
+    timestampsMustStartAtZero = false;
+    writer;
+    format;
+    helper = new Uint8Array(8);
+    helperView = new DataView(this.helper.buffer);
+    /**
+     * Stores the position from the start of the file to where EBML elements have been written. This is used to
+     * rewrite/edit elements that were already added before, and to measure sizes of things.
+     */
+    offsets = /* @__PURE__ */ new WeakMap();
+    /** Same as offsets, but stores position where the element's data starts (after ID and size fields). */
+    dataOffsets = /* @__PURE__ */ new WeakMap();
+    trackDatas = [];
+    segment = null;
+    segmentInfo = null;
+    seekHead = null;
+    tracksElement = null;
+    segmentDuration = null;
+    cues = null;
+    currentCluster = null;
+    currentClusterMsTimestamp = null;
+    trackDatasInCurrentCluster = /* @__PURE__ */ new Set();
+    duration = 0;
     constructor(output, format) {
       super(output);
-      this.timestampsMustStartAtZero = false;
-      this.helper = new Uint8Array(8);
-      this.helperView = new DataView(this.helper.buffer);
-      /**
-       * Stores the position from the start of the file to where EBML elements have been written. This is used to
-       * rewrite/edit elements that were already added before, and to measure sizes of things.
-       */
-      this.offsets = /* @__PURE__ */ new WeakMap();
-      /** Same as offsets, but stores position where the element's data starts (after ID and size fields). */
-      this.dataOffsets = /* @__PURE__ */ new WeakMap();
-      this.trackDatas = [];
-      this.segment = null;
-      this.segmentInfo = null;
-      this.seekHead = null;
-      this.tracksElement = null;
-      this.segmentDuration = null;
-      this.cues = null;
-      this.currentCluster = null;
-      this.currentClusterMsTimestamp = null;
-      this.trackDatasInCurrentCluster = /* @__PURE__ */ new Set();
-      this.duration = 0;
       this.writer = output._writer;
       this.format = format;
       if (this.format._options.streamable) {
@@ -3251,6 +3386,8 @@ ${cue.notes ?? ""}`;
   var OutputFormat = class {
   };
   var Mp4OutputFormat = class extends OutputFormat {
+    /** @internal */
+    _options;
     constructor(options = {}) {
       if (!options || typeof options !== "object") {
         throw new TypeError("options must be an object.");
@@ -3267,6 +3404,8 @@ ${cue.notes ?? ""}`;
     }
   };
   var MkvOutputFormat2 = class extends OutputFormat {
+    /** @internal */
+    _options;
     constructor(options = {}) {
       if (!options || typeof options !== "object") {
         throw new TypeError("options must be an object.");
@@ -3285,19 +3424,14 @@ ${cue.notes ?? ""}`;
   var WebMOutputFormat = class extends MkvOutputFormat2 {
   };
 
-  // src/source.ts
-  var VIDEO_CODECS = ["avc", "hevc", "vp8", "vp9", "av1"];
-  var AUDIO_CODECS = ["aac", "opus"];
-  var SUBTITLE_CODECS = ["webvtt"];
+  // src/media-source.ts
   var MediaSource = class {
-    constructor() {
-      /** @internal */
-      this._connectedTrack = null;
-      /** @internal */
-      this._closed = false;
-      /** @internal */
-      this._offsetTimestamps = false;
-    }
+    /** @internal */
+    _connectedTrack = null;
+    /** @internal */
+    _closed = false;
+    /** @internal */
+    _offsetTimestamps = false;
     /** @internal */
     _ensureValidDigest() {
       if (!this._connectedTrack) {
@@ -3337,10 +3471,12 @@ ${cue.notes ?? ""}`;
     }
   };
   var VideoSource = class extends MediaSource {
+    /** @internal */
+    _connectedTrack = null;
+    /** @internal */
+    _codec;
     constructor(codec) {
       super();
-      /** @internal */
-      this._connectedTrack = null;
       if (!VIDEO_CODECS.includes(codec)) {
         throw new TypeError(`Invalid video codec '${codec}'. Must be one of: ${VIDEO_CODECS.join(", ")}.`);
       }
@@ -3378,13 +3514,13 @@ ${cue.notes ?? ""}`;
     constructor(source, codecConfig) {
       this.source = source;
       this.codecConfig = codecConfig;
-      this.encoder = null;
-      this.muxer = null;
-      this.lastMultipleOfKeyFrameInterval = -1;
-      this.lastWidth = null;
-      this.lastHeight = null;
       validateVideoCodecConfig(codecConfig);
     }
+    encoder = null;
+    muxer = null;
+    lastMultipleOfKeyFrameInterval = -1;
+    lastWidth = null;
+    lastHeight = null;
     async digest(videoFrame) {
       this.source._ensureValidDigest();
       if (this.lastWidth !== null && this.lastHeight !== null) {
@@ -3442,6 +3578,8 @@ ${cue.notes ?? ""}`;
     }
   };
   var VideoFrameSource = class extends VideoSource {
+    /** @internal */
+    _encoder;
     constructor(codecConfig) {
       super(codecConfig.codec);
       this._encoder = new VideoEncoderWrapper(this, codecConfig);
@@ -3458,6 +3596,10 @@ ${cue.notes ?? ""}`;
     }
   };
   var CanvasSource = class extends VideoSource {
+    /** @internal */
+    _encoder;
+    /** @internal */
+    _canvas;
     constructor(canvas, codecConfig) {
       if (!(canvas instanceof HTMLCanvasElement)) {
         throw new TypeError("canvas must be an HTMLCanvasElement.");
@@ -3488,6 +3630,14 @@ ${cue.notes ?? ""}`;
     }
   };
   var MediaStreamVideoTrackSource = class extends VideoSource {
+    /** @internal */
+    _encoder;
+    /** @internal */
+    _abortController = null;
+    /** @internal */
+    _track;
+    /** @internal */
+    _offsetTimestamps = true;
     constructor(track, codecConfig) {
       if (!(track instanceof MediaStreamTrack) || track.kind !== "video") {
         throw new TypeError("track must be a video MediaStreamTrack.");
@@ -3497,10 +3647,6 @@ ${cue.notes ?? ""}`;
         latencyMode: "realtime"
       };
       super(codecConfig.codec);
-      /** @internal */
-      this._abortController = null;
-      /** @internal */
-      this._offsetTimestamps = true;
       this._encoder = new VideoEncoderWrapper(this, codecConfig);
       this._track = track;
     }
@@ -3531,10 +3677,12 @@ ${cue.notes ?? ""}`;
     }
   };
   var AudioSource = class extends MediaSource {
+    /** @internal */
+    _connectedTrack = null;
+    /** @internal */
+    _codec;
     constructor(codec) {
       super();
-      /** @internal */
-      this._connectedTrack = null;
       if (!AUDIO_CODECS.includes(codec)) {
         throw new TypeError(`Invalid audio codec '${codec}'. Must be one of: ${AUDIO_CODECS.join(", ")}.`);
       }
@@ -3568,12 +3716,12 @@ ${cue.notes ?? ""}`;
     constructor(source, codecConfig) {
       this.source = source;
       this.codecConfig = codecConfig;
-      this.encoder = null;
-      this.muxer = null;
-      this.lastNumberOfChannels = null;
-      this.lastSampleRate = null;
       validateAudioCodecConfig(codecConfig);
     }
+    encoder = null;
+    muxer = null;
+    lastNumberOfChannels = null;
+    lastSampleRate = null;
     async digest(audioData) {
       this.source._ensureValidDigest();
       if (this.lastNumberOfChannels !== null && this.lastSampleRate !== null) {
@@ -3620,6 +3768,8 @@ ${cue.notes ?? ""}`;
     }
   };
   var AudioDataSource = class extends AudioSource {
+    /** @internal */
+    _encoder;
     constructor(codecConfig) {
       super(codecConfig.codec);
       this._encoder = new AudioEncoderWrapper(this, codecConfig);
@@ -3636,10 +3786,12 @@ ${cue.notes ?? ""}`;
     }
   };
   var AudioBufferSource = class extends AudioSource {
+    /** @internal */
+    _encoder;
+    /** @internal */
+    _accumulatedFrameCount = 0;
     constructor(codecConfig) {
       super(codecConfig.codec);
-      /** @internal */
-      this._accumulatedFrameCount = 0;
       this._encoder = new AudioEncoderWrapper(this, codecConfig);
     }
     digest(audioBuffer) {
@@ -3673,15 +3825,19 @@ ${cue.notes ?? ""}`;
     }
   };
   var MediaStreamAudioTrackSource = class extends AudioSource {
+    /** @internal */
+    _encoder;
+    /** @internal */
+    _abortController = null;
+    /** @internal */
+    _track;
+    /** @internal */
+    _offsetTimestamps = true;
     constructor(track, codecConfig) {
       if (!(track instanceof MediaStreamTrack) || track.kind !== "audio") {
         throw new TypeError("track must be an audio MediaStreamTrack.");
       }
       super(codecConfig.codec);
-      /** @internal */
-      this._abortController = null;
-      /** @internal */
-      this._offsetTimestamps = true;
       this._encoder = new AudioEncoderWrapper(this, codecConfig);
       this._track = track;
     }
@@ -3712,10 +3868,12 @@ ${cue.notes ?? ""}`;
     }
   };
   var SubtitleSource = class extends MediaSource {
+    /** @internal */
+    _connectedTrack = null;
+    /** @internal */
+    _codec;
     constructor(codec) {
       super();
-      /** @internal */
-      this._connectedTrack = null;
       if (!SUBTITLE_CODECS.includes(codec)) {
         throw new TypeError(`Invalid subtitle codec '${codec}'. Must be one of: ${SUBTITLE_CODECS.join(", ")}.`);
       }
@@ -3723,6 +3881,8 @@ ${cue.notes ?? ""}`;
     }
   };
   var TextSubtitleSource = class extends SubtitleSource {
+    /** @internal */
+    _parser;
     constructor(codec) {
       super(codec);
       this._parser = new SubtitleParser({
@@ -3743,15 +3903,19 @@ ${cue.notes ?? ""}`;
 
   // src/output.ts
   var Output = class {
+    /** @internal */
+    _muxer;
+    /** @internal */
+    _writer;
+    /** @internal */
+    _tracks = [];
+    /** @internal */
+    _started = false;
+    /** @internal */
+    _finalizing = false;
+    /** @internal */
+    _mutex = new AsyncMutex();
     constructor(options) {
-      /** @internal */
-      this._tracks = [];
-      /** @internal */
-      this._started = false;
-      /** @internal */
-      this._finalizing = false;
-      /** @internal */
-      this._mutex = new AsyncMutex();
       if (!options || typeof options !== "object") {
         throw new TypeError("options must be an object.");
       }
@@ -3852,6 +4016,1302 @@ ${cue.notes ?? ""}`;
       await this._writer.flush();
       await this._writer.finalize();
       release();
+    }
+  };
+
+  // src/source.ts
+  var Source = class {
+  };
+  var ArrayBufferSource = class extends Source {
+    constructor(buffer) {
+      super();
+      this.buffer = buffer;
+    }
+    /** @internal */
+    async _read(start, end) {
+      return new Uint8Array(this.buffer, start, end - start);
+    }
+    /** @internal */
+    async _getSize() {
+      return this.buffer.byteLength;
+    }
+  };
+  var BlobSource = class extends Source {
+    constructor(blob) {
+      super();
+      this.blob = blob;
+    }
+    /** @internal */
+    async _read(start, end) {
+      const slice = this.blob.slice(start, end);
+      const buffer = await slice.arrayBuffer();
+      return new Uint8Array(buffer);
+    }
+    /** @internal */
+    async _getSize() {
+      return this.blob.size;
+    }
+  };
+
+  // src/demuxer.ts
+  var Demuxer = class {
+    input;
+    constructor(input) {
+      this.input = input;
+    }
+  };
+
+  // src/input-track.ts
+  var InputTrack = class {
+    /** @internal */
+    _backing;
+    /** @internal */
+    constructor(backing) {
+      this._backing = backing;
+    }
+    isVideoTrack() {
+      return this instanceof InputVideoTrack;
+    }
+    isAudioTrack() {
+      return this instanceof InputAudioTrack;
+    }
+    getDuration() {
+      return this._backing.getDuration();
+    }
+  };
+  var InputVideoTrack = class extends InputTrack {
+    /** @internal */
+    _backing;
+    /** @internal */
+    constructor(backing) {
+      super(backing);
+      this._backing = backing;
+    }
+    getCodec() {
+      return this._backing.getCodec();
+    }
+    getWidth() {
+      return this._backing.getWidth();
+    }
+    getHeight() {
+      return this._backing.getHeight();
+    }
+    getRotation() {
+      return this._backing.getRotation();
+    }
+    getDecoderConfig() {
+      return this._backing.getDecoderConfig();
+    }
+    async getCodecMimeType() {
+      const decoderConfig = await this.getDecoderConfig();
+      return decoderConfig.codec;
+    }
+  };
+  var InputAudioTrack = class extends InputTrack {
+    /** @internal */
+    _backing;
+    /** @internal */
+    constructor(backing) {
+      super(backing);
+      this._backing = backing;
+    }
+    getCodec() {
+      return this._backing.getCodec();
+    }
+    getNumberOfChannels() {
+      return this._backing.getNumberOfChannels();
+    }
+    getSampleRate() {
+      return this._backing.getSampleRate();
+    }
+    getDecoderConfig() {
+      return this._backing.getDecoderConfig();
+    }
+    async getCodecMimeType() {
+      const decoderConfig = await this.getDecoderConfig();
+      return decoderConfig.codec;
+    }
+  };
+
+  // src/isobmff/isobmff-reader.ts
+  var IsobmffReader = class {
+    constructor(reader) {
+      this.reader = reader;
+    }
+    pos = 0;
+    readRange(start, end) {
+      const { view: view2, offset } = this.reader.getViewAndOffset(start, end);
+      return new Uint8Array(view2.buffer, offset, end - start);
+    }
+    readU8() {
+      const { view: view2, offset } = this.reader.getViewAndOffset(this.pos, this.pos + 1);
+      this.pos++;
+      return view2.getUint8(offset);
+    }
+    readU16() {
+      const { view: view2, offset } = this.reader.getViewAndOffset(this.pos, this.pos + 2);
+      this.pos += 2;
+      return view2.getUint16(offset, false);
+    }
+    readU24() {
+      const { view: view2, offset } = this.reader.getViewAndOffset(this.pos, this.pos + 3);
+      this.pos += 3;
+      const high = view2.getUint16(offset, false);
+      const low = view2.getUint8(offset + 2);
+      return high * 256 + low;
+    }
+    readS32() {
+      const { view: view2, offset } = this.reader.getViewAndOffset(this.pos, this.pos + 4);
+      this.pos += 4;
+      return view2.getInt32(offset, false);
+    }
+    readU32() {
+      const { view: view2, offset } = this.reader.getViewAndOffset(this.pos, this.pos + 4);
+      this.pos += 4;
+      return view2.getUint32(offset, false);
+    }
+    readI32() {
+      const { view: view2, offset } = this.reader.getViewAndOffset(this.pos, this.pos + 4);
+      this.pos += 4;
+      return view2.getInt32(offset, false);
+    }
+    readU64() {
+      const high = this.readU32();
+      const low = this.readU32();
+      return high * 4294967296 + low;
+    }
+    readF64() {
+      const { view: view2, offset } = this.reader.getViewAndOffset(this.pos, this.pos + 8);
+      this.pos += 8;
+      return view2.getFloat64(offset, false);
+    }
+    readFixed_16_16() {
+      return this.readS32() / 65536;
+    }
+    readFixed_2_30() {
+      return this.readS32() / 1073741824;
+    }
+    readAscii(length) {
+      const { view: view2, offset } = this.reader.getViewAndOffset(this.pos, this.pos + length);
+      this.pos += length;
+      let str = "";
+      for (let i = 0; i < length; i++) {
+        str += String.fromCharCode(view2.getUint8(offset + i));
+      }
+      return str;
+    }
+    readIsomVariableInteger() {
+      let result = 0;
+      for (let i = 0; i < 4; i++) {
+        result <<= 7;
+        const nextByte = this.readU8();
+        result |= nextByte & 127;
+        if ((nextByte & 128) === 0) {
+          break;
+        }
+      }
+      return result;
+    }
+    readBoxHeader() {
+      let totalSize = this.readU32();
+      const name = this.readAscii(4);
+      let headerSize = 8;
+      const hasLargeSize = totalSize === 1;
+      if (hasLargeSize) {
+        totalSize = this.readU64();
+        headerSize = 16;
+      }
+      return { name, totalSize, headerSize, contentSize: totalSize - headerSize };
+    }
+  };
+
+  // src/isobmff/isobmff-demuxer.ts
+  var knownMatrixes = [rotationMatrix(0), rotationMatrix(90), rotationMatrix(180), rotationMatrix(270)];
+  var IsobmffDemuxer = class extends Demuxer {
+    isobmffReader;
+    currentTrack = null;
+    tracks = [];
+    metadataPromise = null;
+    movieTimescale = -1;
+    movieDurationInTimescale = -1;
+    constructor(input) {
+      super(input);
+      this.isobmffReader = new IsobmffReader(input._reader);
+    }
+    async getDuration() {
+      await this.readMetadata();
+      if (this.movieDurationInTimescale === -1) {
+        throw new Error("Could not read movie duration.");
+      }
+      return this.movieDurationInTimescale / this.movieTimescale;
+    }
+    async getTracks() {
+      await this.readMetadata();
+      return this.tracks.map((track) => track.inputTrack);
+    }
+    async getMimeType() {
+      await this.readMetadata();
+      let string = "video/mp4";
+      if (this.tracks.length > 0) {
+        const codecMimeTypes = await Promise.all(this.tracks.map((x) => x.inputTrack.getCodecMimeType()));
+        const uniqueCodecMimeTypes = [...new Set(codecMimeTypes)];
+        string += `; codecs="${uniqueCodecMimeTypes.join(", ")}"`;
+      }
+      return string;
+    }
+    readMetadata() {
+      return this.metadataPromise ??= (async () => {
+        const sourceSize = await this.isobmffReader.reader.getSourceSize();
+        while (this.isobmffReader.pos < sourceSize) {
+          await this.isobmffReader.reader.loadRange(this.isobmffReader.pos, this.isobmffReader.pos + 16);
+          const startPos = this.isobmffReader.pos;
+          const boxInfo = this.isobmffReader.readBoxHeader();
+          if (boxInfo.name === "moov") {
+            await this.isobmffReader.reader.loadRange(
+              this.isobmffReader.pos,
+              this.isobmffReader.pos + boxInfo.contentSize
+            );
+            this.readContiguousBoxes(boxInfo.contentSize);
+            return;
+          }
+          this.isobmffReader.pos = startPos + boxInfo.totalSize;
+        }
+      })();
+    }
+    getSampleTableForTrack(internalTrack) {
+      if (internalTrack.sampleTable) {
+        return internalTrack.sampleTable;
+      }
+      const sampleTable = {
+        sampleTimingEntries: [],
+        sampleCompositionTimeOffsets: [],
+        sampleSizes: [],
+        keySampleIndices: null,
+        chunkOffsets: [],
+        sampleToChunk: [],
+        presentationTimestamps: []
+      };
+      internalTrack.sampleTable = sampleTable;
+      this.isobmffReader.pos = internalTrack.sampleTableOffset;
+      this.currentTrack = internalTrack;
+      this.traverseBox();
+      this.currentTrack = null;
+      for (const entry of sampleTable.sampleTimingEntries) {
+        for (let i = 0; i < entry.count; i++) {
+          sampleTable.presentationTimestamps.push({
+            presentationTimestamp: entry.startDecodeTimestamp + i * entry.delta,
+            sampleIndex: entry.startIndex + i
+          });
+        }
+      }
+      for (const entry of sampleTable.sampleCompositionTimeOffsets) {
+        for (let i = 0; i < entry.count; i++) {
+          const sampleIndex = entry.startIndex + i;
+          const sample = sampleTable.presentationTimestamps[sampleIndex];
+          if (!sample) {
+            continue;
+          }
+          sample.presentationTimestamp += entry.offset;
+        }
+      }
+      sampleTable.presentationTimestamps.sort((a, b) => a.presentationTimestamp - b.presentationTimestamp);
+      return internalTrack.sampleTable;
+    }
+    readContiguousBoxes(totalSize) {
+      const startIndex = this.isobmffReader.pos;
+      while (this.isobmffReader.pos - startIndex < totalSize) {
+        this.traverseBox();
+      }
+    }
+    traverseBox() {
+      const startPos = this.isobmffReader.pos;
+      const boxInfo = this.isobmffReader.readBoxHeader();
+      const boxEndPos = startPos + boxInfo.totalSize;
+      switch (boxInfo.name) {
+        case "mdia":
+        case "minf":
+        case "dinf":
+          {
+            this.readContiguousBoxes(boxInfo.contentSize);
+          }
+          ;
+          break;
+        case "mvhd":
+          {
+            const version = this.isobmffReader.readU8();
+            this.isobmffReader.pos += 3;
+            if (version === 1) {
+              this.isobmffReader.pos += 8 + 8;
+              this.movieTimescale = this.isobmffReader.readU32();
+              this.movieDurationInTimescale = this.isobmffReader.readU64();
+            } else {
+              this.isobmffReader.pos += 4 + 4;
+              this.movieTimescale = this.isobmffReader.readU32();
+              this.movieDurationInTimescale = this.isobmffReader.readU32();
+            }
+          }
+          ;
+          break;
+        case "trak":
+          {
+            const track = {
+              id: -1,
+              demuxer: this,
+              inputTrack: null,
+              info: null,
+              timescale: -1,
+              durationInTimescale: -1,
+              rotation: 0,
+              sampleTableOffset: -1,
+              sampleTable: null
+            };
+            this.currentTrack = track;
+            this.readContiguousBoxes(boxInfo.contentSize);
+            if (track.id !== -1 && track.timescale !== -1 && track.info !== null) {
+              if (track.info.type === "video" && track.info.codec !== null) {
+                const videoTrack = track;
+                track.inputTrack = new InputVideoTrack(new IsobmffVideoTrackBacking(videoTrack));
+                this.tracks.push(track);
+              } else if (track.info.type === "audio" && track.info.codec !== null) {
+                const audioTrack = track;
+                track.inputTrack = new InputAudioTrack(new IsobmffAudioTrackBacking(audioTrack));
+                this.tracks.push(track);
+              }
+            }
+            this.currentTrack = null;
+          }
+          ;
+          break;
+        case "tkhd":
+          {
+            const track = this.currentTrack;
+            assert(track);
+            const version = this.isobmffReader.readU8();
+            const flags = this.isobmffReader.readU24();
+            const trackEnabled = (flags & 1) !== 0;
+            if (!trackEnabled) {
+              break;
+            }
+            if (version === 0) {
+              this.isobmffReader.pos += 8;
+              track.id = this.isobmffReader.readU32();
+              this.isobmffReader.pos += 8;
+            } else if (version === 1) {
+              this.isobmffReader.pos += 16;
+              track.id = this.isobmffReader.readU32();
+              this.isobmffReader.pos += 12;
+            } else {
+              throw new Error(`Incorrect track header version ${version}.`);
+            }
+            this.isobmffReader.pos += 2 * 4 + 2 + 2 + 2 + 2;
+            const rotationMatrix2 = [];
+            rotationMatrix2.push(this.isobmffReader.readFixed_16_16(), this.isobmffReader.readFixed_16_16());
+            this.isobmffReader.pos += 4;
+            rotationMatrix2.push(this.isobmffReader.readFixed_16_16(), this.isobmffReader.readFixed_16_16());
+            const matrixIndex = knownMatrixes.findIndex((x) => x.every((y, i) => y === rotationMatrix2[i]));
+            if (matrixIndex === -1) {
+              track.rotation = 0;
+            } else {
+              track.rotation = 90 * matrixIndex;
+            }
+          }
+          ;
+          break;
+        case "mdhd":
+          {
+            const track = this.currentTrack;
+            assert(track);
+            const version = this.isobmffReader.readU8();
+            this.isobmffReader.pos += 3;
+            if (version === 0) {
+              this.isobmffReader.pos += 8;
+              track.timescale = this.isobmffReader.readU32();
+              track.durationInTimescale = this.isobmffReader.readU32();
+            } else if (version === 1) {
+              this.isobmffReader.pos += 16;
+              track.timescale = this.isobmffReader.readU32();
+              track.durationInTimescale = this.isobmffReader.readU64();
+            }
+          }
+          ;
+          break;
+        case "hdlr":
+          {
+            const track = this.currentTrack;
+            assert(track);
+            this.isobmffReader.pos += 8;
+            const handlerType = this.isobmffReader.readAscii(4);
+            if (handlerType === "vide") {
+              track.info = {
+                type: "video",
+                width: -1,
+                height: -1,
+                codec: null,
+                codecDescription: null,
+                colorSpace: null
+              };
+            } else if (handlerType === "soun") {
+              track.info = {
+                type: "audio",
+                numberOfChannels: -1,
+                sampleRate: -1,
+                codec: null,
+                codecDescription: null
+              };
+            }
+          }
+          ;
+          break;
+        case "stbl":
+          {
+            const track = this.currentTrack;
+            assert(track);
+            track.sampleTableOffset = startPos;
+            this.readContiguousBoxes(boxInfo.contentSize);
+          }
+          ;
+          break;
+        case "stsd":
+          {
+            const track = this.currentTrack;
+            assert(track);
+            if (track.info === null || track.sampleTable) {
+              break;
+            }
+            const stsdVersion = this.isobmffReader.readU8();
+            this.isobmffReader.pos += 3;
+            const entries = this.isobmffReader.readU32();
+            for (let i = 0; i < entries; i++) {
+              const sampleBoxInfo = this.isobmffReader.readBoxHeader();
+              if (track.info.type === "video") {
+                if (sampleBoxInfo.name === "avc1") {
+                  track.info.codec = "avc";
+                } else if (sampleBoxInfo.name === "hvc1" || sampleBoxInfo.name === "hev1") {
+                  track.info.codec = "hevc";
+                } else {
+                  console.warn(`Unsupported video sample entry type ${sampleBoxInfo.name}.`);
+                  break;
+                }
+                this.isobmffReader.pos += 6 * 1 + 2 + 2 + 2 + 3 * 4;
+                track.info.width = this.isobmffReader.readU16();
+                track.info.height = this.isobmffReader.readU16();
+                this.isobmffReader.pos += 4 + 4 + 4 + 2 + 32 + 2 + 2;
+                this.readContiguousBoxes(startPos + sampleBoxInfo.totalSize - this.isobmffReader.pos);
+              } else {
+                if (sampleBoxInfo.name === "mp4a") {
+                  track.info.codec = "aac";
+                } else if (sampleBoxInfo.name.toLowerCase() === "opus") {
+                  track.info.codec = "opus";
+                } else {
+                  console.warn(`Unsupported audio sample entry type ${sampleBoxInfo.name}.`);
+                  break;
+                }
+                this.isobmffReader.pos += 6 * 1 + 2;
+                const version = this.isobmffReader.readU16();
+                this.isobmffReader.pos += 3 * 2;
+                let channelCount = this.isobmffReader.readU16();
+                this.isobmffReader.pos += 2 + 2 + 2;
+                let sampleRate = this.isobmffReader.readU32() / 65536;
+                if (stsdVersion === 0 && version > 0) {
+                  if (version === 1) {
+                    this.isobmffReader.pos += 4 * 4;
+                  } else if (version === 2) {
+                    this.isobmffReader.pos += 4;
+                    sampleRate = this.isobmffReader.readF64();
+                    channelCount = this.isobmffReader.readU32();
+                    this.isobmffReader.pos += 4;
+                    const sampleSize = this.isobmffReader.readU32();
+                    const flags = this.isobmffReader.readU32();
+                    const bytesPerFrame = this.isobmffReader.readU32();
+                    const samplesPerFrame = this.isobmffReader.readU32();
+                  }
+                }
+                track.info.numberOfChannels = channelCount;
+                track.info.sampleRate = sampleRate;
+                this.readContiguousBoxes(startPos + sampleBoxInfo.totalSize - this.isobmffReader.pos);
+              }
+            }
+          }
+          ;
+          break;
+        case "avcC":
+          {
+            const track = this.currentTrack;
+            assert(track && track.info);
+            track.info.codecDescription = this.isobmffReader.readRange(
+              this.isobmffReader.pos,
+              this.isobmffReader.pos + boxInfo.contentSize
+            );
+          }
+          ;
+          break;
+        case "hvcC":
+          {
+            const track = this.currentTrack;
+            assert(track && track.info);
+            track.info.codecDescription = this.isobmffReader.readRange(
+              this.isobmffReader.pos,
+              this.isobmffReader.pos + boxInfo.contentSize
+            );
+          }
+          ;
+          break;
+        case "colr":
+          {
+            const track = this.currentTrack;
+            assert(track && track.info?.type === "video");
+            const colourType = this.isobmffReader.readAscii(4);
+            if (colourType !== "nclx") {
+              break;
+            }
+            const colourPrimaries = this.isobmffReader.readU16();
+            const transferCharacteristics = this.isobmffReader.readU16();
+            const matrixCoefficients = this.isobmffReader.readU16();
+            const fullRangeFlag = Boolean(this.isobmffReader.readU8() & 128);
+            track.info.colorSpace = {
+              primaries: COLOR_PRIMARIES_MAP_INVERSE[colourPrimaries],
+              transfer: TRANSFER_CHARACTERISTICS_MAP_INVERSE[transferCharacteristics],
+              matrix: MATRIX_COEFFICIENTS_MAP_INVERSE[matrixCoefficients],
+              fullRange: fullRangeFlag
+            };
+          }
+          ;
+          break;
+        case "wave":
+          {
+            if (boxInfo.totalSize > 8) {
+              this.readContiguousBoxes(boxInfo.contentSize);
+            }
+          }
+          ;
+          break;
+        case "esds":
+          {
+            const track = this.currentTrack;
+            assert(track && track.info);
+            this.isobmffReader.pos += 4;
+            const tag = this.isobmffReader.readU8();
+            assert(tag === 3);
+            this.isobmffReader.readIsomVariableInteger();
+            this.isobmffReader.pos += 2;
+            const mixed = this.isobmffReader.readU8();
+            const streamDependenceFlag = (mixed & 128) !== 0;
+            const urlFlag = (mixed & 64) !== 0;
+            const ocrStreamFlag = (mixed & 32) !== 0;
+            if (streamDependenceFlag) {
+              this.isobmffReader.pos += 2;
+            }
+            if (urlFlag) {
+              const urlLength = this.isobmffReader.readU8();
+              this.isobmffReader.pos += urlLength;
+            }
+            if (ocrStreamFlag) {
+              this.isobmffReader.pos += 2;
+            }
+            const decoderConfigTag = this.isobmffReader.readU8();
+            assert(decoderConfigTag === 4);
+            this.isobmffReader.readIsomVariableInteger();
+            const objectTypeIndication = this.isobmffReader.readU8();
+            assert(objectTypeIndication === 64);
+            this.isobmffReader.pos += 1 + 3 + 4 + 4;
+            const decoderSpecificInfoTag = this.isobmffReader.readU8();
+            assert(decoderSpecificInfoTag === 5);
+            const decoderSpecificInfoLength = this.isobmffReader.readIsomVariableInteger();
+            track.info.codecDescription = this.isobmffReader.readRange(
+              this.isobmffReader.pos,
+              this.isobmffReader.pos + decoderSpecificInfoLength
+            );
+          }
+          ;
+          break;
+        case "stts":
+          {
+            const track = this.currentTrack;
+            assert(track);
+            if (!track.sampleTable) {
+              break;
+            }
+            this.isobmffReader.pos += 4;
+            const entryCount = this.isobmffReader.readU32();
+            let currentIndex = 0;
+            let currentTimestamp = 0;
+            for (let i = 0; i < entryCount; i++) {
+              const sampleCount = this.isobmffReader.readU32();
+              const sampleDelta = this.isobmffReader.readU32();
+              track.sampleTable.sampleTimingEntries.push({
+                startIndex: currentIndex,
+                startDecodeTimestamp: currentTimestamp,
+                count: sampleCount,
+                delta: sampleDelta
+              });
+              currentIndex += sampleCount;
+              currentTimestamp += sampleCount * sampleDelta;
+            }
+          }
+          ;
+          break;
+        case "ctts":
+          {
+            const track = this.currentTrack;
+            assert(track);
+            if (!track.sampleTable) {
+              break;
+            }
+            this.isobmffReader.pos += 1 + 3;
+            const entryCount = this.isobmffReader.readU32();
+            let sampleIndex = 0;
+            for (let i = 0; i < entryCount; i++) {
+              const sampleCount = this.isobmffReader.readU32();
+              const sampleOffset = this.isobmffReader.readI32();
+              track.sampleTable.sampleCompositionTimeOffsets.push({
+                startIndex: sampleIndex,
+                count: sampleCount,
+                offset: sampleOffset
+              });
+              sampleIndex += sampleCount;
+            }
+          }
+          ;
+          break;
+        case "stsz":
+          {
+            const track = this.currentTrack;
+            assert(track);
+            if (!track.sampleTable) {
+              break;
+            }
+            this.isobmffReader.pos += 4;
+            const sampleSize = this.isobmffReader.readU32();
+            const sampleCount = this.isobmffReader.readU32();
+            if (sampleSize === 0) {
+              for (let i = 0; i < sampleCount; i++) {
+                const sampleSize2 = this.isobmffReader.readU32();
+                track.sampleTable.sampleSizes.push(sampleSize2);
+              }
+            } else {
+              track.sampleTable.sampleSizes.push(sampleSize);
+            }
+          }
+          ;
+          break;
+        case "stz2":
+          {
+            throw new Error("Unsupported.");
+          }
+          ;
+        case "stss":
+          {
+            const track = this.currentTrack;
+            assert(track);
+            if (!track.sampleTable) {
+              break;
+            }
+            this.isobmffReader.pos += 4;
+            track.sampleTable.keySampleIndices = [];
+            const entryCount = this.isobmffReader.readU32();
+            for (let i = 0; i < entryCount; i++) {
+              const sampleIndex = this.isobmffReader.readU32() - 1;
+              track.sampleTable.keySampleIndices.push(sampleIndex);
+            }
+          }
+          ;
+          break;
+        case "stsc":
+          {
+            const track = this.currentTrack;
+            assert(track);
+            if (!track.sampleTable) {
+              break;
+            }
+            this.isobmffReader.pos += 4;
+            const entryCount = this.isobmffReader.readU32();
+            for (let i = 0; i < entryCount; i++) {
+              const startChunkIndex = this.isobmffReader.readU32() - 1;
+              const samplesPerChunk = this.isobmffReader.readU32();
+              const sampleDescriptionIndex = this.isobmffReader.readU32();
+              track.sampleTable.sampleToChunk.push({
+                startSampleIndex: -1,
+                startChunkIndex,
+                samplesPerChunk,
+                sampleDescriptionIndex
+              });
+            }
+            let startSampleIndex = 0;
+            for (let i = 0; i < track.sampleTable.sampleToChunk.length; i++) {
+              track.sampleTable.sampleToChunk[i].startSampleIndex = startSampleIndex;
+              if (i < track.sampleTable.sampleToChunk.length - 1) {
+                const nextChunk = track.sampleTable.sampleToChunk[i + 1];
+                const chunkCount = nextChunk.startChunkIndex - track.sampleTable.sampleToChunk[i].startChunkIndex;
+                startSampleIndex += chunkCount * track.sampleTable.sampleToChunk[i].samplesPerChunk;
+              }
+            }
+          }
+          ;
+          break;
+        case "stco":
+          {
+            const track = this.currentTrack;
+            assert(track);
+            if (!track.sampleTable) {
+              break;
+            }
+            this.isobmffReader.pos += 4;
+            const entryCount = this.isobmffReader.readU32();
+            for (let i = 0; i < entryCount; i++) {
+              const chunkOffset = this.isobmffReader.readU32();
+              track.sampleTable.chunkOffsets.push(chunkOffset);
+            }
+          }
+          ;
+          break;
+        case "co64":
+          {
+            const track = this.currentTrack;
+            assert(track);
+            if (!track.sampleTable) {
+              break;
+            }
+            this.isobmffReader.pos += 4;
+            const entryCount = this.isobmffReader.readU32();
+            for (let i = 0; i < entryCount; i++) {
+              const chunkOffset = this.isobmffReader.readU64();
+              track.sampleTable.chunkOffsets.push(chunkOffset);
+            }
+          }
+          ;
+          break;
+      }
+      this.isobmffReader.pos = boxEndPos;
+    }
+  };
+  var IsobmffTrackBacking = class {
+    constructor(internalTrack) {
+      this.internalTrack = internalTrack;
+    }
+    chunkToSampleIndex = /* @__PURE__ */ new WeakMap();
+    sampleIndexToChunk = /* @__PURE__ */ new Map();
+    getCodec() {
+      throw new Error("Not implemented on base class.");
+    }
+    async getDuration() {
+      return this.internalTrack.durationInTimescale / this.internalTrack.timescale;
+    }
+  };
+  var IsobmffVideoTrackBacking = class extends IsobmffTrackBacking {
+    internalTrack;
+    constructor(internalTrack) {
+      super(internalTrack);
+      this.internalTrack = internalTrack;
+    }
+    async getCodec() {
+      return this.internalTrack.info.codec;
+    }
+    async getWidth() {
+      return this.internalTrack.info.width;
+    }
+    async getHeight() {
+      return this.internalTrack.info.height;
+    }
+    async getRotation() {
+      return this.internalTrack.rotation;
+    }
+    async getDecoderConfig() {
+      return {
+        codec: extractVideoCodecString(this.internalTrack.info.codec, this.internalTrack.info.codecDescription),
+        codedWidth: this.internalTrack.info.width,
+        codedHeight: this.internalTrack.info.height,
+        description: this.internalTrack.info.codecDescription ?? void 0,
+        colorSpace: this.internalTrack.info.colorSpace ?? void 0
+      };
+    }
+    async fetchChunkForSampleIndex(sampleIndex) {
+      if (sampleIndex === -1) {
+        return null;
+      }
+      const existingChunk = this.sampleIndexToChunk.get(sampleIndex)?.deref();
+      if (existingChunk) {
+        return existingChunk;
+      }
+      const sampleTable = this.internalTrack.demuxer.getSampleTableForTrack(this.internalTrack);
+      const sampleInfo = getSampleInfo(sampleTable, sampleIndex);
+      if (!sampleInfo) {
+        return null;
+      }
+      const data = await this.internalTrack.demuxer.isobmffReader.reader.source._read(
+        sampleInfo.byteOffset,
+        sampleInfo.byteOffset + sampleInfo.byteSize
+      );
+      const chunk = new EncodedVideoChunk({
+        data,
+        timestamp: 1e6 * sampleInfo.presentationTimestamp / this.internalTrack.timescale,
+        duration: 1e6 * sampleInfo.duration / this.internalTrack.timescale,
+        type: sampleInfo.isKeyFrame ? "key" : "delta"
+      });
+      this.chunkToSampleIndex.set(chunk, sampleIndex);
+      this.sampleIndexToChunk.set(sampleIndex, new WeakRef(chunk));
+      return chunk;
+    }
+    async getFirstChunk() {
+      return this.fetchChunkForSampleIndex(0);
+    }
+    async getChunk(timestamp) {
+      const sampleTable = this.internalTrack.demuxer.getSampleTableForTrack(this.internalTrack);
+      const sampleIndex = getSampleIndexForTimestamp(sampleTable, timestamp * this.internalTrack.timescale);
+      return this.fetchChunkForSampleIndex(sampleIndex);
+    }
+    async getNextChunk(chunk) {
+      const sampleIndex = this.chunkToSampleIndex.get(chunk);
+      if (sampleIndex === void 0) {
+        throw new Error("Chunk was not created from this track.");
+      }
+      return this.fetchChunkForSampleIndex(sampleIndex + 1);
+    }
+    async getKeyChunk(timestamp) {
+      const sampleTable = this.internalTrack.demuxer.getSampleTableForTrack(this.internalTrack);
+      const sampleIndex = getSampleIndexForTimestamp(sampleTable, timestamp * this.internalTrack.timescale);
+      const keyFrameSampleIndex = sampleIndex === -1 ? -1 : getRelevantKeyframeIndexForSample(sampleTable, sampleIndex);
+      return this.fetchChunkForSampleIndex(keyFrameSampleIndex);
+    }
+    async getNextKeyChunk(chunk) {
+      const sampleIndex = this.chunkToSampleIndex.get(chunk);
+      if (sampleIndex === void 0) {
+        throw new Error("Chunk was not created from this track.");
+      }
+      const sampleTable = this.internalTrack.demuxer.getSampleTableForTrack(this.internalTrack);
+      const nextKeyFrameSampleIndex = getNextKeyframeIndexForSample(sampleTable, sampleIndex);
+      return this.fetchChunkForSampleIndex(nextKeyFrameSampleIndex);
+    }
+  };
+  var IsobmffAudioTrackBacking = class extends IsobmffTrackBacking {
+    internalTrack;
+    constructor(internalTrack) {
+      super(internalTrack);
+      this.internalTrack = internalTrack;
+    }
+    async getCodec() {
+      return this.internalTrack.info.codec;
+    }
+    async getNumberOfChannels() {
+      return this.internalTrack.info.numberOfChannels;
+    }
+    async getSampleRate() {
+      return this.internalTrack.info.sampleRate;
+    }
+    async getDecoderConfig() {
+      return {
+        codec: extractAudioCodecString(this.internalTrack.info.codec, this.internalTrack.info.codecDescription),
+        numberOfChannels: this.internalTrack.info.numberOfChannels,
+        sampleRate: this.internalTrack.info.sampleRate,
+        description: this.internalTrack.info.codecDescription ?? void 0
+      };
+    }
+  };
+  var getSampleIndexForTimestamp = (sampleTable, timescaleUnits) => {
+    const index = binarySearchLessOrEqual(
+      sampleTable.presentationTimestamps,
+      timescaleUnits,
+      (x) => x.presentationTimestamp
+    );
+    if (index === -1) {
+      return -1;
+    }
+    return sampleTable.presentationTimestamps[index].sampleIndex;
+  };
+  var getSampleInfo = (sampleTable, sampleIndex) => {
+    const timingEntryIndex = binarySearchLessOrEqual(sampleTable.sampleTimingEntries, sampleIndex, (x) => x.startIndex);
+    const timingEntry = sampleTable.sampleTimingEntries[timingEntryIndex];
+    if (!timingEntry || timingEntry.startIndex + timingEntry.count <= sampleIndex) {
+      return null;
+    }
+    const decodeTimestamp = timingEntry.startDecodeTimestamp + (sampleIndex - timingEntry.startIndex) * timingEntry.delta;
+    let presentationTimestamp = decodeTimestamp;
+    const offsetEntryIndex = binarySearchLessOrEqual(
+      sampleTable.sampleCompositionTimeOffsets,
+      sampleIndex,
+      (x) => x.startIndex
+    );
+    const offsetEntry = sampleTable.sampleCompositionTimeOffsets[offsetEntryIndex];
+    if (offsetEntry) {
+      presentationTimestamp += offsetEntry.offset;
+    }
+    const sampleSize = sampleTable.sampleSizes[Math.min(sampleIndex, sampleTable.sampleSizes.length - 1)];
+    const chunkEntryIndex = binarySearchLessOrEqual(sampleTable.sampleToChunk, sampleIndex, (x) => x.startSampleIndex);
+    const chunkEntry = sampleTable.sampleToChunk[chunkEntryIndex];
+    assert(chunkEntry);
+    const chunkIndex = chunkEntry.startChunkIndex + Math.floor((sampleIndex - chunkEntry.startSampleIndex) / chunkEntry.samplesPerChunk);
+    const chunkOffset = sampleTable.chunkOffsets[chunkIndex];
+    let sampleOffset = chunkOffset;
+    if (sampleTable.sampleSizes.length === 1) {
+      sampleOffset += sampleSize * (sampleIndex - chunkEntry.startSampleIndex);
+    } else {
+      const startSampleIndex = chunkEntry.startSampleIndex + (chunkIndex - chunkEntry.startChunkIndex) * chunkEntry.samplesPerChunk;
+      for (let i = startSampleIndex; i < sampleIndex; i++) {
+        sampleOffset += sampleTable.sampleSizes[i];
+      }
+    }
+    return {
+      presentationTimestamp,
+      duration: timingEntry.delta,
+      byteOffset: sampleOffset,
+      byteSize: sampleSize,
+      isKeyFrame: sampleTable.keySampleIndices ? binarySearchExact(sampleTable.keySampleIndices, sampleIndex, (x) => x) !== -1 : true
+    };
+  };
+  var getRelevantKeyframeIndexForSample = (sampleTable, sampleIndex) => {
+    if (!sampleTable.keySampleIndices) {
+      return sampleIndex;
+    }
+    const index = binarySearchLessOrEqual(sampleTable.keySampleIndices, sampleIndex, (x) => x);
+    return sampleTable.keySampleIndices[index] ?? -1;
+  };
+  var getNextKeyframeIndexForSample = (sampleTable, sampleIndex) => {
+    if (!sampleTable.keySampleIndices) {
+      return sampleIndex + 1;
+    }
+    const index = binarySearchLessOrEqual(sampleTable.keySampleIndices, sampleIndex, (x) => x);
+    return sampleTable.keySampleIndices[index + 1] ?? -1;
+  };
+
+  // src/matroska/matroska-demuxer.ts
+  var MatroskaDemuxer = class extends Demuxer {
+  };
+
+  // src/input-format.ts
+  var InputFormat = class {
+  };
+  var IsobmffInputFormat = class extends InputFormat {
+    /** @internal */
+    async _canReadInput(input) {
+      const sourceSize = await input._reader.getSourceSize();
+      if (sourceSize < 8) {
+        return false;
+      }
+      await input._reader.loadRange(4, 8);
+      const isobmffReader = new IsobmffReader(input._reader);
+      isobmffReader.pos = 4;
+      const fourCc = isobmffReader.readAscii(4);
+      return fourCc === "ftyp";
+    }
+    _createDemuxer(input) {
+      return new IsobmffDemuxer(input);
+    }
+  };
+  var MatroskaInputFormat = class extends InputFormat {
+    /** @internal */
+    async _canReadInput() {
+      return false;
+    }
+    _createDemuxer(input) {
+      return new MatroskaDemuxer(input);
+    }
+  };
+  var ISOBMFF = new IsobmffInputFormat();
+  var MP4 = ISOBMFF;
+  var MOV = ISOBMFF;
+  var MATROSKA = new MatroskaInputFormat();
+  var MKV = MATROSKA;
+  var WEBM = MATROSKA;
+  var ALL_FORMATS = [ISOBMFF, MKV];
+
+  // src/reader.ts
+  var PAGE_SIZE = 4096;
+  var Reader = class {
+    constructor(source) {
+      this.source = source;
+    }
+    loadedSegments = [];
+    sourceSizePromise = null;
+    getSourceSize() {
+      if (this.sourceSizePromise) {
+        return this.sourceSizePromise;
+      } else {
+        return this.sourceSizePromise = this.source._getSize();
+      }
+    }
+    async loadRange(start, end) {
+      let alignedStart = Math.floor(start / PAGE_SIZE) * PAGE_SIZE;
+      let alignedEnd = Math.ceil(end / PAGE_SIZE) * PAGE_SIZE;
+      alignedEnd = Math.min(alignedEnd, await this.getSourceSize());
+      const thing = this.loadedSegments.find((x) => x.start <= alignedStart);
+      if (thing) {
+        alignedStart = Math.max(alignedStart, thing.end);
+      }
+      const thing2 = this.loadedSegments.find((x) => x.end >= alignedEnd);
+      if (thing2) {
+        alignedEnd = Math.min(alignedEnd, thing2.start);
+      }
+      if (alignedStart >= alignedEnd) {
+        return;
+      }
+      const bytes2 = await this.source._read(alignedStart, alignedEnd);
+      this.insertIntoLoadedSegments(alignedStart, bytes2);
+    }
+    insertIntoLoadedSegments(start, bytes2) {
+      const segment = {
+        start,
+        end: start + bytes2.byteLength,
+        bytes: bytes2,
+        view: new DataView(bytes2.buffer)
+      };
+      let index = this.loadedSegments.findLastIndex((x) => x.start <= start);
+      this.loadedSegments.splice(index + 1, 0, segment);
+      if (index === -1 || this.loadedSegments[index].end < segment.start) {
+        index++;
+      }
+      const mergeSectionStartIndex = index;
+      const mergeSectionStart = this.loadedSegments[mergeSectionStartIndex].start;
+      let mergeSectionEndIndex = index;
+      let mergeSectionEnd = this.loadedSegments[mergeSectionEndIndex].end;
+      while (this.loadedSegments.length - 1 > mergeSectionEndIndex && this.loadedSegments[mergeSectionEndIndex + 1].start <= mergeSectionEnd) {
+        mergeSectionEndIndex++;
+        mergeSectionEnd = Math.max(mergeSectionEnd, this.loadedSegments[mergeSectionEndIndex].end);
+      }
+      if (mergeSectionStartIndex === mergeSectionEndIndex) {
+        return;
+      }
+      for (let i = mergeSectionStartIndex; i <= mergeSectionEndIndex; i++) {
+        const segment2 = this.loadedSegments[i];
+        const coversEntireMergeSection = segment2.start === mergeSectionStart && segment2.end === mergeSectionEnd;
+        if (coversEntireMergeSection) {
+          this.loadedSegments.splice(i + 1, mergeSectionEndIndex - i);
+          this.loadedSegments.splice(mergeSectionStartIndex, i - mergeSectionStartIndex);
+          return;
+        }
+      }
+      const unifiedBytes = new Uint8Array(mergeSectionEnd - mergeSectionStart);
+      for (let i = mergeSectionStartIndex; i <= mergeSectionEndIndex; i++) {
+        const segment2 = this.loadedSegments[i];
+        unifiedBytes.set(segment2.bytes, segment2.start - mergeSectionStart);
+      }
+      this.loadedSegments.splice(mergeSectionStartIndex + 1, mergeSectionEndIndex - mergeSectionStartIndex);
+      this.loadedSegments[mergeSectionStartIndex].end = mergeSectionEnd;
+      this.loadedSegments[mergeSectionStartIndex].bytes = unifiedBytes;
+      this.loadedSegments[mergeSectionStartIndex].view = new DataView(unifiedBytes.buffer);
+    }
+    getViewAndOffset(start, end) {
+      const segment = this.loadedSegments.find((x) => x.start <= start && end <= x.end);
+      if (!segment) {
+        throw new Error(`No segment loaded for range [${start}, ${end}).`);
+      }
+      return {
+        view: segment.view,
+        offset: segment.bytes.byteOffset + start - segment.start
+      };
+    }
+  };
+
+  // src/input.ts
+  var Input = class {
+    /** @internal */
+    _formats;
+    /** @internal */
+    _reader;
+    /** @internal */
+    _demuxerPromise = null;
+    /** @internal */
+    _format = null;
+    constructor(options) {
+      this._formats = options.formats;
+      this._reader = new Reader(options.source);
+    }
+    /** @internal */
+    _getDemuxer() {
+      return this._demuxerPromise ??= (async () => {
+        for (const format of this._formats) {
+          const canRead = await format._canReadInput(this);
+          if (canRead) {
+            this._format = format;
+            return format._createDemuxer(this);
+          }
+        }
+        throw new Error("Input has an unrecognizable format.");
+      })();
+    }
+    async getFormat() {
+      await this._getDemuxer();
+      assert(this._format);
+      return this._format;
+    }
+    async getDuration() {
+      const demuxer = await this._getDemuxer();
+      return demuxer.getDuration();
+    }
+    async getTracks() {
+      const demuxer = await this._getDemuxer();
+      return demuxer.getTracks();
+    }
+    async getVideoTracks() {
+      const tracks = await this.getTracks();
+      return tracks.filter((x) => x.isVideoTrack());
+    }
+    async getPrimaryVideoTrack() {
+      const tracks = await this.getTracks();
+      return tracks.find((x) => x.isVideoTrack()) ?? null;
+    }
+    async getAudioTracks() {
+      const tracks = await this.getTracks();
+      return tracks.filter((x) => x.isAudioTrack());
+    }
+    async getPrimaryAudioTrack() {
+      const tracks = await this.getTracks();
+      return tracks.find((x) => x.isAudioTrack()) ?? null;
+    }
+    async getMimeType() {
+      const demuxer = await this._getDemuxer();
+      return demuxer.getMimeType();
+    }
+  };
+
+  // src/media-drain.ts
+  var EncodedVideoChunkDrain = class {
+    constructor(videoTrack) {
+      this.videoTrack = videoTrack;
+    }
+    getFirstChunk() {
+      return this.videoTrack._backing.getFirstChunk();
+    }
+    getChunk(timestamp) {
+      return this.videoTrack._backing.getChunk(timestamp);
+    }
+    getNextChunk(chunk) {
+      return this.videoTrack._backing.getNextChunk(chunk);
+    }
+    getKeyChunk(timestamp) {
+      return this.videoTrack._backing.getKeyChunk(timestamp);
+    }
+    getNextKeyChunk(chunk) {
+      return this.videoTrack._backing.getNextKeyChunk(chunk);
+    }
+    async *chunks(startTimestamp = 0) {
+      let chunk = await this.getChunk(startTimestamp);
+      while (chunk) {
+        yield chunk;
+        chunk = await this.getNextChunk(chunk);
+      }
+    }
+  };
+  var VideoFrameDrain = class {
+    constructor(videoTrack) {
+      this.videoTrack = videoTrack;
+    }
+    decoderConfig = null;
+    async createDecoder(onFrame) {
+      if (!this.decoderConfig) {
+        this.decoderConfig = await this.videoTrack.getDecoderConfig();
+      }
+      const decoder = new VideoDecoder({
+        output: onFrame,
+        error: (error) => console.error(error)
+      });
+      decoder.configure(this.decoderConfig);
+      return decoder;
+    }
+    async getKeyFrame(timestamp) {
+      let result = null;
+      const decoder = await this.createDecoder((frame) => result = frame);
+      const chunk = await this.videoTrack._backing.getKeyChunk(timestamp);
+      if (!chunk) {
+        return null;
+      }
+      decoder.decode(chunk);
+      await decoder.flush();
+      decoder.close();
+      return result;
+    }
+    async getFrame(timestamp) {
+      let result = null;
+      const decoder = await this.createDecoder((frame) => {
+        if (frame.timestamp / 1e6 <= timestamp) {
+          result?.close();
+          result = frame;
+        } else {
+          frame.close();
+        }
+      });
+      const keyChunk = await this.videoTrack._backing.getKeyChunk(timestamp);
+      if (!keyChunk) {
+        return null;
+      }
+      const targetChunk = await this.videoTrack._backing.getChunk(timestamp);
+      assert(targetChunk);
+      decoder.decode(keyChunk);
+      let currentChunk = keyChunk;
+      while (currentChunk !== targetChunk) {
+        const nextChunk = await this.videoTrack._backing.getNextChunk(currentChunk);
+        assert(nextChunk);
+        currentChunk = nextChunk;
+        decoder.decode(nextChunk);
+        if (decoder.decodeQueueSize >= 10) {
+          await new Promise((resolve) => decoder.addEventListener("dequeue", resolve, { once: true }));
+        }
+      }
+      await decoder.flush();
+      decoder.close();
+      return result;
+    }
+    async *frames(startTimestamp = 0) {
+      const frameQueue = [];
+      let firstFrameQueued = false;
+      let lastFrame = null;
+      let { promise: queueNonEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers();
+      let ended = false;
+      const decoder = await this.createDecoder((frame) => {
+        if (ended) {
+          frame.close();
+          return;
+        }
+        const frameTimestamp = frame.timestamp / 1e6;
+        if (lastFrame) {
+          if (frameTimestamp > startTimestamp) {
+            frameQueue.push(lastFrame);
+            firstFrameQueued = true;
+          } else {
+            lastFrame.close();
+          }
+        }
+        if (frameTimestamp >= startTimestamp) {
+          frameQueue.push(frame);
+          firstFrameQueued = true;
+        }
+        lastFrame = firstFrameQueued ? null : frame;
+        if (frameQueue.length > 0) {
+          onQueueNotEmpty();
+          ({ promise: queueNonEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers());
+        }
+      });
+      const keyChunk = await this.videoTrack._backing.getKeyChunk(startTimestamp);
+      if (!keyChunk) {
+        return;
+      }
+      let decoderIsFlushed = false;
+      void (async () => {
+        let currentChunk = keyChunk;
+        while (currentChunk && !ended) {
+          decoder.decode(currentChunk);
+          if (decoder.decodeQueueSize >= 10) {
+            await new Promise((resolve) => decoder.addEventListener("dequeue", resolve, { once: true }));
+          }
+          const nextChunk = await this.videoTrack._backing.getNextChunk(currentChunk);
+          currentChunk = nextChunk;
+        }
+        await decoder.flush();
+        decoder.close();
+        decoderIsFlushed = true;
+        onQueueNotEmpty();
+      })();
+      try {
+        while (true) {
+          if (frameQueue.length > 0) {
+            yield frameQueue.shift();
+          } else if (!decoderIsFlushed) {
+            await queueNonEmpty;
+          } else {
+            break;
+          }
+        }
+      } finally {
+        ended = true;
+      }
     }
   };
   return __toCommonJS(src_exports);

@@ -25,6 +25,7 @@ export default tseslint.config(
 				code: 120,
 			}],
 			'@typescript-eslint/no-empty-object-type': 'off',
+			'@typescript-eslint/require-await': 'off',
 		},
 	},
 	{

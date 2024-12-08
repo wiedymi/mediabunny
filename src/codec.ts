@@ -2,11 +2,28 @@ import {
 	COLOR_PRIMARIES_MAP,
 	MATRIX_COEFFICIENTS_MAP,
 	TRANSFER_CHARACTERISTICS_MAP,
+	bytesToHexString,
 	isAllowSharedBufferSource,
 	last,
+	reverseBitsU32,
 } from './misc';
-import { AudioCodec, VideoCodec } from './source';
 import { SubtitleMetadata } from './subtitles';
+
+/** @public */
+export const VIDEO_CODECS = ['avc', 'hevc', 'vp8', 'vp9', 'av1'] as const;
+/** @public */
+export const AUDIO_CODECS = ['aac', 'opus'] as const; // TODO add the rest
+/** @public */
+export const SUBTITLE_CODECS = ['webvtt'] as const; // TODO add the rest
+
+/** @public */
+export type VideoCodec = typeof VIDEO_CODECS[number];
+/** @public */
+export type AudioCodec = typeof AUDIO_CODECS[number];
+/** @public */
+export type SubtitleCodec = typeof SUBTITLE_CODECS[number];
+/** @public */
+export type MediaCodec = VideoCodec | AudioCodec | SubtitleCodec;
 
 // https://en.wikipedia.org/wiki/Advanced_Video_Coding
 const AVC_LEVEL_TABLE = [
@@ -166,6 +183,65 @@ export const buildVideoCodecString = (codec: VideoCodec, width: number, height: 
 	throw new TypeError(`Unhandled codec '${codec}'.`);
 };
 
+export const extractVideoCodecString = (codec: VideoCodec, description: Uint8Array | null) => {
+	if (codec === 'avc') {
+		if (!description || description.byteLength < 4) {
+			throw new TypeError('AVC description must be at least 4 bytes long.');
+		}
+
+		// TODO: The "temp hack". Something is amiss with the second byte in the hex string, check the specification
+
+		return `avc1.${bytesToHexString(description.subarray(1, 4))}`;
+	} else if (codec === 'hevc') {
+		if (!description) {
+			throw new TypeError('HEVC description must be provided.');
+		}
+
+		const view = new DataView(description.buffer, description.byteOffset, description.byteLength);
+		let codecString = 'hev1.';
+
+		// general_profile_space and general_profile_idc
+		const generalProfileSpace = (description[1]! >> 6) & 0x03;
+		const generalProfileIdc = description[1]! & 0x1F;
+		codecString += ['', 'A', 'B', 'C'][generalProfileSpace]! + generalProfileIdc;
+
+		codecString += '.';
+
+		// general_profile_compatibility_flags (in reverse bit order)
+		const compatibilityFlags = reverseBitsU32(view.getUint32(2));
+		codecString += compatibilityFlags.toString(16);
+
+		codecString += '.';
+
+		// general_tier_flag and general_level_idc
+		const generalTierFlag = (description[1]! >> 5) & 0x01;
+		const generalLevelIdc = description[12]!;
+		codecString += generalTierFlag === 0 ? 'L' : 'H';
+		codecString += generalLevelIdc;
+
+		codecString += '.';
+
+		// constraint_flags (6 bytes)
+		const constraintFlags: number[] = [];
+		for (let i = 0; i < 6; i++) {
+			const byte = description[i + 13]!;
+			constraintFlags.push(byte);
+		}
+
+		while (constraintFlags[constraintFlags.length - 1] === 0) {
+			constraintFlags.pop();
+		}
+
+		codecString += constraintFlags.map(x => x.toString(16)).join('.');
+
+		return codecString;
+	}
+
+	// TODO
+
+	throw new TypeError(`Unhandled codec '${codec}'.`);
+};
+
 export const buildAudioCodecString = (codec: AudioCodec, numberOfChannels: number, sampleRate: number) => {
 	if (codec === 'aac') {
 		// If stereo or higher channels and lower sample rate, likely using HE-AAC v2 with PS
@@ -184,6 +260,25 @@ export const buildAudioCodecString = (codec: AudioCodec, numberOfChannels: numbe
 		return 'opus'; // Easy, this one
 	} else if (codec === 'vorbis') {
 		return 'vorbis'; // Also easy, this one
+	}
+
+	// eslint-disable-next-line @typescript-eslint/restrict-template-expressions
+	throw new TypeError(`Unhandled codec '${codec}'.`);
+};
+
+export const extractAudioCodecString = (codec: AudioCodec, description: Uint8Array | null) => {
+	if (codec === 'aac') {
+		if (!description || description.byteLength < 2) {
+			throw new TypeError('AAC description must be at least 2 bytes long.');
+		}
+
+		// TODO: Is this correct? Give a source/reason
+		const mpeg4AudioObjectType = description[0]! >> 3;
+		return `mp4a.40.${mpeg4AudioObjectType}`;
+	} else if (codec === 'opus') {
+		return 'opus';
+	} else if (codec === 'vorbis') {
+		return 'vorbis';
 	}
 
 	// eslint-disable-next-line @typescript-eslint/restrict-template-expressions

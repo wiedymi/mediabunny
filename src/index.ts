@@ -9,14 +9,8 @@ export {
 	WebMOutputFormatOptions,
 } from './output-format';
 export {
-	VIDEO_CODECS,
-	VideoCodec,
 	VideoCodecConfig,
-	AUDIO_CODECS,
-	AudioCodec,
 	AudioCodecConfig,
-	SUBTITLE_CODECS,
-	SubtitleCodec,
 	MediaSource,
 	VideoSource,
 	EncodedVideoChunkSource,
@@ -30,6 +24,18 @@ export {
 	MediaStreamAudioTrackSource,
 	SubtitleSource,
 	TextSubtitleSource,
-} from './source';
+} from './media-source';
+export {
+	VIDEO_CODECS,
+	VideoCodec,
+	AUDIO_CODECS,
+	AudioCodec,
+	SUBTITLE_CODECS,
+	SubtitleCodec,
+} from './codec';
 export { Target, ArrayBufferTarget, StreamTarget, StreamTargetChunk, StreamTargetOptions } from './target';
 export { TransformationMatrix } from './misc';
+export { Source, ArrayBufferSource, BlobSource } from './source';
+export { ALL_FORMATS, ISOBMFF, MP4, MOV, MATROSKA, MKV, WEBM } from './input-format';
+export { Input, InputOptions } from './input';
+export { EncodedVideoChunkDrain, VideoFrameDrain } from './media-drain';
