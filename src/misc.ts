@@ -4,6 +4,8 @@ export function assert(x: unknown): asserts x {
 	}
 }
 
+export type Rotation = 0 | 90 | 180 | 270;
+
 /** @public */
 export type TransformationMatrix = [number, number, number, number, number, number, number, number, number];
 

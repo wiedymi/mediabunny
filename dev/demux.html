@@ -14,8 +14,53 @@
 		});
 
 		const videoTrack = await input.getPrimaryVideoTrack();
+		const drain = new Metamuxer.VideoFrameDrain(videoTrack);
+		const width = await videoTrack.getWidth();
+		const height = await videoTrack.getHeight();
+
+		const canvas = document.createElement('canvas');
+		canvas.width = width;
+		canvas.height = height;
+		document.body.append(canvas);
+
+		const context = canvas.getContext('2d');
+
+		// Top-level for await loop inside the event listener
+		for await (const frame of drain.frames()) {
+			context.drawImage(frame, 0, 0, width, height);
+			frame.close();
+		}
+
+		/*
+		const drain = new Metamuxer.EncodedVideoChunkDrain(videoTrack);
+
+		const startChunk = await drain.getFirstChunk();
+		for await (const chunk of drain.chunks(startChunk)) {
+			console.log(chunk.timestamp);
+		}
+		*/
+
+
+		/*
+		for (let i = 0; i < 2; i += 0.1) {
+			console.log(await drain.getChunk(i));
+		}
+		*/
+
+		/*
+		const drain = new Metamuxer.VideoFrameDrain(videoTrack);
+
+		for await (const frame of drain.frames()) {
+            // ...
+        }
+
+		console.log(await videoTrack.getDuration());
+		*/
+
+		/*
         const drain = new Metamuxer.VideoFrameDrain(videoTrack);
 
+		
         const width = await videoTrack.getWidth();
         const height = await videoTrack.getHeight();
 
@@ -31,6 +76,7 @@
             context.drawImage(frame, 0, 0, width, height);
             frame.close();
         }
+		*/
 
 		/*
 		const videoTrack = await input.getPrimaryVideoTrack();

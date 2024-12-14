@@ -30,6 +30,8 @@ export class Input {
 	/** @internal */
 	_getDemuxer() {
 		return this._demuxerPromise ??= (async () => {
+			await this._mainReader.loadRange(0, 4096); // Load the first 4 kiB so we can determine the format
+
 			for (const format of this._formats) {
 				const canRead = await format._canReadInput(this);
 				if (canRead) {

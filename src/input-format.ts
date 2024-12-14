@@ -20,8 +20,6 @@ class IsobmffInputFormat extends InputFormat {
 			return false;
 		}
 
-		await input._mainReader.loadRange(4, 8);
-
 		const isobmffReader = new IsobmffReader(input._mainReader);
 		isobmffReader.pos = 4;
 		const fourCc = isobmffReader.readAscii(4);

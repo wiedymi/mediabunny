@@ -1,4 +1,5 @@
 import { AudioCodec, MediaCodec, VideoCodec } from './codec';
+import { Rotation } from './misc';
 
 export interface InputTrackBacking {
 	getCodec(): Promise<MediaCodec>;
@@ -34,7 +35,7 @@ export interface InputVideoTrackBacking extends InputTrackBacking {
 	getCodec(): Promise<VideoCodec>;
 	getWidth(): Promise<number>;
 	getHeight(): Promise<number>;
-	getRotation(): Promise<number>;
+	getRotation(): Promise<Rotation>;
 	getDecoderConfig(): Promise<VideoDecoderConfig>;
 	getFirstChunk(): Promise<EncodedVideoChunk | null>;
 	getChunk(timestamp: number): Promise<EncodedVideoChunk | null>;

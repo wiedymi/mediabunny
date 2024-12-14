@@ -1075,8 +1075,8 @@ var tfra = (trackData, trackIndex) => {
     u32(trackData.finalizedChunks.length),
     // Number of entries
     trackData.finalizedChunks.map((chunk) => [
-      u64(intoTimescale(chunk.startTimestamp, trackData.timescale)),
-      // Time
+      u64(intoTimescale(chunk.samples[0].timestamp, trackData.timescale)),
+      // Time (in presentation time)
       u64(chunk.moofOffset),
       // moof offset
       u32(trackIndex + 1),
@@ -2405,14 +2405,14 @@ var IsobmffMuxer = class extends Muxer {
       const movieBox = moov(this.trackDatas, this.creationTime, true);
       this.boxWriter.writeBox(movieBox);
     }
+    const tracksInFragment = this.trackDatas.filter((x) => x.currentChunk);
     const moofOffset = this.writer.getPos();
-    const moofBox = moof(fragmentNumber, this.trackDatas);
+    const moofBox = moof(fragmentNumber, tracksInFragment);
     this.boxWriter.writeBox(moofBox);
     {
       const mdatBox = mdat(false);
       let totalTrackSampleSize = 0;
-      for (const trackData of this.trackDatas) {
-        assert(trackData.currentChunk);
+      for (const trackData of tracksInFragment) {
         for (const sample of trackData.currentChunk.samples) {
           totalTrackSampleSize += sample.size;
         }
@@ -2425,7 +2425,7 @@ var IsobmffMuxer = class extends Muxer {
       mdatBox.size = mdatSize;
       this.boxWriter.writeBox(mdatBox);
     }
-    for (const trackData of this.trackDatas) {
+    for (const trackData of tracksInFragment) {
       trackData.currentChunk.offset = this.writer.getPos();
       trackData.currentChunk.moofOffset = moofOffset;
       for (const sample of trackData.currentChunk.samples) {
@@ -2435,10 +2435,10 @@ var IsobmffMuxer = class extends Muxer {
     }
     const endPos = this.writer.getPos();
     this.writer.seek(this.boxWriter.offsets.get(moofBox));
-    const newMoofBox = moof(fragmentNumber, this.trackDatas);
+    const newMoofBox = moof(fragmentNumber, tracksInFragment);
     this.boxWriter.writeBox(newMoofBox);
     this.writer.seek(endPos);
-    for (const trackData of this.trackDatas) {
+    for (const trackData of tracksInFragment) {
       trackData.finalizedChunks.push(trackData.currentChunk);
       this.finalizedChunks.push(trackData.currentChunk);
       trackData.currentChunk = null;
@@ -4084,7 +4084,6 @@ var InputAudioTrack = class extends InputTrack {
 };
 
 // src/reader.ts
-var PAGE_SIZE = 4096;
 var Reader = class {
   constructor(source, maxStorableBytes = Infinity) {
     this.source = source;
@@ -4096,24 +4095,22 @@ var Reader = class {
   nextAge = 0;
   totalStoredBytes = 0;
   async loadRange(start, end) {
-    const alignedStart = Math.floor(start / PAGE_SIZE) * PAGE_SIZE;
-    let alignedEnd = Math.ceil(end / PAGE_SIZE) * PAGE_SIZE;
-    alignedEnd = Math.min(alignedEnd, await this.source._getSize());
-    const matchingLoadingSegment = this.loadingSegments.find((x) => x.start <= alignedStart && x.end >= alignedEnd);
+    end = Math.min(end, await this.source._getSize());
+    const matchingLoadingSegment = this.loadingSegments.find((x) => x.start <= start && x.end >= end);
     if (matchingLoadingSegment) {
       await matchingLoadingSegment.promise;
       return;
     }
-    const encasingSegmentExists = this.loadedSegments.some((x) => x.start <= alignedStart && x.end >= alignedEnd);
+    const encasingSegmentExists = this.loadedSegments.some((x) => x.start <= start && x.end >= end);
     if (encasingSegmentExists) {
       return;
     }
-    const bytesPromise = this.source._read(alignedStart, alignedEnd);
-    const loadingSegment = { start: alignedStart, end: alignedEnd, promise: bytesPromise };
+    const bytesPromise = this.source._read(start, end);
+    const loadingSegment = { start, end, promise: bytesPromise };
     this.loadingSegments.push(loadingSegment);
     const bytes2 = await bytesPromise;
     removeItem(this.loadingSegments, loadingSegment);
-    this.insertIntoLoadedSegments(alignedStart, bytes2);
+    this.insertIntoLoadedSegments(start, bytes2);
   }
   insertIntoLoadedSegments(start, bytes2) {
     const segment = {
@@ -4177,6 +4174,21 @@ var Reader = class {
       view: segment.view,
       offset: segment.bytes.byteOffset + start - segment.start
     };
+  }
+  forgetRange(start, end) {
+    if (end <= start) {
+      return;
+    }
+    const startIndex = binarySearchLessOrEqual(this.loadedSegments, start, (x) => x.start);
+    if (startIndex === -1) {
+      return;
+    }
+    const segment = this.loadedSegments[startIndex];
+    if (segment.start !== start || segment.end !== end) {
+      return;
+    }
+    this.loadedSegments.splice(startIndex, 1);
+    this.totalStoredBytes -= segment.bytes.byteLength;
   }
 };
 
@@ -4281,6 +4293,11 @@ var IsobmffDemuxer = class extends Demuxer {
   metadataPromise = null;
   movieTimescale = -1;
   movieDurationInTimescale = -1;
+  isFragmented = false;
+  fragmentTrackDefaults = [];
+  fragments = [];
+  currentFragment = null;
+  fragmentLookupMutex = new AsyncMutex();
   chunkReader;
   constructor(input) {
     super(input);
@@ -4321,9 +4338,23 @@ var IsobmffDemuxer = class extends Demuxer {
             this.isobmffReader.pos + boxInfo.contentSize
           );
           this.readContiguousBoxes(boxInfo.contentSize);
-          return;
+          break;
         }
         this.isobmffReader.pos = startPos + boxInfo.totalSize;
+      }
+      if (this.isFragmented) {
+        await this.isobmffReader.reader.loadRange(sourceSize - 4, sourceSize);
+        this.isobmffReader.pos = sourceSize - 4;
+        const lastWord = this.isobmffReader.readU32();
+        const potentialMfraPos = sourceSize - lastWord;
+        if (potentialMfraPos >= 0 && potentialMfraPos < sourceSize) {
+          await this.isobmffReader.reader.loadRange(potentialMfraPos, sourceSize);
+          this.isobmffReader.pos = potentialMfraPos;
+          const boxInfo = this.isobmffReader.readBoxHeader();
+          if (boxInfo.name === "mfra") {
+            this.readContiguousBoxes(boxInfo.contentSize);
+          }
+        }
       }
     })();
   }
@@ -4366,6 +4397,73 @@ var IsobmffDemuxer = class extends Demuxer {
     sampleTable.presentationTimestamps.sort((a, b) => a.presentationTimestamp - b.presentationTimestamp);
     return internalTrack.sampleTable;
   }
+  async readFragment() {
+    const startPos = this.isobmffReader.pos;
+    await this.isobmffReader.reader.loadRange(this.isobmffReader.pos, this.isobmffReader.pos + 16);
+    const moofBoxInfo = this.isobmffReader.readBoxHeader();
+    assert(moofBoxInfo.name === "moof");
+    await this.isobmffReader.reader.loadRange(startPos, startPos + moofBoxInfo.totalSize);
+    this.isobmffReader.pos = startPos;
+    this.traverseBox();
+    const index = binarySearchExact(this.fragments, startPos, (x) => x.moofOffset);
+    assert(index !== -1);
+    const fragment = this.fragments[index];
+    assert(fragment.moofOffset === startPos);
+    this.isobmffReader.reader.forgetRange(startPos, startPos + moofBoxInfo.totalSize);
+    for (const [trackId, trackData] of fragment.trackData) {
+      if (trackData.startTimestampIsFinal) {
+        continue;
+      }
+      const internalTrack = this.tracks.find((x) => x.id === trackId);
+      this.isobmffReader.pos = 0;
+      let currentFragment = null;
+      let lastFragment = null;
+      const index2 = binarySearchLessOrEqual(
+        internalTrack.fragments,
+        startPos - 1,
+        (x) => x.moofOffset
+      );
+      if (index2 !== -1) {
+        currentFragment = internalTrack.fragments[index2];
+        lastFragment = currentFragment;
+        this.isobmffReader.pos = currentFragment.moofOffset + currentFragment.moofSize;
+      }
+      while (this.isobmffReader.pos < startPos) {
+        if (currentFragment?.nextFragment) {
+          currentFragment = currentFragment.nextFragment;
+          this.isobmffReader.pos = currentFragment.moofOffset + currentFragment.moofSize;
+        } else {
+          await this.isobmffReader.reader.loadRange(this.isobmffReader.pos, this.isobmffReader.pos + 16);
+          const startPos2 = this.isobmffReader.pos;
+          const boxInfo = this.isobmffReader.readBoxHeader();
+          if (boxInfo.name === "moof") {
+            const index3 = binarySearchExact(this.fragments, startPos2, (x) => x.moofOffset);
+            if (index3 === -1) {
+              this.isobmffReader.pos = startPos2;
+              const fragment2 = await this.readFragment();
+              if (currentFragment) currentFragment.nextFragment = fragment2;
+              currentFragment = fragment2;
+            } else {
+              const fragment2 = this.fragments[index3];
+              if (currentFragment) currentFragment.nextFragment = fragment2;
+              currentFragment = fragment2;
+            }
+          }
+          this.isobmffReader.pos = startPos2 + boxInfo.totalSize;
+        }
+        if (currentFragment && currentFragment.trackData.has(trackId)) {
+          lastFragment = currentFragment;
+        }
+      }
+      if (lastFragment) {
+        const otherTrackData = lastFragment.trackData.get(trackId);
+        assert(otherTrackData.startTimestampIsFinal);
+        offsetFragmentTrackDataByTimestamp(trackData, otherTrackData.endTimestamp);
+      }
+      trackData.startTimestampIsFinal = true;
+    }
+    return fragment;
+  }
   readContiguousBoxes(totalSize) {
     const startIndex = this.isobmffReader.pos;
     while (this.isobmffReader.pos - startIndex < totalSize) {
@@ -4380,6 +4478,7 @@ var IsobmffDemuxer = class extends Demuxer {
       case "mdia":
       case "minf":
       case "dinf":
+      case "mfra":
         {
           this.readContiguousBoxes(boxInfo.contentSize);
         }
@@ -4412,7 +4511,10 @@ var IsobmffDemuxer = class extends Demuxer {
             durationInTimescale: -1,
             rotation: 0,
             sampleTableOffset: -1,
-            sampleTable: null
+            sampleTable: null,
+            fragmentLookupTable: null,
+            currentFragmentState: null,
+            fragments: []
           };
           this.currentTrack = track;
           this.readContiguousBoxes(boxInfo.contentSize);
@@ -4829,6 +4931,293 @@ var IsobmffDemuxer = class extends Demuxer {
         }
         ;
         break;
+      case "mvex":
+        {
+          this.isFragmented = true;
+          this.readContiguousBoxes(boxInfo.contentSize);
+        }
+        ;
+        break;
+      case "mehd":
+        {
+          const version = this.isobmffReader.readU8();
+          this.isobmffReader.pos += 3;
+          const fragmentDuration = version === 1 ? this.isobmffReader.readU64() : this.isobmffReader.readU32();
+          this.movieDurationInTimescale = fragmentDuration;
+        }
+        ;
+        break;
+      case "trex":
+        {
+          this.isobmffReader.pos += 4;
+          const trackId = this.isobmffReader.readU32();
+          const defaultSampleDescriptionIndex = this.isobmffReader.readU32();
+          const defaultSampleDuration = this.isobmffReader.readU32();
+          const defaultSampleSize = this.isobmffReader.readU32();
+          const defaultSampleFlags = this.isobmffReader.readU32();
+          this.fragmentTrackDefaults.push({
+            trackId,
+            defaultSampleDescriptionIndex,
+            defaultSampleDuration,
+            defaultSampleSize,
+            defaultSampleFlags
+          });
+        }
+        ;
+        break;
+      case "tfra":
+        {
+          const version = this.isobmffReader.readU8();
+          this.isobmffReader.pos += 3;
+          const trackId = this.isobmffReader.readU32();
+          const track = this.tracks.find((x2) => x2.id === trackId);
+          if (!track) {
+            break;
+          }
+          track.fragmentLookupTable = [];
+          const word = this.isobmffReader.readU32();
+          const lengthSizeOfTrafNum = (word & 48) >> 4;
+          const lengthSizeOfTrunNum = (word & 12) >> 2;
+          const lengthSizeOfSampleNum = word & 3;
+          const x = this.isobmffReader;
+          const functions = [x.readU8.bind(x), x.readU16.bind(x), x.readU24.bind(x), x.readU32.bind(x)];
+          const readTrafNum = functions[lengthSizeOfTrafNum];
+          const readTrunNum = functions[lengthSizeOfTrunNum];
+          const readSampleNum = functions[lengthSizeOfSampleNum];
+          const numberOfEntries = this.isobmffReader.readU32();
+          for (let i = 0; i < numberOfEntries; i++) {
+            const time = version === 1 ? this.isobmffReader.readU64() : this.isobmffReader.readU32();
+            const moofOffset = version === 1 ? this.isobmffReader.readU64() : this.isobmffReader.readU32();
+            const trafNumber = readTrafNum();
+            const trunNumber = readTrunNum();
+            const sampleNumber = readSampleNum();
+            track.fragmentLookupTable.push({
+              timestamp: time,
+              moofOffset
+            });
+          }
+        }
+        ;
+        break;
+      case "moof":
+        {
+          this.currentFragment = {
+            moofOffset: startPos,
+            moofSize: boxInfo.totalSize,
+            implicitBaseDataOffset: startPos,
+            trackData: /* @__PURE__ */ new Map(),
+            dataStart: Infinity,
+            dataEnd: 0,
+            nextFragment: null
+          };
+          this.readContiguousBoxes(boxInfo.contentSize);
+          const insertionIndex = binarySearchLessOrEqual(
+            this.fragments,
+            this.currentFragment.moofOffset,
+            (x) => x.moofOffset
+          );
+          this.fragments.splice(insertionIndex + 1, 0, this.currentFragment);
+          for (const [, trackData] of this.currentFragment.trackData) {
+            const firstSample = trackData.samples[0];
+            const lastSample = last(trackData.samples);
+            this.currentFragment.dataStart = Math.min(
+              this.currentFragment.dataStart,
+              firstSample.byteOffset
+            );
+            this.currentFragment.dataEnd = Math.max(
+              this.currentFragment.dataEnd,
+              lastSample.byteOffset + lastSample.byteSize
+            );
+          }
+          this.currentFragment = null;
+        }
+        ;
+        break;
+      case "traf":
+        {
+          assert(this.currentFragment);
+          this.readContiguousBoxes(boxInfo.contentSize);
+          if (this.currentTrack) {
+            const trackData = this.currentFragment.trackData.get(this.currentTrack.id);
+            if (trackData) {
+              const insertionIndex = binarySearchLessOrEqual(
+                this.currentTrack.fragments,
+                this.currentFragment.moofOffset,
+                (x) => x.moofOffset
+              );
+              this.currentTrack.fragments.splice(insertionIndex + 1, 0, this.currentFragment);
+              const { currentFragmentState } = this.currentTrack;
+              assert(currentFragmentState);
+              if (currentFragmentState.startTimestamp !== null) {
+                offsetFragmentTrackDataByTimestamp(trackData, currentFragmentState.startTimestamp);
+                trackData.startTimestampIsFinal = true;
+              }
+            }
+            this.currentTrack.currentFragmentState = null;
+            this.currentTrack = null;
+          }
+        }
+        ;
+        break;
+      case "tfhd":
+        {
+          assert(this.currentFragment);
+          this.isobmffReader.pos += 1;
+          const flags = this.isobmffReader.readU24();
+          const baseDataOffsetPresent = Boolean(flags & 1);
+          const sampleDescriptionIndexPresent = Boolean(flags & 2);
+          const defaultSampleDurationPresent = Boolean(flags & 8);
+          const defaultSampleSizePresent = Boolean(flags & 16);
+          const defaultSampleFlagsPresent = Boolean(flags & 32);
+          const durationIsEmpty = Boolean(flags & 65536);
+          const defaultBaseIsMoof = Boolean(flags & 131072);
+          const trackId = this.isobmffReader.readU32();
+          const track = this.tracks.find((x) => x.id === trackId);
+          if (!track) {
+            break;
+          }
+          const defaults = this.fragmentTrackDefaults.find((x) => x.trackId === trackId);
+          this.currentTrack = track;
+          track.currentFragmentState = {
+            baseDataOffset: this.currentFragment.implicitBaseDataOffset,
+            sampleDescriptionIndex: defaults?.defaultSampleDescriptionIndex ?? null,
+            defaultSampleDuration: defaults?.defaultSampleDuration ?? null,
+            defaultSampleSize: defaults?.defaultSampleSize ?? null,
+            defaultSampleFlags: defaults?.defaultSampleFlags ?? null,
+            startTimestamp: null
+          };
+          if (baseDataOffsetPresent) {
+            track.currentFragmentState.baseDataOffset = this.isobmffReader.readU64();
+          } else if (defaultBaseIsMoof) {
+            track.currentFragmentState.baseDataOffset = this.currentFragment.moofOffset;
+          }
+          if (sampleDescriptionIndexPresent) {
+            track.currentFragmentState.sampleDescriptionIndex = this.isobmffReader.readU32();
+          }
+          if (defaultSampleDurationPresent) {
+            track.currentFragmentState.defaultSampleDuration = this.isobmffReader.readU32();
+          }
+          if (defaultSampleSizePresent) {
+            track.currentFragmentState.defaultSampleSize = this.isobmffReader.readU32();
+          }
+          if (defaultSampleFlagsPresent) {
+            track.currentFragmentState.defaultSampleFlags = this.isobmffReader.readU32();
+          }
+          if (durationIsEmpty) {
+            track.currentFragmentState.defaultSampleDuration = 0;
+          }
+        }
+        ;
+        break;
+      case "tfdt":
+        {
+          const track = this.currentTrack;
+          if (!track) {
+            break;
+          }
+          assert(track.currentFragmentState);
+          const version = this.isobmffReader.readU8();
+          this.isobmffReader.pos += 3;
+          const baseMediaDecodeTime = version === 0 ? this.isobmffReader.readU32() : this.isobmffReader.readU64();
+          track.currentFragmentState.startTimestamp = baseMediaDecodeTime;
+        }
+        ;
+        break;
+      case "trun":
+        {
+          const track = this.currentTrack;
+          if (!track) {
+            break;
+          }
+          assert(this.currentFragment);
+          assert(track.currentFragmentState);
+          if (this.currentFragment.trackData.has(track.id)) {
+            throw new Error("Can't have two trun boxes for the same track in one fragment.");
+          }
+          const version = this.isobmffReader.readU8();
+          const flags = this.isobmffReader.readU24();
+          const dataOffsetPresent = Boolean(flags & 1);
+          const firstSampleFlagsPresent = Boolean(flags & 4);
+          const sampleDurationPresent = Boolean(flags & 256);
+          const sampleSizePresent = Boolean(flags & 512);
+          const sampleFlagsPresent = Boolean(flags & 1024);
+          const sampleCompositionTimeOffsetsPresent = Boolean(flags & 2048);
+          const sampleCount = this.isobmffReader.readU32();
+          let dataOffset = track.currentFragmentState.baseDataOffset;
+          if (dataOffsetPresent) {
+            dataOffset += this.isobmffReader.readI32();
+          }
+          let firstSampleFlags = null;
+          if (firstSampleFlagsPresent) {
+            firstSampleFlags = this.isobmffReader.readU32();
+          }
+          let currentOffset = dataOffset;
+          if (sampleCount === 0) {
+            this.currentFragment.implicitBaseDataOffset = currentOffset;
+            break;
+          }
+          let currentTimestamp = 0;
+          const trackData = {
+            startTimestamp: 0,
+            endTimestamp: 0,
+            samples: [],
+            presentationTimestamps: [],
+            startTimestampIsFinal: false
+          };
+          this.currentFragment.trackData.set(track.id, trackData);
+          for (let i = 0; i < sampleCount; i++) {
+            let sampleDuration;
+            if (sampleDurationPresent) {
+              sampleDuration = this.isobmffReader.readU32();
+            } else {
+              assert(track.currentFragmentState.defaultSampleDuration !== null);
+              sampleDuration = track.currentFragmentState.defaultSampleDuration;
+            }
+            let sampleSize;
+            if (sampleSizePresent) {
+              sampleSize = this.isobmffReader.readU32();
+            } else {
+              assert(track.currentFragmentState.defaultSampleSize !== null);
+              sampleSize = track.currentFragmentState.defaultSampleSize;
+            }
+            let sampleFlags;
+            if (sampleFlagsPresent) {
+              sampleFlags = this.isobmffReader.readU32();
+            } else {
+              assert(track.currentFragmentState.defaultSampleFlags !== null);
+              sampleFlags = track.currentFragmentState.defaultSampleFlags;
+            }
+            if (i === 0 && firstSampleFlags !== null) {
+              sampleFlags = firstSampleFlags;
+            }
+            let sampleCompositionTimeOffset = 0;
+            if (sampleCompositionTimeOffsetsPresent) {
+              if (version === 0) {
+                sampleCompositionTimeOffset = this.isobmffReader.readU32();
+              } else {
+                sampleCompositionTimeOffset = this.isobmffReader.readI32();
+              }
+            }
+            const isKeyFrame = !(sampleFlags & 65536);
+            trackData.samples.push({
+              presentationTimestamp: currentTimestamp + sampleCompositionTimeOffset,
+              duration: sampleDuration,
+              byteOffset: currentOffset,
+              byteSize: sampleSize,
+              isKeyFrame
+            });
+            currentOffset += sampleSize;
+            currentTimestamp += sampleDuration;
+          }
+          trackData.presentationTimestamps = trackData.samples.map((x, i) => ({ presentationTimestamp: x.presentationTimestamp, sampleIndex: i })).sort((a, b) => a.presentationTimestamp - b.presentationTimestamp);
+          const firstSample = trackData.samples[trackData.presentationTimestamps[0].sampleIndex];
+          const lastSample = trackData.samples[last(trackData.presentationTimestamps).sampleIndex];
+          trackData.startTimestamp = firstSample.presentationTimestamp;
+          trackData.endTimestamp = lastSample.presentationTimestamp + lastSample.duration;
+          this.currentFragment.implicitBaseDataOffset = currentOffset;
+        }
+        ;
+        break;
     }
     this.isobmffReader.pos = boxEndPos;
   }
@@ -4839,6 +5228,8 @@ var IsobmffTrackBacking = class {
   }
   chunkToSampleIndex = /* @__PURE__ */ new WeakMap();
   sampleIndexToChunk = /* @__PURE__ */ new Map();
+  chunkToFragmentLocation = /* @__PURE__ */ new WeakMap();
+  fragmentLocationToChunk = /* @__PURE__ */ new Map();
   getCodec() {
     throw new Error("Not implemented on base class.");
   }
@@ -4873,6 +5264,176 @@ var IsobmffVideoTrackBacking = class extends IsobmffTrackBacking {
       colorSpace: this.internalTrack.info.colorSpace ?? void 0
     };
   }
+  async getFirstChunk() {
+    if (this.internalTrack.demuxer.isFragmented) {
+      return this.performFragmentedLookup(
+        () => {
+          const fragment = this.internalTrack.fragments[0];
+          return {
+            fragmentIndex: fragment ? 0 : -1,
+            sampleIndex: fragment ? 0 : -1,
+            correctSampleFound: !!fragment
+          };
+        },
+        0,
+        Infinity
+      );
+    }
+    return this.fetchChunkForSampleIndex(0);
+  }
+  async getChunk(timestamp) {
+    const timestampInTimescale = timestamp * this.internalTrack.timescale;
+    if (this.internalTrack.demuxer.isFragmented) {
+      return this.performFragmentedLookup(
+        () => this.findSampleInFragmentsForTimestamp(timestampInTimescale),
+        timestampInTimescale,
+        timestampInTimescale
+      );
+    } else {
+      const sampleTable = this.internalTrack.demuxer.getSampleTableForTrack(this.internalTrack);
+      const sampleIndex = getSampleIndexForTimestamp(sampleTable, timestampInTimescale);
+      return this.fetchChunkForSampleIndex(sampleIndex);
+    }
+  }
+  async getNextChunk(chunk) {
+    if (this.internalTrack.demuxer.isFragmented) {
+      const locationInFragment = this.chunkToFragmentLocation.get(chunk);
+      if (locationInFragment === void 0) {
+        throw new Error("Chunk was not created from this track.");
+      }
+      const trackData = locationInFragment.fragment.trackData.get(this.internalTrack.id);
+      const sample = trackData.samples[locationInFragment.sampleIndex];
+      const fragmentIndex = binarySearchExact(
+        this.internalTrack.fragments,
+        locationInFragment.fragment.moofOffset,
+        (x) => x.moofOffset
+      );
+      assert(fragmentIndex !== -1);
+      return this.performFragmentedLookup(
+        () => {
+          if (locationInFragment.sampleIndex + 1 < trackData.samples.length) {
+            return {
+              fragmentIndex,
+              sampleIndex: locationInFragment.sampleIndex + 1,
+              correctSampleFound: true
+            };
+          } else {
+            let currentFragment = locationInFragment.fragment;
+            while (currentFragment.nextFragment) {
+              currentFragment = currentFragment.nextFragment;
+              const trackData2 = currentFragment.trackData.get(this.internalTrack.id);
+              if (trackData2) {
+                const fragmentIndex2 = binarySearchExact(
+                  this.internalTrack.fragments,
+                  currentFragment.moofOffset,
+                  (x) => x.moofOffset
+                );
+                assert(fragmentIndex2 !== -1);
+                return {
+                  fragmentIndex: fragmentIndex2,
+                  sampleIndex: 0,
+                  correctSampleFound: true
+                };
+              }
+            }
+            return {
+              fragmentIndex,
+              sampleIndex: -1,
+              correctSampleFound: false
+            };
+          }
+        },
+        sample.presentationTimestamp,
+        Infinity
+      );
+    }
+    const sampleIndex = this.chunkToSampleIndex.get(chunk);
+    if (sampleIndex === void 0) {
+      throw new Error("Chunk was not created from this track.");
+    }
+    return this.fetchChunkForSampleIndex(sampleIndex + 1);
+  }
+  async getKeyChunk(timestamp) {
+    const timestampInTimescale = timestamp * this.internalTrack.timescale;
+    if (this.internalTrack.demuxer.isFragmented) {
+      return this.performFragmentedLookup(
+        () => this.findKeySampleInFragmentsForTimestamp(timestampInTimescale),
+        timestampInTimescale,
+        timestampInTimescale
+      );
+    }
+    const sampleTable = this.internalTrack.demuxer.getSampleTableForTrack(this.internalTrack);
+    const sampleIndex = getSampleIndexForTimestamp(sampleTable, timestampInTimescale);
+    const keyFrameSampleIndex = sampleIndex === -1 ? -1 : getRelevantKeyframeIndexForSample(sampleTable, sampleIndex);
+    return this.fetchChunkForSampleIndex(keyFrameSampleIndex);
+  }
+  async getNextKeyChunk(chunk) {
+    if (this.internalTrack.demuxer.isFragmented) {
+      const locationInFragment = this.chunkToFragmentLocation.get(chunk);
+      if (locationInFragment === void 0) {
+        throw new Error("Chunk was not created from this track.");
+      }
+      const trackData = locationInFragment.fragment.trackData.get(this.internalTrack.id);
+      const sample = trackData.samples[locationInFragment.sampleIndex];
+      const fragmentIndex = binarySearchExact(
+        this.internalTrack.fragments,
+        locationInFragment.fragment.moofOffset,
+        (x) => x.moofOffset
+      );
+      assert(fragmentIndex !== -1);
+      return this.performFragmentedLookup(
+        () => {
+          const nextKeyFrameIndex = trackData.samples.findIndex(
+            (x, i) => x.isKeyFrame && i > locationInFragment.sampleIndex
+          );
+          if (nextKeyFrameIndex !== -1) {
+            return {
+              fragmentIndex,
+              sampleIndex: nextKeyFrameIndex,
+              correctSampleFound: true
+            };
+          } else {
+            let currentFragment = locationInFragment.fragment;
+            while (currentFragment.nextFragment) {
+              currentFragment = currentFragment.nextFragment;
+              const trackData2 = currentFragment.trackData.get(this.internalTrack.id);
+              if (trackData2) {
+                const fragmentIndex2 = binarySearchExact(
+                  this.internalTrack.fragments,
+                  currentFragment.moofOffset,
+                  (x) => x.moofOffset
+                );
+                assert(fragmentIndex2 !== -1);
+                const keyFrameIndex = trackData2.samples.findIndex((x) => x.isKeyFrame);
+                if (keyFrameIndex === -1) {
+                  throw new Error("Not supported: Fragment does not contain key sample.");
+                }
+                return {
+                  fragmentIndex: fragmentIndex2,
+                  sampleIndex: keyFrameIndex,
+                  correctSampleFound: true
+                };
+              }
+            }
+            return {
+              fragmentIndex,
+              sampleIndex: -1,
+              correctSampleFound: false
+            };
+          }
+        },
+        sample.presentationTimestamp,
+        Infinity
+      );
+    }
+    const sampleIndex = this.chunkToSampleIndex.get(chunk);
+    if (sampleIndex === void 0) {
+      throw new Error("Chunk was not created from this track.");
+    }
+    const sampleTable = this.internalTrack.demuxer.getSampleTableForTrack(this.internalTrack);
+    const nextKeyFrameSampleIndex = getNextKeyframeIndexForSample(sampleTable, sampleIndex);
+    return this.fetchChunkForSampleIndex(nextKeyFrameSampleIndex);
+  }
   async fetchChunkForSampleIndex(sampleIndex) {
     if (sampleIndex === -1) {
       return null;
@@ -4904,35 +5465,163 @@ var IsobmffVideoTrackBacking = class extends IsobmffTrackBacking {
     this.sampleIndexToChunk.set(sampleIndex, new WeakRef(chunk));
     return chunk;
   }
-  async getFirstChunk() {
-    return this.fetchChunkForSampleIndex(0);
-  }
-  async getChunk(timestamp) {
-    const sampleTable = this.internalTrack.demuxer.getSampleTableForTrack(this.internalTrack);
-    const sampleIndex = getSampleIndexForTimestamp(sampleTable, timestamp * this.internalTrack.timescale);
-    return this.fetchChunkForSampleIndex(sampleIndex);
-  }
-  async getNextChunk(chunk) {
-    const sampleIndex = this.chunkToSampleIndex.get(chunk);
-    if (sampleIndex === void 0) {
-      throw new Error("Chunk was not created from this track.");
+  async fetchChunkInFragment(fragment, sampleIndex) {
+    if (sampleIndex === -1) {
+      return null;
     }
-    return this.fetchChunkForSampleIndex(sampleIndex + 1);
-  }
-  async getKeyChunk(timestamp) {
-    const sampleTable = this.internalTrack.demuxer.getSampleTableForTrack(this.internalTrack);
-    const sampleIndex = getSampleIndexForTimestamp(sampleTable, timestamp * this.internalTrack.timescale);
-    const keyFrameSampleIndex = sampleIndex === -1 ? -1 : getRelevantKeyframeIndexForSample(sampleTable, sampleIndex);
-    return this.fetchChunkForSampleIndex(keyFrameSampleIndex);
-  }
-  async getNextKeyChunk(chunk) {
-    const sampleIndex = this.chunkToSampleIndex.get(chunk);
-    if (sampleIndex === void 0) {
-      throw new Error("Chunk was not created from this track.");
+    const compositeKey = `${fragment.moofOffset}:${sampleIndex}`;
+    const existingChunk = this.fragmentLocationToChunk.get(compositeKey)?.deref();
+    if (existingChunk) {
+      return existingChunk;
     }
-    const sampleTable = this.internalTrack.demuxer.getSampleTableForTrack(this.internalTrack);
-    const nextKeyFrameSampleIndex = getNextKeyframeIndexForSample(sampleTable, sampleIndex);
-    return this.fetchChunkForSampleIndex(nextKeyFrameSampleIndex);
+    const trackData = fragment.trackData.get(this.internalTrack.id);
+    const sample = trackData.samples[sampleIndex];
+    assert(sample);
+    await this.internalTrack.demuxer.chunkReader.reader.loadRange(fragment.dataStart, fragment.dataEnd);
+    const data = this.internalTrack.demuxer.chunkReader.readRange(
+      sample.byteOffset,
+      sample.byteOffset + sample.byteSize
+    );
+    const chunk = new EncodedVideoChunk({
+      data,
+      timestamp: 1e6 * sample.presentationTimestamp / this.internalTrack.timescale,
+      duration: 1e6 * sample.duration / this.internalTrack.timescale,
+      type: sample.isKeyFrame ? "key" : "delta"
+    });
+    this.chunkToFragmentLocation.set(chunk, { fragment, sampleIndex });
+    this.fragmentLocationToChunk.set(compositeKey, new WeakRef(chunk));
+    return chunk;
+  }
+  findSampleInFragmentsForTimestamp(timestampInTimescale) {
+    const fragmentIndex = binarySearchLessOrEqual(
+      this.internalTrack.fragments,
+      timestampInTimescale,
+      (x) => x.trackData.get(this.internalTrack.id).startTimestamp
+    );
+    let sampleIndex = -1;
+    let correctSampleFound = false;
+    if (fragmentIndex !== -1) {
+      const fragment = this.internalTrack.fragments[fragmentIndex];
+      const trackData = fragment.trackData.get(this.internalTrack.id);
+      const index = binarySearchLessOrEqual(
+        trackData.presentationTimestamps,
+        timestampInTimescale,
+        (x) => x.presentationTimestamp
+      );
+      assert(index !== -1);
+      sampleIndex = trackData.presentationTimestamps[index].sampleIndex;
+      correctSampleFound = timestampInTimescale < trackData.endTimestamp;
+    }
+    return { fragmentIndex, sampleIndex, correctSampleFound };
+  }
+  findKeySampleInFragmentsForTimestamp(timestampInTimescale) {
+    const fragmentIndex = binarySearchLessOrEqual(
+      this.internalTrack.fragments,
+      timestampInTimescale,
+      (x) => x.trackData.get(this.internalTrack.id).startTimestamp
+    );
+    let sampleIndex = -1;
+    let correctSampleFound = false;
+    if (fragmentIndex !== -1) {
+      const fragment = this.internalTrack.fragments[fragmentIndex];
+      const trackData = fragment.trackData.get(this.internalTrack.id);
+      const index = trackData.presentationTimestamps.findLastIndex((x) => {
+        const sample = trackData.samples[x.sampleIndex];
+        return sample.isKeyFrame;
+      });
+      if (index === -1) {
+        throw new Error("Not supported: Fragment does not contain key sample.");
+      }
+      const entry = trackData.presentationTimestamps[index];
+      sampleIndex = entry.sampleIndex;
+      correctSampleFound = timestampInTimescale < trackData.endTimestamp;
+    }
+    return { fragmentIndex, sampleIndex, correctSampleFound };
+  }
+  /** Looks for a sample in the fragments while trying to load as few fragments as possible to retrieve it. */
+  async performFragmentedLookup(getBestMatch, earliestTimestamp, latestTimestamp) {
+    const { fragmentIndex, sampleIndex, correctSampleFound } = getBestMatch();
+    if (correctSampleFound) {
+      const fragment = this.internalTrack.fragments[fragmentIndex];
+      return this.fetchChunkInFragment(fragment, sampleIndex);
+    }
+    const demuxer = this.internalTrack.demuxer;
+    const release = await demuxer.fragmentLookupMutex.acquire();
+    try {
+      const isobmffReader = demuxer.isobmffReader;
+      const sourceSize = await isobmffReader.reader.source._getSize();
+      let prevFragment = null;
+      let bestFragmentIndex = fragmentIndex;
+      let bestSampleIndex = sampleIndex;
+      let lookupEntry = null;
+      if (this.internalTrack.fragmentLookupTable) {
+        const index = binarySearchLessOrEqual(
+          this.internalTrack.fragmentLookupTable,
+          earliestTimestamp,
+          (x) => x.timestamp
+        );
+        if (index !== -1) {
+          lookupEntry = this.internalTrack.fragmentLookupTable[index];
+        }
+      }
+      if (fragmentIndex === -1) {
+        isobmffReader.pos = lookupEntry?.moofOffset ?? 0;
+      } else {
+        const fragment = this.internalTrack.fragments[fragmentIndex];
+        if (!lookupEntry || fragment.moofOffset >= fragment.moofOffset) {
+          isobmffReader.pos = fragment.moofOffset + fragment.moofSize;
+          prevFragment = fragment;
+        } else {
+          isobmffReader.pos = lookupEntry.moofOffset;
+        }
+      }
+      while (isobmffReader.pos < sourceSize) {
+        if (prevFragment) {
+          const trackData = prevFragment.trackData.get(this.internalTrack.id);
+          if (trackData && trackData.startTimestamp > latestTimestamp) {
+            break;
+          }
+          if (prevFragment.nextFragment) {
+            isobmffReader.pos = prevFragment.nextFragment.moofOffset + prevFragment.nextFragment.moofSize;
+            prevFragment = prevFragment.nextFragment;
+            continue;
+          }
+        }
+        await isobmffReader.reader.loadRange(isobmffReader.pos, isobmffReader.pos + 16);
+        const startPos = isobmffReader.pos;
+        const boxInfo = isobmffReader.readBoxHeader();
+        if (boxInfo.name === "moof") {
+          const index = binarySearchExact(demuxer.fragments, startPos, (x) => x.moofOffset);
+          if (index === -1) {
+            isobmffReader.pos = startPos;
+            const fragment = await demuxer.readFragment();
+            if (prevFragment) prevFragment.nextFragment = fragment;
+            prevFragment = fragment;
+            const { fragmentIndex: fragmentIndex2, sampleIndex: sampleIndex2, correctSampleFound: correctSampleFound2 } = getBestMatch();
+            if (correctSampleFound2) {
+              const fragment2 = this.internalTrack.fragments[fragmentIndex2];
+              return this.fetchChunkInFragment(fragment2, sampleIndex2);
+            }
+            if (fragmentIndex2 !== -1) {
+              bestFragmentIndex = fragmentIndex2;
+              bestSampleIndex = sampleIndex2;
+            }
+          } else {
+            const fragment = demuxer.fragments[index];
+            if (prevFragment) prevFragment.nextFragment = fragment;
+            prevFragment = fragment;
+          }
+        }
+        isobmffReader.pos = startPos + boxInfo.totalSize;
+      }
+      if (bestFragmentIndex !== -1) {
+        const fragment = this.internalTrack.fragments[bestFragmentIndex];
+        return this.fetchChunkInFragment(fragment, bestSampleIndex);
+      }
+      return null;
+    } finally {
+      release();
+    }
   }
 };
 var IsobmffAudioTrackBacking = class extends IsobmffTrackBacking {
@@ -5032,6 +5721,16 @@ var getNextKeyframeIndexForSample = (sampleTable, sampleIndex) => {
   const index = binarySearchLessOrEqual(sampleTable.keySampleIndices, sampleIndex, (x) => x);
   return sampleTable.keySampleIndices[index + 1] ?? -1;
 };
+var offsetFragmentTrackDataByTimestamp = (trackData, timestamp) => {
+  trackData.startTimestamp += timestamp;
+  trackData.endTimestamp += timestamp;
+  for (const sample of trackData.samples) {
+    sample.presentationTimestamp += timestamp;
+  }
+  for (const entry of trackData.presentationTimestamps) {
+    entry.presentationTimestamp += timestamp;
+  }
+};
 
 // src/matroska/matroska-demuxer.ts
 var MatroskaDemuxer = class extends Demuxer {
@@ -5047,7 +5746,6 @@ var IsobmffInputFormat = class extends InputFormat {
     if (sourceSize < 8) {
       return false;
     }
-    await input._mainReader.loadRange(4, 8);
     const isobmffReader = new IsobmffReader(input._mainReader);
     isobmffReader.pos = 4;
     const fourCc = isobmffReader.readAscii(4);
@@ -5094,6 +5792,7 @@ var Input = class {
   /** @internal */
   _getDemuxer() {
     return this._demuxerPromise ??= (async () => {
+      await this._mainReader.loadRange(0, 4096);
       for (const format of this._formats) {
         const canRead = await format._canReadInput(this);
         if (canRead) {

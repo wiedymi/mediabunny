@@ -701,20 +701,22 @@ export class IsobmffMuxer extends Muxer {
 			this.boxWriter.writeBox(movieBox);
 		}
 
+		// Not all tracks need to be present in every fragment
+		const tracksInFragment = this.trackDatas.filter(x => x.currentChunk);
+
 		// Write out an initial moof box; will be overwritten later once actual chunk offsets are known
 		const moofOffset = this.writer.getPos();
-		const moofBox = moof(fragmentNumber, this.trackDatas);
+		const moofBox = moof(fragmentNumber, tracksInFragment);
 		this.boxWriter.writeBox(moofBox);
 
 		// Create the mdat box
 		{
-			const mdatBox = mdat(false); // Initially assume no fragment is larger than 4 GiB
+			const mdatBox = mdat(false); // Initially assume the fragment is not larger than 4 GiB
 			let totalTrackSampleSize = 0;
 
 			// Compute the size of the mdat box
-			for (const trackData of this.trackDatas) {
-				assert(trackData.currentChunk);
-				for (const sample of trackData.currentChunk.samples) {
+			for (const trackData of tracksInFragment) {
+				for (const sample of trackData.currentChunk!.samples) {
 					totalTrackSampleSize += sample.size;
 				}
 			}
@@ -731,7 +733,7 @@ export class IsobmffMuxer extends Muxer {
 		}
 
 		// Write sample data
-		for (const trackData of this.trackDatas) {
+		for (const trackData of tracksInFragment) {
 			trackData.currentChunk!.offset = this.writer.getPos();
 			trackData.currentChunk!.moofOffset = moofOffset;
 
@@ -744,11 +746,11 @@ export class IsobmffMuxer extends Muxer {
 		// Now that we set the actual chunk offsets, fix the moof box
 		const endPos = this.writer.getPos();
 		this.writer.seek(this.boxWriter.offsets.get(moofBox)!);
-		const newMoofBox = moof(fragmentNumber, this.trackDatas);
+		const newMoofBox = moof(fragmentNumber, tracksInFragment);
 		this.boxWriter.writeBox(newMoofBox);
 		this.writer.seek(endPos);
 
-		for (const trackData of this.trackDatas) {
+		for (const trackData of tracksInFragment) {
 			trackData.finalizedChunks.push(trackData.currentChunk!);
 			this.finalizedChunks.push(trackData.currentChunk!);
 			trackData.currentChunk = null;

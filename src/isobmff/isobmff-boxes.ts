@@ -989,7 +989,7 @@ export const tfra = (trackData: IsobmffTrackData, trackIndex: number) => {
 		u32(0b111111), // This specifies that traf number, trun number and sample number are 32-bit ints
 		u32(trackData.finalizedChunks.length), // Number of entries
 		trackData.finalizedChunks.map(chunk => [
-			u64(intoTimescale(chunk.startTimestamp, trackData.timescale)), // Time
+			u64(intoTimescale(chunk.samples[0]!.timestamp, trackData.timescale)), // Time (in presentation time)
 			u64(chunk.moofOffset!), // moof offset
 			u32(trackIndex + 1), // traf number
 			u32(1), // trun number

@@ -1,8 +1,6 @@
 import { assert, binarySearchLessOrEqual, removeItem } from './misc';
 import { Source } from './source';
 
-const PAGE_SIZE = 4096;
-
 type ReadSegment = {
 	start: number;
 	end: number;
@@ -27,32 +25,29 @@ export class Reader {
 	constructor(public source: Source, public maxStorableBytes = Infinity) {}
 
 	async loadRange(start: number, end: number) {
-		// Read rounded to the nearest page
-		const alignedStart = Math.floor(start / PAGE_SIZE) * PAGE_SIZE;
-		let alignedEnd = Math.ceil(end / PAGE_SIZE) * PAGE_SIZE;
-		alignedEnd = Math.min(alignedEnd, await this.source._getSize());
+		end = Math.min(end, await this.source._getSize());
 
-		const matchingLoadingSegment = this.loadingSegments.find(x => x.start <= alignedStart && x.end >= alignedEnd);
+		const matchingLoadingSegment = this.loadingSegments.find(x => x.start <= start && x.end >= end);
 		if (matchingLoadingSegment) {
 			// Simply wait for the existing promise to finish to avoid loading the same range twice
 			await matchingLoadingSegment.promise;
 			return;
 		}
 
-		const encasingSegmentExists = this.loadedSegments.some(x => x.start <= alignedStart && x.end >= alignedEnd);
+		const encasingSegmentExists = this.loadedSegments.some(x => x.start <= start && x.end >= end);
 		if (encasingSegmentExists) {
 			// Nothing to load
 			return;
 		}
 
-		const bytesPromise = this.source._read(alignedStart, alignedEnd);
-		const loadingSegment: LoadingSegment = { start: alignedStart, end: alignedEnd, promise: bytesPromise };
+		const bytesPromise = this.source._read(start, end);
+		const loadingSegment: LoadingSegment = { start, end, promise: bytesPromise };
 		this.loadingSegments.push(loadingSegment);
 
 		const bytes = await bytesPromise;
 		removeItem(this.loadingSegments, loadingSegment);
 
-		this.insertIntoLoadedSegments(alignedStart, bytes);
+		this.insertIntoLoadedSegments(start, bytes);
 	}
 
 	private insertIntoLoadedSegments(start: number, bytes: Uint8Array) {
@@ -135,5 +130,24 @@ export class Reader {
 			view: segment.view,
 			offset: segment.bytes.byteOffset + start - segment.start,
 		};
+	}
+
+	forgetRange(start: number, end: number) {
+		if (end <= start) {
+			return;
+		}
+
+		const startIndex = binarySearchLessOrEqual(this.loadedSegments, start, x => x.start);
+		if (startIndex === -1) {
+			return;
+		}
+
+		const segment = this.loadedSegments[startIndex]!;
+		if (segment.start !== start || segment.end !== end) {
+			return;
+		}
+
+		this.loadedSegments.splice(startIndex, 1);
+		this.totalStoredBytes -= segment.bytes.byteLength;
 	}
 }
