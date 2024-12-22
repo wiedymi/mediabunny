@@ -6149,9 +6149,7 @@ var VideoFrameDrain = class extends BaseMediaFrameDrain {
   }
   decoderConfig = null;
   async createDecoder(onFrame) {
-    if (!this.decoderConfig) {
-      this.decoderConfig = await this.videoTrack.getDecoderConfig();
-    }
+    this.decoderConfig ??= await this.videoTrack.getDecoderConfig();
     const decoder = new VideoDecoder({
       output: onFrame,
       error: (error) => console.error(error)
@@ -6200,9 +6198,7 @@ var AudioDataDrain = class extends BaseMediaFrameDrain {
   }
   decoderConfig = null;
   async createDecoder(onData) {
-    if (!this.decoderConfig) {
-      this.decoderConfig = await this.audioTrack.getDecoderConfig();
-    }
+    this.decoderConfig ??= await this.audioTrack.getDecoderConfig();
     const decoder = new AudioDecoder({
       output: onData,
       error: (error) => console.error(error)
@@ -6238,9 +6234,9 @@ var AudioBufferDrain = class {
       length: data.numberOfFrames,
       sampleRate: data.sampleRate
     });
+    const dataBytes = new Float32Array(data.allocationSize({ planeIndex: 0, format: "f32-planar" }) / 4);
     for (let i = 0; i < data.numberOfChannels; i++) {
-      const dataBytes = new Float32Array(data.allocationSize({ planeIndex: i }));
-      data.copyTo(dataBytes, { planeIndex: i });
+      data.copyTo(dataBytes, { planeIndex: i, format: "f32-planar" });
       audioBuffer.copyToChannel(dataBytes, i);
     }
     const sampleDuration = 1 / data.sampleRate;

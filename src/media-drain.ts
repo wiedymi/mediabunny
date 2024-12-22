@@ -305,9 +305,7 @@ export class VideoFrameDrain extends BaseMediaFrameDrain<EncodedVideoChunk, Vide
 	}
 
 	async createDecoder(onFrame: (frame: VideoFrame) => unknown) {
-		if (!this.decoderConfig) {
-			this.decoderConfig = await this.videoTrack.getDecoderConfig();
-		}
+		this.decoderConfig ??= await this.videoTrack.getDecoderConfig();
 
 		const decoder = new VideoDecoder({
 			output: onFrame,
@@ -369,9 +367,7 @@ export class AudioDataDrain extends BaseMediaFrameDrain<EncodedAudioChunk, Audio
 	}
 
 	async createDecoder(onData: (data: AudioData) => unknown) {
-		if (!this.decoderConfig) {
-			this.decoderConfig = await this.audioTrack.getDecoderConfig();
-		}
+		this.decoderConfig ??= await this.audioTrack.getDecoderConfig();
 
 		const decoder = new AudioDecoder({
 			output: onData,
@@ -422,9 +418,11 @@ export class AudioBufferDrain {
 			sampleRate: data.sampleRate,
 		});
 
+		// All user agents are required to support conversion to f32-planar
+		const dataBytes = new Float32Array(data.allocationSize({ planeIndex: 0, format: 'f32-planar' }) / 4);
+
 		for (let i = 0; i < data.numberOfChannels; i++) {
-			const dataBytes = new Float32Array(data.allocationSize({ planeIndex: i }));
-			data.copyTo(dataBytes, { planeIndex: i });
+			data.copyTo(dataBytes, { planeIndex: i, format: 'f32-planar' });
 			audioBuffer.copyToChannel(dataBytes, i);
 		}
 
