@@ -8,7 +8,7 @@ export abstract class Demuxer {
 		this.input = input;
 	}
 
-	abstract getDuration(): Promise<number>;
+	abstract computeDuration(): Promise<number>;
 	abstract getTracks(): Promise<InputTrack[]>;
 	abstract getMimeType(): Promise<string>;
 }

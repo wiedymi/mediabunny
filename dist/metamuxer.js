@@ -25,11 +25,14 @@ var Metamuxer = (() => {
     AUDIO_CODECS: () => AUDIO_CODECS,
     ArrayBufferSource: () => ArrayBufferSource,
     ArrayBufferTarget: () => ArrayBufferTarget,
+    AudioBufferDrain: () => AudioBufferDrain,
     AudioBufferSource: () => AudioBufferSource,
+    AudioDataDrain: () => AudioDataDrain,
     AudioDataSource: () => AudioDataSource,
     AudioSource: () => AudioSource,
     BlobSource: () => BlobSource,
     CanvasSource: () => CanvasSource,
+    EncodedAudioChunkDrain: () => EncodedAudioChunkDrain,
     EncodedAudioChunkSource: () => EncodedAudioChunkSource,
     EncodedVideoChunkDrain: () => EncodedVideoChunkDrain,
     EncodedVideoChunkSource: () => EncodedVideoChunkSource,
@@ -1811,17 +1814,74 @@ var Metamuxer = (() => {
   };
   var extractAudioCodecString = (codec, description) => {
     if (codec === "aac") {
-      if (!description || description.byteLength < 2) {
-        throw new TypeError("AAC description must be at least 2 bytes long.");
-      }
-      const mpeg4AudioObjectType = description[0] >> 3;
-      return `mp4a.40.${mpeg4AudioObjectType}`;
+      const audioSpecificConfig = parseAacAudioSpecificConfig(description);
+      return `mp4a.40.${audioSpecificConfig.objectType}`;
     } else if (codec === "opus") {
       return "opus";
     } else if (codec === "vorbis") {
       return "vorbis";
     }
     throw new TypeError(`Unhandled codec '${codec}'.`);
+  };
+  var parseAacAudioSpecificConfig = (bytes2) => {
+    if (!bytes2 || bytes2.byteLength < 2) {
+      throw new TypeError("AAC description must be at least 2 bytes long.");
+    }
+    let bitOffset = 0;
+    let objectType = readBits(bytes2, bitOffset, bitOffset + 5);
+    bitOffset += 5;
+    if (objectType === 31) {
+      objectType = 32 + readBits(bytes2, bitOffset, bitOffset + 6);
+      bitOffset += 6;
+    }
+    const frequencyIndex = readBits(bytes2, bitOffset, bitOffset + 4);
+    bitOffset += 4;
+    let sampleRate = null;
+    if (frequencyIndex === 15) {
+      sampleRate = readBits(bytes2, bitOffset, bitOffset + 24);
+      bitOffset += 24;
+    } else {
+      const freqTable = [
+        96e3,
+        88200,
+        64e3,
+        48e3,
+        44100,
+        32e3,
+        24e3,
+        22050,
+        16e3,
+        12e3,
+        11025,
+        8e3,
+        7350
+      ];
+      if (frequencyIndex < freqTable.length) {
+        sampleRate = freqTable[frequencyIndex];
+      }
+    }
+    const channelConfiguration = readBits(bytes2, bitOffset, bitOffset + 4);
+    bitOffset += 4;
+    let numberOfChannels = null;
+    if (channelConfiguration >= 1 && channelConfiguration <= 7) {
+      const channelMap = {
+        1: 1,
+        2: 2,
+        3: 3,
+        4: 4,
+        5: 5,
+        6: 6,
+        7: 8
+      };
+      numberOfChannels = channelMap[channelConfiguration];
+    }
+    return {
+      objectType,
+      frequencyIndex,
+      sampleRate,
+      channelConfiguration,
+      numberOfChannels
+    };
   };
   var getVideoEncoderConfigExtension = (codec) => {
     if (codec === "avc") {
@@ -4087,8 +4147,8 @@ ${cue.notes ?? ""}`;
     isAudioTrack() {
       return this instanceof InputAudioTrack;
     }
-    getDuration() {
-      return this._backing.getDuration();
+    computeDuration() {
+      return this._backing.computeDuration();
     }
   };
   var InputVideoTrack = class extends InputTrack {
@@ -4366,12 +4426,10 @@ ${cue.notes ?? ""}`;
       this.isobmffReader = new IsobmffReader(input._mainReader);
       this.chunkReader = new IsobmffReader(new Reader(input._source, 64 * 2 ** 20));
     }
-    async getDuration() {
-      await this.readMetadata();
-      if (this.movieDurationInTimescale === -1) {
-        throw new Error("Could not read movie duration.");
-      }
-      return this.movieDurationInTimescale / this.movieTimescale;
+    async computeDuration() {
+      const tracks = await this.getTracks();
+      const trackDurations = await Promise.all(tracks.map((x) => x.computeDuration()));
+      return Math.max(0, ...trackDurations);
     }
     async getTracks() {
       await this.readMetadata();
@@ -4589,6 +4647,15 @@ ${cue.notes ?? ""}`;
                 const audioTrack = track;
                 track.inputTrack = new InputAudioTrack(new IsobmffAudioTrackBacking(audioTrack));
                 this.tracks.push(track);
+                if (track.info.codec === "aac") {
+                  const audioSpecificConfig = parseAacAudioSpecificConfig(track.info.codecDescription);
+                  if (audioSpecificConfig.numberOfChannels !== null) {
+                    track.info.numberOfChannels = audioSpecificConfig.numberOfChannels;
+                  }
+                  if (audioSpecificConfig.sampleRate !== null) {
+                    track.info.sampleRate = audioSpecificConfig.sampleRate;
+                  }
+                }
               }
             }
             this.currentTrack = null;
@@ -5295,38 +5362,12 @@ ${cue.notes ?? ""}`;
     getCodec() {
       throw new Error("Not implemented on base class.");
     }
-    async getDuration() {
-      return this.internalTrack.durationInTimescale / this.internalTrack.timescale;
+    async computeDuration() {
+      const lastChunk = await this.getChunk(Infinity, { metadataOnly: true });
+      const timestamp = lastChunk?.timestamp;
+      return timestamp ? timestamp / 1e6 : 0;
     }
-  };
-  var IsobmffVideoTrackBacking = class extends IsobmffTrackBacking {
-    internalTrack;
-    constructor(internalTrack) {
-      super(internalTrack);
-      this.internalTrack = internalTrack;
-    }
-    async getCodec() {
-      return this.internalTrack.info.codec;
-    }
-    async getWidth() {
-      return this.internalTrack.info.width;
-    }
-    async getHeight() {
-      return this.internalTrack.info.height;
-    }
-    async getRotation() {
-      return this.internalTrack.rotation;
-    }
-    async getDecoderConfig() {
-      return {
-        codec: extractVideoCodecString(this.internalTrack.info.codec, this.internalTrack.info.codecDescription),
-        codedWidth: this.internalTrack.info.width,
-        codedHeight: this.internalTrack.info.height,
-        description: this.internalTrack.info.codecDescription ?? void 0,
-        colorSpace: this.internalTrack.info.colorSpace ?? void 0
-      };
-    }
-    async getFirstChunk() {
+    async getFirstChunk(options) {
       if (this.internalTrack.demuxer.isFragmented) {
         return this.performFragmentedLookup(
           () => {
@@ -5338,26 +5379,28 @@ ${cue.notes ?? ""}`;
             };
           },
           0,
-          Infinity
+          Infinity,
+          options
         );
       }
-      return this.fetchChunkForSampleIndex(0);
+      return this.fetchChunkForSampleIndex(0, options);
     }
-    async getChunk(timestamp) {
+    async getChunk(timestamp, options) {
       const timestampInTimescale = timestamp * this.internalTrack.timescale;
       if (this.internalTrack.demuxer.isFragmented) {
         return this.performFragmentedLookup(
           () => this.findSampleInFragmentsForTimestamp(timestampInTimescale),
           timestampInTimescale,
-          timestampInTimescale
+          timestampInTimescale,
+          options
         );
       } else {
         const sampleTable = this.internalTrack.demuxer.getSampleTableForTrack(this.internalTrack);
         const sampleIndex = getSampleIndexForTimestamp(sampleTable, timestampInTimescale);
-        return this.fetchChunkForSampleIndex(sampleIndex);
+        return this.fetchChunkForSampleIndex(sampleIndex, options);
       }
     }
-    async getNextChunk(chunk) {
+    async getNextChunk(chunk, options) {
       if (this.internalTrack.demuxer.isFragmented) {
         const locationInFragment = this.chunkToFragmentLocation.get(chunk);
         if (locationInFragment === void 0) {
@@ -5406,30 +5449,32 @@ ${cue.notes ?? ""}`;
             }
           },
           sample.presentationTimestamp,
-          Infinity
+          Infinity,
+          options
         );
       }
       const sampleIndex = this.chunkToSampleIndex.get(chunk);
       if (sampleIndex === void 0) {
         throw new Error("Chunk was not created from this track.");
       }
-      return this.fetchChunkForSampleIndex(sampleIndex + 1);
+      return this.fetchChunkForSampleIndex(sampleIndex + 1, options);
     }
-    async getKeyChunk(timestamp) {
+    async getKeyChunk(timestamp, options) {
       const timestampInTimescale = timestamp * this.internalTrack.timescale;
       if (this.internalTrack.demuxer.isFragmented) {
         return this.performFragmentedLookup(
           () => this.findKeySampleInFragmentsForTimestamp(timestampInTimescale),
           timestampInTimescale,
-          timestampInTimescale
+          timestampInTimescale,
+          options
         );
       }
       const sampleTable = this.internalTrack.demuxer.getSampleTableForTrack(this.internalTrack);
       const sampleIndex = getSampleIndexForTimestamp(sampleTable, timestampInTimescale);
       const keyFrameSampleIndex = sampleIndex === -1 ? -1 : getRelevantKeyframeIndexForSample(sampleTable, sampleIndex);
-      return this.fetchChunkForSampleIndex(keyFrameSampleIndex);
+      return this.fetchChunkForSampleIndex(keyFrameSampleIndex, options);
     }
-    async getNextKeyChunk(chunk) {
+    async getNextKeyChunk(chunk, options) {
       if (this.internalTrack.demuxer.isFragmented) {
         const locationInFragment = this.chunkToFragmentLocation.get(chunk);
         if (locationInFragment === void 0) {
@@ -5485,7 +5530,8 @@ ${cue.notes ?? ""}`;
             }
           },
           sample.presentationTimestamp,
-          Infinity
+          Infinity,
+          options
         );
       }
       const sampleIndex = this.chunkToSampleIndex.get(chunk);
@@ -5494,9 +5540,9 @@ ${cue.notes ?? ""}`;
       }
       const sampleTable = this.internalTrack.demuxer.getSampleTableForTrack(this.internalTrack);
       const nextKeyFrameSampleIndex = getNextKeyframeIndexForSample(sampleTable, sampleIndex);
-      return this.fetchChunkForSampleIndex(nextKeyFrameSampleIndex);
+      return this.fetchChunkForSampleIndex(nextKeyFrameSampleIndex, options);
     }
-    async fetchChunkForSampleIndex(sampleIndex) {
+    async fetchChunkForSampleIndex(sampleIndex, options) {
       if (sampleIndex === -1) {
         return null;
       }
@@ -5509,25 +5555,27 @@ ${cue.notes ?? ""}`;
       if (!sampleInfo) {
         return null;
       }
-      await this.internalTrack.demuxer.chunkReader.reader.loadRange(
-        sampleInfo.chunkOffset,
-        sampleInfo.chunkOffset + sampleInfo.chunkSize
-      );
-      const data = this.internalTrack.demuxer.chunkReader.readRange(
-        sampleInfo.sampleOffset,
-        sampleInfo.sampleOffset + sampleInfo.sampleSize
-      );
-      const chunk = new EncodedVideoChunk({
-        data,
-        timestamp: 1e6 * sampleInfo.presentationTimestamp / this.internalTrack.timescale,
-        duration: 1e6 * sampleInfo.duration / this.internalTrack.timescale,
-        type: sampleInfo.isKeyFrame ? "key" : "delta"
-      });
+      let data;
+      if (options.metadataOnly) {
+        data = new Uint8Array(0);
+      } else {
+        await this.internalTrack.demuxer.chunkReader.reader.loadRange(
+          sampleInfo.chunkOffset,
+          sampleInfo.chunkOffset + sampleInfo.chunkSize
+        );
+        data = this.internalTrack.demuxer.chunkReader.readRange(
+          sampleInfo.sampleOffset,
+          sampleInfo.sampleOffset + sampleInfo.sampleSize
+        );
+      }
+      const timestamp = 1e6 * sampleInfo.presentationTimestamp / this.internalTrack.timescale;
+      const duration = 1e6 * sampleInfo.duration / this.internalTrack.timescale;
+      const chunk = this.createChunk(data, timestamp, duration, sampleInfo.isKeyFrame);
       this.chunkToSampleIndex.set(chunk, sampleIndex);
       this.sampleIndexToChunk.set(sampleIndex, new WeakRef(chunk));
       return chunk;
     }
-    async fetchChunkInFragment(fragment, sampleIndex) {
+    async fetchChunkInFragment(fragment, sampleIndex, options) {
       if (sampleIndex === -1) {
         return null;
       }
@@ -5539,17 +5587,19 @@ ${cue.notes ?? ""}`;
       const trackData = fragment.trackData.get(this.internalTrack.id);
       const sample = trackData.samples[sampleIndex];
       assert(sample);
-      await this.internalTrack.demuxer.chunkReader.reader.loadRange(fragment.dataStart, fragment.dataEnd);
-      const data = this.internalTrack.demuxer.chunkReader.readRange(
-        sample.byteOffset,
-        sample.byteOffset + sample.byteSize
-      );
-      const chunk = new EncodedVideoChunk({
-        data,
-        timestamp: 1e6 * sample.presentationTimestamp / this.internalTrack.timescale,
-        duration: 1e6 * sample.duration / this.internalTrack.timescale,
-        type: sample.isKeyFrame ? "key" : "delta"
-      });
+      let data;
+      if (options.metadataOnly) {
+        data = new Uint8Array(0);
+      } else {
+        await this.internalTrack.demuxer.chunkReader.reader.loadRange(fragment.dataStart, fragment.dataEnd);
+        data = this.internalTrack.demuxer.chunkReader.readRange(
+          sample.byteOffset,
+          sample.byteOffset + sample.byteSize
+        );
+      }
+      const timestamp = 1e6 * sample.presentationTimestamp / this.internalTrack.timescale;
+      const duration = 1e6 * sample.duration / this.internalTrack.timescale;
+      const chunk = this.createChunk(data, timestamp, duration, sample.isKeyFrame);
       this.chunkToFragmentLocation.set(chunk, { fragment, sampleIndex });
       this.fragmentLocationToChunk.set(compositeKey, new WeakRef(chunk));
       return chunk;
@@ -5589,10 +5639,10 @@ ${cue.notes ?? ""}`;
         const trackData = fragment.trackData.get(this.internalTrack.id);
         const index = trackData.presentationTimestamps.findLastIndex((x) => {
           const sample = trackData.samples[x.sampleIndex];
-          return sample.isKeyFrame;
+          return sample.isKeyFrame && x.presentationTimestamp <= timestampInTimescale;
         });
         if (index === -1) {
-          throw new Error("Not supported: Fragment does not contain key sample.");
+          throw new Error("Not supported: Fragment does not begin with a key sample.");
         }
         const entry = trackData.presentationTimestamps[index];
         sampleIndex = entry.sampleIndex;
@@ -5601,15 +5651,15 @@ ${cue.notes ?? ""}`;
       return { fragmentIndex, sampleIndex, correctSampleFound };
     }
     /** Looks for a sample in the fragments while trying to load as few fragments as possible to retrieve it. */
-    async performFragmentedLookup(getBestMatch, earliestTimestamp, latestTimestamp) {
-      const { fragmentIndex, sampleIndex, correctSampleFound } = getBestMatch();
-      if (correctSampleFound) {
-        const fragment = this.internalTrack.fragments[fragmentIndex];
-        return this.fetchChunkInFragment(fragment, sampleIndex);
-      }
+    async performFragmentedLookup(getBestMatch, searchTimestamp, latestTimestamp, options) {
       const demuxer = this.internalTrack.demuxer;
       const release = await demuxer.fragmentLookupMutex.acquire();
       try {
+        const { fragmentIndex, sampleIndex, correctSampleFound } = getBestMatch();
+        if (correctSampleFound) {
+          const fragment = this.internalTrack.fragments[fragmentIndex];
+          return this.fetchChunkInFragment(fragment, sampleIndex, options);
+        }
         const isobmffReader = demuxer.isobmffReader;
         const sourceSize = await isobmffReader.reader.source._getSize();
         let prevFragment = null;
@@ -5619,7 +5669,7 @@ ${cue.notes ?? ""}`;
         if (this.internalTrack.fragmentLookupTable) {
           const index = binarySearchLessOrEqual(
             this.internalTrack.fragmentLookupTable,
-            earliestTimestamp,
+            searchTimestamp,
             (x) => x.timestamp
           );
           if (index !== -1) {
@@ -5662,7 +5712,7 @@ ${cue.notes ?? ""}`;
               const { fragmentIndex: fragmentIndex2, sampleIndex: sampleIndex2, correctSampleFound: correctSampleFound2 } = getBestMatch();
               if (correctSampleFound2) {
                 const fragment2 = this.internalTrack.fragments[fragmentIndex2];
-                return this.fetchChunkInFragment(fragment2, sampleIndex2);
+                return this.fetchChunkInFragment(fragment2, sampleIndex2, options);
               }
               if (fragmentIndex2 !== -1) {
                 bestFragmentIndex = fragmentIndex2;
@@ -5678,12 +5728,48 @@ ${cue.notes ?? ""}`;
         }
         if (bestFragmentIndex !== -1) {
           const fragment = this.internalTrack.fragments[bestFragmentIndex];
-          return this.fetchChunkInFragment(fragment, bestSampleIndex);
+          return this.fetchChunkInFragment(fragment, bestSampleIndex, options);
         }
         return null;
       } finally {
         release();
       }
+    }
+  };
+  var IsobmffVideoTrackBacking = class extends IsobmffTrackBacking {
+    internalTrack;
+    constructor(internalTrack) {
+      super(internalTrack);
+      this.internalTrack = internalTrack;
+    }
+    async getCodec() {
+      return this.internalTrack.info.codec;
+    }
+    async getWidth() {
+      return this.internalTrack.info.width;
+    }
+    async getHeight() {
+      return this.internalTrack.info.height;
+    }
+    async getRotation() {
+      return this.internalTrack.rotation;
+    }
+    async getDecoderConfig() {
+      return {
+        codec: extractVideoCodecString(this.internalTrack.info.codec, this.internalTrack.info.codecDescription),
+        codedWidth: this.internalTrack.info.width,
+        codedHeight: this.internalTrack.info.height,
+        description: this.internalTrack.info.codecDescription ?? void 0,
+        colorSpace: this.internalTrack.info.colorSpace ?? void 0
+      };
+    }
+    createChunk(data, timestamp, duration, isKeyFrame) {
+      return new EncodedVideoChunk({
+        data,
+        timestamp,
+        duration,
+        type: isKeyFrame ? "key" : "delta"
+      });
     }
   };
   var IsobmffAudioTrackBacking = class extends IsobmffTrackBacking {
@@ -5708,6 +5794,14 @@ ${cue.notes ?? ""}`;
         sampleRate: this.internalTrack.info.sampleRate,
         description: this.internalTrack.info.codecDescription ?? void 0
       };
+    }
+    createChunk(data, timestamp, duration, isKeyFrame) {
+      return new EncodedAudioChunk({
+        data,
+        timestamp,
+        duration,
+        type: isKeyFrame ? "key" : "delta"
+      });
     }
   };
   var getSampleIndexForTimestamp = (sampleTable, timescaleUnits) => {
@@ -5870,9 +5964,9 @@ ${cue.notes ?? ""}`;
       assert(this._format);
       return this._format;
     }
-    async getDuration() {
+    async computeDuration() {
       const demuxer = await this._getDemuxer();
-      return demuxer.getDuration();
+      return demuxer.computeDuration();
     }
     async getTracks() {
       const demuxer = await this._getDemuxer();
@@ -5901,25 +5995,7 @@ ${cue.notes ?? ""}`;
   };
 
   // src/media-drain.ts
-  var EncodedVideoChunkDrain = class {
-    constructor(videoTrack) {
-      this.videoTrack = videoTrack;
-    }
-    getFirstChunk() {
-      return this.videoTrack._backing.getFirstChunk();
-    }
-    getChunk(timestamp) {
-      return this.videoTrack._backing.getChunk(timestamp);
-    }
-    getNextChunk(chunk) {
-      return this.videoTrack._backing.getNextChunk(chunk);
-    }
-    getKeyChunk(timestamp) {
-      return this.videoTrack._backing.getKeyChunk(timestamp);
-    }
-    getNextKeyChunk(chunk) {
-      return this.videoTrack._backing.getNextKeyChunk(chunk);
-    }
+  var BaseChunkDrain = class {
     async *chunks(startChunk, endTimestamp = Infinity) {
       const chunkQueue = [];
       let { promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers();
@@ -5968,26 +6044,12 @@ ${cue.notes ?? ""}`;
       }
     }
   };
-  var VideoFrameDrain = class {
-    constructor(videoTrack) {
-      this.videoTrack = videoTrack;
-    }
-    decoderConfig = null;
-    async createDecoder(onFrame) {
-      if (!this.decoderConfig) {
-        this.decoderConfig = await this.videoTrack.getDecoderConfig();
-      }
-      const decoder = new VideoDecoder({
-        output: onFrame,
-        error: (error) => console.error(error)
-      });
-      decoder.configure(this.decoderConfig);
-      return decoder;
-    }
-    async getKeyFrame(timestamp) {
+  var BaseMediaFrameDrain = class {
+    async getKeyMediaFrame(timestamp) {
       let result = null;
       const decoder = await this.createDecoder((frame) => result = frame);
-      const chunk = await this.videoTrack._backing.getKeyChunk(timestamp);
+      const chunkDrain = this.createChunkDrain();
+      const chunk = await chunkDrain.getKeyChunk(timestamp);
       if (!chunk) {
         return null;
       }
@@ -5996,7 +6058,7 @@ ${cue.notes ?? ""}`;
       decoder.close();
       return result;
     }
-    async getFrame(timestamp) {
+    async getMediaFrame(timestamp) {
       let result = null;
       const decoder = await this.createDecoder((frame) => {
         if (frame.timestamp / 1e6 <= timestamp) {
@@ -6006,16 +6068,17 @@ ${cue.notes ?? ""}`;
           frame.close();
         }
       });
-      const keyChunk = await this.videoTrack._backing.getKeyChunk(timestamp);
+      const chunkDrain = this.createChunkDrain();
+      const keyChunk = await chunkDrain.getKeyChunk(timestamp);
       if (!keyChunk) {
         return null;
       }
-      const targetChunk = await this.videoTrack._backing.getChunk(timestamp);
+      const targetChunk = await chunkDrain.getChunk(timestamp);
       assert(targetChunk);
       decoder.decode(keyChunk);
       let currentChunk = keyChunk;
       while (currentChunk !== targetChunk) {
-        const nextChunk = await this.videoTrack._backing.getNextChunk(currentChunk);
+        const nextChunk = await chunkDrain.getNextChunk(currentChunk);
         assert(nextChunk);
         currentChunk = nextChunk;
         decoder.decode(nextChunk);
@@ -6027,7 +6090,7 @@ ${cue.notes ?? ""}`;
       decoder.close();
       return result;
     }
-    async *frames(startTimestamp = 0, endTimestamp = Infinity) {
+    async *mediaFrames(startTimestamp = 0, endTimestamp = Infinity) {
       const frameQueue = [];
       let firstFrameQueued = false;
       let lastFrame = null;
@@ -6060,7 +6123,8 @@ ${cue.notes ?? ""}`;
           ({ promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers());
         }
       });
-      const keyChunk = await this.videoTrack._backing.getKeyChunk(startTimestamp) ?? await this.videoTrack._backing.getFirstChunk();
+      const chunkDrain = this.createChunkDrain();
+      const keyChunk = await chunkDrain.getKeyChunk(startTimestamp) ?? await chunkDrain.getFirstChunk();
       if (!keyChunk) {
         return;
       }
@@ -6069,13 +6133,12 @@ ${cue.notes ?? ""}`;
         let currentChunk = keyChunk;
         let chunksEndTimestamp = Infinity;
         if (endTimestamp < Infinity) {
-          const endFrame = await this.videoTrack._backing.getChunk(endTimestamp);
-          const endKeyFrame = !endFrame ? null : endFrame.type === "key" && endFrame.timestamp / 1e6 === endTimestamp ? endFrame : await this.videoTrack._backing.getNextKeyChunk(endFrame);
+          const endFrame = await chunkDrain.getChunk(endTimestamp);
+          const endKeyFrame = !endFrame ? null : endFrame.type === "key" && endFrame.timestamp / 1e6 === endTimestamp ? endFrame : await chunkDrain.getNextKeyChunk(endFrame);
           if (endKeyFrame) {
             chunksEndTimestamp = endKeyFrame.timestamp / 1e6;
           }
         }
-        const chunkDrain = new EncodedVideoChunkDrain(this.videoTrack);
         const chunks = chunkDrain.chunks(keyChunk, chunksEndTimestamp);
         await chunks.next();
         while (currentChunk && !ended) {
@@ -6110,6 +6173,145 @@ ${cue.notes ?? ""}`;
         }
       } finally {
         ended = true;
+      }
+    }
+  };
+  var EncodedVideoChunkDrain = class extends BaseChunkDrain {
+    constructor(videoTrack) {
+      super();
+      this.videoTrack = videoTrack;
+    }
+    getFirstChunk(options = {}) {
+      return this.videoTrack._backing.getFirstChunk(options);
+    }
+    getChunk(timestamp, options = {}) {
+      return this.videoTrack._backing.getChunk(timestamp, options);
+    }
+    getNextChunk(chunk, options = {}) {
+      return this.videoTrack._backing.getNextChunk(chunk, options);
+    }
+    getKeyChunk(timestamp, options = {}) {
+      return this.videoTrack._backing.getKeyChunk(timestamp, options);
+    }
+    getNextKeyChunk(chunk, options = {}) {
+      return this.videoTrack._backing.getNextKeyChunk(chunk, options);
+    }
+  };
+  var VideoFrameDrain = class extends BaseMediaFrameDrain {
+    constructor(videoTrack) {
+      super();
+      this.videoTrack = videoTrack;
+    }
+    decoderConfig = null;
+    async createDecoder(onFrame) {
+      if (!this.decoderConfig) {
+        this.decoderConfig = await this.videoTrack.getDecoderConfig();
+      }
+      const decoder = new VideoDecoder({
+        output: onFrame,
+        error: (error) => console.error(error)
+      });
+      decoder.configure(this.decoderConfig);
+      return decoder;
+    }
+    createChunkDrain() {
+      return new EncodedVideoChunkDrain(this.videoTrack);
+    }
+    getKeyFrame(timestamp) {
+      return this.getKeyMediaFrame(timestamp);
+    }
+    getFrame(timestamp) {
+      return this.getMediaFrame(timestamp);
+    }
+    frames(startTimestamp = 0, endTimestamp = Infinity) {
+      return this.mediaFrames(startTimestamp, endTimestamp);
+    }
+  };
+  var EncodedAudioChunkDrain = class extends BaseChunkDrain {
+    constructor(audioTrack) {
+      super();
+      this.audioTrack = audioTrack;
+    }
+    getFirstChunk(options = {}) {
+      return this.audioTrack._backing.getFirstChunk(options);
+    }
+    getChunk(timestamp, options = {}) {
+      return this.audioTrack._backing.getChunk(timestamp, options);
+    }
+    getNextChunk(chunk, options = {}) {
+      return this.audioTrack._backing.getNextChunk(chunk, options);
+    }
+    getKeyChunk(timestamp, options = {}) {
+      return this.audioTrack._backing.getKeyChunk(timestamp, options);
+    }
+    getNextKeyChunk(chunk, options = {}) {
+      return this.audioTrack._backing.getNextKeyChunk(chunk, options);
+    }
+  };
+  var AudioDataDrain = class extends BaseMediaFrameDrain {
+    constructor(audioTrack) {
+      super();
+      this.audioTrack = audioTrack;
+    }
+    decoderConfig = null;
+    async createDecoder(onData) {
+      if (!this.decoderConfig) {
+        this.decoderConfig = await this.audioTrack.getDecoderConfig();
+      }
+      const decoder = new AudioDecoder({
+        output: onData,
+        error: (error) => console.error(error)
+      });
+      decoder.configure(this.decoderConfig);
+      return decoder;
+    }
+    createChunkDrain() {
+      return new EncodedAudioChunkDrain(this.audioTrack);
+    }
+    getKeyData(timestamp) {
+      return this.getKeyMediaFrame(timestamp);
+    }
+    getData(timestamp) {
+      return this.getMediaFrame(timestamp);
+    }
+    data(startTimestamp = 0, endTimestamp = Infinity) {
+      return this.mediaFrames(startTimestamp, endTimestamp);
+    }
+  };
+  var AudioBufferDrain = class {
+    constructor(audioTrack) {
+      this.audioTrack = audioTrack;
+      this.audioDataDrain = new AudioDataDrain(audioTrack);
+    }
+    audioDataDrain;
+    audioDataToWrappedArrayBuffer(data) {
+      if (!data) {
+        return null;
+      }
+      const audioBuffer = new AudioBuffer({
+        numberOfChannels: data.numberOfChannels,
+        length: data.numberOfFrames,
+        sampleRate: data.sampleRate
+      });
+      for (let i = 0; i < data.numberOfChannels; i++) {
+        const dataBytes = new Float32Array(data.allocationSize({ planeIndex: i }));
+        data.copyTo(dataBytes, { planeIndex: i });
+        audioBuffer.copyToChannel(dataBytes, i);
+      }
+      return {
+        buffer: audioBuffer,
+        timestamp: data.timestamp / 1e6
+      };
+    }
+    async getBuffer(timestamp) {
+      const data = await this.audioDataDrain.getData(timestamp);
+      return this.audioDataToWrappedArrayBuffer(data);
+    }
+    async *buffers(startTimestamp = 0, endTimestamp = Infinity) {
+      for await (const data of this.audioDataDrain.data(startTimestamp, endTimestamp)) {
+        const result = this.audioDataToWrappedArrayBuffer(data);
+        data.close();
+        yield result;
       }
     }
   };

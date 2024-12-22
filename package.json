@@ -20,7 +20,8 @@
     "build": "node build.mjs && tsc && api-extractor run && node append-namespace.mjs",
     "build-local": "node build.mjs && tsc && api-extractor run --local --verbose && node append-namespace.mjs",
     "watch": "node build.mjs --watch",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "check": "tsc --noEmit"
   },
   "author": "",
   "license": "MIT",

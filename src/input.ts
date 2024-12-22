@@ -50,9 +50,9 @@ export class Input {
 		return this._format;
 	}
 
-	async getDuration() {
+	async computeDuration() {
 		const demuxer = await this._getDemuxer();
-		return demuxer.getDuration();
+		return demuxer.computeDuration();
 	}
 
 	async getTracks() {

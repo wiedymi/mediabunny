@@ -5,6 +5,7 @@ import {
 	bytesToHexString,
 	isAllowSharedBufferSource,
 	last,
+	readBits,
 	reverseBitsU32,
 } from './misc';
 import { SubtitleMetadata } from './subtitles';
@@ -268,13 +269,8 @@ export const buildAudioCodecString = (codec: AudioCodec, numberOfChannels: numbe
 
 export const extractAudioCodecString = (codec: AudioCodec, description: Uint8Array | null) => {
 	if (codec === 'aac') {
-		if (!description || description.byteLength < 2) {
-			throw new TypeError('AAC description must be at least 2 bytes long.');
-		}
-
-		// TODO: Is this correct? Give a source/reason
-		const mpeg4AudioObjectType = description[0]! >> 3;
-		return `mp4a.40.${mpeg4AudioObjectType}`;
+		const audioSpecificConfig = parseAacAudioSpecificConfig(description);
+		return `mp4a.40.${audioSpecificConfig.objectType}`;
 	} else if (codec === 'opus') {
 		return 'opus';
 	} else if (codec === 'vorbis') {
@@ -283,6 +279,63 @@ export const extractAudioCodecString = (codec: AudioCodec, description: Uint8Arr
 
 	// eslint-disable-next-line @typescript-eslint/restrict-template-expressions
 	throw new TypeError(`Unhandled codec '${codec}'.`);
+};
+
+export const parseAacAudioSpecificConfig = (bytes: Uint8Array | null) => {
+	if (!bytes || bytes.byteLength < 2) {
+		throw new TypeError('AAC description must be at least 2 bytes long.');
+	}
+
+	let bitOffset = 0;
+
+	// 1) Audio Object Type (5 bits)
+	let objectType = readBits(bytes, bitOffset, bitOffset + 5);
+	bitOffset += 5;
+	if (objectType === 31) {
+		// (Escape value) -> 6 bits + 32
+		objectType = 32 + readBits(bytes, bitOffset, bitOffset + 6);
+		bitOffset += 6;
+	}
+
+	// 2) Sampling Frequency Index (4 bits)
+	const frequencyIndex = readBits(bytes, bitOffset, bitOffset + 4);
+	bitOffset += 4;
+	let sampleRate: number | null = null;
+	if (frequencyIndex === 15) {
+		// Explicit sample rate (24 bits)
+		sampleRate = readBits(bytes, bitOffset, bitOffset + 24);
+		bitOffset += 24;
+	} else {
+		const freqTable = [
+			96000, 88200, 64000, 48000, 44100,
+			32000, 24000, 22050, 16000, 12000,
+			11025, 8000, 7350,
+		];
+		if (frequencyIndex < freqTable.length) {
+			sampleRate = freqTable[frequencyIndex]!;
+		}
+	}
+
+	// 3) Channel Configuration (4 bits)
+	const channelConfiguration = readBits(bytes, bitOffset, bitOffset + 4);
+	bitOffset += 4;
+	let numberOfChannels: number | null = null;
+	if (channelConfiguration >= 1 && channelConfiguration <= 7) {
+		const channelMap = {
+			1: 1, 2: 2, 3: 3,
+			4: 4, 5: 5, 6: 6,
+			7: 8,
+		};
+		numberOfChannels = channelMap[channelConfiguration as keyof typeof channelMap];
+	}
+
+	return {
+		objectType,
+		frequencyIndex,
+		sampleRate,
+		channelConfiguration,
+		numberOfChannels,
+	};
 };
 
 export const getVideoEncoderConfigExtension = (codec: VideoCodec) => {

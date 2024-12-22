@@ -3,7 +3,7 @@ import { Rotation } from './misc';
 
 export interface InputTrackBacking {
 	getCodec(): Promise<MediaCodec>;
-	getDuration(): Promise<number>;
+	computeDuration(): Promise<number>;
 }
 
 export abstract class InputTrack {
@@ -26,10 +26,14 @@ export abstract class InputTrack {
 		return this instanceof InputAudioTrack;
 	}
 
-	getDuration() {
-		return this._backing.getDuration();
+	computeDuration() {
+		return this._backing.computeDuration();
 	}
 }
+
+export type ChunkRetrievalOptions = {
+	metadataOnly?: boolean;
+};
 
 export interface InputVideoTrackBacking extends InputTrackBacking {
 	getCodec(): Promise<VideoCodec>;
@@ -37,11 +41,11 @@ export interface InputVideoTrackBacking extends InputTrackBacking {
 	getHeight(): Promise<number>;
 	getRotation(): Promise<Rotation>;
 	getDecoderConfig(): Promise<VideoDecoderConfig>;
-	getFirstChunk(): Promise<EncodedVideoChunk | null>;
-	getChunk(timestamp: number): Promise<EncodedVideoChunk | null>;
-	getNextChunk(chunk: EncodedVideoChunk): Promise<EncodedVideoChunk | null>;
-	getKeyChunk(timestamp: number): Promise<EncodedVideoChunk | null>;
-	getNextKeyChunk(chunk: EncodedVideoChunk): Promise<EncodedVideoChunk | null>;
+	getFirstChunk(options: ChunkRetrievalOptions): Promise<EncodedVideoChunk | null>;
+	getChunk(timestamp: number, options: ChunkRetrievalOptions): Promise<EncodedVideoChunk | null>;
+	getNextChunk(chunk: EncodedVideoChunk, options: ChunkRetrievalOptions): Promise<EncodedVideoChunk | null>;
+	getKeyChunk(timestamp: number, options: ChunkRetrievalOptions): Promise<EncodedVideoChunk | null>;
+	getNextKeyChunk(chunk: EncodedVideoChunk, options: ChunkRetrievalOptions): Promise<EncodedVideoChunk | null>;
 }
 
 export class InputVideoTrack extends InputTrack {
@@ -86,6 +90,11 @@ export interface InputAudioTrackBacking extends InputTrackBacking {
 	getNumberOfChannels(): Promise<number>;
 	getSampleRate(): Promise<number>;
 	getDecoderConfig(): Promise<AudioDecoderConfig>;
+	getFirstChunk(options: ChunkRetrievalOptions): Promise<EncodedAudioChunk | null>;
+	getChunk(timestamp: number, options: ChunkRetrievalOptions): Promise<EncodedAudioChunk | null>;
+	getNextChunk(chunk: EncodedAudioChunk, options: ChunkRetrievalOptions): Promise<EncodedAudioChunk | null>;
+	getKeyChunk(timestamp: number, options: ChunkRetrievalOptions): Promise<EncodedAudioChunk | null>;
+	getNextKeyChunk(chunk: EncodedAudioChunk, options: ChunkRetrievalOptions): Promise<EncodedAudioChunk | null>;
 }
 
 export class InputAudioTrack extends InputTrack {

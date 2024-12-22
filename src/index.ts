@@ -38,6 +38,12 @@ export { TransformationMatrix } from './misc';
 export { Source, ArrayBufferSource, BlobSource } from './source';
 export { ALL_FORMATS, ISOBMFF, MP4, MOV, MATROSKA, MKV, WEBM } from './input-format';
 export { Input, InputOptions } from './input';
-export { EncodedVideoChunkDrain, VideoFrameDrain } from './media-drain';
+export {
+	EncodedVideoChunkDrain,
+	VideoFrameDrain,
+	EncodedAudioChunkDrain,
+	AudioDataDrain,
+	AudioBufferDrain,
+} from './media-drain';
 
 // 🐡🦔
