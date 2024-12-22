@@ -1572,8 +1572,8 @@ abstract class IsobmffTrackBacking<Chunk extends EncodedVideoChunk | EncodedAudi
 			);
 		}
 
-		const timestamp = (1e6 * sampleInfo.presentationTimestamp) / this.internalTrack.timescale;
-		const duration = (1e6 * sampleInfo.duration) / this.internalTrack.timescale;
+		const timestamp = 1e6 * sampleInfo.presentationTimestamp / this.internalTrack.timescale;
+		const duration = 1e6 * sampleInfo.duration / this.internalTrack.timescale;
 		const chunk = this.createChunk(data, timestamp, duration, sampleInfo.isKeyFrame);
 
 		this.chunkToSampleIndex.set(chunk, sampleIndex);
@@ -1610,8 +1610,8 @@ abstract class IsobmffTrackBacking<Chunk extends EncodedVideoChunk | EncodedAudi
 			);
 		}
 
-		const timestamp = (1e6 * sample.presentationTimestamp) / this.internalTrack.timescale;
-		const duration = (1e6 * sample.duration) / this.internalTrack.timescale;
+		const timestamp = 1e6 * sample.presentationTimestamp / this.internalTrack.timescale;
+		const duration = 1e6 * sample.duration / this.internalTrack.timescale;
 		const chunk = this.createChunk(data, timestamp, duration, sample.isKeyFrame);
 
 		this.chunkToFragmentLocation.set(chunk, { fragment, sampleIndex });

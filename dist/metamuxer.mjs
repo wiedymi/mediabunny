@@ -6030,8 +6030,11 @@ var BaseMediaFrameDrain = class {
     let firstFrameQueued = false;
     let lastFrame = null;
     let { promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers();
+    let { promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers();
     let ended = false;
+    const MAX_QUEUE_SIZE = 8;
     const decoder = await this.createDecoder((frame) => {
+      onQueueDequeue();
       const frameTimestamp = frame.timestamp / 1e6;
       if (frameTimestamp >= endTimestamp) {
         ended = true;
@@ -6077,10 +6080,12 @@ var BaseMediaFrameDrain = class {
       const chunks = chunkDrain.chunks(keyChunk, chunksEndTimestamp);
       await chunks.next();
       while (currentChunk && !ended) {
-        decoder.decode(currentChunk);
-        if (decoder.decodeQueueSize >= 10) {
-          await new Promise((resolve) => decoder.addEventListener("dequeue", resolve, { once: true }));
+        if (frameQueue.length + decoder.decodeQueueSize > MAX_QUEUE_SIZE) {
+          ({ promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers());
+          await queueDequeue;
+          continue;
         }
+        decoder.decode(currentChunk);
         const chunkResult = await chunks.next();
         if (chunkResult.done) {
           break;
@@ -6100,6 +6105,7 @@ var BaseMediaFrameDrain = class {
       while (true) {
         if (frameQueue.length > 0) {
           yield frameQueue.shift();
+          onQueueDequeue();
         } else if (!decoderIsFlushed) {
           await queueNotEmpty;
         } else {
@@ -6108,6 +6114,10 @@ var BaseMediaFrameDrain = class {
       }
     } finally {
       ended = true;
+      onQueueDequeue();
+      for (const frame of frameQueue) {
+        frame.close();
+      }
     }
   }
 };
@@ -6233,9 +6243,11 @@ var AudioBufferDrain = class {
       data.copyTo(dataBytes, { planeIndex: i });
       audioBuffer.copyToChannel(dataBytes, i);
     }
+    const sampleDuration = 1 / data.sampleRate;
     return {
       buffer: audioBuffer,
-      timestamp: data.timestamp / 1e6
+      // Rounding the timestamp based on the sample duration removes audio playback artifacts
+      timestamp: Math.round(data.timestamp / 1e6 / sampleDuration) * sampleDuration
     };
   }
   async getBuffer(timestamp) {

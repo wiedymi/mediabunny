@@ -1,0 +1,282 @@
+<input type="file" accept="video/mp4">
+
+<div id="player"
+	 style="display: none; flex-direction: column; align-items: center;
+			max-width: 1000px; max-height: calc(100svh - 10px);
+			margin: 0 auto;">
+	<canvas style="background: magenta; flex: 1 1 0%; min-height: 0;"></canvas>
+	<div style="display: flex; width: 100%; align-items: center; gap: 8px;">
+		<button style="width: 100px;"></button>
+		<p id="currentTime" style="font-variant-numeric: tabular-nums;">-</p>
+		<input type="range" style="flex: 1 1 0; outline: none;" value="0" min="0" max="1" step="0.000001">
+		<p id="duration" style="font-variant-numeric: tabular-nums;">-</p>
+	</div>
+</div>
+
+<script src="../dist/metamuxer.js"></script>
+
+<script type="module">
+const fileInput = document.querySelector('input[type="file"]');
+const currentTimeElement = document.querySelector('#currentTime');
+const durationElement = document.querySelector('#duration');
+const playerDiv = document.querySelector('#player');
+const playButton = playerDiv.querySelector('button');
+const rangeInput = playerDiv.querySelector('input[type="range"]');
+
+const file = await new Promise(resolve => {
+	fileInput.addEventListener('change', () => {
+		resolve(fileInput.files[0]);
+	});
+});
+
+fileInput.style.display = 'none';
+const audioContext = new AudioContext();
+
+const source = new Metamuxer.BlobSource(file);
+const input = new Metamuxer.Input({
+	formats: Metamuxer.ALL_FORMATS,
+	source
+});
+
+const videoTrack = await input.getPrimaryVideoTrack(); 
+const audioTrack = await input.getPrimaryAudioTrack(); 
+
+const canvas = document.querySelector('canvas');
+const context = canvas.getContext('2d');
+let videoRotation = 0;
+
+if (!videoTrack) {
+	canvas.style.display = 'none';
+} else {
+	canvas.width = await videoTrack.getWidth();
+	canvas.height = await videoTrack.getHeight();
+
+	videoRotation = await videoTrack.getRotation();
+	if (videoRotation % 180 === 90) {
+		[canvas.width, canvas.height] = [canvas.height, canvas.width];
+	}
+
+	switch (videoRotation) {
+		case 90:
+			// Move to right edge, then rotate
+			context.translate(canvas.width, 0);
+			context.rotate(90 * Math.PI / 180);
+			break;
+	
+		case 180:
+			// Move to bottom-right corner, then rotate
+			context.translate(canvas.width, canvas.height);
+			context.rotate(180 * Math.PI / 180);
+			break;
+	
+		case 270:
+			// Move to bottom edge, then rotate
+			context.translate(0, canvas.height);
+			context.rotate(270 * Math.PI / 180);
+			break;
+	}
+}
+
+const totalDuration = await input.computeDuration();
+durationElement.textContent = formatSeconds(totalDuration);
+
+playerDiv.style.display = 'flex';
+
+const videoDrain = videoTrack && new Metamuxer.VideoFrameDrain(videoTrack);
+const audioDrain = audioTrack && new Metamuxer.AudioBufferDrain(audioTrack);
+
+let startTime = null;
+let playing = false;
+let playbackTimeAtStart = 0;
+let videoFrameIterator = null;
+let audioBufferIterator = null;
+let currentFrame = null;
+let nextFrame = null;
+let seeking = false;
+let seekId = 0;
+const queuedAudioNodes = new Set();
+
+function getPlaybackTime() {
+	if (playing) {
+		return audioContext.currentTime - startTime + playbackTimeAtStart;
+	} else {
+		return playbackTimeAtStart;
+	}
+}
+
+function play() {
+	audioBufferIterator?.return();
+	audioBufferIterator = audioDrain?.buffers(getPlaybackTime());
+	startTime = audioContext.currentTime;
+	playing = true;
+	runAudioIterator();
+
+	playButton.textContent = 'Pause';
+}
+
+function pause() {
+	playbackTimeAtStart = getPlaybackTime();
+	playing = false;
+	audioBufferIterator?.return();
+	audioBufferIterator = null;
+
+	for (const node of queuedAudioNodes) {
+		node.stop();
+	}
+
+	playButton.textContent = 'Play';
+}
+
+function togglePlay() {
+	if (seeking) {
+		return;
+	}
+
+	if (playing) {
+		pause();
+	} else {
+		play();
+	}
+}
+
+async function seek() {
+	if (!videoTrack) {
+		return;
+	}
+
+	seeking = true;
+	seekId++;
+
+	await videoFrameIterator?.return();
+
+	videoFrameIterator = videoDrain.frames(getPlaybackTime());
+	
+	const newCurrentFrame = (await videoFrameIterator.next()).value;
+	const newNextFrame = (await videoFrameIterator.next()).value;
+
+	currentFrame?.close();
+	nextFrame?.close();
+
+	currentFrame = newCurrentFrame;
+	nextFrame = newNextFrame;
+
+	context.drawImage(currentFrame, 0, 0);
+	
+	seeking = false;
+}
+await seek();
+
+async function render() {
+	const playbackTime = getPlaybackTime();
+	if (playbackTime >= totalDuration) {
+		pause();
+		playbackTimeAtStart = totalDuration;
+	}
+
+	if (currentFrame) {
+		while (nextFrame && nextFrame.timestamp / 1e6 <= playbackTime && !seeking) {
+			currentFrame.close();
+			currentFrame = nextFrame;
+			context.drawImage(currentFrame, 0, 0);
+
+			const currentSeekId = seekId;
+			const newNextFrame = (await videoFrameIterator.next()).value;
+
+			if (currentSeekId === seekId) {
+				nextFrame = newNextFrame;
+			} else {
+				newNextFrame.close();
+			}
+		}
+	}
+
+	if (!movingRangeInput) {
+		rangeInput.value = playbackTime / totalDuration;
+		currentTimeElement.textContent = formatSeconds(playbackTime);
+	}
+
+	requestAnimationFrame(render);
+}
+
+async function runAudioIterator() {
+	if (!audioTrack) {
+		return;
+	}
+
+	for await (let { buffer, timestamp } of audioBufferIterator) {
+		const node = audioContext.createBufferSource();
+		node.buffer = buffer;
+		node.connect(audioContext.destination);
+
+		const startTimestamp = startTime + timestamp - playbackTimeAtStart;
+		if (startTimestamp >= audioContext.currentTime) {
+			node.start(startTimestamp);
+		} else {
+			node.start(audioContext.currentTime, audioContext.currentTime - startTimestamp);
+		}
+
+		queuedAudioNodes.add(node);
+		node.onended = () => {
+			queuedAudioNodes.delete(node);
+		};
+
+		if (timestamp - getPlaybackTime() >= 1) {
+			await new Promise(resolve => {
+				const id = setInterval(() => {
+					if (timestamp - getPlaybackTime() < 1) {
+						clearInterval(id);
+						resolve();
+					}
+				}, 100);
+			});
+		}
+	}
+}
+
+function formatSeconds(seconds) {
+	const minutes = Math.floor(seconds / 60);
+	const remainingSeconds = Math.floor(seconds % 60);
+	return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}.${Math.floor(1000 * seconds % 1000).toString().padStart(3, '0')}`;
+}
+
+playButton.addEventListener('click', togglePlay);
+window.addEventListener('keydown', (e) => {
+	if (e.code === 'Space') {
+		togglePlay();
+		e.preventDefault();
+	}
+});
+
+let movingRangeInput = false;
+rangeInput.addEventListener('input', () => {
+	movingRangeInput = true;
+	const time = Number(rangeInput.value) * totalDuration;
+	currentTimeElement.textContent = formatSeconds(time);
+});
+rangeInput.addEventListener('change', async () => {
+	movingRangeInput = false;
+
+	if (seeking) {
+		return;
+	}
+
+	const wasPlaying = playing;
+
+	if (wasPlaying) {
+		pause();
+	}
+
+	const newTime = Number(rangeInput.value) * totalDuration;
+	playbackTimeAtStart = newTime;
+
+	await seek();
+
+	if (wasPlaying) {
+		play();
+	}
+});
+addEventListener('pointerup', () => movingRangeInput = false);
+
+render();
+play();
+</script>

@@ -142,9 +142,13 @@ abstract class BaseMediaFrameDrain<
 		let firstFrameQueued = false;
 		let lastFrame: MediaFrame | null = null;
 		let { promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers();
+		let { promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers();
 		let ended = false;
 
+		const MAX_QUEUE_SIZE = 8;
+
 		const decoder = await this.createDecoder((frame) => {
+			onQueueDequeue();
 			const frameTimestamp = frame.timestamp / 1e6;
 
 			if (frameTimestamp >= endTimestamp) {
@@ -216,14 +220,13 @@ abstract class BaseMediaFrameDrain<
 			await chunks.next();
 
 			while (currentChunk && !ended) {
-				// TODO: Some sort of queue size limit for the frames? Right now this code relies on the pace at which
-				// the consumer calls .close()
+				if (frameQueue.length + decoder.decodeQueueSize > MAX_QUEUE_SIZE) {
+					({ promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers());
+					await queueDequeue;
+					continue;
+				}
 
 				decoder.decode(currentChunk);
-
-				if (decoder.decodeQueueSize >= 10) {
-					await new Promise(resolve => decoder.addEventListener('dequeue', resolve, { once: true }));
-				}
 
 				const chunkResult = await chunks.next();
 				if (chunkResult.done) {
@@ -250,6 +253,7 @@ abstract class BaseMediaFrameDrain<
 			while (true) {
 				if (frameQueue.length > 0) {
 					yield frameQueue.shift()!;
+					onQueueDequeue();
 				} else if (!decoderIsFlushed) {
 					await queueNotEmpty;
 				} else {
@@ -258,6 +262,11 @@ abstract class BaseMediaFrameDrain<
 			}
 		} finally {
 			ended = true;
+			onQueueDequeue();
+
+			for (const frame of frameQueue) {
+				frame.close();
+			}
 		}
 	}
 }
@@ -419,9 +428,12 @@ export class AudioBufferDrain {
 			audioBuffer.copyToChannel(dataBytes, i);
 		}
 
+		const sampleDuration = 1 / data.sampleRate;
+
 		return {
 			buffer: audioBuffer,
-			timestamp: data.timestamp / 1e6,
+			// Rounding the timestamp based on the sample duration removes audio playback artifacts
+			timestamp: Math.round(data.timestamp / 1e6 / sampleDuration) * sampleDuration,
 		};
 	}
 
