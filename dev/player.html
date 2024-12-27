@@ -48,33 +48,8 @@ let videoRotation = 0;
 if (!videoTrack) {
 	canvas.style.display = 'none';
 } else {
-	canvas.width = await videoTrack.getWidth();
-	canvas.height = await videoTrack.getHeight();
-
-	videoRotation = await videoTrack.getRotation();
-	if (videoRotation % 180 === 90) {
-		[canvas.width, canvas.height] = [canvas.height, canvas.width];
-	}
-
-	switch (videoRotation) {
-		case 90:
-			// Move to right edge, then rotate
-			context.translate(canvas.width, 0);
-			context.rotate(90 * Math.PI / 180);
-			break;
-	
-		case 180:
-			// Move to bottom-right corner, then rotate
-			context.translate(canvas.width, canvas.height);
-			context.rotate(180 * Math.PI / 180);
-			break;
-	
-		case 270:
-			// Move to bottom edge, then rotate
-			context.translate(0, canvas.height);
-			context.rotate(270 * Math.PI / 180);
-			break;
-	}
+	canvas.width = await videoTrack.getRotatedWidth();
+	canvas.height = await videoTrack.getRotatedHeight();
 }
 
 const totalDuration = await input.computeDuration();
@@ -82,7 +57,7 @@ durationElement.textContent = formatSeconds(totalDuration);
 
 playerDiv.style.display = 'flex';
 
-const videoDrain = videoTrack && new Metamuxer.VideoFrameDrain(videoTrack);
+const videoDrain = videoTrack && new Metamuxer.CanvasDrain(videoTrack);
 const audioDrain = audioTrack && new Metamuxer.AudioBufferDrain(audioTrack);
 
 let startTime = null;
@@ -149,18 +124,15 @@ async function seek() {
 
 	await videoFrameIterator?.return();
 
-	videoFrameIterator = videoDrain.frames(getPlaybackTime());
+	videoFrameIterator = videoDrain.canvases(getPlaybackTime());
 	
 	const newCurrentFrame = (await videoFrameIterator.next()).value;
 	const newNextFrame = (await videoFrameIterator.next()).value;
 
-	currentFrame?.close();
-	nextFrame?.close();
-
 	currentFrame = newCurrentFrame;
 	nextFrame = newNextFrame;
 
-	context.drawImage(currentFrame, 0, 0);
+	context.drawImage(currentFrame.canvas, 0, 0);
 	
 	seeking = false;
 }
@@ -174,18 +146,15 @@ async function render() {
 	}
 
 	if (currentFrame) {
-		while (nextFrame && nextFrame.timestamp / 1e6 <= playbackTime && !seeking) {
-			currentFrame.close();
+		while (nextFrame && nextFrame.timestamp <= playbackTime && !seeking) {
 			currentFrame = nextFrame;
-			context.drawImage(currentFrame, 0, 0);
+			context.drawImage(currentFrame.canvas, 0, 0);
 
 			const currentSeekId = seekId;
 			const newNextFrame = (await videoFrameIterator.next()).value;
 
 			if (currentSeekId === seekId) {
 				nextFrame = newNextFrame;
-			} else {
-				newNextFrame.close();
 			}
 		}
 	}

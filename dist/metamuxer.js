@@ -31,6 +31,7 @@ var Metamuxer = (() => {
     AudioDataSource: () => AudioDataSource,
     AudioSource: () => AudioSource,
     BlobSource: () => BlobSource,
+    CanvasDrain: () => CanvasDrain,
     CanvasSource: () => CanvasSource,
     EncodedAudioChunkDrain: () => EncodedAudioChunkDrain,
     EncodedAudioChunkSource: () => EncodedAudioChunkSource,
@@ -4171,6 +4172,14 @@ ${cue.notes ?? ""}`;
     getRotation() {
       return this._backing.getRotation();
     }
+    async getRotatedWidth() {
+      const rotation = await this._backing.getRotation();
+      return rotation % 180 === 0 ? this._backing.getWidth() : this._backing.getHeight();
+    }
+    async getRotatedHeight() {
+      const rotation = await this._backing.getRotation();
+      return rotation % 180 === 0 ? this._backing.getHeight() : this._backing.getWidth();
+    }
     getDecoderConfig() {
       return this._backing.getDecoderConfig();
     }
@@ -6235,6 +6244,45 @@ ${cue.notes ?? ""}`;
       return this.mediaFrames(startTimestamp, endTimestamp);
     }
   };
+  var CanvasDrain = class {
+    constructor(videoTrack, dimensions) {
+      this.videoTrack = videoTrack;
+      this.dimensions = dimensions;
+      this.videoFrameDrain = new VideoFrameDrain(videoTrack);
+    }
+    videoFrameDrain;
+    async videoFrameToWrappedCanvas(frame) {
+      const width = this.dimensions?.width ?? await this.videoTrack.getRotatedWidth();
+      const height = this.dimensions?.height ?? await this.videoTrack.getRotatedHeight();
+      const rotation = await this.videoTrack.getRotation();
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext("2d", { alpha: false });
+      assert(context);
+      context.translate(width / 2, height / 2);
+      context.rotate(rotation * Math.PI / 180);
+      context.translate(-width / 2, -height / 2);
+      const [imageWidth, imageHeight] = rotation % 180 === 0 ? [width, height] : [height, width];
+      context.drawImage(frame, (width - imageWidth) / 2, (height - imageHeight) / 2, imageWidth, imageHeight);
+      const result = {
+        canvas,
+        timestamp: frame.timestamp / 1e6,
+        duration: (frame.duration ?? 0) / 1e6
+      };
+      frame.close();
+      return result;
+    }
+    async getCanvas(timestamp) {
+      const frame = await this.videoFrameDrain.getFrame(timestamp);
+      return frame && this.videoFrameToWrappedCanvas(frame);
+    }
+    async *canvases(startTimestamp = 0, endTimestamp = Infinity) {
+      for await (const frame of this.videoFrameDrain.frames(startTimestamp, endTimestamp)) {
+        yield this.videoFrameToWrappedCanvas(frame);
+      }
+    }
+  };
   var EncodedAudioChunkDrain = class extends BaseChunkDrain {
     constructor(audioTrack) {
       super();
@@ -6291,9 +6339,6 @@ ${cue.notes ?? ""}`;
     }
     audioDataDrain;
     audioDataToWrappedArrayBuffer(data) {
-      if (!data) {
-        return null;
-      }
       const audioBuffer = new AudioBuffer({
         numberOfChannels: data.numberOfChannels,
         length: data.numberOfFrames,
@@ -6305,21 +6350,21 @@ ${cue.notes ?? ""}`;
         audioBuffer.copyToChannel(dataBytes, i);
       }
       const sampleDuration = 1 / data.sampleRate;
-      return {
+      const result = {
         buffer: audioBuffer,
         // Rounding the timestamp based on the sample duration removes audio playback artifacts
         timestamp: Math.round(data.timestamp / 1e6 / sampleDuration) * sampleDuration
       };
+      data.close();
+      return result;
     }
     async getBuffer(timestamp) {
       const data = await this.audioDataDrain.getData(timestamp);
-      return this.audioDataToWrappedArrayBuffer(data);
+      return data && this.audioDataToWrappedArrayBuffer(data);
     }
     async *buffers(startTimestamp = 0, endTimestamp = Infinity) {
       for await (const data of this.audioDataDrain.data(startTimestamp, endTimestamp)) {
-        const result = this.audioDataToWrappedArrayBuffer(data);
-        data.close();
-        yield result;
+        yield this.audioDataToWrappedArrayBuffer(data);
       }
     }
   };

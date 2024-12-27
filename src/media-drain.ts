@@ -333,6 +333,61 @@ export class VideoFrameDrain extends BaseMediaFrameDrain<EncodedVideoChunk, Vide
 	}
 }
 
+type WrappedCanvas = {
+	canvas: HTMLCanvasElement;
+	timestamp: number;
+	duration: number;
+};
+
+export class CanvasDrain {
+	videoFrameDrain: VideoFrameDrain;
+
+	constructor(public videoTrack: InputVideoTrack, public dimensions?: { width: number; height: number }) {
+		this.videoFrameDrain = new VideoFrameDrain(videoTrack);
+	}
+
+	private async videoFrameToWrappedCanvas(frame: VideoFrame): Promise<WrappedCanvas> {
+		const width = this.dimensions?.width ?? await this.videoTrack.getRotatedWidth();
+		const height = this.dimensions?.height ?? await this.videoTrack.getRotatedHeight();
+		const rotation = await this.videoTrack.getRotation();
+
+		const canvas = document.createElement('canvas');
+		canvas.width = width;
+		canvas.height = height;
+
+		const context = canvas.getContext('2d', { alpha: false });
+		assert(context);
+
+		context.translate(width / 2, height / 2);
+		context.rotate(rotation * Math.PI / 180);
+		context.translate(-width / 2, -height / 2);
+
+		const [imageWidth, imageHeight] = rotation % 180 === 0 ? [width, height] : [height, width];
+
+		context.drawImage(frame, (width - imageWidth) / 2, (height - imageHeight) / 2, imageWidth, imageHeight);
+
+		const result = {
+			canvas,
+			timestamp: frame.timestamp / 1e6,
+			duration: (frame.duration ?? 0) / 1e6,
+		};
+
+		frame.close();
+		return result;
+	}
+
+	async getCanvas(timestamp: number) {
+		const frame = await this.videoFrameDrain.getFrame(timestamp);
+		return frame && this.videoFrameToWrappedCanvas(frame);
+	}
+
+	async* canvases(startTimestamp = 0, endTimestamp = Infinity) {
+		for await (const frame of this.videoFrameDrain.frames(startTimestamp, endTimestamp)) {
+			yield this.videoFrameToWrappedCanvas(frame);
+		}
+	}
+}
+
 export class EncodedAudioChunkDrain extends BaseChunkDrain<EncodedAudioChunk> {
 	constructor(public audioTrack: InputAudioTrack) {
 		super();
@@ -407,11 +462,7 @@ export class AudioBufferDrain {
 		this.audioDataDrain = new AudioDataDrain(audioTrack);
 	}
 
-	private audioDataToWrappedArrayBuffer(data: AudioData | null): WrappedAudioBuffer | null {
-		if (!data) {
-			return null;
-		}
-
+	private audioDataToWrappedArrayBuffer(data: AudioData): WrappedAudioBuffer {
 		const audioBuffer = new AudioBuffer({
 			numberOfChannels: data.numberOfChannels,
 			length: data.numberOfFrames,
@@ -428,24 +479,24 @@ export class AudioBufferDrain {
 
 		const sampleDuration = 1 / data.sampleRate;
 
-		return {
+		const result = {
 			buffer: audioBuffer,
 			// Rounding the timestamp based on the sample duration removes audio playback artifacts
 			timestamp: Math.round(data.timestamp / 1e6 / sampleDuration) * sampleDuration,
 		};
+
+		data.close();
+		return result;
 	}
 
 	async getBuffer(timestamp: number) {
 		const data = await this.audioDataDrain.getData(timestamp);
-		return this.audioDataToWrappedArrayBuffer(data);
+		return data && this.audioDataToWrappedArrayBuffer(data);
 	}
 
 	async* buffers(startTimestamp = 0, endTimestamp = Infinity) {
 		for await (const data of this.audioDataDrain.data(startTimestamp, endTimestamp)) {
-			const result = this.audioDataToWrappedArrayBuffer(data);
-			data.close();
-
-			yield result;
+			yield this.audioDataToWrappedArrayBuffer(data);
 		}
 	}
 }

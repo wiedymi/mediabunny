@@ -75,6 +75,16 @@ export class InputVideoTrack extends InputTrack {
 		return this._backing.getRotation();
 	}
 
+	async getRotatedWidth() {
+		const rotation = await this._backing.getRotation();
+		return rotation % 180 === 0 ? this._backing.getWidth() : this._backing.getHeight();
+	}
+
+	async getRotatedHeight() {
+		const rotation = await this._backing.getRotation();
+		return rotation % 180 === 0 ? this._backing.getHeight() : this._backing.getWidth();
+	}
+
 	getDecoderConfig() {
 		return this._backing.getDecoderConfig();
 	}

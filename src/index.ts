@@ -42,6 +42,7 @@ export {
 	EncodedVideoChunkDrain,
 	VideoFrameDrain,
 	EncodedAudioChunkDrain,
+	CanvasDrain,
 	AudioDataDrain,
 	AudioBufferDrain,
 } from './media-drain';
