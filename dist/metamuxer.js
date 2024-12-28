@@ -234,6 +234,13 @@ var Metamuxer = (() => {
       arr.splice(index, 1);
     }
   };
+  var toAsyncIterator = async function* (source) {
+    if (Symbol.iterator in source) {
+      yield* source[Symbol.iterator]();
+    } else {
+      yield* source[Symbol.asyncIterator]();
+    }
+  };
 
   // src/subtitles.ts
   var cueBlockHeaderRegex = /(?:(.+?)\n)?((?:\d{2}:)?\d{2}:\d{2}.\d{3})\s+-->\s+((?:\d{2}:)?\d{2}:\d{2}.\d{3})/g;
@@ -5365,9 +5372,7 @@ ${cue.notes ?? ""}`;
       this.internalTrack = internalTrack;
     }
     chunkToSampleIndex = /* @__PURE__ */ new WeakMap();
-    sampleIndexToChunk = /* @__PURE__ */ new Map();
     chunkToFragmentLocation = /* @__PURE__ */ new WeakMap();
-    fragmentLocationToChunk = /* @__PURE__ */ new Map();
     getCodec() {
       throw new Error("Not implemented on base class.");
     }
@@ -5394,7 +5399,11 @@ ${cue.notes ?? ""}`;
       }
       return this.fetchChunkForSampleIndex(0, options);
     }
+    roundToMicrosecond(timestamp) {
+      return (Math.floor(timestamp * 1e6) + 0.99999999) / 1e6;
+    }
     async getChunk(timestamp, options) {
+      timestamp = this.roundToMicrosecond(timestamp);
       const timestampInTimescale = timestamp * this.internalTrack.timescale;
       if (this.internalTrack.demuxer.isFragmented) {
         return this.performFragmentedLookup(
@@ -5469,6 +5478,7 @@ ${cue.notes ?? ""}`;
       return this.fetchChunkForSampleIndex(sampleIndex + 1, options);
     }
     async getKeyChunk(timestamp, options) {
+      timestamp = this.roundToMicrosecond(timestamp);
       const timestampInTimescale = timestamp * this.internalTrack.timescale;
       if (this.internalTrack.demuxer.isFragmented) {
         return this.performFragmentedLookup(
@@ -5555,10 +5565,6 @@ ${cue.notes ?? ""}`;
       if (sampleIndex === -1) {
         return null;
       }
-      const existingChunk = this.sampleIndexToChunk.get(sampleIndex)?.deref();
-      if (existingChunk) {
-        return existingChunk;
-      }
       const sampleTable = this.internalTrack.demuxer.getSampleTableForTrack(this.internalTrack);
       const sampleInfo = getSampleInfo(sampleTable, sampleIndex);
       if (!sampleInfo) {
@@ -5581,17 +5587,11 @@ ${cue.notes ?? ""}`;
       const duration = 1e6 * sampleInfo.duration / this.internalTrack.timescale;
       const chunk = this.createChunk(data, timestamp, duration, sampleInfo.isKeyFrame);
       this.chunkToSampleIndex.set(chunk, sampleIndex);
-      this.sampleIndexToChunk.set(sampleIndex, new WeakRef(chunk));
       return chunk;
     }
     async fetchChunkInFragment(fragment, sampleIndex, options) {
       if (sampleIndex === -1) {
         return null;
-      }
-      const compositeKey = `${fragment.moofOffset}:${sampleIndex}`;
-      const existingChunk = this.fragmentLocationToChunk.get(compositeKey)?.deref();
-      if (existingChunk) {
-        return existingChunk;
       }
       const trackData = fragment.trackData.get(this.internalTrack.id);
       const sample = trackData.samples[sampleIndex];
@@ -5610,7 +5610,6 @@ ${cue.notes ?? ""}`;
       const duration = 1e6 * sample.duration / this.internalTrack.timescale;
       const chunk = this.createChunk(data, timestamp, duration, sample.isKeyFrame);
       this.chunkToFragmentLocation.set(chunk, { fragment, sampleIndex });
-      this.fragmentLocationToChunk.set(compositeKey, new WeakRef(chunk));
       return chunk;
     }
     findSampleInFragmentsForTimestamp(timestampInTimescale) {
@@ -6054,57 +6053,123 @@ ${cue.notes ?? ""}`;
     }
   };
   var BaseMediaFrameDrain = class {
-    async getKeyMediaFrame(timestamp) {
-      let result = null;
-      const decoder = await this.createDecoder((frame) => result = frame);
-      const chunkDrain = this.createChunkDrain();
-      const chunk = await chunkDrain.getKeyChunk(timestamp);
-      if (!chunk) {
-        return null;
-      }
-      decoder.decode(chunk);
-      await decoder.flush();
-      decoder.close();
-      return result;
+    duplicateFrame(frame) {
+      return structuredClone(frame);
     }
-    async getMediaFrame(timestamp) {
-      let result = null;
+    async *mediaFramesAtTimestamps(timestamps) {
+      const timestampIterator = toAsyncIterator(timestamps);
+      const timestampsOfInterest = [];
+      const frameQueue = [];
+      let { promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers();
+      let { promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers();
+      let decoderIsFlushed = false;
+      let ended = false;
+      const MAX_QUEUE_SIZE = 8;
+      let lastUsedFrame = null;
+      const pushToQueue = (frame) => {
+        frameQueue.push(frame);
+        onQueueNotEmpty();
+        ({ promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers());
+      };
       const decoder = await this.createDecoder((frame) => {
-        if (frame.timestamp / 1e6 <= timestamp) {
-          result?.close();
-          result = frame;
+        onQueueDequeue();
+        if (ended) {
+          frame.close();
+          return;
+        }
+        let frameUsed = false;
+        while (timestampsOfInterest.length > 0 && timestampsOfInterest[0] === frame.timestamp) {
+          pushToQueue(this.duplicateFrame(frame));
+          timestampsOfInterest.shift();
+          frameUsed = true;
+        }
+        if (frameUsed) {
+          lastUsedFrame?.close();
+          lastUsedFrame = frame;
         } else {
           frame.close();
         }
       });
-      const chunkDrain = this.createChunkDrain();
-      const keyChunk = await chunkDrain.getKeyChunk(timestamp);
-      if (!keyChunk) {
-        return null;
-      }
-      const targetChunk = await chunkDrain.getChunk(timestamp);
-      assert(targetChunk);
-      decoder.decode(keyChunk);
-      let currentChunk = keyChunk;
-      while (currentChunk !== targetChunk) {
-        const nextChunk = await chunkDrain.getNextChunk(currentChunk);
-        assert(nextChunk);
-        currentChunk = nextChunk;
-        decoder.decode(nextChunk);
-        if (decoder.decodeQueueSize >= 10) {
-          await new Promise((resolve) => decoder.addEventListener("dequeue", resolve, { once: true }));
+      void (async () => {
+        const chunkDrain = this.createChunkDrain();
+        let lastKeyChunk = null;
+        let lastChunk = null;
+        for await (const timestamp of timestampIterator) {
+          while (frameQueue.length + decoder.decodeQueueSize > MAX_QUEUE_SIZE) {
+            ({ promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers());
+            await queueDequeue;
+          }
+          if (ended) {
+            break;
+          }
+          const targetChunk = await chunkDrain.getChunk(timestamp);
+          if (!targetChunk) {
+            pushToQueue(null);
+            continue;
+          }
+          const keyChunk = await chunkDrain.getKeyChunk(timestamp);
+          if (!keyChunk) {
+            pushToQueue(null);
+            continue;
+          }
+          timestampsOfInterest.push(targetChunk.timestamp);
+          if (lastKeyChunk && keyChunk.timestamp === lastKeyChunk.timestamp && targetChunk.timestamp >= lastChunk.timestamp) {
+            assert(lastChunk);
+            if (targetChunk.timestamp === lastChunk.timestamp && timestampsOfInterest.length === 1) {
+              if (lastUsedFrame) {
+                pushToQueue(this.duplicateFrame(lastUsedFrame));
+              }
+              timestampsOfInterest.shift();
+            }
+          } else {
+            lastKeyChunk = keyChunk;
+            lastChunk = keyChunk;
+            decoder.decode(keyChunk);
+          }
+          while (lastChunk.timestamp !== targetChunk.timestamp) {
+            const nextChunk = await chunkDrain.getNextChunk(lastChunk);
+            assert(nextChunk);
+            lastChunk = nextChunk;
+            decoder.decode(nextChunk);
+          }
+          if (decoder.decodeQueueSize >= 10) {
+            await new Promise((resolve) => decoder.addEventListener("dequeue", resolve, { once: true }));
+          }
         }
+        await decoder.flush();
+        decoder.close();
+        decoderIsFlushed = true;
+        onQueueNotEmpty();
+      })();
+      try {
+        while (true) {
+          if (frameQueue.length > 0) {
+            const nextFrame = frameQueue.shift();
+            assert(nextFrame !== void 0);
+            yield nextFrame;
+            onQueueDequeue();
+          } else if (!decoderIsFlushed) {
+            await queueNotEmpty;
+          } else {
+            break;
+          }
+        }
+      } finally {
+        ended = true;
+        onQueueDequeue();
+        for (const frame of frameQueue) {
+          frame?.close();
+        }
+        lastUsedFrame?.close();
       }
-      await decoder.flush();
-      decoder.close();
-      return result;
     }
-    async *mediaFrames(startTimestamp = 0, endTimestamp = Infinity) {
+    async *mediaFramesInRange(startTimestamp = 0, endTimestamp = Infinity) {
       const frameQueue = [];
       let firstFrameQueued = false;
       let lastFrame = null;
       let { promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers();
       let { promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers();
+      let decoderIsFlushed = false;
       let ended = false;
       const MAX_QUEUE_SIZE = 8;
       const decoder = await this.createDecoder((frame) => {
@@ -6140,7 +6205,6 @@ ${cue.notes ?? ""}`;
       if (!keyChunk) {
         return;
       }
-      let decoderIsFlushed = false;
       void (async () => {
         let currentChunk = keyChunk;
         let chunksEndTimestamp = Infinity;
@@ -6234,14 +6298,17 @@ ${cue.notes ?? ""}`;
     createChunkDrain() {
       return new EncodedVideoChunkDrain(this.videoTrack);
     }
-    getKeyFrame(timestamp) {
-      return this.getKeyMediaFrame(timestamp);
-    }
-    getFrame(timestamp) {
-      return this.getMediaFrame(timestamp);
+    async getFrame(timestamp) {
+      for await (const frame of this.mediaFramesAtTimestamps([timestamp])) {
+        return frame;
+      }
+      throw new Error("Internal error: Iterator returned nothing.");
     }
     frames(startTimestamp = 0, endTimestamp = Infinity) {
-      return this.mediaFrames(startTimestamp, endTimestamp);
+      return this.mediaFramesInRange(startTimestamp, endTimestamp);
+    }
+    framesAtTimestamps(timestamps) {
+      return this.mediaFramesAtTimestamps(timestamps);
     }
   };
   var CanvasDrain = class {
@@ -6280,6 +6347,11 @@ ${cue.notes ?? ""}`;
     async *canvases(startTimestamp = 0, endTimestamp = Infinity) {
       for await (const frame of this.videoFrameDrain.frames(startTimestamp, endTimestamp)) {
         yield this.videoFrameToWrappedCanvas(frame);
+      }
+    }
+    async *canvasesAtTimestamps(timestamps) {
+      for await (const frame of this.videoFrameDrain.framesAtTimestamps(timestamps)) {
+        yield frame && this.videoFrameToWrappedCanvas(frame);
       }
     }
   };
@@ -6322,14 +6394,17 @@ ${cue.notes ?? ""}`;
     createChunkDrain() {
       return new EncodedAudioChunkDrain(this.audioTrack);
     }
-    getKeyData(timestamp) {
-      return this.getKeyMediaFrame(timestamp);
-    }
-    getData(timestamp) {
-      return this.getMediaFrame(timestamp);
+    async getData(timestamp) {
+      for await (const data of this.mediaFramesAtTimestamps([timestamp])) {
+        return data;
+      }
+      throw new Error("Internal error: Iterator returned nothing.");
     }
     data(startTimestamp = 0, endTimestamp = Infinity) {
-      return this.mediaFrames(startTimestamp, endTimestamp);
+      return this.mediaFramesInRange(startTimestamp, endTimestamp);
+    }
+    dataAtTimestamps(timestamps) {
+      return this.mediaFramesAtTimestamps(timestamps);
     }
   };
   var AudioBufferDrain = class {
@@ -6365,6 +6440,11 @@ ${cue.notes ?? ""}`;
     async *buffers(startTimestamp = 0, endTimestamp = Infinity) {
       for await (const data of this.audioDataDrain.data(startTimestamp, endTimestamp)) {
         yield this.audioDataToWrappedArrayBuffer(data);
+      }
+    }
+    async *buffersAtTimestamps(timestamps) {
+      for await (const data of this.audioDataDrain.dataAtTimestamps(timestamps)) {
+        yield data && this.audioDataToWrappedArrayBuffer(data);
       }
     }
   };

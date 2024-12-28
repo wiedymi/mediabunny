@@ -165,7 +165,7 @@ export const binarySearchExact = <T>(arr: T[], key: number, valueGetter: (x: T) 
 
 		if (midVal === key) {
 			res = mid;
-			high = mid - 1; // continue searching left to find the lowest index
+			high = mid - 1; // Continue searching left to find the lowest index
 		} else if (midVal < key) {
 			low = mid + 1;
 		} else {
@@ -211,5 +211,19 @@ export const removeItem = <T>(arr: T[], item: T) => {
 	const index = arr.indexOf(item);
 	if (index !== -1) {
 		arr.splice(index, 1);
+	}
+};
+
+export type AnyIterable<T> =
+	| Iterable<T>
+	| AsyncIterable<T>;
+
+export const toAsyncIterator = async function* <T>(source: AnyIterable<T>): AsyncGenerator<T, void, unknown> {
+	if (Symbol.iterator in source) {
+		// @ts-expect-error Trust me
+		yield* source[Symbol.iterator]();
+	} else {
+		// @ts-expect-error Trust me
+		yield* source[Symbol.asyncIterator]();
 	}
 };

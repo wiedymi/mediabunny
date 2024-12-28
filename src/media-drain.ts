@@ -1,5 +1,5 @@
 import { ChunkRetrievalOptions, InputAudioTrack, InputVideoTrack } from './input-track';
-import { assert, promiseWithResolvers } from './misc';
+import { AnyIterable, assert, promiseWithResolvers, toAsyncIterator } from './misc';
 
 abstract class BaseChunkDrain<Chunk extends EncodedVideoChunk | EncodedAudioChunk> {
 	abstract getFirstChunk(options?: ChunkRetrievalOptions): Promise<Chunk | null>;
@@ -78,71 +78,154 @@ abstract class BaseMediaFrameDrain<
 	abstract createDecoder(onMedia: (media: MediaFrame) => unknown): Promise<VideoDecoder | AudioDecoder>;
 	abstract createChunkDrain(): BaseChunkDrain<Chunk>;
 
-	protected async getKeyMediaFrame(timestamp: number): Promise<MediaFrame | null> {
-		let result: MediaFrame | null = null;
-
-		const decoder = await this.createDecoder(frame => result = frame);
-		const chunkDrain = this.createChunkDrain();
-		const chunk = await chunkDrain.getKeyChunk(timestamp);
-		if (!chunk) {
-			return null;
-		}
-
-		decoder.decode(chunk);
-
-		await decoder.flush();
-		decoder.close();
-
-		return result;
+	private duplicateFrame(frame: MediaFrame) {
+		return structuredClone(frame);
 	}
 
-	protected async getMediaFrame(timestamp: number): Promise<MediaFrame | null> {
-		let result: MediaFrame | null = null;
+	protected async* mediaFramesAtTimestamps(timestamps: AnyIterable<number>) {
+		const timestampIterator = toAsyncIterator(timestamps);
+		const timestampsOfInterest: number[] = [];
+
+		const frameQueue: (MediaFrame | null)[] = [];
+		let { promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers();
+		let { promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers();
+		let decoderIsFlushed = false;
+		let ended = false;
+
+		const MAX_QUEUE_SIZE = 8;
+
+		let lastUsedFrame: MediaFrame | null = null;
+		const pushToQueue = (frame: MediaFrame | null) => {
+			frameQueue.push(frame);
+			onQueueNotEmpty();
+			({ promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers());
+		};
 
 		const decoder = await this.createDecoder((frame) => {
-			if (frame.timestamp / 1e6 <= timestamp) {
-				result?.close();
-				result = frame;
+			onQueueDequeue();
+
+			if (ended) {
+				frame.close();
+				return;
+			}
+
+			let frameUsed = false;
+			while (timestampsOfInterest.length > 0 && timestampsOfInterest[0] === frame.timestamp) {
+				pushToQueue(this.duplicateFrame(frame));
+				timestampsOfInterest.shift();
+				frameUsed = true;
+			}
+
+			if (frameUsed) {
+				lastUsedFrame?.close();
+				lastUsedFrame = frame;
 			} else {
 				frame.close();
 			}
 		});
-		const chunkDrain = this.createChunkDrain();
-		const keyChunk = await chunkDrain.getKeyChunk(timestamp);
-		if (!keyChunk) {
-			return null;
-		}
 
-		const targetChunk = await chunkDrain.getChunk(timestamp);
-		assert(targetChunk);
+		// The following is the "pump" process that keeps pumping chunks into the decoder
+		void (async () => {
+			const chunkDrain = this.createChunkDrain();
+			let lastKeyChunk: Chunk | null = null;
+			let lastChunk: Chunk | null = null;
 
-		decoder.decode(keyChunk);
+			for await (const timestamp of timestampIterator) {
+				while (frameQueue.length + decoder.decodeQueueSize > MAX_QUEUE_SIZE) {
+					({ promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers());
+					await queueDequeue;
+				}
 
-		let currentChunk = keyChunk;
-		while (currentChunk !== targetChunk) {
-			const nextChunk = await chunkDrain.getNextChunk(currentChunk);
-			assert(nextChunk);
+				if (ended) {
+					break;
+				}
 
-			currentChunk = nextChunk;
-			decoder.decode(nextChunk);
+				const targetChunk = await chunkDrain.getChunk(timestamp);
+				if (!targetChunk) {
+					pushToQueue(null);
+					continue;
+				}
 
-			if (decoder.decodeQueueSize >= 10) {
-				await new Promise(resolve => decoder.addEventListener('dequeue', resolve, { once: true }));
+				const keyChunk = await chunkDrain.getKeyChunk(timestamp);
+				if (!keyChunk) {
+					pushToQueue(null);
+					continue;
+				}
+
+				timestampsOfInterest.push(targetChunk.timestamp);
+
+				if (
+					lastKeyChunk
+					&& keyChunk.timestamp === lastKeyChunk.timestamp
+					&& targetChunk.timestamp >= lastChunk!.timestamp
+				) {
+					assert(lastChunk);
+
+					if (targetChunk.timestamp === lastChunk.timestamp && timestampsOfInterest.length === 1) {
+						// Special case: We have a repeat chunk, but the frame for that chunk has already been decoded.
+						// Therefore, we need to push the frame here instead of in the decoder callback.
+						if (lastUsedFrame) {
+							pushToQueue(this.duplicateFrame(lastUsedFrame));
+						}
+						timestampsOfInterest.shift();
+					}
+				} else {
+					lastKeyChunk = keyChunk;
+					lastChunk = keyChunk;
+					decoder.decode(keyChunk);
+				}
+
+				while (lastChunk.timestamp !== targetChunk.timestamp) {
+					const nextChunk = await chunkDrain.getNextChunk(lastChunk);
+					assert(nextChunk);
+
+					lastChunk = nextChunk;
+					decoder.decode(nextChunk);
+				}
+
+				if (decoder.decodeQueueSize >= 10) {
+					await new Promise(resolve => decoder.addEventListener('dequeue', resolve, { once: true }));
+				}
 			}
+
+			await decoder.flush();
+			decoder.close();
+
+			decoderIsFlushed = true;
+			onQueueNotEmpty(); // To unstuck the generator
+		})();
+
+		try {
+			while (true) {
+				if (frameQueue.length > 0) {
+					const nextFrame = frameQueue.shift();
+					assert(nextFrame !== undefined);
+					yield nextFrame;
+					onQueueDequeue();
+				} else if (!decoderIsFlushed) {
+					await queueNotEmpty;
+				} else {
+					break;
+				}
+			}
+		} finally {
+			ended = true;
+			onQueueDequeue();
+
+			for (const frame of frameQueue) {
+				frame?.close();
+			}
+			(lastUsedFrame as MediaFrame | null)?.close();
 		}
-
-		await decoder.flush();
-		decoder.close();
-
-		return result;
 	}
 
-	protected async* mediaFrames(startTimestamp = 0, endTimestamp = Infinity) {
+	protected async* mediaFramesInRange(startTimestamp = 0, endTimestamp = Infinity) {
 		const frameQueue: MediaFrame[] = [];
 		let firstFrameQueued = false;
 		let lastFrame: MediaFrame | null = null;
 		let { promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers();
 		let { promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers();
+		let decoderIsFlushed = false;
 		let ended = false;
 
 		const MAX_QUEUE_SIZE = 8;
@@ -191,8 +274,6 @@ abstract class BaseMediaFrameDrain<
 		if (!keyChunk) {
 			return;
 		}
-
-		let decoderIsFlushed = false;
 
 		// The following is the "pump" process that keeps pumping chunks into the decoder
 		void (async () => {
@@ -320,16 +401,19 @@ export class VideoFrameDrain extends BaseMediaFrameDrain<EncodedVideoChunk, Vide
 		return new EncodedVideoChunkDrain(this.videoTrack);
 	}
 
-	getKeyFrame(timestamp: number) {
-		return this.getKeyMediaFrame(timestamp);
-	}
-
-	getFrame(timestamp: number) {
-		return this.getMediaFrame(timestamp);
+	async getFrame(timestamp: number) {
+		for await (const frame of this.mediaFramesAtTimestamps([timestamp])) {
+			return frame;
+		}
+		throw new Error('Internal error: Iterator returned nothing.');
 	}
 
 	frames(startTimestamp = 0, endTimestamp = Infinity) {
-		return this.mediaFrames(startTimestamp, endTimestamp);
+		return this.mediaFramesInRange(startTimestamp, endTimestamp);
+	}
+
+	framesAtTimestamps(timestamps: AnyIterable<number>) {
+		return this.mediaFramesAtTimestamps(timestamps);
 	}
 }
 
@@ -386,6 +470,12 @@ export class CanvasDrain {
 			yield this.videoFrameToWrappedCanvas(frame);
 		}
 	}
+
+	async* canvasesAtTimestamps(timestamps: AnyIterable<number>) {
+		for await (const frame of this.videoFrameDrain.framesAtTimestamps(timestamps)) {
+			yield frame && this.videoFrameToWrappedCanvas(frame);
+		}
+	}
 }
 
 export class EncodedAudioChunkDrain extends BaseChunkDrain<EncodedAudioChunk> {
@@ -437,16 +527,19 @@ export class AudioDataDrain extends BaseMediaFrameDrain<EncodedAudioChunk, Audio
 		return new EncodedAudioChunkDrain(this.audioTrack);
 	}
 
-	getKeyData(timestamp: number) {
-		return this.getKeyMediaFrame(timestamp);
-	}
-
-	getData(timestamp: number) {
-		return this.getMediaFrame(timestamp);
+	async getData(timestamp: number) {
+		for await (const data of this.mediaFramesAtTimestamps([timestamp])) {
+			return data;
+		}
+		throw new Error('Internal error: Iterator returned nothing.');
 	}
 
 	data(startTimestamp = 0, endTimestamp = Infinity) {
-		return this.mediaFrames(startTimestamp, endTimestamp);
+		return this.mediaFramesInRange(startTimestamp, endTimestamp);
+	}
+
+	dataAtTimestamps(timestamps: AnyIterable<number>) {
+		return this.mediaFramesAtTimestamps(timestamps);
 	}
 }
 
@@ -497,6 +590,12 @@ export class AudioBufferDrain {
 	async* buffers(startTimestamp = 0, endTimestamp = Infinity) {
 		for await (const data of this.audioDataDrain.data(startTimestamp, endTimestamp)) {
 			yield this.audioDataToWrappedArrayBuffer(data);
+		}
+	}
+
+	async* buffersAtTimestamps(timestamps: AnyIterable<number>) {
+		for await (const data of this.audioDataDrain.dataAtTimestamps(timestamps)) {
+			yield data && this.audioDataToWrappedArrayBuffer(data);
 		}
 	}
 }

@@ -15,6 +15,45 @@
 
 		const videoTrack = await input.getPrimaryVideoTrack();
 		const drain = new Metamuxer.VideoFrameDrain(videoTrack);
+
+		async function* timestamps() {
+			const fromTime = 0;
+			const toTime = await videoTrack.computeDuration();
+			const extractDuration = toTime - fromTime;
+			const drain = new Metamuxer.EncodedVideoChunkDrain(videoTrack);
+			const thumbnailsNeeded = 16;
+
+			  for (let i = 0; i < thumbnailsNeeded; i++) {
+				const startTime = (extractDuration * i) / thumbnailsNeeded + fromTime;
+				const endTime = Math.min(
+				  (extractDuration * (i + 1)) / thumbnailsNeeded + fromTime,
+				  toTime + 1,
+				);
+
+				const chunk = await drain.getChunk(startTime, { onlyMetadata: true });
+
+				let bestTimestamp = chunk.timestamp / 1e6;
+				if (chunk.type !== 'key') {
+					const nextKeyChunk = await drain.getNextKeyChunk(chunk, { onlyMetadata: true });
+					if (nextKeyChunk.timestamp / 1e6 < endTime) {
+						bestTimestamp = nextKeyChunk.timestamp / 1e6;
+					}
+				}
+
+				yield bestTimestamp;
+			  }
+		}
+
+		for await (const frame of drain.framesAtTimestamps(timestamps())) {
+			const clone = structuredClone(frame);
+			frame.close();
+			console.log(clone)
+		}
+		console.log("done")
+
+		/*
+		const videoTrack = await input.getPrimaryVideoTrack();
+		const drain = new Metamuxer.VideoFrameDrain(videoTrack);
 		const width = await videoTrack.getWidth();
 		const height = await videoTrack.getHeight();
 
@@ -32,6 +71,7 @@
 
 			await new Promise(resolve => setTimeout(resolve, 1000 / 24));
 		}
+		*/
 
 		/*
 		const videoTrack = await input.getPrimaryVideoTrack();

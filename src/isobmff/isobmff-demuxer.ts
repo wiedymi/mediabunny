@@ -1305,18 +1305,12 @@ export class IsobmffDemuxer extends Demuxer {
 
 abstract class IsobmffTrackBacking<Chunk extends EncodedVideoChunk | EncodedAudioChunk> implements InputTrackBacking {
 	chunkToSampleIndex = new WeakMap<Chunk, number>();
-	sampleIndexToChunk = new Map<number, WeakRef<Chunk>>();
-
 	chunkToFragmentLocation = new WeakMap<Chunk, {
 		fragment: Fragment;
 		sampleIndex: number;
 	}>();
 
-	fragmentLocationToChunk = new Map<string, WeakRef<Chunk>>();
-
-	constructor(public internalTrack: InternalTrack) {
-
-	}
+	constructor(public internalTrack: InternalTrack) {}
 
 	getCodec(): Promise<MediaCodec> {
 		throw new Error('Not implemented on base class.');
@@ -1355,7 +1349,20 @@ abstract class IsobmffTrackBacking<Chunk extends EncodedVideoChunk | EncodedAudi
 		return this.fetchChunkForSampleIndex(0, options);
 	}
 
+	private roundToMicrosecond(timestamp: number) {
+		// We transform the timestamp so that chunk retrieval behaves expectedly: All chunks returned have a timestamp
+		// that's floored to the microseconds, and that timestamp may be before the actual timestamp. But since the
+		// actual timestamp is never communicated to the outside, chunk retrieval should work like the timestamp is
+		// exactly equal to its floored version. This means, when we retrieve the chunk for timestamp 0.333333, but the
+		// chunk's true, unrounded timestamp is 1/3, then we would not retrieve that chunk, despite the chunk having a
+		// floored timestamp of 0.333333. That's why we transform the search timestamp by first flooring it to the
+		// microsecond, and then adding "1-eps" to it to make sure get all chunks whose timestamps will round down to
+		// a value included by the search timestamp.
+		return (Math.floor(timestamp * 1e6) + 0.99999999) / 1e6;
+	}
+
 	async getChunk(timestamp: number, options: ChunkRetrievalOptions) {
+		timestamp = this.roundToMicrosecond(timestamp);
 		const timestampInTimescale = timestamp * this.internalTrack.timescale;
 
 		if (this.internalTrack.demuxer.isFragmented) {
@@ -1441,6 +1448,7 @@ abstract class IsobmffTrackBacking<Chunk extends EncodedVideoChunk | EncodedAudi
 	}
 
 	async getKeyChunk(timestamp: number, options: ChunkRetrievalOptions) {
+		timestamp = this.roundToMicrosecond(timestamp);
 		const timestampInTimescale = timestamp * this.internalTrack.timescale;
 
 		if (this.internalTrack.demuxer.isFragmented) {
@@ -1545,11 +1553,6 @@ abstract class IsobmffTrackBacking<Chunk extends EncodedVideoChunk | EncodedAudi
 			return null;
 		}
 
-		const existingChunk = this.sampleIndexToChunk.get(sampleIndex)?.deref();
-		if (existingChunk) {
-			return existingChunk;
-		}
-
 		const sampleTable = this.internalTrack.demuxer.getSampleTableForTrack(this.internalTrack);
 		const sampleInfo = getSampleInfo(sampleTable, sampleIndex);
 		if (!sampleInfo) {
@@ -1577,7 +1580,6 @@ abstract class IsobmffTrackBacking<Chunk extends EncodedVideoChunk | EncodedAudi
 		const chunk = this.createChunk(data, timestamp, duration, sampleInfo.isKeyFrame);
 
 		this.chunkToSampleIndex.set(chunk, sampleIndex);
-		this.sampleIndexToChunk.set(sampleIndex, new WeakRef(chunk));
 
 		return chunk;
 	}
@@ -1585,12 +1587,6 @@ abstract class IsobmffTrackBacking<Chunk extends EncodedVideoChunk | EncodedAudi
 	private async fetchChunkInFragment(fragment: Fragment, sampleIndex: number, options: ChunkRetrievalOptions) {
 		if (sampleIndex === -1) {
 			return null;
-		}
-
-		const compositeKey = `${fragment.moofOffset}:${sampleIndex}`;
-		const existingChunk = this.fragmentLocationToChunk.get(compositeKey)?.deref();
-		if (existingChunk) {
-			return existingChunk;
 		}
 
 		const trackData = fragment.trackData.get(this.internalTrack.id)!;
@@ -1615,7 +1611,6 @@ abstract class IsobmffTrackBacking<Chunk extends EncodedVideoChunk | EncodedAudi
 		const chunk = this.createChunk(data, timestamp, duration, sample.isKeyFrame);
 
 		this.chunkToFragmentLocation.set(chunk, { fragment, sampleIndex });
-		this.fragmentLocationToChunk.set(compositeKey, new WeakRef(chunk));
 
 		return chunk;
 	}
