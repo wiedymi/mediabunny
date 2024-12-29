@@ -1,10 +1,29 @@
 /** @public */
+export declare const ALL_FORMATS: InputFormat[];
+
+/** @public */
+export declare type AnyIterable<T> = Iterable<T> | AsyncIterable<T>;
+
+/** @public */
+export declare class ArrayBufferSource extends Source {
+    constructor(buffer: ArrayBuffer);
+}
+
+/** @public */
 export declare class ArrayBufferTarget extends Target {
     buffer: ArrayBuffer | null;
 }
 
 /** @public */
 export declare const AUDIO_CODECS: readonly ["aac", "opus"];
+
+/** @public */
+export declare class AudioBufferDrain {
+    constructor(audioTrack: InputAudioTrack);
+    getBuffer(timestamp: number): Promise<WrappedAudioBuffer | null>;
+    buffers(startTimestamp?: number, endTimestamp?: number): AsyncGenerator<WrappedAudioBuffer, void, unknown>;
+    buffersAtTimestamps(timestamps: AnyIterable<number>): AsyncGenerator<WrappedAudioBuffer | null, void, unknown>;
+}
 
 /** @public */
 export declare class AudioBufferSource extends AudioSource {
@@ -22,6 +41,14 @@ export declare type AudioCodecConfig = {
 };
 
 /** @public */
+export declare class AudioDataDrain extends BaseMediaFrameDrain<EncodedAudioChunk, AudioData> {
+    constructor(audioTrack: InputAudioTrack);
+    getData(timestamp: number): Promise<AudioData | null>;
+    data(startTimestamp?: number, endTimestamp?: number): AsyncGenerator<AudioData, void, unknown>;
+    dataAtTimestamps(timestamps: AnyIterable<number>): AsyncGenerator<AudioData | null, void, unknown>;
+}
+
+/** @public */
 export declare class AudioDataSource extends AudioSource {
     constructor(codecConfig: AudioCodecConfig);
     digest(audioData: AudioData): Promise<void>;
@@ -36,9 +63,56 @@ export declare abstract class AudioSource extends MediaSource_2 {
 export declare type AudioTrackMetadata = {};
 
 /** @public */
+export declare abstract class BaseChunkDrain<Chunk extends EncodedVideoChunk | EncodedAudioChunk> {
+    abstract getFirstChunk(options?: ChunkRetrievalOptions): Promise<Chunk | null>;
+    abstract getChunk(timestamp: number, options?: ChunkRetrievalOptions): Promise<Chunk | null>;
+    abstract getNextChunk(chunk: Chunk, options?: ChunkRetrievalOptions): Promise<Chunk | null>;
+    abstract getKeyChunk(timestamp: number, options?: ChunkRetrievalOptions): Promise<Chunk | null>;
+    abstract getNextKeyChunk(chunk: Chunk, options?: ChunkRetrievalOptions): Promise<Chunk | null>;
+    chunks(startChunk?: Chunk, endTimestamp?: number): AsyncGenerator<Chunk, void, unknown>;
+}
+
+/** @public */
+export declare abstract class BaseMediaFrameDrain<Chunk extends EncodedVideoChunk | EncodedAudioChunk, MediaFrame extends VideoFrame | AudioData> {
+    protected mediaFramesAtTimestamps(timestamps: AnyIterable<number>): AsyncGenerator<MediaFrame | null, void, unknown>;
+    protected mediaFramesInRange(startTimestamp?: number, endTimestamp?: number): AsyncGenerator<MediaFrame, void, unknown>;
+}
+
+/** @public */
+export declare class BlobSource extends Source {
+    constructor(blob: Blob);
+}
+
+/** @public */
+export declare class CanvasDrain {
+    constructor(videoTrack: InputVideoTrack, dimensions?: {
+        width: number;
+        height: number;
+    });
+    getCanvas(timestamp: number): Promise<WrappedCanvas | null>;
+    canvases(startTimestamp?: number, endTimestamp?: number): AsyncGenerator<WrappedCanvas, void, unknown>;
+    canvasesAtTimestamps(timestamps: AnyIterable<number>): AsyncGenerator<WrappedCanvas | null, void, unknown>;
+}
+
+/** @public */
 export declare class CanvasSource extends VideoSource {
     constructor(canvas: HTMLCanvasElement | OffscreenCanvas, codecConfig: VideoCodecConfig);
     digest(timestamp: number, duration?: number): Promise<void>;
+}
+
+/** @public */
+export declare type ChunkRetrievalOptions = {
+    metadataOnly?: boolean;
+};
+
+/** @public */
+export declare class EncodedAudioChunkDrain extends BaseChunkDrain<EncodedAudioChunk> {
+    constructor(audioTrack: InputAudioTrack);
+    getFirstChunk(options?: ChunkRetrievalOptions): Promise<EncodedAudioChunk | null>;
+    getChunk(timestamp: number, options?: ChunkRetrievalOptions): Promise<EncodedAudioChunk | null>;
+    getNextChunk(chunk: EncodedAudioChunk, options?: ChunkRetrievalOptions): Promise<EncodedAudioChunk | null>;
+    getKeyChunk(timestamp: number, options?: ChunkRetrievalOptions): Promise<EncodedAudioChunk | null>;
+    getNextKeyChunk(chunk: EncodedAudioChunk, options?: ChunkRetrievalOptions): Promise<EncodedAudioChunk | null>;
 }
 
 /** @public */
@@ -48,10 +122,90 @@ export declare class EncodedAudioChunkSource extends AudioSource {
 }
 
 /** @public */
+export declare class EncodedVideoChunkDrain extends BaseChunkDrain<EncodedVideoChunk> {
+    constructor(videoTrack: InputVideoTrack);
+    getFirstChunk(options?: ChunkRetrievalOptions): Promise<EncodedVideoChunk | null>;
+    getChunk(timestamp: number, options?: ChunkRetrievalOptions): Promise<EncodedVideoChunk | null>;
+    getNextChunk(chunk: EncodedVideoChunk, options?: ChunkRetrievalOptions): Promise<EncodedVideoChunk | null>;
+    getKeyChunk(timestamp: number, options?: ChunkRetrievalOptions): Promise<EncodedVideoChunk | null>;
+    getNextKeyChunk(chunk: EncodedVideoChunk, options?: ChunkRetrievalOptions): Promise<EncodedVideoChunk | null>;
+}
+
+/** @public */
 export declare class EncodedVideoChunkSource extends VideoSource {
     constructor(codec: VideoCodec);
     digest(chunk: EncodedVideoChunk, meta?: EncodedVideoChunkMetadata): Promise<void>;
 }
+
+/** @public */
+export declare class Input {
+    constructor(options: InputOptions);
+    getFormat(): Promise<InputFormat>;
+    computeDuration(): Promise<number>;
+    getTracks(): Promise<InputTrack[]>;
+    getVideoTracks(): Promise<InputVideoTrack[]>;
+    getPrimaryVideoTrack(): Promise<InputVideoTrack | null>;
+    getAudioTracks(): Promise<InputAudioTrack[]>;
+    getPrimaryAudioTrack(): Promise<InputAudioTrack | null>;
+    getMimeType(): Promise<string>;
+}
+
+/** @public */
+export declare class InputAudioTrack extends InputTrack {
+    getCodec(): Promise<"aac" | "opus">;
+    getNumberOfChannels(): Promise<number>;
+    getSampleRate(): Promise<number>;
+    getDecoderConfig(): Promise<AudioDecoderConfig>;
+    getCodecMimeType(): Promise<string>;
+}
+
+/** @public */
+export declare abstract class InputFormat {
+}
+
+/** @public */
+export declare type InputOptions = {
+    formats: InputFormat[];
+    source: Source;
+};
+
+/** @public */
+export declare abstract class InputTrack {
+    abstract getCodec(): Promise<MediaCodec>;
+    abstract getCodecMimeType(): Promise<string>;
+    isVideoTrack(): this is InputVideoTrack;
+    isAudioTrack(): this is InputAudioTrack;
+    computeDuration(): Promise<number>;
+}
+
+/** @public */
+export declare class InputVideoTrack extends InputTrack {
+    getCodec(): Promise<"avc" | "hevc" | "vp8" | "vp9" | "av1">;
+    getCodedWidth(): Promise<number>;
+    getCodedHeight(): Promise<number>;
+    getRotation(): Promise<Rotation>;
+    getDisplayWidth(): Promise<number>;
+    getDisplayHeight(): Promise<number>;
+    getDecoderConfig(): Promise<VideoDecoderConfig>;
+    getCodecMimeType(): Promise<string>;
+}
+
+/** @public */
+export declare const ISOBMFF: IsobmffInputFormat;
+
+/** @public */
+export declare class IsobmffInputFormat extends InputFormat {
+}
+
+/** @public */
+export declare const MATROSKA: MatroskaInputFormat;
+
+/** @public */
+export declare class MatroskaInputFormat extends InputFormat {
+}
+
+/** @public */
+export declare type MediaCodec = VideoCodec | AudioCodec | SubtitleCodec;
 
 /** @public */
 declare abstract class MediaSource_2 {
@@ -70,6 +224,9 @@ export declare class MediaStreamVideoTrackSource extends VideoSource {
 }
 
 /** @public */
+export declare const MKV: MatroskaInputFormat;
+
+/** @public */
 export declare class MkvOutputFormat extends OutputFormat {
     constructor(options?: MkvOutputFormatOptions);
 }
@@ -78,6 +235,12 @@ export declare class MkvOutputFormat extends OutputFormat {
 export declare type MkvOutputFormatOptions = {
     streamable?: boolean;
 };
+
+/** @public */
+export declare const MOV: IsobmffInputFormat;
+
+/** @public */
+export declare const MP4: IsobmffInputFormat;
 
 /** @public */
 export declare class Mp4OutputFormat extends OutputFormat {
@@ -108,6 +271,13 @@ export declare type OutputOptions = {
     format: OutputFormat;
     target: Target;
 };
+
+/** @public */
+export declare type Rotation = 0 | 90 | 180 | 270;
+
+/** @public */
+export declare abstract class Source {
+}
 
 /** @public */
 export declare class StreamTarget extends Target {
@@ -168,6 +338,14 @@ export declare type VideoCodecConfig = {
 };
 
 /** @public */
+export declare class VideoFrameDrain extends BaseMediaFrameDrain<EncodedVideoChunk, VideoFrame> {
+    constructor(videoTrack: InputVideoTrack);
+    getFrame(timestamp: number): Promise<VideoFrame | null>;
+    frames(startTimestamp?: number, endTimestamp?: number): AsyncGenerator<VideoFrame, void, unknown>;
+    framesAtTimestamps(timestamps: AnyIterable<number>): AsyncGenerator<VideoFrame | null, void, unknown>;
+}
+
+/** @public */
 export declare class VideoFrameSource extends VideoSource {
     constructor(codecConfig: VideoCodecConfig);
     digest(videoFrame: VideoFrame): Promise<void>;
@@ -185,11 +363,27 @@ export declare type VideoTrackMetadata = {
 };
 
 /** @public */
+export declare const WEBM: MatroskaInputFormat;
+
+/** @public */
 export declare class WebMOutputFormat extends MkvOutputFormat {
 }
 
 /** @public */
 export declare type WebMOutputFormatOptions = MkvOutputFormatOptions;
+
+/** @public */
+export declare type WrappedAudioBuffer = {
+    buffer: AudioBuffer;
+    timestamp: number;
+};
+
+/** @public */
+export declare type WrappedCanvas = {
+    canvas: HTMLCanvasElement;
+    timestamp: number;
+    duration: number;
+};
 
 export { }
 

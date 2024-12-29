@@ -32,19 +32,37 @@ export {
 	AudioCodec,
 	SUBTITLE_CODECS,
 	SubtitleCodec,
+	MediaCodec,
 } from './codec';
 export { Target, ArrayBufferTarget, StreamTarget, StreamTargetChunk, StreamTargetOptions } from './target';
-export { TransformationMatrix } from './misc';
+export { Rotation, TransformationMatrix, AnyIterable } from './misc';
 export { Source, ArrayBufferSource, BlobSource } from './source';
-export { ALL_FORMATS, ISOBMFF, MP4, MOV, MATROSKA, MKV, WEBM } from './input-format';
-export { Input, InputOptions } from './input';
 export {
+	InputFormat,
+	IsobmffInputFormat,
+	MatroskaInputFormat,
+	ALL_FORMATS,
+	ISOBMFF,
+	MP4,
+	MOV,
+	MATROSKA,
+	MKV,
+	WEBM,
+} from './input-format';
+export { Input, InputOptions } from './input';
+export { InputTrack, InputVideoTrack, InputAudioTrack } from './input-track';
+export {
+	ChunkRetrievalOptions,
+	BaseChunkDrain,
+	BaseMediaFrameDrain,
 	EncodedVideoChunkDrain,
 	VideoFrameDrain,
 	EncodedAudioChunkDrain,
 	CanvasDrain,
+	WrappedCanvas,
 	AudioDataDrain,
 	AudioBufferDrain,
+	WrappedAudioBuffer,
 } from './media-drain';
 
 // 🐡🦔

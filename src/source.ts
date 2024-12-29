@@ -1,3 +1,4 @@
+/** @public */
 export abstract class Source {
 	/** @internal */
 	abstract _read(start: number, end: number): Promise<Uint8Array>;
@@ -13,36 +14,48 @@ export abstract class Source {
 	}
 }
 
+/** @public */
 export class ArrayBufferSource extends Source {
-	constructor(private buffer: ArrayBuffer) {
+	/** @internal */
+	_buffer: ArrayBuffer;
+
+	constructor(buffer: ArrayBuffer) {
 		super();
+
+		this._buffer = buffer;
 	}
 
 	/** @internal */
 	override async _read(start: number, end: number) {
-		return new Uint8Array(this.buffer, start, end - start);
+		return new Uint8Array(this._buffer, start, end - start);
 	}
 
 	/** @internal */
 	override async _retrieveSize() {
-		return this.buffer.byteLength;
+		return this._buffer.byteLength;
 	}
 }
 
+/** @public */
 export class BlobSource extends Source {
-	constructor(private blob: Blob) {
+	/** @internal */
+	_blob: Blob;
+
+	constructor(blob: Blob) {
 		super();
+
+		this._blob = blob;
 	}
 
 	/** @internal */
 	override async _read(start: number, end: number) {
-		const slice = this.blob.slice(start, end);
+		const slice = this._blob.slice(start, end);
 		const buffer = await slice.arrayBuffer();
 		return new Uint8Array(buffer);
 	}
 
 	/** @internal */
 	override async _retrieveSize() {
-		return this.blob.size;
+		return this._blob.size;
 	}
 }

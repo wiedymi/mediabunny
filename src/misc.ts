@@ -4,6 +4,7 @@ export function assert(x: unknown): asserts x {
 	}
 }
 
+/** @public */
 export type Rotation = 0 | 90 | 180 | 270;
 
 /** @public */
@@ -214,6 +215,17 @@ export const removeItem = <T>(arr: T[], item: T) => {
 	}
 };
 
+export const findLastIndex = <T>(arr: T[], predicate: (x: T) => boolean) => {
+	for (let i = arr.length - 1; i >= 0; i--) {
+		if (predicate(arr[i]!)) {
+			return i;
+		}
+	}
+
+	return -1;
+};
+
+/** @public */
 export type AnyIterable<T> =
 	| Iterable<T>
 	| AsyncIterable<T>;

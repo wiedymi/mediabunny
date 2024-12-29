@@ -4,11 +4,13 @@ import { assert } from './misc';
 import { Reader } from './reader';
 import { Source } from './source';
 
+/** @public */
 export type InputOptions = {
 	formats: InputFormat[];
 	source: Source;
 };
 
+/** @public */
 export class Input {
 	/** @internal */
 	_source: Source;

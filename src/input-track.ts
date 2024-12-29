@@ -1,4 +1,5 @@
 import { AudioCodec, MediaCodec, VideoCodec } from './codec';
+import { ChunkRetrievalOptions } from './media-drain';
 import { Rotation } from './misc';
 
 export interface InputTrackBacking {
@@ -6,6 +7,7 @@ export interface InputTrackBacking {
 	computeDuration(): Promise<number>;
 }
 
+/** @public */
 export abstract class InputTrack {
 	/** @internal */
 	_backing: InputTrackBacking;
@@ -31,14 +33,10 @@ export abstract class InputTrack {
 	}
 }
 
-export type ChunkRetrievalOptions = {
-	metadataOnly?: boolean;
-};
-
 export interface InputVideoTrackBacking extends InputTrackBacking {
 	getCodec(): Promise<VideoCodec>;
-	getWidth(): Promise<number>;
-	getHeight(): Promise<number>;
+	getCodedWidth(): Promise<number>;
+	getCodedHeight(): Promise<number>;
 	getRotation(): Promise<Rotation>;
 	getDecoderConfig(): Promise<VideoDecoderConfig>;
 	getFirstChunk(options: ChunkRetrievalOptions): Promise<EncodedVideoChunk | null>;
@@ -48,6 +46,7 @@ export interface InputVideoTrackBacking extends InputTrackBacking {
 	getNextKeyChunk(chunk: EncodedVideoChunk, options: ChunkRetrievalOptions): Promise<EncodedVideoChunk | null>;
 }
 
+/** @public */
 export class InputVideoTrack extends InputTrack {
 	/** @internal */
 	override _backing: InputVideoTrackBacking;
@@ -63,26 +62,26 @@ export class InputVideoTrack extends InputTrack {
 		return this._backing.getCodec();
 	}
 
-	getWidth() {
-		return this._backing.getWidth();
+	getCodedWidth() {
+		return this._backing.getCodedWidth();
 	}
 
-	getHeight() {
-		return this._backing.getHeight();
+	getCodedHeight() {
+		return this._backing.getCodedHeight();
 	}
 
 	getRotation() {
 		return this._backing.getRotation();
 	}
 
-	async getRotatedWidth() {
+	async getDisplayWidth() {
 		const rotation = await this._backing.getRotation();
-		return rotation % 180 === 0 ? this._backing.getWidth() : this._backing.getHeight();
+		return rotation % 180 === 0 ? this._backing.getCodedWidth() : this._backing.getCodedHeight();
 	}
 
-	async getRotatedHeight() {
+	async getDisplayHeight() {
 		const rotation = await this._backing.getRotation();
-		return rotation % 180 === 0 ? this._backing.getHeight() : this._backing.getWidth();
+		return rotation % 180 === 0 ? this._backing.getCodedHeight() : this._backing.getCodedWidth();
 	}
 
 	getDecoderConfig() {
@@ -107,6 +106,7 @@ export interface InputAudioTrackBacking extends InputTrackBacking {
 	getNextKeyChunk(chunk: EncodedAudioChunk, options: ChunkRetrievalOptions): Promise<EncodedAudioChunk | null>;
 }
 
+/** @public */
 export class InputAudioTrack extends InputTrack {
 	/** @internal */
 	override _backing: InputAudioTrackBacking;

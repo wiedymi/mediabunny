@@ -79,7 +79,9 @@ var isAllowSharedBufferSource = (x) => {
   return x instanceof ArrayBuffer || typeof SharedArrayBuffer !== "undefined" && x instanceof SharedArrayBuffer || ArrayBuffer.isView(x) && !(x instanceof DataView);
 };
 var AsyncMutex = class {
-  currentPromise = Promise.resolve();
+  constructor() {
+    this.currentPromise = Promise.resolve();
+  }
   async acquire() {
     let resolver;
     const nextPromise = new Promise((resolve) => {
@@ -168,6 +170,14 @@ var removeItem = (arr, item) => {
     arr.splice(index, 1);
   }
 };
+var findLastIndex = (arr, predicate) => {
+  for (let i = arr.length - 1; i >= 0; i--) {
+    if (predicate(arr[i])) {
+      return i;
+    }
+  }
+  return -1;
+};
 var toAsyncIterator = async function* (source) {
   if (Symbol.iterator in source) {
     yield* source[Symbol.iterator]();
@@ -181,10 +191,9 @@ var cueBlockHeaderRegex = /(?:(.+?)\n)?((?:\d{2}:)?\d{2}:\d{2}.\d{3})\s+-->\s+((
 var preambleStartRegex = /^WEBVTT(.|\n)*?\n{2}/;
 var inlineTimestampRegex = /<(?:(\d{2}):)?(\d{2}):(\d{2}).(\d{3})>/g;
 var SubtitleParser = class {
-  options;
-  preambleText = null;
-  preambleEmitted = false;
   constructor(options) {
+    this.preambleText = null;
+    this.preambleEmitted = false;
     this.options = options;
   }
   parse(text) {
@@ -261,14 +270,14 @@ var formatSubtitleTimestamp = (timestamp) => {
 var IsobmffBoxWriter = class {
   constructor(writer) {
     this.writer = writer;
+    this.helper = new Uint8Array(8);
+    this.helperView = new DataView(this.helper.buffer);
+    /**
+     * Stores the position from the start of the file to where boxes elements have been written. This is used to
+     * rewrite/edit elements that were already added before, and to measure sizes of things.
+     */
+    this.offsets = /* @__PURE__ */ new WeakMap();
   }
-  helper = new Uint8Array(8);
-  helperView = new DataView(this.helper.buffer);
-  /**
-   * Stores the position from the start of the file to where boxes elements have been written. This is used to
-   * rewrite/edit elements that were already added before, and to measure sizes of things.
-   */
-  offsets = /* @__PURE__ */ new WeakMap();
   writeU32(value) {
     this.helperView.setUint32(0, value, false);
     this.writer.write(this.helper.subarray(0, 4));
@@ -1143,9 +1152,9 @@ var SUBTITLE_CODEC_TO_CONFIGURATION_BOX = {
 
 // src/muxer.ts
 var Muxer = class {
-  output;
-  mutex = new AsyncMutex();
   constructor(output) {
+    this.mutex = new AsyncMutex();
+    this.trackTimestampInfo = /* @__PURE__ */ new WeakMap();
     this.output = output;
   }
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -1154,7 +1163,6 @@ var Muxer = class {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   onTrackClose(track) {
   }
-  trackTimestampInfo = /* @__PURE__ */ new WeakMap();
   validateAndNormalizeTimestamp(track, rawTimestampInUs, isKeyFrame) {
     let timestampInSeconds = rawTimestampInUs / 1e6;
     let timestampInfo = this.trackTimestampInfo.get(track);
@@ -1198,19 +1206,20 @@ var Muxer = class {
 
 // src/writer.ts
 var Writer = class {
-  /** Setting this to true will cause the writer to ensure data is written in a strictly monotonic, streamable way. */
-  ensureMonotonicity = false;
+  constructor() {
+    /** Setting this to true will cause the writer to ensure data is written in a strictly monotonic, streamable way. */
+    this.ensureMonotonicity = false;
+  }
   start() {
   }
 };
 var ArrayBufferTargetWriter = class extends Writer {
-  pos = 0;
-  target;
-  buffer = new ArrayBuffer(2 ** 16);
-  bytes = new Uint8Array(this.buffer);
-  maxPos = 0;
   constructor(target) {
     super();
+    this.pos = 0;
+    this.buffer = new ArrayBuffer(2 ** 16);
+    this.bytes = new Uint8Array(this.buffer);
+    this.maxPos = 0;
     this.target = target;
   }
   ensureSize(size) {
@@ -1246,13 +1255,12 @@ var ArrayBufferTargetWriter = class extends Writer {
   }
 };
 var StreamTargetWriter = class extends Writer {
-  pos = 0;
-  target;
-  sections = [];
-  lastFlushEnd = 0;
-  writer = null;
   constructor(target) {
     super();
+    this.pos = 0;
+    this.sections = [];
+    this.lastFlushEnd = 0;
+    this.writer = null;
     this.target = target;
   }
   start() {
@@ -1322,19 +1330,17 @@ var StreamTargetWriter = class extends Writer {
 var DEFAULT_CHUNK_SIZE = 2 ** 24;
 var MAX_CHUNKS_AT_ONCE = 2;
 var ChunkedStreamTargetWriter = class extends Writer {
-  pos = 0;
-  target;
-  chunkSize;
-  /**
-   * The data is divided up into fixed-size chunks, whose contents are first filled in RAM and then flushed out.
-   * A chunk is flushed if all of its contents have been written.
-   */
-  chunks = [];
-  lastFlushEnd = 0;
-  writer = null;
-  flushedChunkQueue = [];
   constructor(target) {
     super();
+    this.pos = 0;
+    /**
+     * The data is divided up into fixed-size chunks, whose contents are first filled in RAM and then flushed out.
+     * A chunk is flushed if all of its contents have been written.
+     */
+    this.chunks = [];
+    this.lastFlushEnd = 0;
+    this.writer = null;
+    this.flushedChunkQueue = [];
     this.target = target;
     this.chunkSize = target._options?.chunkSize ?? DEFAULT_CHUNK_SIZE;
     if (!Number.isInteger(this.chunkSize) || this.chunkSize < 2 ** 10) {
@@ -1452,21 +1458,22 @@ var ChunkedStreamTargetWriter = class extends Writer {
 
 // src/target.ts
 var Target = class {
-  /** @internal */
-  _output = null;
+  constructor() {
+    /** @internal */
+    this._output = null;
+  }
 };
 var ArrayBufferTarget = class extends Target {
-  buffer = null;
+  constructor() {
+    super(...arguments);
+    this.buffer = null;
+  }
   /** @internal */
   _createWriter() {
     return new ArrayBufferTargetWriter(this);
   }
 };
 var StreamTarget = class extends Target {
-  /** @internal */
-  _writable;
-  /** @internal */
-  _options;
   constructor(writable, options = {}) {
     super();
     if (!(writable instanceof WritableStream)) {
@@ -2006,21 +2013,18 @@ var intoTimescale = (timeInSeconds, timescale, round = true) => {
   return round ? Math.round(value) : value;
 };
 var IsobmffMuxer = class extends Muxer {
-  timestampsMustStartAtZero = true;
-  writer;
-  boxWriter;
-  fastStart;
-  auxTarget = new ArrayBufferTarget();
-  auxWriter = this.auxTarget._createWriter();
-  auxBoxWriter = new IsobmffBoxWriter(this.auxWriter);
-  ftypSize = null;
-  mdat = null;
-  trackDatas = [];
-  creationTime = Math.floor(Date.now() / 1e3) + TIMESTAMP_OFFSET;
-  finalizedChunks = [];
-  nextFragmentNumber = 1;
   constructor(output, format) {
     super(output);
+    this.timestampsMustStartAtZero = true;
+    this.auxTarget = new ArrayBufferTarget();
+    this.auxWriter = this.auxTarget._createWriter();
+    this.auxBoxWriter = new IsobmffBoxWriter(this.auxWriter);
+    this.ftypSize = null;
+    this.mdat = null;
+    this.trackDatas = [];
+    this.creationTime = Math.floor(Date.now() / 1e3) + TIMESTAMP_OFFSET;
+    this.finalizedChunks = [];
+    this.nextFragmentNumber = 1;
     this.writer = output._writer;
     this.boxWriter = new IsobmffBoxWriter(this.writer);
     const fastStartDefault = this.writer instanceof ArrayBufferTargetWriter ? "in-memory" : false;
@@ -2609,19 +2613,16 @@ var IsobmffMuxer = class extends Muxer {
 
 // src/matroska/ebml.ts
 var EBMLFloat32 = class {
-  value;
   constructor(value) {
     this.value = value;
   }
 };
 var EBMLFloat64 = class {
-  value;
   constructor(value) {
     this.value = value;
   }
 };
 var EBMLSignedInt = class {
-  value;
   constructor(value) {
     this.value = value;
   }
@@ -2695,31 +2696,29 @@ var TRACK_TYPE_MAP = {
   subtitle: 17
 };
 var MatroskaMuxer = class extends Muxer {
-  timestampsMustStartAtZero = false;
-  writer;
-  format;
-  helper = new Uint8Array(8);
-  helperView = new DataView(this.helper.buffer);
-  /**
-   * Stores the position from the start of the file to where EBML elements have been written. This is used to
-   * rewrite/edit elements that were already added before, and to measure sizes of things.
-   */
-  offsets = /* @__PURE__ */ new WeakMap();
-  /** Same as offsets, but stores position where the element's data starts (after ID and size fields). */
-  dataOffsets = /* @__PURE__ */ new WeakMap();
-  trackDatas = [];
-  segment = null;
-  segmentInfo = null;
-  seekHead = null;
-  tracksElement = null;
-  segmentDuration = null;
-  cues = null;
-  currentCluster = null;
-  currentClusterMsTimestamp = null;
-  trackDatasInCurrentCluster = /* @__PURE__ */ new Set();
-  duration = 0;
   constructor(output, format) {
     super(output);
+    this.timestampsMustStartAtZero = false;
+    this.helper = new Uint8Array(8);
+    this.helperView = new DataView(this.helper.buffer);
+    /**
+     * Stores the position from the start of the file to where EBML elements have been written. This is used to
+     * rewrite/edit elements that were already added before, and to measure sizes of things.
+     */
+    this.offsets = /* @__PURE__ */ new WeakMap();
+    /** Same as offsets, but stores position where the element's data starts (after ID and size fields). */
+    this.dataOffsets = /* @__PURE__ */ new WeakMap();
+    this.trackDatas = [];
+    this.segment = null;
+    this.segmentInfo = null;
+    this.seekHead = null;
+    this.tracksElement = null;
+    this.segmentDuration = null;
+    this.cues = null;
+    this.currentCluster = null;
+    this.currentClusterMsTimestamp = null;
+    this.trackDatasInCurrentCluster = /* @__PURE__ */ new Set();
+    this.duration = 0;
     this.writer = output._writer;
     this.format = format;
     if (this.format._options.streamable) {
@@ -3394,8 +3393,6 @@ ${cue.notes ?? ""}`;
 var OutputFormat = class {
 };
 var Mp4OutputFormat = class extends OutputFormat {
-  /** @internal */
-  _options;
   constructor(options = {}) {
     if (!options || typeof options !== "object") {
       throw new TypeError("options must be an object.");
@@ -3412,8 +3409,6 @@ var Mp4OutputFormat = class extends OutputFormat {
   }
 };
 var MkvOutputFormat2 = class extends OutputFormat {
-  /** @internal */
-  _options;
   constructor(options = {}) {
     if (!options || typeof options !== "object") {
       throw new TypeError("options must be an object.");
@@ -3434,12 +3429,14 @@ var WebMOutputFormat = class extends MkvOutputFormat2 {
 
 // src/media-source.ts
 var MediaSource = class {
-  /** @internal */
-  _connectedTrack = null;
-  /** @internal */
-  _closed = false;
-  /** @internal */
-  _offsetTimestamps = false;
+  constructor() {
+    /** @internal */
+    this._connectedTrack = null;
+    /** @internal */
+    this._closed = false;
+    /** @internal */
+    this._offsetTimestamps = false;
+  }
   /** @internal */
   _ensureValidDigest() {
     if (!this._connectedTrack) {
@@ -3479,12 +3476,10 @@ var MediaSource = class {
   }
 };
 var VideoSource = class extends MediaSource {
-  /** @internal */
-  _connectedTrack = null;
-  /** @internal */
-  _codec;
   constructor(codec) {
     super();
+    /** @internal */
+    this._connectedTrack = null;
     if (!VIDEO_CODECS.includes(codec)) {
       throw new TypeError(`Invalid video codec '${codec}'. Must be one of: ${VIDEO_CODECS.join(", ")}.`);
     }
@@ -3522,13 +3517,13 @@ var VideoEncoderWrapper = class {
   constructor(source, codecConfig) {
     this.source = source;
     this.codecConfig = codecConfig;
+    this.encoder = null;
+    this.muxer = null;
+    this.lastMultipleOfKeyFrameInterval = -1;
+    this.lastWidth = null;
+    this.lastHeight = null;
     validateVideoCodecConfig(codecConfig);
   }
-  encoder = null;
-  muxer = null;
-  lastMultipleOfKeyFrameInterval = -1;
-  lastWidth = null;
-  lastHeight = null;
   async digest(videoFrame) {
     this.source._ensureValidDigest();
     if (this.lastWidth !== null && this.lastHeight !== null) {
@@ -3586,8 +3581,6 @@ var VideoEncoderWrapper = class {
   }
 };
 var VideoFrameSource = class extends VideoSource {
-  /** @internal */
-  _encoder;
   constructor(codecConfig) {
     super(codecConfig.codec);
     this._encoder = new VideoEncoderWrapper(this, codecConfig);
@@ -3604,10 +3597,6 @@ var VideoFrameSource = class extends VideoSource {
   }
 };
 var CanvasSource = class extends VideoSource {
-  /** @internal */
-  _encoder;
-  /** @internal */
-  _canvas;
   constructor(canvas, codecConfig) {
     if (!(canvas instanceof HTMLCanvasElement)) {
       throw new TypeError("canvas must be an HTMLCanvasElement.");
@@ -3638,14 +3627,6 @@ var CanvasSource = class extends VideoSource {
   }
 };
 var MediaStreamVideoTrackSource = class extends VideoSource {
-  /** @internal */
-  _encoder;
-  /** @internal */
-  _abortController = null;
-  /** @internal */
-  _track;
-  /** @internal */
-  _offsetTimestamps = true;
   constructor(track, codecConfig) {
     if (!(track instanceof MediaStreamTrack) || track.kind !== "video") {
       throw new TypeError("track must be a video MediaStreamTrack.");
@@ -3655,6 +3636,10 @@ var MediaStreamVideoTrackSource = class extends VideoSource {
       latencyMode: "realtime"
     };
     super(codecConfig.codec);
+    /** @internal */
+    this._abortController = null;
+    /** @internal */
+    this._offsetTimestamps = true;
     this._encoder = new VideoEncoderWrapper(this, codecConfig);
     this._track = track;
   }
@@ -3685,12 +3670,10 @@ var MediaStreamVideoTrackSource = class extends VideoSource {
   }
 };
 var AudioSource = class extends MediaSource {
-  /** @internal */
-  _connectedTrack = null;
-  /** @internal */
-  _codec;
   constructor(codec) {
     super();
+    /** @internal */
+    this._connectedTrack = null;
     if (!AUDIO_CODECS.includes(codec)) {
       throw new TypeError(`Invalid audio codec '${codec}'. Must be one of: ${AUDIO_CODECS.join(", ")}.`);
     }
@@ -3724,12 +3707,12 @@ var AudioEncoderWrapper = class {
   constructor(source, codecConfig) {
     this.source = source;
     this.codecConfig = codecConfig;
+    this.encoder = null;
+    this.muxer = null;
+    this.lastNumberOfChannels = null;
+    this.lastSampleRate = null;
     validateAudioCodecConfig(codecConfig);
   }
-  encoder = null;
-  muxer = null;
-  lastNumberOfChannels = null;
-  lastSampleRate = null;
   async digest(audioData) {
     this.source._ensureValidDigest();
     if (this.lastNumberOfChannels !== null && this.lastSampleRate !== null) {
@@ -3776,8 +3759,6 @@ var AudioEncoderWrapper = class {
   }
 };
 var AudioDataSource = class extends AudioSource {
-  /** @internal */
-  _encoder;
   constructor(codecConfig) {
     super(codecConfig.codec);
     this._encoder = new AudioEncoderWrapper(this, codecConfig);
@@ -3794,12 +3775,10 @@ var AudioDataSource = class extends AudioSource {
   }
 };
 var AudioBufferSource = class extends AudioSource {
-  /** @internal */
-  _encoder;
-  /** @internal */
-  _accumulatedFrameCount = 0;
   constructor(codecConfig) {
     super(codecConfig.codec);
+    /** @internal */
+    this._accumulatedFrameCount = 0;
     this._encoder = new AudioEncoderWrapper(this, codecConfig);
   }
   digest(audioBuffer) {
@@ -3833,19 +3812,15 @@ var AudioBufferSource = class extends AudioSource {
   }
 };
 var MediaStreamAudioTrackSource = class extends AudioSource {
-  /** @internal */
-  _encoder;
-  /** @internal */
-  _abortController = null;
-  /** @internal */
-  _track;
-  /** @internal */
-  _offsetTimestamps = true;
   constructor(track, codecConfig) {
     if (!(track instanceof MediaStreamTrack) || track.kind !== "audio") {
       throw new TypeError("track must be an audio MediaStreamTrack.");
     }
     super(codecConfig.codec);
+    /** @internal */
+    this._abortController = null;
+    /** @internal */
+    this._offsetTimestamps = true;
     this._encoder = new AudioEncoderWrapper(this, codecConfig);
     this._track = track;
   }
@@ -3876,12 +3851,10 @@ var MediaStreamAudioTrackSource = class extends AudioSource {
   }
 };
 var SubtitleSource = class extends MediaSource {
-  /** @internal */
-  _connectedTrack = null;
-  /** @internal */
-  _codec;
   constructor(codec) {
     super();
+    /** @internal */
+    this._connectedTrack = null;
     if (!SUBTITLE_CODECS.includes(codec)) {
       throw new TypeError(`Invalid subtitle codec '${codec}'. Must be one of: ${SUBTITLE_CODECS.join(", ")}.`);
     }
@@ -3889,8 +3862,6 @@ var SubtitleSource = class extends MediaSource {
   }
 };
 var TextSubtitleSource = class extends SubtitleSource {
-  /** @internal */
-  _parser;
   constructor(codec) {
     super(codec);
     this._parser = new SubtitleParser({
@@ -3911,19 +3882,15 @@ var TextSubtitleSource = class extends SubtitleSource {
 
 // src/output.ts
 var Output = class {
-  /** @internal */
-  _muxer;
-  /** @internal */
-  _writer;
-  /** @internal */
-  _tracks = [];
-  /** @internal */
-  _started = false;
-  /** @internal */
-  _finalizing = false;
-  /** @internal */
-  _mutex = new AsyncMutex();
   constructor(options) {
+    /** @internal */
+    this._tracks = [];
+    /** @internal */
+    this._started = false;
+    /** @internal */
+    this._finalizing = false;
+    /** @internal */
+    this._mutex = new AsyncMutex();
     if (!options || typeof options !== "object") {
       throw new TypeError("options must be an object.");
     }
@@ -4029,8 +3996,10 @@ var Output = class {
 
 // src/source.ts
 var Source = class {
-  /** @internal */
-  _sizePromise = null;
+  constructor() {
+    /** @internal */
+    this._sizePromise = null;
+  }
   /** @internal */
   _getSize() {
     return this._sizePromise ??= this._retrieveSize();
@@ -4039,37 +4008,36 @@ var Source = class {
 var ArrayBufferSource = class extends Source {
   constructor(buffer) {
     super();
-    this.buffer = buffer;
+    this._buffer = buffer;
   }
   /** @internal */
   async _read(start, end) {
-    return new Uint8Array(this.buffer, start, end - start);
+    return new Uint8Array(this._buffer, start, end - start);
   }
   /** @internal */
   async _retrieveSize() {
-    return this.buffer.byteLength;
+    return this._buffer.byteLength;
   }
 };
 var BlobSource = class extends Source {
   constructor(blob) {
     super();
-    this.blob = blob;
+    this._blob = blob;
   }
   /** @internal */
   async _read(start, end) {
-    const slice = this.blob.slice(start, end);
+    const slice = this._blob.slice(start, end);
     const buffer = await slice.arrayBuffer();
     return new Uint8Array(buffer);
   }
   /** @internal */
   async _retrieveSize() {
-    return this.blob.size;
+    return this._blob.size;
   }
 };
 
 // src/demuxer.ts
 var Demuxer = class {
-  input;
   constructor(input) {
     this.input = input;
   }
@@ -4077,8 +4045,6 @@ var Demuxer = class {
 
 // src/input-track.ts
 var InputTrack = class {
-  /** @internal */
-  _backing;
   /** @internal */
   constructor(backing) {
     this._backing = backing;
@@ -4095,8 +4061,6 @@ var InputTrack = class {
 };
 var InputVideoTrack = class extends InputTrack {
   /** @internal */
-  _backing;
-  /** @internal */
   constructor(backing) {
     super(backing);
     this._backing = backing;
@@ -4104,22 +4068,22 @@ var InputVideoTrack = class extends InputTrack {
   getCodec() {
     return this._backing.getCodec();
   }
-  getWidth() {
-    return this._backing.getWidth();
+  getCodedWidth() {
+    return this._backing.getCodedWidth();
   }
-  getHeight() {
-    return this._backing.getHeight();
+  getCodedHeight() {
+    return this._backing.getCodedHeight();
   }
   getRotation() {
     return this._backing.getRotation();
   }
-  async getRotatedWidth() {
+  async getDisplayWidth() {
     const rotation = await this._backing.getRotation();
-    return rotation % 180 === 0 ? this._backing.getWidth() : this._backing.getHeight();
+    return rotation % 180 === 0 ? this._backing.getCodedWidth() : this._backing.getCodedHeight();
   }
-  async getRotatedHeight() {
+  async getDisplayHeight() {
     const rotation = await this._backing.getRotation();
-    return rotation % 180 === 0 ? this._backing.getHeight() : this._backing.getWidth();
+    return rotation % 180 === 0 ? this._backing.getCodedHeight() : this._backing.getCodedWidth();
   }
   getDecoderConfig() {
     return this._backing.getDecoderConfig();
@@ -4130,8 +4094,6 @@ var InputVideoTrack = class extends InputTrack {
   }
 };
 var InputAudioTrack = class extends InputTrack {
-  /** @internal */
-  _backing;
   /** @internal */
   constructor(backing) {
     super(backing);
@@ -4160,12 +4122,12 @@ var Reader = class {
   constructor(source, maxStorableBytes = Infinity) {
     this.source = source;
     this.maxStorableBytes = maxStorableBytes;
+    this.loadedSegments = [];
+    this.loadingSegments = [];
+    this.sourceSizePromise = null;
+    this.nextAge = 0;
+    this.totalStoredBytes = 0;
   }
-  loadedSegments = [];
-  loadingSegments = [];
-  sourceSizePromise = null;
-  nextAge = 0;
-  totalStoredBytes = 0;
   async loadRange(start, end) {
     end = Math.min(end, await this.source._getSize());
     const matchingLoadingSegment = this.loadingSegments.find((x) => x.start <= start && x.end >= end);
@@ -4268,8 +4230,8 @@ var Reader = class {
 var IsobmffReader = class {
   constructor(reader) {
     this.reader = reader;
+    this.pos = 0;
   }
-  pos = 0;
   readRange(start, end) {
     const { view: view2, offset } = this.reader.getViewAndOffset(start, end);
     return new Uint8Array(view2.buffer, offset, end - start);
@@ -4359,20 +4321,18 @@ var IsobmffReader = class {
 // src/isobmff/isobmff-demuxer.ts
 var knownMatrixes = [rotationMatrix(0), rotationMatrix(90), rotationMatrix(180), rotationMatrix(270)];
 var IsobmffDemuxer = class extends Demuxer {
-  isobmffReader;
-  currentTrack = null;
-  tracks = [];
-  metadataPromise = null;
-  movieTimescale = -1;
-  movieDurationInTimescale = -1;
-  isFragmented = false;
-  fragmentTrackDefaults = [];
-  fragments = [];
-  currentFragment = null;
-  fragmentLookupMutex = new AsyncMutex();
-  chunkReader;
   constructor(input) {
     super(input);
+    this.currentTrack = null;
+    this.tracks = [];
+    this.metadataPromise = null;
+    this.movieTimescale = -1;
+    this.movieDurationInTimescale = -1;
+    this.isFragmented = false;
+    this.fragmentTrackDefaults = [];
+    this.fragments = [];
+    this.currentFragment = null;
+    this.fragmentLookupMutex = new AsyncMutex();
     this.isobmffReader = new IsobmffReader(input._mainReader);
     this.chunkReader = new IsobmffReader(new Reader(input._source, 64 * 2 ** 20));
   }
@@ -5304,9 +5264,9 @@ var IsobmffDemuxer = class extends Demuxer {
 var IsobmffTrackBacking = class {
   constructor(internalTrack) {
     this.internalTrack = internalTrack;
+    this.chunkToSampleIndex = /* @__PURE__ */ new WeakMap();
+    this.chunkToFragmentLocation = /* @__PURE__ */ new WeakMap();
   }
-  chunkToSampleIndex = /* @__PURE__ */ new WeakMap();
-  chunkToFragmentLocation = /* @__PURE__ */ new WeakMap();
   getCodec() {
     throw new Error("Not implemented on base class.");
   }
@@ -5579,7 +5539,7 @@ var IsobmffTrackBacking = class {
     if (fragmentIndex !== -1) {
       const fragment = this.internalTrack.fragments[fragmentIndex];
       const trackData = fragment.trackData.get(this.internalTrack.id);
-      const index = trackData.presentationTimestamps.findLastIndex((x) => {
+      const index = findLastIndex(trackData.presentationTimestamps, (x) => {
         const sample = trackData.samples[x.sampleIndex];
         return sample.isKeyFrame && x.presentationTimestamp <= timestampInTimescale;
       });
@@ -5679,7 +5639,6 @@ var IsobmffTrackBacking = class {
   }
 };
 var IsobmffVideoTrackBacking = class extends IsobmffTrackBacking {
-  internalTrack;
   constructor(internalTrack) {
     super(internalTrack);
     this.internalTrack = internalTrack;
@@ -5687,10 +5646,10 @@ var IsobmffVideoTrackBacking = class extends IsobmffTrackBacking {
   async getCodec() {
     return this.internalTrack.info.codec;
   }
-  async getWidth() {
+  async getCodedWidth() {
     return this.internalTrack.info.width;
   }
-  async getHeight() {
+  async getCodedHeight() {
     return this.internalTrack.info.height;
   }
   async getRotation() {
@@ -5715,7 +5674,6 @@ var IsobmffVideoTrackBacking = class extends IsobmffTrackBacking {
   }
 };
 var IsobmffAudioTrackBacking = class extends IsobmffTrackBacking {
-  internalTrack;
   constructor(internalTrack) {
     super(internalTrack);
     this.internalTrack = internalTrack;
@@ -5830,10 +5788,6 @@ var offsetFragmentTrackDataByTimestamp = (trackData, timestamp) => {
   }
 };
 
-// src/matroska/matroska-demuxer.ts
-var MatroskaDemuxer = class extends Demuxer {
-};
-
 // src/input-format.ts
 var InputFormat = class {
 };
@@ -5849,6 +5803,7 @@ var IsobmffInputFormat = class extends InputFormat {
     const fourCc = isobmffReader.readAscii(4);
     return fourCc === "ftyp";
   }
+  /** @internal */
   _createDemuxer(input) {
     return new IsobmffDemuxer(input);
   }
@@ -5858,8 +5813,9 @@ var MatroskaInputFormat = class extends InputFormat {
   async _canReadInput() {
     return false;
   }
-  _createDemuxer(input) {
-    return new MatroskaDemuxer(input);
+  /** @internal */
+  _createDemuxer() {
+    throw new Error("Not implemented");
   }
 };
 var ISOBMFF = new IsobmffInputFormat();
@@ -5872,17 +5828,11 @@ var ALL_FORMATS = [ISOBMFF, MKV];
 
 // src/input.ts
 var Input = class {
-  /** @internal */
-  _source;
-  /** @internal */
-  _formats;
-  /** @internal */
-  _mainReader;
-  /** @internal */
-  _demuxerPromise = null;
-  /** @internal */
-  _format = null;
   constructor(options) {
+    /** @internal */
+    this._demuxerPromise = null;
+    /** @internal */
+    this._format = null;
     this._formats = options.formats;
     this._source = options.source;
     this._mainReader = new Reader(options.source);
@@ -5987,7 +5937,8 @@ var BaseChunkDrain = class {
   }
 };
 var BaseMediaFrameDrain = class {
-  duplicateFrame(frame) {
+  /** @internal */
+  _duplicateFrame(frame) {
     return structuredClone(frame);
   }
   async *mediaFramesAtTimestamps(timestamps) {
@@ -6005,7 +5956,7 @@ var BaseMediaFrameDrain = class {
       onQueueNotEmpty();
       ({ promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers());
     };
-    const decoder = await this.createDecoder((frame) => {
+    const decoder = await this._createDecoder((frame) => {
       onQueueDequeue();
       if (ended) {
         frame.close();
@@ -6013,7 +5964,7 @@ var BaseMediaFrameDrain = class {
       }
       let frameUsed = false;
       while (timestampsOfInterest.length > 0 && timestampsOfInterest[0] === frame.timestamp) {
-        pushToQueue(this.duplicateFrame(frame));
+        pushToQueue(this._duplicateFrame(frame));
         timestampsOfInterest.shift();
         frameUsed = true;
       }
@@ -6025,7 +5976,7 @@ var BaseMediaFrameDrain = class {
       }
     });
     void (async () => {
-      const chunkDrain = this.createChunkDrain();
+      const chunkDrain = this._createChunkDrain();
       let lastKeyChunk = null;
       let lastChunk = null;
       for await (const timestamp of timestampIterator) {
@@ -6051,7 +6002,7 @@ var BaseMediaFrameDrain = class {
           assert(lastChunk);
           if (targetChunk.timestamp === lastChunk.timestamp && timestampsOfInterest.length === 1) {
             if (lastUsedFrame) {
-              pushToQueue(this.duplicateFrame(lastUsedFrame));
+              pushToQueue(this._duplicateFrame(lastUsedFrame));
             }
             timestampsOfInterest.shift();
           }
@@ -6106,7 +6057,7 @@ var BaseMediaFrameDrain = class {
     let decoderIsFlushed = false;
     let ended = false;
     const MAX_QUEUE_SIZE = 8;
-    const decoder = await this.createDecoder((frame) => {
+    const decoder = await this._createDecoder((frame) => {
       onQueueDequeue();
       const frameTimestamp = frame.timestamp / 1e6;
       if (frameTimestamp >= endTimestamp) {
@@ -6134,7 +6085,7 @@ var BaseMediaFrameDrain = class {
         ({ promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers());
       }
     });
-    const chunkDrain = this.createChunkDrain();
+    const chunkDrain = this._createChunkDrain();
     const keyChunk = await chunkDrain.getKeyChunk(startTimestamp) ?? await chunkDrain.getFirstChunk();
     if (!keyChunk) {
       return;
@@ -6196,41 +6147,44 @@ var BaseMediaFrameDrain = class {
 var EncodedVideoChunkDrain = class extends BaseChunkDrain {
   constructor(videoTrack) {
     super();
-    this.videoTrack = videoTrack;
+    this._videoTrack = videoTrack;
   }
   getFirstChunk(options = {}) {
-    return this.videoTrack._backing.getFirstChunk(options);
+    return this._videoTrack._backing.getFirstChunk(options);
   }
   getChunk(timestamp, options = {}) {
-    return this.videoTrack._backing.getChunk(timestamp, options);
+    return this._videoTrack._backing.getChunk(timestamp, options);
   }
   getNextChunk(chunk, options = {}) {
-    return this.videoTrack._backing.getNextChunk(chunk, options);
+    return this._videoTrack._backing.getNextChunk(chunk, options);
   }
   getKeyChunk(timestamp, options = {}) {
-    return this.videoTrack._backing.getKeyChunk(timestamp, options);
+    return this._videoTrack._backing.getKeyChunk(timestamp, options);
   }
   getNextKeyChunk(chunk, options = {}) {
-    return this.videoTrack._backing.getNextKeyChunk(chunk, options);
+    return this._videoTrack._backing.getNextKeyChunk(chunk, options);
   }
 };
 var VideoFrameDrain = class extends BaseMediaFrameDrain {
   constructor(videoTrack) {
     super();
-    this.videoTrack = videoTrack;
+    /** @internal */
+    this._decoderConfig = null;
+    this._videoTrack = videoTrack;
   }
-  decoderConfig = null;
-  async createDecoder(onFrame) {
-    this.decoderConfig ??= await this.videoTrack.getDecoderConfig();
+  /** @internal */
+  async _createDecoder(onFrame) {
+    this._decoderConfig ??= await this._videoTrack.getDecoderConfig();
     const decoder = new VideoDecoder({
       output: onFrame,
       error: (error) => console.error(error)
     });
-    decoder.configure(this.decoderConfig);
+    decoder.configure(this._decoderConfig);
     return decoder;
   }
-  createChunkDrain() {
-    return new EncodedVideoChunkDrain(this.videoTrack);
+  /** @internal */
+  _createChunkDrain() {
+    return new EncodedVideoChunkDrain(this._videoTrack);
   }
   async getFrame(timestamp) {
     for await (const frame of this.mediaFramesAtTimestamps([timestamp])) {
@@ -6247,15 +6201,15 @@ var VideoFrameDrain = class extends BaseMediaFrameDrain {
 };
 var CanvasDrain = class {
   constructor(videoTrack, dimensions) {
-    this.videoTrack = videoTrack;
-    this.dimensions = dimensions;
-    this.videoFrameDrain = new VideoFrameDrain(videoTrack);
+    this._videoTrack = videoTrack;
+    this._dimensions = dimensions;
+    this._videoFrameDrain = new VideoFrameDrain(videoTrack);
   }
-  videoFrameDrain;
-  async videoFrameToWrappedCanvas(frame) {
-    const width = this.dimensions?.width ?? await this.videoTrack.getRotatedWidth();
-    const height = this.dimensions?.height ?? await this.videoTrack.getRotatedHeight();
-    const rotation = await this.videoTrack.getRotation();
+  /** @internal */
+  async _videoFrameToWrappedCanvas(frame) {
+    const width = this._dimensions?.width ?? await this._videoTrack.getDisplayWidth();
+    const height = this._dimensions?.height ?? await this._videoTrack.getDisplayHeight();
+    const rotation = await this._videoTrack.getRotation();
     const canvas = document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
@@ -6275,58 +6229,61 @@ var CanvasDrain = class {
     return result;
   }
   async getCanvas(timestamp) {
-    const frame = await this.videoFrameDrain.getFrame(timestamp);
-    return frame && this.videoFrameToWrappedCanvas(frame);
+    const frame = await this._videoFrameDrain.getFrame(timestamp);
+    return frame && this._videoFrameToWrappedCanvas(frame);
   }
   async *canvases(startTimestamp = 0, endTimestamp = Infinity) {
-    for await (const frame of this.videoFrameDrain.frames(startTimestamp, endTimestamp)) {
-      yield this.videoFrameToWrappedCanvas(frame);
+    for await (const frame of this._videoFrameDrain.frames(startTimestamp, endTimestamp)) {
+      yield this._videoFrameToWrappedCanvas(frame);
     }
   }
   async *canvasesAtTimestamps(timestamps) {
-    for await (const frame of this.videoFrameDrain.framesAtTimestamps(timestamps)) {
-      yield frame && this.videoFrameToWrappedCanvas(frame);
+    for await (const frame of this._videoFrameDrain.framesAtTimestamps(timestamps)) {
+      yield frame && this._videoFrameToWrappedCanvas(frame);
     }
   }
 };
 var EncodedAudioChunkDrain = class extends BaseChunkDrain {
   constructor(audioTrack) {
     super();
-    this.audioTrack = audioTrack;
+    this._audioTrack = audioTrack;
   }
   getFirstChunk(options = {}) {
-    return this.audioTrack._backing.getFirstChunk(options);
+    return this._audioTrack._backing.getFirstChunk(options);
   }
   getChunk(timestamp, options = {}) {
-    return this.audioTrack._backing.getChunk(timestamp, options);
+    return this._audioTrack._backing.getChunk(timestamp, options);
   }
   getNextChunk(chunk, options = {}) {
-    return this.audioTrack._backing.getNextChunk(chunk, options);
+    return this._audioTrack._backing.getNextChunk(chunk, options);
   }
   getKeyChunk(timestamp, options = {}) {
-    return this.audioTrack._backing.getKeyChunk(timestamp, options);
+    return this._audioTrack._backing.getKeyChunk(timestamp, options);
   }
   getNextKeyChunk(chunk, options = {}) {
-    return this.audioTrack._backing.getNextKeyChunk(chunk, options);
+    return this._audioTrack._backing.getNextKeyChunk(chunk, options);
   }
 };
 var AudioDataDrain = class extends BaseMediaFrameDrain {
   constructor(audioTrack) {
     super();
-    this.audioTrack = audioTrack;
+    /** @internal */
+    this._decoderConfig = null;
+    this._audioTrack = audioTrack;
   }
-  decoderConfig = null;
-  async createDecoder(onData) {
-    this.decoderConfig ??= await this.audioTrack.getDecoderConfig();
+  /** @internal */
+  async _createDecoder(onData) {
+    this._decoderConfig ??= await this._audioTrack.getDecoderConfig();
     const decoder = new AudioDecoder({
       output: onData,
       error: (error) => console.error(error)
     });
-    decoder.configure(this.decoderConfig);
+    decoder.configure(this._decoderConfig);
     return decoder;
   }
-  createChunkDrain() {
-    return new EncodedAudioChunkDrain(this.audioTrack);
+  /** @internal */
+  _createChunkDrain() {
+    return new EncodedAudioChunkDrain(this._audioTrack);
   }
   async getData(timestamp) {
     for await (const data of this.mediaFramesAtTimestamps([timestamp])) {
@@ -6343,11 +6300,10 @@ var AudioDataDrain = class extends BaseMediaFrameDrain {
 };
 var AudioBufferDrain = class {
   constructor(audioTrack) {
-    this.audioTrack = audioTrack;
-    this.audioDataDrain = new AudioDataDrain(audioTrack);
+    this._audioDataDrain = new AudioDataDrain(audioTrack);
   }
-  audioDataDrain;
-  audioDataToWrappedArrayBuffer(data) {
+  /** @internal */
+  _audioDataToWrappedArrayBuffer(data) {
     const audioBuffer = new AudioBuffer({
       numberOfChannels: data.numberOfChannels,
       length: data.numberOfFrames,
@@ -6368,17 +6324,17 @@ var AudioBufferDrain = class {
     return result;
   }
   async getBuffer(timestamp) {
-    const data = await this.audioDataDrain.getData(timestamp);
-    return data && this.audioDataToWrappedArrayBuffer(data);
+    const data = await this._audioDataDrain.getData(timestamp);
+    return data && this._audioDataToWrappedArrayBuffer(data);
   }
   async *buffers(startTimestamp = 0, endTimestamp = Infinity) {
-    for await (const data of this.audioDataDrain.data(startTimestamp, endTimestamp)) {
-      yield this.audioDataToWrappedArrayBuffer(data);
+    for await (const data of this._audioDataDrain.data(startTimestamp, endTimestamp)) {
+      yield this._audioDataToWrappedArrayBuffer(data);
     }
   }
   async *buffersAtTimestamps(timestamps) {
-    for await (const data of this.audioDataDrain.dataAtTimestamps(timestamps)) {
-      yield data && this.audioDataToWrappedArrayBuffer(data);
+    for await (const data of this._audioDataDrain.dataAtTimestamps(timestamps)) {
+      yield data && this._audioDataToWrappedArrayBuffer(data);
     }
   }
 };
@@ -6392,6 +6348,8 @@ export {
   AudioDataDrain,
   AudioDataSource,
   AudioSource,
+  BaseChunkDrain,
+  BaseMediaFrameDrain,
   BlobSource,
   CanvasDrain,
   CanvasSource,
@@ -6401,10 +6359,16 @@ export {
   EncodedVideoChunkSource,
   ISOBMFF,
   Input,
+  InputAudioTrack,
+  InputFormat,
+  InputTrack,
+  InputVideoTrack,
+  IsobmffInputFormat,
   MATROSKA,
   MKV,
   MOV,
   MP4,
+  MatroskaInputFormat,
   MediaSource,
   MediaStreamAudioTrackSource,
   MediaStreamVideoTrackSource,

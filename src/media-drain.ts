@@ -1,7 +1,13 @@
-import { ChunkRetrievalOptions, InputAudioTrack, InputVideoTrack } from './input-track';
+import { InputAudioTrack, InputVideoTrack } from './input-track';
 import { AnyIterable, assert, promiseWithResolvers, toAsyncIterator } from './misc';
 
-abstract class BaseChunkDrain<Chunk extends EncodedVideoChunk | EncodedAudioChunk> {
+/** @public */
+export type ChunkRetrievalOptions = {
+	metadataOnly?: boolean;
+};
+
+/** @public */
+export abstract class BaseChunkDrain<Chunk extends EncodedVideoChunk | EncodedAudioChunk> {
 	abstract getFirstChunk(options?: ChunkRetrievalOptions): Promise<Chunk | null>;
 	abstract getChunk(timestamp: number, options?: ChunkRetrievalOptions): Promise<Chunk | null>;
 	abstract getNextChunk(chunk: Chunk, options?: ChunkRetrievalOptions): Promise<Chunk | null>;
@@ -71,14 +77,18 @@ abstract class BaseChunkDrain<Chunk extends EncodedVideoChunk | EncodedAudioChun
 	}
 }
 
-abstract class BaseMediaFrameDrain<
+/** @public */
+export abstract class BaseMediaFrameDrain<
 	Chunk extends EncodedVideoChunk | EncodedAudioChunk,
 	MediaFrame extends VideoFrame | AudioData,
 > {
-	abstract createDecoder(onMedia: (media: MediaFrame) => unknown): Promise<VideoDecoder | AudioDecoder>;
-	abstract createChunkDrain(): BaseChunkDrain<Chunk>;
+	/** @internal */
+	abstract _createDecoder(onMedia: (media: MediaFrame) => unknown): Promise<VideoDecoder | AudioDecoder>;
+	/** @internal */
+	abstract _createChunkDrain(): BaseChunkDrain<Chunk>;
 
-	private duplicateFrame(frame: MediaFrame) {
+	/** @internal */
+	private _duplicateFrame(frame: MediaFrame) {
 		return structuredClone(frame);
 	}
 
@@ -101,7 +111,7 @@ abstract class BaseMediaFrameDrain<
 			({ promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers());
 		};
 
-		const decoder = await this.createDecoder((frame) => {
+		const decoder = await this._createDecoder((frame) => {
 			onQueueDequeue();
 
 			if (ended) {
@@ -111,7 +121,7 @@ abstract class BaseMediaFrameDrain<
 
 			let frameUsed = false;
 			while (timestampsOfInterest.length > 0 && timestampsOfInterest[0] === frame.timestamp) {
-				pushToQueue(this.duplicateFrame(frame));
+				pushToQueue(this._duplicateFrame(frame));
 				timestampsOfInterest.shift();
 				frameUsed = true;
 			}
@@ -126,7 +136,7 @@ abstract class BaseMediaFrameDrain<
 
 		// The following is the "pump" process that keeps pumping chunks into the decoder
 		void (async () => {
-			const chunkDrain = this.createChunkDrain();
+			const chunkDrain = this._createChunkDrain();
 			let lastKeyChunk: Chunk | null = null;
 			let lastChunk: Chunk | null = null;
 
@@ -165,7 +175,7 @@ abstract class BaseMediaFrameDrain<
 						// Special case: We have a repeat chunk, but the frame for that chunk has already been decoded.
 						// Therefore, we need to push the frame here instead of in the decoder callback.
 						if (lastUsedFrame) {
-							pushToQueue(this.duplicateFrame(lastUsedFrame));
+							pushToQueue(this._duplicateFrame(lastUsedFrame));
 						}
 						timestampsOfInterest.shift();
 					}
@@ -230,7 +240,7 @@ abstract class BaseMediaFrameDrain<
 
 		const MAX_QUEUE_SIZE = 8;
 
-		const decoder = await this.createDecoder((frame) => {
+		const decoder = await this._createDecoder((frame) => {
 			onQueueDequeue();
 			const frameTimestamp = frame.timestamp / 1e6;
 
@@ -269,7 +279,7 @@ abstract class BaseMediaFrameDrain<
 			}
 		});
 
-		const chunkDrain = this.createChunkDrain();
+		const chunkDrain = this._createChunkDrain();
 		const keyChunk = await chunkDrain.getKeyChunk(startTimestamp) ?? await chunkDrain.getFirstChunk();
 		if (!keyChunk) {
 			return;
@@ -352,53 +362,67 @@ abstract class BaseMediaFrameDrain<
 	}
 }
 
+/** @public */
 export class EncodedVideoChunkDrain extends BaseChunkDrain<EncodedVideoChunk> {
-	constructor(public videoTrack: InputVideoTrack) {
+	/** @internal */
+	_videoTrack: InputVideoTrack;
+
+	constructor(videoTrack: InputVideoTrack) {
 		super();
+
+		this._videoTrack = videoTrack;
 	}
 
 	getFirstChunk(options: ChunkRetrievalOptions = {}) {
-		return this.videoTrack._backing.getFirstChunk(options);
+		return this._videoTrack._backing.getFirstChunk(options);
 	}
 
 	getChunk(timestamp: number, options: ChunkRetrievalOptions = {}) {
-		return this.videoTrack._backing.getChunk(timestamp, options);
+		return this._videoTrack._backing.getChunk(timestamp, options);
 	}
 
 	getNextChunk(chunk: EncodedVideoChunk, options: ChunkRetrievalOptions = {}) {
-		return this.videoTrack._backing.getNextChunk(chunk, options);
+		return this._videoTrack._backing.getNextChunk(chunk, options);
 	}
 
 	getKeyChunk(timestamp: number, options: ChunkRetrievalOptions = {}) {
-		return this.videoTrack._backing.getKeyChunk(timestamp, options);
+		return this._videoTrack._backing.getKeyChunk(timestamp, options);
 	}
 
 	getNextKeyChunk(chunk: EncodedVideoChunk, options: ChunkRetrievalOptions = {}) {
-		return this.videoTrack._backing.getNextKeyChunk(chunk, options);
+		return this._videoTrack._backing.getNextKeyChunk(chunk, options);
 	}
 }
 
+/** @public */
 export class VideoFrameDrain extends BaseMediaFrameDrain<EncodedVideoChunk, VideoFrame> {
-	decoderConfig: VideoDecoderConfig | null = null;
+	/** @internal */
+	_videoTrack: InputVideoTrack;
+	/** @internal */
+	_decoderConfig: VideoDecoderConfig | null = null;
 
-	constructor(public videoTrack: InputVideoTrack) {
+	constructor(videoTrack: InputVideoTrack) {
 		super();
+
+		this._videoTrack = videoTrack;
 	}
 
-	async createDecoder(onFrame: (frame: VideoFrame) => unknown) {
-		this.decoderConfig ??= await this.videoTrack.getDecoderConfig();
+	/** @internal */
+	async _createDecoder(onFrame: (frame: VideoFrame) => unknown) {
+		this._decoderConfig ??= await this._videoTrack.getDecoderConfig();
 
 		const decoder = new VideoDecoder({
 			output: onFrame,
 			error: error => console.error(error),
 		});
-		decoder.configure(this.decoderConfig);
+		decoder.configure(this._decoderConfig);
 
 		return decoder;
 	}
 
-	createChunkDrain() {
-		return new EncodedVideoChunkDrain(this.videoTrack);
+	/** @internal */
+	_createChunkDrain() {
+		return new EncodedVideoChunkDrain(this._videoTrack);
 	}
 
 	async getFrame(timestamp: number) {
@@ -417,23 +441,33 @@ export class VideoFrameDrain extends BaseMediaFrameDrain<EncodedVideoChunk, Vide
 	}
 }
 
-type WrappedCanvas = {
+/** @public */
+export type WrappedCanvas = {
 	canvas: HTMLCanvasElement;
 	timestamp: number;
 	duration: number;
 };
 
+/** @public */
 export class CanvasDrain {
-	videoFrameDrain: VideoFrameDrain;
+	/** @internal */
+	_videoTrack: InputVideoTrack;
+	/** @internal */
+	_dimensions?: { width: number; height: number };
+	/** @internal */
+	_videoFrameDrain: VideoFrameDrain;
 
-	constructor(public videoTrack: InputVideoTrack, public dimensions?: { width: number; height: number }) {
-		this.videoFrameDrain = new VideoFrameDrain(videoTrack);
+	constructor(videoTrack: InputVideoTrack, dimensions?: { width: number; height: number }) {
+		this._videoTrack = videoTrack;
+		this._dimensions = dimensions;
+		this._videoFrameDrain = new VideoFrameDrain(videoTrack);
 	}
 
-	private async videoFrameToWrappedCanvas(frame: VideoFrame): Promise<WrappedCanvas> {
-		const width = this.dimensions?.width ?? await this.videoTrack.getRotatedWidth();
-		const height = this.dimensions?.height ?? await this.videoTrack.getRotatedHeight();
-		const rotation = await this.videoTrack.getRotation();
+	/** @internal */
+	async _videoFrameToWrappedCanvas(frame: VideoFrame): Promise<WrappedCanvas> {
+		const width = this._dimensions?.width ?? await this._videoTrack.getDisplayWidth();
+		const height = this._dimensions?.height ?? await this._videoTrack.getDisplayHeight();
+		const rotation = await this._videoTrack.getRotation();
 
 		const canvas = document.createElement('canvas');
 		canvas.width = width;
@@ -461,70 +495,84 @@ export class CanvasDrain {
 	}
 
 	async getCanvas(timestamp: number) {
-		const frame = await this.videoFrameDrain.getFrame(timestamp);
-		return frame && this.videoFrameToWrappedCanvas(frame);
+		const frame = await this._videoFrameDrain.getFrame(timestamp);
+		return frame && this._videoFrameToWrappedCanvas(frame);
 	}
 
 	async* canvases(startTimestamp = 0, endTimestamp = Infinity) {
-		for await (const frame of this.videoFrameDrain.frames(startTimestamp, endTimestamp)) {
-			yield this.videoFrameToWrappedCanvas(frame);
+		for await (const frame of this._videoFrameDrain.frames(startTimestamp, endTimestamp)) {
+			yield this._videoFrameToWrappedCanvas(frame);
 		}
 	}
 
 	async* canvasesAtTimestamps(timestamps: AnyIterable<number>) {
-		for await (const frame of this.videoFrameDrain.framesAtTimestamps(timestamps)) {
-			yield frame && this.videoFrameToWrappedCanvas(frame);
+		for await (const frame of this._videoFrameDrain.framesAtTimestamps(timestamps)) {
+			yield frame && this._videoFrameToWrappedCanvas(frame);
 		}
 	}
 }
 
+/** @public */
 export class EncodedAudioChunkDrain extends BaseChunkDrain<EncodedAudioChunk> {
-	constructor(public audioTrack: InputAudioTrack) {
+	/** @internal */
+	_audioTrack: InputAudioTrack;
+
+	constructor(audioTrack: InputAudioTrack) {
 		super();
+
+		this._audioTrack = audioTrack;
 	}
 
 	getFirstChunk(options: ChunkRetrievalOptions = {}) {
-		return this.audioTrack._backing.getFirstChunk(options);
+		return this._audioTrack._backing.getFirstChunk(options);
 	}
 
 	getChunk(timestamp: number, options: ChunkRetrievalOptions = {}) {
-		return this.audioTrack._backing.getChunk(timestamp, options);
+		return this._audioTrack._backing.getChunk(timestamp, options);
 	}
 
 	getNextChunk(chunk: EncodedAudioChunk, options: ChunkRetrievalOptions = {}) {
-		return this.audioTrack._backing.getNextChunk(chunk, options);
+		return this._audioTrack._backing.getNextChunk(chunk, options);
 	}
 
 	getKeyChunk(timestamp: number, options: ChunkRetrievalOptions = {}) {
-		return this.audioTrack._backing.getKeyChunk(timestamp, options);
+		return this._audioTrack._backing.getKeyChunk(timestamp, options);
 	}
 
 	getNextKeyChunk(chunk: EncodedAudioChunk, options: ChunkRetrievalOptions = {}) {
-		return this.audioTrack._backing.getNextKeyChunk(chunk, options);
+		return this._audioTrack._backing.getNextKeyChunk(chunk, options);
 	}
 }
 
+/** @public */
 export class AudioDataDrain extends BaseMediaFrameDrain<EncodedAudioChunk, AudioData> {
-	decoderConfig: AudioDecoderConfig | null = null;
+	/** @internal */
+	_audioTrack: InputAudioTrack;
+	/** @internal */
+	_decoderConfig: AudioDecoderConfig | null = null;
 
-	constructor(public audioTrack: InputAudioTrack) {
+	constructor(audioTrack: InputAudioTrack) {
 		super();
+
+		this._audioTrack = audioTrack;
 	}
 
-	async createDecoder(onData: (data: AudioData) => unknown) {
-		this.decoderConfig ??= await this.audioTrack.getDecoderConfig();
+	/** @internal */
+	async _createDecoder(onData: (data: AudioData) => unknown) {
+		this._decoderConfig ??= await this._audioTrack.getDecoderConfig();
 
 		const decoder = new AudioDecoder({
 			output: onData,
 			error: error => console.error(error),
 		});
-		decoder.configure(this.decoderConfig);
+		decoder.configure(this._decoderConfig);
 
 		return decoder;
 	}
 
-	createChunkDrain() {
-		return new EncodedAudioChunkDrain(this.audioTrack);
+	/** @internal */
+	_createChunkDrain() {
+		return new EncodedAudioChunkDrain(this._audioTrack);
 	}
 
 	async getData(timestamp: number) {
@@ -543,19 +591,23 @@ export class AudioDataDrain extends BaseMediaFrameDrain<EncodedAudioChunk, Audio
 	}
 }
 
-type WrappedAudioBuffer = {
+/** @public */
+export type WrappedAudioBuffer = {
 	buffer: AudioBuffer;
 	timestamp: number;
 };
 
+/** @public */
 export class AudioBufferDrain {
-	audioDataDrain: AudioDataDrain;
+	/** @internal */
+	_audioDataDrain: AudioDataDrain;
 
-	constructor(public audioTrack: InputAudioTrack) {
-		this.audioDataDrain = new AudioDataDrain(audioTrack);
+	constructor(audioTrack: InputAudioTrack) {
+		this._audioDataDrain = new AudioDataDrain(audioTrack);
 	}
 
-	private audioDataToWrappedArrayBuffer(data: AudioData): WrappedAudioBuffer {
+	/** @internal */
+	_audioDataToWrappedArrayBuffer(data: AudioData): WrappedAudioBuffer {
 		const audioBuffer = new AudioBuffer({
 			numberOfChannels: data.numberOfChannels,
 			length: data.numberOfFrames,
@@ -583,19 +635,19 @@ export class AudioBufferDrain {
 	}
 
 	async getBuffer(timestamp: number) {
-		const data = await this.audioDataDrain.getData(timestamp);
-		return data && this.audioDataToWrappedArrayBuffer(data);
+		const data = await this._audioDataDrain.getData(timestamp);
+		return data && this._audioDataToWrappedArrayBuffer(data);
 	}
 
 	async* buffers(startTimestamp = 0, endTimestamp = Infinity) {
-		for await (const data of this.audioDataDrain.data(startTimestamp, endTimestamp)) {
-			yield this.audioDataToWrappedArrayBuffer(data);
+		for await (const data of this._audioDataDrain.data(startTimestamp, endTimestamp)) {
+			yield this._audioDataToWrappedArrayBuffer(data);
 		}
 	}
 
 	async* buffersAtTimestamps(timestamps: AnyIterable<number>) {
-		for await (const data of this.audioDataDrain.dataAtTimestamps(timestamps)) {
-			yield data && this.audioDataToWrappedArrayBuffer(data);
+		for await (const data of this._audioDataDrain.dataAtTimestamps(timestamps)) {
+			yield data && this._audioDataToWrappedArrayBuffer(data);
 		}
 	}
 }

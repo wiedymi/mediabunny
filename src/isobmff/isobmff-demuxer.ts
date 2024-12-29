@@ -9,7 +9,6 @@ import {
 import { Demuxer } from '../demuxer';
 import { Input } from '../input';
 import {
-	ChunkRetrievalOptions,
 	InputAudioTrack,
 	InputAudioTrackBacking,
 	InputTrack,
@@ -17,6 +16,7 @@ import {
 	InputVideoTrack,
 	InputVideoTrackBacking,
 } from '../input-track';
+import { ChunkRetrievalOptions } from '../media-drain';
 import {
 	assert,
 	COLOR_PRIMARIES_MAP_INVERSE,
@@ -28,6 +28,7 @@ import {
 	Rotation,
 	last,
 	AsyncMutex,
+	findLastIndex,
 } from '../misc';
 import { Reader } from '../reader';
 import { IsobmffReader } from './isobmff-reader';
@@ -1654,7 +1655,7 @@ abstract class IsobmffTrackBacking<Chunk extends EncodedVideoChunk | EncodedAudi
 		if (fragmentIndex !== -1) {
 			const fragment = this.internalTrack.fragments[fragmentIndex]!;
 			const trackData = fragment.trackData.get(this.internalTrack.id)!;
-			const index = trackData.presentationTimestamps.findLastIndex((x) => {
+			const index = findLastIndex(trackData.presentationTimestamps, (x) => {
 				const sample = trackData.samples[x.sampleIndex]!;
 				return sample.isKeyFrame && x.presentationTimestamp <= timestampInTimescale;
 			});
@@ -1805,11 +1806,11 @@ class IsobmffVideoTrackBacking extends IsobmffTrackBacking<EncodedVideoChunk> im
 		return this.internalTrack.info.codec!;
 	}
 
-	async getWidth() {
+	async getCodedWidth() {
 		return this.internalTrack.info.width;
 	}
 
-	async getHeight() {
+	async getCodedHeight() {
 		return this.internalTrack.info.height;
 	}
 

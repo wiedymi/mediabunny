@@ -2,8 +2,8 @@ import { Demuxer } from './demuxer';
 import { Input } from './input';
 import { IsobmffDemuxer } from './isobmff/isobmff-demuxer';
 import { IsobmffReader } from './isobmff/isobmff-reader';
-import { MatroskaDemuxer } from './matroska/matroska-demuxer';
 
+/** @public */
 export abstract class InputFormat {
 	/** @internal */
 	abstract _canReadInput(input: Input): Promise<boolean>;
@@ -12,7 +12,8 @@ export abstract class InputFormat {
 	abstract _createDemuxer(input: Input): Demuxer;
 }
 
-class IsobmffInputFormat extends InputFormat {
+/** @public */
+export class IsobmffInputFormat extends InputFormat {
 	/** @internal */
 	override async _canReadInput(input: Input) {
 		const sourceSize = await input._mainReader.source._getSize();
@@ -27,27 +28,37 @@ class IsobmffInputFormat extends InputFormat {
 		return fourCc === 'ftyp';
 	}
 
+	/** @internal */
 	override _createDemuxer(input: Input) {
 		return new IsobmffDemuxer(input);
 	}
 }
 
-class MatroskaInputFormat extends InputFormat {
+/** @public */
+export class MatroskaInputFormat extends InputFormat {
 	/** @internal */
 	override async _canReadInput() {
 		return false; // TODO
 	}
 
-	override _createDemuxer(input: Input) {
-		return new MatroskaDemuxer(input);
+	/** @internal */
+	override _createDemuxer(): never {
+		throw new Error('Not implemented');
 	}
 }
 
+/** @public */
 export const ISOBMFF = new IsobmffInputFormat();
+/** @public */
 export const MP4 = ISOBMFF;
+/** @public */
 export const MOV = ISOBMFF;
+/** @public */
 export const MATROSKA = new MatroskaInputFormat();
+/** @public */
 export const MKV = MATROSKA;
+/** @public */
 export const WEBM = MATROSKA;
 
+/** @public */
 export const ALL_FORMATS: InputFormat[] = [ISOBMFF, MKV];
