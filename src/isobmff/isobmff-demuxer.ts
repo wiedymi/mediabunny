@@ -728,11 +728,22 @@ export class IsobmffDemuxer extends Demuxer {
 				const profile = this.isobmffReader.readU8();
 				const level = this.isobmffReader.readU8();
 				const thirdByte = this.isobmffReader.readU8();
+				const bitDepth = thirdByte >> 4;
+				const chromaSubsampling = (thirdByte >> 1) & 0b111;
+				const videoFullRangeFlag = thirdByte & 1;
+				const colourPrimaries = this.isobmffReader.readU8();
+				const transferCharacteristics = this.isobmffReader.readU8();
+				const matrixCoefficients = this.isobmffReader.readU8();
 
 				track.info.vp9CodecInfo = {
-					profile: profile,
-					level: level,
-					bitDepth: thirdByte >> 4,
+					profile,
+					level,
+					bitDepth,
+					chromaSubsampling,
+					videoFullRangeFlag,
+					colourPrimaries,
+					transferCharacteristics,
+					matrixCoefficients,
 				};
 			}; break;
 
@@ -743,22 +754,30 @@ export class IsobmffDemuxer extends Demuxer {
 				this.isobmffReader.pos += 1; // Marker + version
 
 				const secondByte = this.isobmffReader.readU8();
-				const seqProfile = secondByte >> 5;
-				const seqLevelIdx0 = secondByte & 0b11111;
+				const profile = secondByte >> 5;
+				const level = secondByte & 0b11111;
 
 				const thirdByte = this.isobmffReader.readU8();
-				const seqTier0 = thirdByte >> 7;
+				const tier = thirdByte >> 7;
 				const highBitDepth = (thirdByte >> 6) & 1;
 				const twelveBit = (thirdByte >> 5) & 1;
+				const monochrome = (thirdByte >> 4) & 1;
+				const chromaSubsamplingX = (thirdByte >> 3) & 1;
+				const chromaSubsamplingY = (thirdByte >> 2) & 1;
+				const chromaSamplePosition = thirdByte & 0b11;
 
 				// Logic from https://aomediacodec.github.io/av1-spec/av1-spec.pdf
-				const bitDepth = seqProfile == 2 && highBitDepth ? (twelveBit ? 12 : 10) : (highBitDepth ? 10 : 8);
+				const bitDepth = profile == 2 && highBitDepth ? (twelveBit ? 12 : 10) : (highBitDepth ? 10 : 8);
 
 				track.info.av1CodecInfo = {
-					seqProfile,
-					seqLevelIdx0,
-					seqTier0,
+					profile,
+					level,
+					tier,
 					bitDepth,
+					monochrome,
+					chromaSubsamplingX,
+					chromaSubsamplingY,
+					chromaSamplePosition,
 				};
 			}; break;
 

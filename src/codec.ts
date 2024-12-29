@@ -120,6 +120,9 @@ const AV1_LEVEL_TABLE = [
 	{ maxPictureSize: 35651584, maxBitrate: 800000000, tier: 'H', level: 19 }, // Level 6.3 (High Tier)
 ];
 
+const VP9_DEFAULT_SUFFIX = '.01.01.01.01.00';
+const AV1_DEFAULT_SUFFIX = '.0.110.01.01.01.0';
+
 export const buildVideoCodecString = (codec: VideoCodec, width: number, height: number, bitrate: number) => {
 	if (codec === 'avc') {
 		const profileIndication = 0x64; // High Profile
@@ -166,7 +169,7 @@ export const buildVideoCodecString = (codec: VideoCodec, width: number, height: 
 
 		const bitDepth = '08'; // 8-bit
 
-		return `vp09.${profile}.${levelInfo.level.toString().padStart(2, '0')}.${bitDepth}`;
+		return `vp09.${profile}.${levelInfo.level.toString().padStart(2, '0')}.${bitDepth}${VP9_DEFAULT_SUFFIX}`;
 	} else if (codec === 'av1') {
 		const profile = 0; // Main Profile, single digit
 
@@ -174,10 +177,11 @@ export const buildVideoCodecString = (codec: VideoCodec, width: number, height: 
 		const levelInfo = AV1_LEVEL_TABLE.find(
 			level => pictureSize <= level.maxPictureSize && bitrate <= level.maxBitrate,
 		) ?? last(AV1_LEVEL_TABLE)!;
+		const level = levelInfo.level.toString().padStart(2, '0');
 
 		const bitDepth = '08'; // 8-bit
 
-		return `av01.${profile}.${levelInfo.level.toString().padStart(2, '0')}${levelInfo.tier}.${bitDepth}`;
+		return `av01.${profile}.${level}${levelInfo.tier}.${bitDepth}${AV1_DEFAULT_SUFFIX}`;
 	}
 
 	// eslint-disable-next-line @typescript-eslint/restrict-template-expressions
@@ -188,22 +192,32 @@ export type Vp9CodecInfo = {
 	profile: number;
 	level: number;
 	bitDepth: number;
+	chromaSubsampling: number;
+	videoFullRangeFlag: number;
+	colourPrimaries: number;
+	transferCharacteristics: number;
+	matrixCoefficients: number;
 };
 
 export type Av1CodecInfo = {
-	seqProfile: number;
-	seqLevelIdx0: number;
-	seqTier0: number;
+	profile: number;
+	level: number;
+	tier: number;
 	bitDepth: number;
+	monochrome: number;
+	chromaSubsamplingX: number;
+	chromaSubsamplingY: number;
+	chromaSamplePosition: number;
 };
 
 export const extractVideoCodecString = (trackInfo: {
 	codec: VideoCodec | null;
 	codecDescription: Uint8Array | null;
+	colorSpace: VideoColorSpaceInit | null;
 	vp9CodecInfo: Vp9CodecInfo | null;
 	av1CodecInfo: Av1CodecInfo | null;
 }) => {
-	const { codec, codecDescription: description, vp9CodecInfo, av1CodecInfo } = trackInfo;
+	const { codec, codecDescription: description, colorSpace, vp9CodecInfo, av1CodecInfo } = trackInfo;
 
 	if (codec === 'avc') {
 		if (!description || description.byteLength < 4) {
@@ -266,19 +280,60 @@ export const extractVideoCodecString = (trackInfo: {
 		const profile = vp9CodecInfo.profile.toString().padStart(2, '0');
 		const level = vp9CodecInfo.level.toString().padStart(2, '0');
 		const bitDepth = vp9CodecInfo.bitDepth.toString().padStart(2, '0');
+		const chromaSubsampling = vp9CodecInfo.chromaSubsampling.toString().padStart(2, '0');
+		const colourPrimaries = vp9CodecInfo.colourPrimaries.toString().padStart(2, '0');
+		const transferCharacteristics = vp9CodecInfo.transferCharacteristics.toString().padStart(2, '0');
+		const matrixCoefficients = vp9CodecInfo.matrixCoefficients.toString().padStart(2, '0');
+		const videoFullRangeFlag = vp9CodecInfo.videoFullRangeFlag.toString().padStart(2, '0');
 
-		return `vp09.${profile}.${level}.${bitDepth}`;
+		let string = `vp09.${profile}.${level}.${bitDepth}.${chromaSubsampling}`;
+		string += `.${colourPrimaries}.${transferCharacteristics}.${matrixCoefficients}.${videoFullRangeFlag}`;
+
+		const defaultSuffix = '.01.01.01.01.00';
+		if (string.endsWith(defaultSuffix)) {
+			string = string.slice(0, -defaultSuffix.length);
+		}
+
+		return string;
 	} else if (codec === 'av1') {
 		if (!av1CodecInfo) {
 			throw new Error('Missing AV1 codec info - unable to construct codec string.');
 		}
 
-		const profile = av1CodecInfo.seqProfile; // Single digit
-		const level = av1CodecInfo.seqLevelIdx0.toString().padStart(2, '0');
-		const tier = av1CodecInfo.seqTier0 ? 'H' : 'M';
+		// https://aomediacodec.github.io/av1-isobmff/#codecsparam
+		const profile = av1CodecInfo.profile; // Single digit
+		const level = av1CodecInfo.level.toString().padStart(2, '0');
+		const tier = av1CodecInfo.tier ? 'H' : 'M';
 		const bitDepth = av1CodecInfo.bitDepth.toString().padStart(2, '0');
+		const monochrome = av1CodecInfo.monochrome ? '1' : '0';
+		const chromaSubsampling = 100 * av1CodecInfo.chromaSubsamplingX
+			+ 10 * av1CodecInfo.chromaSubsamplingY
+			+ 1 * (
+				av1CodecInfo.chromaSubsamplingX && av1CodecInfo.chromaSubsamplingY
+					? av1CodecInfo.chromaSamplePosition
+					: 0
+			);
 
-		return `av01.${profile}.${level}${tier}.${bitDepth}`;
+		// The defaults are 1 (ITU-R BT.709)
+		const colorPrimaries = colorSpace?.primaries ? COLOR_PRIMARIES_MAP[colorSpace.primaries] : 1;
+		const transferCharacteristics = colorSpace?.transfer ? TRANSFER_CHARACTERISTICS_MAP[colorSpace.transfer] : 1;
+		const matrixCoefficients = colorSpace?.matrix ? MATRIX_COEFFICIENTS_MAP[colorSpace.matrix] : 1;
+
+		const videoFullRangeFlag = colorSpace?.fullRange ? 1 : 0;
+
+		let string = `av01.${profile}.${level}${tier}.${bitDepth}`;
+		string += `.${monochrome}.${chromaSubsampling.toString().padStart(3, '0')}`;
+		string += `.${colorPrimaries.toString().padStart(2, '0')}`;
+		string += `.${transferCharacteristics.toString().padStart(2, '0')}`;
+		string += `.${matrixCoefficients.toString().padStart(2, '0')}`;
+		string += `.${videoFullRangeFlag}`;
+
+		const defaultSuffix = '.0.110.01.01.01.0';
+		if (string.endsWith(defaultSuffix)) {
+			string = string.slice(0, -defaultSuffix.length);
+		}
+
+		return string;
 	}
 
 	throw new TypeError(`Unhandled codec '${codec}'.`);

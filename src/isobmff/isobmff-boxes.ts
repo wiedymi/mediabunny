@@ -601,18 +601,25 @@ export const vpcC = (trackData: IsobmffVideoTrackData) => {
 	const level = Number(parts[2]);
 
 	const bitDepth = Number(parts[3]);
-	const chromaSubsampling = 0;
-	const thirdByte = (bitDepth << 4) + (chromaSubsampling << 1) + Number(decoderConfig.colorSpace.fullRange);
+	const chromaSubsampling = parts[4] ? Number(parts[4]) : 1; // 4:2:0 colocated with luma (0,0)
+	const videoFullRangeFlag = parts[8] ? Number(parts[8]) : Number(decoderConfig.colorSpace.fullRange);
+	const thirdByte = (bitDepth << 4) + (chromaSubsampling << 1) + videoFullRangeFlag;
 
-	const colourPrimaries = decoderConfig.colorSpace.primaries
-		? COLOR_PRIMARIES_MAP[decoderConfig.colorSpace.primaries]
-		: 2; // Default to undetermined
-	const transferCharacteristics = decoderConfig.colorSpace.transfer
-		? TRANSFER_CHARACTERISTICS_MAP[decoderConfig.colorSpace.transfer]
-		: 2;
-	const matrixCoefficients = decoderConfig.colorSpace.matrix
-		? MATRIX_COEFFICIENTS_MAP[decoderConfig.colorSpace.matrix]
-		: 2;
+	const colourPrimaries = parts[5]
+		? Number(parts[5])
+		: decoderConfig.colorSpace.primaries
+			? COLOR_PRIMARIES_MAP[decoderConfig.colorSpace.primaries]
+			: 2; // Default to undetermined
+	const transferCharacteristics = parts[6]
+		? Number(parts[6])
+		: decoderConfig.colorSpace.transfer
+			? TRANSFER_CHARACTERISTICS_MAP[decoderConfig.colorSpace.transfer]
+			: 2;
+	const matrixCoefficients = parts[7]
+		? Number(parts[7])
+		: decoderConfig.colorSpace.matrix
+			? MATRIX_COEFFICIENTS_MAP[decoderConfig.colorSpace.matrix]
+			: 2;
 
 	return fullBox('vpcC', 1, 0, [
 		u8(profile), // Profile
