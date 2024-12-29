@@ -646,18 +646,18 @@ export const av1C = (trackData: IsobmffVideoTrackData) => {
 	const profile = Number(parts[1]);
 	const levelAndTier = parts[2]!;
 	const level = Number(levelAndTier.slice(0, -1));
-	const tier = levelAndTier.slice(-1) === 'H' ? 1 : 0;
-	const bitDepth = Number(parts[3]);
 	const secondByte = (profile << 5) + level;
 
-	// The following values are educated, very likely guesses (typical 4:2:0 chroma subsampling)
+	const tier = levelAndTier.slice(-1) === 'H' ? 1 : 0;
+	const bitDepth = Number(parts[3]);
+	const highBitDepth = bitDepth === 8 ? 0 : 1;
 	const twelveBit = 0;
-	const monochrome = 0;
-	const chromaSubsamplingX = 1;
-	const chromaSubsamplingY = 1;
-	const chromaSamplePosition = 1; // CSP_VERTICAL
+	const monochrome = parts[4] ? Number(parts[4]) : 0;
+	const chromaSubsamplingX = parts[5] ? Number(parts[5][0]) : 1;
+	const chromaSubsamplingY = parts[5] ? Number(parts[5][1]) : 1;
+	const chromaSamplePosition = parts[5] ? Number(parts[5][2]) : 0; // CSP_UNKNOWN
 	const thirdByte = (tier << 7)
-		+ ((bitDepth === 8 ? 0 : 1) << 6)
+		+ (highBitDepth << 6)
 		+ (twelveBit << 5)
 		+ (monochrome << 4)
 		+ (chromaSubsamplingX << 3)

@@ -21,7 +21,7 @@
 		const output = new Metamuxer.Output({ target, format });
 
 		const mediaSource = new Metamuxer.VideoFrameSource({
-			codec: 'vp9',
+			codec: 'av1',
 			bitrate: 1e6
 		});
 		output.addVideoTrack(mediaSource);
