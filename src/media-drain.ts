@@ -36,12 +36,17 @@ export abstract class BaseChunkDrain<Chunk extends EncodedVideoChunk | EncodedAu
 		let { promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers();
 		let ended = false;
 
+		// This stores errors that are "out of band" in the sense that they didn't occur in the normal flow of this
+		// method but instead in a different context. This error should not go unnoticed and must be bubbled up to
+		// the consumer.
+		let outOfBandError = null as Error | null;
+
 		const timestamps: number[] = [];
 		// The queue should always be big enough to hold 1 second worth of chunks
 		const maxQueueSize = () => Math.max(2, timestamps.length);
 
 		// The following is the "pump" process that keeps pumping chunks into the queue
-		void (async () => {
+		(async () => {
 			let chunk = startChunk ?? await this.getFirstChunk();
 
 			while (chunk && !ended) {
@@ -65,11 +70,18 @@ export abstract class BaseChunkDrain<Chunk extends EncodedVideoChunk | EncodedAu
 
 			ended = true;
 			onQueueNotEmpty();
-		})();
+		})().catch((error: Error) => {
+			if (!outOfBandError) {
+				outOfBandError = error;
+				onQueueNotEmpty();
+			}
+		});
 
 		try {
 			while (true) {
-				if (chunkQueue.length > 0) {
+				if (outOfBandError) {
+					throw outOfBandError;
+				} else if (chunkQueue.length > 0) {
 					yield chunkQueue.shift()!;
 					const now = performance.now();
 					timestamps.push(now);
@@ -98,7 +110,10 @@ export abstract class BaseMediaFrameDrain<
 	MediaFrame extends VideoFrame | AudioData,
 > {
 	/** @internal */
-	abstract _createDecoder(onMedia: (media: MediaFrame) => unknown): Promise<VideoDecoder | AudioDecoder>;
+	abstract _createDecoder(
+		onMedia: (media: MediaFrame) => unknown,
+		onError: (error: DOMException) => unknown
+	): Promise<VideoDecoder | AudioDecoder>;
 	/** @internal */
 	abstract _createChunkDrain(): BaseChunkDrain<Chunk>;
 
@@ -112,21 +127,26 @@ export abstract class BaseMediaFrameDrain<
 		const timestampIterator = toAsyncIterator(timestamps);
 		const timestampsOfInterest: number[] = [];
 
+		const MAX_QUEUE_SIZE = 8;
 		const frameQueue: (MediaFrame | null)[] = [];
 		let { promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers();
 		let { promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers();
 		let decoderIsFlushed = false;
 		let ended = false;
 
-		const MAX_QUEUE_SIZE = 8;
+		// This stores errors that are "out of band" in the sense that they didn't occur in the normal flow of this
+		// method but instead in a different context. This error should not go unnoticed and must be bubbled up to
+		// the consumer.
+		let outOfBandError = null as Error | null;
 
-		let lastUsedFrame: MediaFrame | null = null;
+		let lastUsedFrame = null as MediaFrame | null;
 		const pushToQueue = (frame: MediaFrame | null) => {
 			frameQueue.push(frame);
 			onQueueNotEmpty();
 			({ promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers());
 		};
 
+		const decoderError = new Error();
 		const decoder = await this._createDecoder((frame) => {
 			onQueueDequeue();
 
@@ -148,10 +168,16 @@ export abstract class BaseMediaFrameDrain<
 			} else {
 				frame.close();
 			}
+		}, (error) => {
+			if (!outOfBandError) {
+				error.stack = decoderError.stack; // Provide a more useful stack trace
+				outOfBandError = error;
+				onQueueNotEmpty();
+			}
 		});
 
 		// The following is the "pump" process that keeps pumping chunks into the decoder
-		void (async () => {
+		(async () => {
 			const chunkDrain = this._createChunkDrain();
 			let lastKeyChunk: Chunk | null = null;
 			let lastChunk: Chunk | null = null;
@@ -221,11 +247,18 @@ export abstract class BaseMediaFrameDrain<
 
 			decoderIsFlushed = true;
 			onQueueNotEmpty(); // To unstuck the generator
-		})();
+		})().catch((error: Error) => {
+			if (!outOfBandError) {
+				outOfBandError = error;
+				onQueueNotEmpty();
+			}
+		});
 
 		try {
 			while (true) {
-				if (frameQueue.length > 0) {
+				if (outOfBandError) {
+					throw outOfBandError;
+				} else if (frameQueue.length > 0) {
 					const nextFrame = frameQueue.shift();
 					assert(nextFrame !== undefined);
 					yield nextFrame;
@@ -243,7 +276,7 @@ export abstract class BaseMediaFrameDrain<
 			for (const frame of frameQueue) {
 				frame?.close();
 			}
-			(lastUsedFrame as MediaFrame | null)?.close();
+			lastUsedFrame?.close();
 		}
 	}
 
@@ -251,6 +284,7 @@ export abstract class BaseMediaFrameDrain<
 		validateTimestamp(startTimestamp);
 		validateTimestamp(endTimestamp);
 
+		const MAX_QUEUE_SIZE = 8;
 		const frameQueue: MediaFrame[] = [];
 		let firstFrameQueued = false;
 		let lastFrame: MediaFrame | null = null;
@@ -259,8 +293,12 @@ export abstract class BaseMediaFrameDrain<
 		let decoderIsFlushed = false;
 		let ended = false;
 
-		const MAX_QUEUE_SIZE = 8;
+		// This stores errors that are "out of band" in the sense that they didn't occur in the normal flow of this
+		// method but instead in a different context. This error should not go unnoticed and must be bubbled up to
+		// the consumer.
+		let outOfBandError = null as Error | null;
 
+		const decoderError = new Error();
 		const decoder = await this._createDecoder((frame) => {
 			onQueueDequeue();
 			const frameTimestamp = frame.timestamp / 1e6;
@@ -298,6 +336,12 @@ export abstract class BaseMediaFrameDrain<
 				onQueueNotEmpty();
 				({ promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers());
 			}
+		}, (error) => {
+			if (!outOfBandError) {
+				error.stack = decoderError.stack; // Provide a more useful stack trace
+				outOfBandError = error;
+				onQueueNotEmpty();
+			}
 		});
 
 		const chunkDrain = this._createChunkDrain();
@@ -307,7 +351,7 @@ export abstract class BaseMediaFrameDrain<
 		}
 
 		// The following is the "pump" process that keeps pumping chunks into the decoder
-		void (async () => {
+		(async () => {
 			let currentChunk: Chunk | null = keyChunk;
 
 			let chunksEndTimestamp = Infinity;
@@ -359,11 +403,18 @@ export abstract class BaseMediaFrameDrain<
 
 			decoderIsFlushed = true;
 			onQueueNotEmpty(); // To unstuck the generator
-		})();
+		})().catch((error: Error) => {
+			if (!outOfBandError) {
+				outOfBandError = error;
+				onQueueNotEmpty();
+			}
+		});
 
 		try {
 			while (true) {
-				if (frameQueue.length > 0) {
+				if (outOfBandError) {
+					throw outOfBandError;
+				} else if (frameQueue.length > 0) {
 					yield frameQueue.shift()!;
 					onQueueDequeue();
 				} else if (!decoderIsFlushed) {
@@ -450,13 +501,10 @@ export class VideoFrameDrain extends BaseMediaFrameDrain<EncodedVideoChunk, Vide
 	}
 
 	/** @internal */
-	async _createDecoder(onFrame: (frame: VideoFrame) => unknown) {
+	async _createDecoder(onFrame: (frame: VideoFrame) => unknown, onError: (error: DOMException) => unknown) {
 		this._decoderConfig ??= await this._videoTrack.getDecoderConfig();
 
-		const decoder = new VideoDecoder({
-			output: onFrame,
-			error: error => console.error(error),
-		});
+		const decoder = new VideoDecoder({ output: onFrame, error: onError });
 		decoder.configure(this._decoderConfig);
 
 		return decoder;
@@ -638,13 +686,10 @@ export class AudioDataDrain extends BaseMediaFrameDrain<EncodedAudioChunk, Audio
 	}
 
 	/** @internal */
-	async _createDecoder(onData: (data: AudioData) => unknown) {
+	async _createDecoder(onData: (data: AudioData) => unknown, onError: (error: DOMException) => unknown) {
 		this._decoderConfig ??= await this._audioTrack.getDecoderConfig();
 
-		const decoder = new AudioDecoder({
-			output: onData,
-			error: error => console.error(error),
-		});
+		const decoder = new AudioDecoder({ output: onData, error: onError });
 		decoder.configure(this._decoderConfig);
 
 		return decoder;

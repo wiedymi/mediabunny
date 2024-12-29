@@ -326,6 +326,13 @@ export declare class TextSubtitleSource extends SubtitleSource {
 export declare type TransformationMatrix = [number, number, number, number, number, number, number, number, number];
 
 /** @public */
+export declare class UrlSource extends Source {
+    constructor(url: string, options?: {
+        withCredentials?: boolean;
+    });
+}
+
+/** @public */
 export declare const VIDEO_CODECS: readonly ["avc", "hevc", "vp8", "vp9", "av1"];
 
 /** @public */

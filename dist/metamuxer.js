@@ -64,6 +64,7 @@ var Metamuxer = (() => {
     SubtitleSource: () => SubtitleSource,
     Target: () => Target,
     TextSubtitleSource: () => TextSubtitleSource,
+    UrlSource: () => UrlSource,
     VIDEO_CODECS: () => VIDEO_CODECS,
     VideoFrameDrain: () => VideoFrameDrain,
     VideoFrameSource: () => VideoFrameSource,
@@ -4120,6 +4121,97 @@ ${cue.notes ?? ""}`;
       return this._blob.size;
     }
   };
+  var UrlSource = class extends Source {
+    constructor(url2, options = {}) {
+      if (typeof url2 !== "string") {
+        throw new TypeError("url must be a string.");
+      }
+      if (!options || typeof options !== "object") {
+        throw new TypeError("options must be an object.");
+      }
+      if (options.withCredentials !== void 0 && typeof options.withCredentials !== "boolean") {
+        throw new TypeError("options.withCredentials, when specified, must be a boolean.");
+      }
+      super();
+      /** @internal */
+      this._fullData = null;
+      this._url = url2;
+      this._withCredentials = options.withCredentials ?? false;
+    }
+    /** @internal */
+    _makeRequest(range) {
+      return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("GET", this._url, true);
+        xhr.responseType = "arraybuffer";
+        xhr.withCredentials = this._withCredentials;
+        if (range) {
+          xhr.setRequestHeader("Range", `bytes=${range.start}-${range.end - 1}`);
+        }
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            const buffer = xhr.response;
+            if (!range) {
+              this._fullData = buffer;
+            }
+            resolve({
+              response: buffer,
+              statusCode: xhr.status
+            });
+          } else {
+            reject(new Error(`Error fetching ${this._url}: ${xhr.status} ${xhr.statusText}`));
+          }
+        };
+        xhr.onerror = () => {
+          reject(new Error("Network error occurred."));
+        };
+        xhr.ontimeout = () => {
+          reject(new Error("Request timed out."));
+        };
+        xhr.send();
+      });
+    }
+    /** @internal */
+    async _read(start, end) {
+      if (this._fullData) {
+        return new Uint8Array(this._fullData, start, end - start);
+      }
+      const { response, statusCode } = await this._makeRequest({ start, end });
+      if (statusCode === 200) {
+        const fullData = new Uint8Array(response);
+        return fullData.subarray(start, end);
+      }
+      return new Uint8Array(response);
+    }
+    /** @internal */
+    async _retrieveSize() {
+      if (this._fullData) {
+        return this._fullData.byteLength;
+      }
+      const xhr = new XMLHttpRequest();
+      xhr.open("HEAD", this._url, true);
+      xhr.withCredentials = this._withCredentials;
+      await new Promise((resolve, reject) => {
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve();
+          } else {
+            reject(new Error(`Error fetching ${this._url} (HEAD): ${xhr.status} ${xhr.statusText}`));
+          }
+        };
+        xhr.onerror = () => {
+          resolve();
+        };
+        xhr.send();
+      });
+      const contentLength = xhr.getResponseHeader("Content-Length");
+      if (!contentLength) {
+        const { response } = await this._makeRequest();
+        return response.byteLength;
+      }
+      return parseInt(contentLength, 10);
+    }
+  };
 
   // src/demuxer.ts
   var Demuxer = class {
@@ -6000,9 +6092,10 @@ ${cue.notes ?? ""}`;
       let { promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers();
       let { promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers();
       let ended = false;
+      let outOfBandError = null;
       const timestamps = [];
       const maxQueueSize = () => Math.max(2, timestamps.length);
-      void (async () => {
+      (async () => {
         let chunk = startChunk ?? await this.getFirstChunk();
         while (chunk && !ended) {
           if (chunk.timestamp / 1e6 >= endTimestamp) {
@@ -6020,10 +6113,17 @@ ${cue.notes ?? ""}`;
         }
         ended = true;
         onQueueNotEmpty();
-      })();
+      })().catch((error) => {
+        if (!outOfBandError) {
+          outOfBandError = error;
+          onQueueNotEmpty();
+        }
+      });
       try {
         while (true) {
-          if (chunkQueue.length > 0) {
+          if (outOfBandError) {
+            throw outOfBandError;
+          } else if (chunkQueue.length > 0) {
             yield chunkQueue.shift();
             const now = performance.now();
             timestamps.push(now);
@@ -6052,18 +6152,20 @@ ${cue.notes ?? ""}`;
       validateAnyIterable(timestamps);
       const timestampIterator = toAsyncIterator(timestamps);
       const timestampsOfInterest = [];
+      const MAX_QUEUE_SIZE = 8;
       const frameQueue = [];
       let { promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers();
       let { promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers();
       let decoderIsFlushed = false;
       let ended = false;
-      const MAX_QUEUE_SIZE = 8;
+      let outOfBandError = null;
       let lastUsedFrame = null;
       const pushToQueue = (frame) => {
         frameQueue.push(frame);
         onQueueNotEmpty();
         ({ promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers());
       };
+      const decoderError = new Error();
       const decoder = await this._createDecoder((frame) => {
         onQueueDequeue();
         if (ended) {
@@ -6082,8 +6184,14 @@ ${cue.notes ?? ""}`;
         } else {
           frame.close();
         }
+      }, (error) => {
+        if (!outOfBandError) {
+          error.stack = decoderError.stack;
+          outOfBandError = error;
+          onQueueNotEmpty();
+        }
       });
-      void (async () => {
+      (async () => {
         const chunkDrain = this._createChunkDrain();
         let lastKeyChunk = null;
         let lastChunk = null;
@@ -6134,10 +6242,17 @@ ${cue.notes ?? ""}`;
         decoder.close();
         decoderIsFlushed = true;
         onQueueNotEmpty();
-      })();
+      })().catch((error) => {
+        if (!outOfBandError) {
+          outOfBandError = error;
+          onQueueNotEmpty();
+        }
+      });
       try {
         while (true) {
-          if (frameQueue.length > 0) {
+          if (outOfBandError) {
+            throw outOfBandError;
+          } else if (frameQueue.length > 0) {
             const nextFrame = frameQueue.shift();
             assert(nextFrame !== void 0);
             yield nextFrame;
@@ -6160,6 +6275,7 @@ ${cue.notes ?? ""}`;
     async *mediaFramesInRange(startTimestamp = 0, endTimestamp = Infinity) {
       validateTimestamp(startTimestamp);
       validateTimestamp(endTimestamp);
+      const MAX_QUEUE_SIZE = 8;
       const frameQueue = [];
       let firstFrameQueued = false;
       let lastFrame = null;
@@ -6167,7 +6283,8 @@ ${cue.notes ?? ""}`;
       let { promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers();
       let decoderIsFlushed = false;
       let ended = false;
-      const MAX_QUEUE_SIZE = 8;
+      let outOfBandError = null;
+      const decoderError = new Error();
       const decoder = await this._createDecoder((frame) => {
         onQueueDequeue();
         const frameTimestamp = frame.timestamp / 1e6;
@@ -6195,13 +6312,19 @@ ${cue.notes ?? ""}`;
           onQueueNotEmpty();
           ({ promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers());
         }
+      }, (error) => {
+        if (!outOfBandError) {
+          error.stack = decoderError.stack;
+          outOfBandError = error;
+          onQueueNotEmpty();
+        }
       });
       const chunkDrain = this._createChunkDrain();
       const keyChunk = await chunkDrain.getKeyChunk(startTimestamp) ?? await chunkDrain.getFirstChunk();
       if (!keyChunk) {
         return;
       }
-      void (async () => {
+      (async () => {
         let currentChunk = keyChunk;
         let chunksEndTimestamp = Infinity;
         if (endTimestamp < Infinity) {
@@ -6234,10 +6357,17 @@ ${cue.notes ?? ""}`;
         }
         decoderIsFlushed = true;
         onQueueNotEmpty();
-      })();
+      })().catch((error) => {
+        if (!outOfBandError) {
+          outOfBandError = error;
+          onQueueNotEmpty();
+        }
+      });
       try {
         while (true) {
-          if (frameQueue.length > 0) {
+          if (outOfBandError) {
+            throw outOfBandError;
+          } else if (frameQueue.length > 0) {
             yield frameQueue.shift();
             onQueueDequeue();
           } else if (!decoderIsFlushed) {
@@ -6303,12 +6433,9 @@ ${cue.notes ?? ""}`;
       this._videoTrack = videoTrack;
     }
     /** @internal */
-    async _createDecoder(onFrame) {
+    async _createDecoder(onFrame, onError) {
       this._decoderConfig ??= await this._videoTrack.getDecoderConfig();
-      const decoder = new VideoDecoder({
-        output: onFrame,
-        error: (error) => console.error(error)
-      });
+      const decoder = new VideoDecoder({ output: onFrame, error: onError });
       decoder.configure(this._decoderConfig);
       return decoder;
     }
@@ -6435,12 +6562,9 @@ ${cue.notes ?? ""}`;
       this._audioTrack = audioTrack;
     }
     /** @internal */
-    async _createDecoder(onData) {
+    async _createDecoder(onData, onError) {
       this._decoderConfig ??= await this._audioTrack.getDecoderConfig();
-      const decoder = new AudioDecoder({
-        output: onData,
-        error: (error) => console.error(error)
-      });
+      const decoder = new AudioDecoder({ output: onData, error: onError });
       decoder.configure(this._decoderConfig);
       return decoder;
     }

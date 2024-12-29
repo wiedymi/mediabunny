@@ -36,7 +36,7 @@ export {
 } from './codec';
 export { Target, ArrayBufferTarget, StreamTarget, StreamTargetChunk, StreamTargetOptions } from './target';
 export { Rotation, TransformationMatrix, AnyIterable } from './misc';
-export { Source, BufferSource, BlobSource } from './source';
+export { Source, BufferSource, BlobSource, UrlSource } from './source';
 export {
 	InputFormat,
 	IsobmffInputFormat,
