@@ -24,6 +24,16 @@ export class Input {
 	_format: InputFormat | null = null;
 
 	constructor(options: InputOptions) {
+		if (!options || typeof options !== 'object') {
+			throw new TypeError('options must be an object.');
+		}
+		if (!Array.isArray(options.formats) || options.formats.some(x => !(x instanceof InputFormat))) {
+			throw new TypeError('options.formats must be an array of InputFormat.');
+		}
+		if (!(options.source instanceof Source)) {
+			throw new TypeError('options.source must be a Source.');
+		}
+
 		this._formats = options.formats;
 		this._source = options.source;
 		this._mainReader = new Reader(options.source);

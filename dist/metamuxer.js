@@ -23,7 +23,6 @@ var Metamuxer = (() => {
   __export(src_exports, {
     ALL_FORMATS: () => ALL_FORMATS,
     AUDIO_CODECS: () => AUDIO_CODECS,
-    ArrayBufferSource: () => ArrayBufferSource,
     ArrayBufferTarget: () => ArrayBufferTarget,
     AudioBufferDrain: () => AudioBufferDrain,
     AudioBufferSource: () => AudioBufferSource,
@@ -33,6 +32,7 @@ var Metamuxer = (() => {
     BaseChunkDrain: () => BaseChunkDrain,
     BaseMediaFrameDrain: () => BaseMediaFrameDrain,
     BlobSource: () => BlobSource,
+    BufferSource: () => BufferSource,
     CanvasDrain: () => CanvasDrain,
     CanvasSource: () => CanvasSource,
     EncodedAudioChunkDrain: () => EncodedAudioChunkDrain,
@@ -257,6 +257,11 @@ var Metamuxer = (() => {
       yield* source[Symbol.iterator]();
     } else {
       yield* source[Symbol.asyncIterator]();
+    }
+  };
+  var validateAnyIterable = (iterable) => {
+    if (!(Symbol.iterator in iterable) && !(Symbol.asyncIterator in iterable)) {
+      throw new TypeError("Argument must be an iterable or async iterable.");
     }
   };
 
@@ -4079,22 +4084,28 @@ ${cue.notes ?? ""}`;
       return this._sizePromise ??= this._retrieveSize();
     }
   };
-  var ArrayBufferSource = class extends Source {
+  var BufferSource = class extends Source {
     constructor(buffer) {
+      if (!(buffer instanceof ArrayBuffer) && !(buffer instanceof Uint8Array)) {
+        throw new TypeError("buffer must be an ArrayBuffer or Uint8Array.");
+      }
       super();
-      this._buffer = buffer;
+      this._bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
     }
     /** @internal */
     async _read(start, end) {
-      return new Uint8Array(this._buffer, start, end - start);
+      return this._bytes.subarray(start, end);
     }
     /** @internal */
     async _retrieveSize() {
-      return this._buffer.byteLength;
+      return this._bytes.byteLength;
     }
   };
   var BlobSource = class extends Source {
     constructor(blob) {
+      if (!(blob instanceof Blob)) {
+        throw new TypeError("blob must be a Blob.");
+      }
       super();
       this._blob = blob;
     }
@@ -5907,6 +5918,15 @@ ${cue.notes ?? ""}`;
       this._demuxerPromise = null;
       /** @internal */
       this._format = null;
+      if (!options || typeof options !== "object") {
+        throw new TypeError("options must be an object.");
+      }
+      if (!Array.isArray(options.formats) || options.formats.some((x) => !(x instanceof InputFormat))) {
+        throw new TypeError("options.formats must be an array of InputFormat.");
+      }
+      if (!(options.source instanceof Source)) {
+        throw new TypeError("options.source must be a Source.");
+      }
       this._formats = options.formats;
       this._source = options.source;
       this._mainReader = new Reader(options.source);
@@ -5961,6 +5981,19 @@ ${cue.notes ?? ""}`;
   };
 
   // src/media-drain.ts
+  var validateChunkRetrievalOptions = (options) => {
+    if (!options || typeof options !== "object") {
+      throw new TypeError("options must be an object.");
+    }
+    if (options.metadataOnly !== void 0 && typeof options.metadataOnly !== "boolean") {
+      throw new TypeError("options.metadataOnly, when defined, must be a boolean.");
+    }
+  };
+  var validateTimestamp = (timestamp) => {
+    if (typeof timestamp !== "number" || Number.isNaN(timestamp)) {
+      throw new TypeError("timestamp must be a number.");
+    }
+  };
   var BaseChunkDrain = class {
     async *chunks(startChunk, endTimestamp = Infinity) {
       const chunkQueue = [];
@@ -6016,6 +6049,7 @@ ${cue.notes ?? ""}`;
       return structuredClone(frame);
     }
     async *mediaFramesAtTimestamps(timestamps) {
+      validateAnyIterable(timestamps);
       const timestampIterator = toAsyncIterator(timestamps);
       const timestampsOfInterest = [];
       const frameQueue = [];
@@ -6054,6 +6088,7 @@ ${cue.notes ?? ""}`;
         let lastKeyChunk = null;
         let lastChunk = null;
         for await (const timestamp of timestampIterator) {
+          validateTimestamp(timestamp);
           while (frameQueue.length + decoder.decodeQueueSize > MAX_QUEUE_SIZE) {
             ({ promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers());
             await queueDequeue;
@@ -6123,6 +6158,8 @@ ${cue.notes ?? ""}`;
       }
     }
     async *mediaFramesInRange(startTimestamp = 0, endTimestamp = Infinity) {
+      validateTimestamp(startTimestamp);
+      validateTimestamp(endTimestamp);
       const frameQueue = [];
       let firstFrameQueued = false;
       let lastFrame = null;
@@ -6220,27 +6257,46 @@ ${cue.notes ?? ""}`;
   };
   var EncodedVideoChunkDrain = class extends BaseChunkDrain {
     constructor(videoTrack) {
+      if (!(videoTrack instanceof InputVideoTrack)) {
+        throw new TypeError("videoTrack must be an InputVideoTrack.");
+      }
       super();
       this._videoTrack = videoTrack;
     }
     getFirstChunk(options = {}) {
+      validateChunkRetrievalOptions(options);
       return this._videoTrack._backing.getFirstChunk(options);
     }
     getChunk(timestamp, options = {}) {
+      validateTimestamp(timestamp);
+      validateChunkRetrievalOptions(options);
       return this._videoTrack._backing.getChunk(timestamp, options);
     }
     getNextChunk(chunk, options = {}) {
+      if (!(chunk instanceof EncodedVideoChunk)) {
+        throw new TypeError("chunk must be an EncodedVideoChunk.");
+      }
+      validateChunkRetrievalOptions(options);
       return this._videoTrack._backing.getNextChunk(chunk, options);
     }
     getKeyChunk(timestamp, options = {}) {
+      validateTimestamp(timestamp);
+      validateChunkRetrievalOptions(options);
       return this._videoTrack._backing.getKeyChunk(timestamp, options);
     }
     getNextKeyChunk(chunk, options = {}) {
+      if (!(chunk instanceof EncodedVideoChunk)) {
+        throw new TypeError("chunk must be an EncodedVideoChunk.");
+      }
+      validateChunkRetrievalOptions(options);
       return this._videoTrack._backing.getNextKeyChunk(chunk, options);
     }
   };
   var VideoFrameDrain = class extends BaseMediaFrameDrain {
     constructor(videoTrack) {
+      if (!(videoTrack instanceof InputVideoTrack)) {
+        throw new TypeError("videoTrack must be an InputVideoTrack.");
+      }
       super();
       /** @internal */
       this._decoderConfig = null;
@@ -6261,6 +6317,7 @@ ${cue.notes ?? ""}`;
       return new EncodedVideoChunkDrain(this._videoTrack);
     }
     async getFrame(timestamp) {
+      validateTimestamp(timestamp);
       for await (const frame of this.mediaFramesAtTimestamps([timestamp])) {
         return frame;
       }
@@ -6275,6 +6332,18 @@ ${cue.notes ?? ""}`;
   };
   var CanvasDrain = class {
     constructor(videoTrack, dimensions) {
+      if (!(videoTrack instanceof InputVideoTrack)) {
+        throw new TypeError("videoTrack must be an InputVideoTrack.");
+      }
+      if (dimensions && typeof dimensions !== "object") {
+        throw new TypeError("dimensions, when defined, must be an object.");
+      }
+      if (dimensions && (!Number.isInteger(dimensions.width) || dimensions.width <= 0)) {
+        throw new TypeError("dimensions.width must be a positive integer.");
+      }
+      if (dimensions && (!Number.isInteger(dimensions.height) || dimensions.height <= 0)) {
+        throw new TypeError("dimensions.height must be a positive integer.");
+      }
       this._videoTrack = videoTrack;
       this._dimensions = dimensions;
       this._videoFrameDrain = new VideoFrameDrain(videoTrack);
@@ -6303,6 +6372,7 @@ ${cue.notes ?? ""}`;
       return result;
     }
     async getCanvas(timestamp) {
+      validateTimestamp(timestamp);
       const frame = await this._videoFrameDrain.getFrame(timestamp);
       return frame && this._videoFrameToWrappedCanvas(frame);
     }
@@ -6319,27 +6389,46 @@ ${cue.notes ?? ""}`;
   };
   var EncodedAudioChunkDrain = class extends BaseChunkDrain {
     constructor(audioTrack) {
+      if (!(audioTrack instanceof InputAudioTrack)) {
+        throw new TypeError("audioTrack must be an InputAudioTrack.");
+      }
       super();
       this._audioTrack = audioTrack;
     }
     getFirstChunk(options = {}) {
+      validateChunkRetrievalOptions(options);
       return this._audioTrack._backing.getFirstChunk(options);
     }
     getChunk(timestamp, options = {}) {
+      validateTimestamp(timestamp);
+      validateChunkRetrievalOptions(options);
       return this._audioTrack._backing.getChunk(timestamp, options);
     }
     getNextChunk(chunk, options = {}) {
+      if (!(chunk instanceof EncodedAudioChunk)) {
+        throw new TypeError("chunk must be an EncodedAudioChunk.");
+      }
+      validateChunkRetrievalOptions(options);
       return this._audioTrack._backing.getNextChunk(chunk, options);
     }
     getKeyChunk(timestamp, options = {}) {
+      validateTimestamp(timestamp);
+      validateChunkRetrievalOptions(options);
       return this._audioTrack._backing.getKeyChunk(timestamp, options);
     }
     getNextKeyChunk(chunk, options = {}) {
+      if (!(chunk instanceof EncodedAudioChunk)) {
+        throw new TypeError("chunk must be an EncodedAudioChunk.");
+      }
+      validateChunkRetrievalOptions(options);
       return this._audioTrack._backing.getNextKeyChunk(chunk, options);
     }
   };
   var AudioDataDrain = class extends BaseMediaFrameDrain {
     constructor(audioTrack) {
+      if (!(audioTrack instanceof InputAudioTrack)) {
+        throw new TypeError("audioTrack must be an InputAudioTrack.");
+      }
       super();
       /** @internal */
       this._decoderConfig = null;
@@ -6360,6 +6449,7 @@ ${cue.notes ?? ""}`;
       return new EncodedAudioChunkDrain(this._audioTrack);
     }
     async getData(timestamp) {
+      validateTimestamp(timestamp);
       for await (const data of this.mediaFramesAtTimestamps([timestamp])) {
         return data;
       }
@@ -6374,6 +6464,9 @@ ${cue.notes ?? ""}`;
   };
   var AudioBufferDrain = class {
     constructor(audioTrack) {
+      if (!(audioTrack instanceof InputAudioTrack)) {
+        throw new TypeError("audioTrack must be an InputAudioTrack.");
+      }
       this._audioDataDrain = new AudioDataDrain(audioTrack);
     }
     /** @internal */
@@ -6398,6 +6491,7 @@ ${cue.notes ?? ""}`;
       return result;
     }
     async getBuffer(timestamp) {
+      validateTimestamp(timestamp);
       const data = await this._audioDataDrain.getData(timestamp);
       return data && this._audioDataToWrappedArrayBuffer(data);
     }

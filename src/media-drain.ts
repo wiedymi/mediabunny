@@ -1,9 +1,24 @@
 import { InputAudioTrack, InputVideoTrack } from './input-track';
-import { AnyIterable, assert, promiseWithResolvers, toAsyncIterator } from './misc';
+import { AnyIterable, assert, promiseWithResolvers, toAsyncIterator, validateAnyIterable } from './misc';
 
 /** @public */
 export type ChunkRetrievalOptions = {
 	metadataOnly?: boolean;
+};
+
+const validateChunkRetrievalOptions = (options: ChunkRetrievalOptions) => {
+	if (!options || typeof options !== 'object') {
+		throw new TypeError('options must be an object.');
+	}
+	if (options.metadataOnly !== undefined && typeof options.metadataOnly !== 'boolean') {
+		throw new TypeError('options.metadataOnly, when defined, must be a boolean.');
+	}
+};
+
+const validateTimestamp = (timestamp: number) => {
+	if (typeof timestamp !== 'number' || Number.isNaN(timestamp)) {
+		throw new TypeError('timestamp must be a number.'); // It can be non-finite, that's fine
+	}
 };
 
 /** @public */
@@ -93,6 +108,7 @@ export abstract class BaseMediaFrameDrain<
 	}
 
 	protected async* mediaFramesAtTimestamps(timestamps: AnyIterable<number>) {
+		validateAnyIterable(timestamps);
 		const timestampIterator = toAsyncIterator(timestamps);
 		const timestampsOfInterest: number[] = [];
 
@@ -141,6 +157,8 @@ export abstract class BaseMediaFrameDrain<
 			let lastChunk: Chunk | null = null;
 
 			for await (const timestamp of timestampIterator) {
+				validateTimestamp(timestamp);
+
 				while (frameQueue.length + decoder.decodeQueueSize > MAX_QUEUE_SIZE) {
 					({ promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers());
 					await queueDequeue;
@@ -230,6 +248,9 @@ export abstract class BaseMediaFrameDrain<
 	}
 
 	protected async* mediaFramesInRange(startTimestamp = 0, endTimestamp = Infinity) {
+		validateTimestamp(startTimestamp);
+		validateTimestamp(endTimestamp);
+
 		const frameQueue: MediaFrame[] = [];
 		let firstFrameQueued = false;
 		let lastFrame: MediaFrame | null = null;
@@ -368,28 +389,45 @@ export class EncodedVideoChunkDrain extends BaseChunkDrain<EncodedVideoChunk> {
 	_videoTrack: InputVideoTrack;
 
 	constructor(videoTrack: InputVideoTrack) {
+		if (!(videoTrack instanceof InputVideoTrack)) {
+			throw new TypeError('videoTrack must be an InputVideoTrack.');
+		}
+
 		super();
 
 		this._videoTrack = videoTrack;
 	}
 
 	getFirstChunk(options: ChunkRetrievalOptions = {}) {
+		validateChunkRetrievalOptions(options);
 		return this._videoTrack._backing.getFirstChunk(options);
 	}
 
 	getChunk(timestamp: number, options: ChunkRetrievalOptions = {}) {
+		validateTimestamp(timestamp);
+		validateChunkRetrievalOptions(options);
 		return this._videoTrack._backing.getChunk(timestamp, options);
 	}
 
 	getNextChunk(chunk: EncodedVideoChunk, options: ChunkRetrievalOptions = {}) {
+		if (!(chunk instanceof EncodedVideoChunk)) {
+			throw new TypeError('chunk must be an EncodedVideoChunk.');
+		}
+		validateChunkRetrievalOptions(options);
 		return this._videoTrack._backing.getNextChunk(chunk, options);
 	}
 
 	getKeyChunk(timestamp: number, options: ChunkRetrievalOptions = {}) {
+		validateTimestamp(timestamp);
+		validateChunkRetrievalOptions(options);
 		return this._videoTrack._backing.getKeyChunk(timestamp, options);
 	}
 
 	getNextKeyChunk(chunk: EncodedVideoChunk, options: ChunkRetrievalOptions = {}) {
+		if (!(chunk instanceof EncodedVideoChunk)) {
+			throw new TypeError('chunk must be an EncodedVideoChunk.');
+		}
+		validateChunkRetrievalOptions(options);
 		return this._videoTrack._backing.getNextKeyChunk(chunk, options);
 	}
 }
@@ -402,6 +440,10 @@ export class VideoFrameDrain extends BaseMediaFrameDrain<EncodedVideoChunk, Vide
 	_decoderConfig: VideoDecoderConfig | null = null;
 
 	constructor(videoTrack: InputVideoTrack) {
+		if (!(videoTrack instanceof InputVideoTrack)) {
+			throw new TypeError('videoTrack must be an InputVideoTrack.');
+		}
+
 		super();
 
 		this._videoTrack = videoTrack;
@@ -426,6 +468,8 @@ export class VideoFrameDrain extends BaseMediaFrameDrain<EncodedVideoChunk, Vide
 	}
 
 	async getFrame(timestamp: number) {
+		validateTimestamp(timestamp);
+
 		for await (const frame of this.mediaFramesAtTimestamps([timestamp])) {
 			return frame;
 		}
@@ -458,6 +502,19 @@ export class CanvasDrain {
 	_videoFrameDrain: VideoFrameDrain;
 
 	constructor(videoTrack: InputVideoTrack, dimensions?: { width: number; height: number }) {
+		if (!(videoTrack instanceof InputVideoTrack)) {
+			throw new TypeError('videoTrack must be an InputVideoTrack.');
+		}
+		if (dimensions && typeof dimensions !== 'object') {
+			throw new TypeError('dimensions, when defined, must be an object.');
+		}
+		if (dimensions && (!Number.isInteger(dimensions.width) || dimensions.width <= 0)) {
+			throw new TypeError('dimensions.width must be a positive integer.');
+		}
+		if (dimensions && (!Number.isInteger(dimensions.height) || dimensions.height <= 0)) {
+			throw new TypeError('dimensions.height must be a positive integer.');
+		}
+
 		this._videoTrack = videoTrack;
 		this._dimensions = dimensions;
 		this._videoFrameDrain = new VideoFrameDrain(videoTrack);
@@ -495,6 +552,8 @@ export class CanvasDrain {
 	}
 
 	async getCanvas(timestamp: number) {
+		validateTimestamp(timestamp);
+
 		const frame = await this._videoFrameDrain.getFrame(timestamp);
 		return frame && this._videoFrameToWrappedCanvas(frame);
 	}
@@ -518,28 +577,45 @@ export class EncodedAudioChunkDrain extends BaseChunkDrain<EncodedAudioChunk> {
 	_audioTrack: InputAudioTrack;
 
 	constructor(audioTrack: InputAudioTrack) {
+		if (!(audioTrack instanceof InputAudioTrack)) {
+			throw new TypeError('audioTrack must be an InputAudioTrack.');
+		}
+
 		super();
 
 		this._audioTrack = audioTrack;
 	}
 
 	getFirstChunk(options: ChunkRetrievalOptions = {}) {
+		validateChunkRetrievalOptions(options);
 		return this._audioTrack._backing.getFirstChunk(options);
 	}
 
 	getChunk(timestamp: number, options: ChunkRetrievalOptions = {}) {
+		validateTimestamp(timestamp);
+		validateChunkRetrievalOptions(options);
 		return this._audioTrack._backing.getChunk(timestamp, options);
 	}
 
 	getNextChunk(chunk: EncodedAudioChunk, options: ChunkRetrievalOptions = {}) {
+		if (!(chunk instanceof EncodedAudioChunk)) {
+			throw new TypeError('chunk must be an EncodedAudioChunk.');
+		}
+		validateChunkRetrievalOptions(options);
 		return this._audioTrack._backing.getNextChunk(chunk, options);
 	}
 
 	getKeyChunk(timestamp: number, options: ChunkRetrievalOptions = {}) {
+		validateTimestamp(timestamp);
+		validateChunkRetrievalOptions(options);
 		return this._audioTrack._backing.getKeyChunk(timestamp, options);
 	}
 
 	getNextKeyChunk(chunk: EncodedAudioChunk, options: ChunkRetrievalOptions = {}) {
+		if (!(chunk instanceof EncodedAudioChunk)) {
+			throw new TypeError('chunk must be an EncodedAudioChunk.');
+		}
+		validateChunkRetrievalOptions(options);
 		return this._audioTrack._backing.getNextKeyChunk(chunk, options);
 	}
 }
@@ -552,6 +628,10 @@ export class AudioDataDrain extends BaseMediaFrameDrain<EncodedAudioChunk, Audio
 	_decoderConfig: AudioDecoderConfig | null = null;
 
 	constructor(audioTrack: InputAudioTrack) {
+		if (!(audioTrack instanceof InputAudioTrack)) {
+			throw new TypeError('audioTrack must be an InputAudioTrack.');
+		}
+
 		super();
 
 		this._audioTrack = audioTrack;
@@ -576,6 +656,8 @@ export class AudioDataDrain extends BaseMediaFrameDrain<EncodedAudioChunk, Audio
 	}
 
 	async getData(timestamp: number) {
+		validateTimestamp(timestamp);
+
 		for await (const data of this.mediaFramesAtTimestamps([timestamp])) {
 			return data;
 		}
@@ -603,6 +685,10 @@ export class AudioBufferDrain {
 	_audioDataDrain: AudioDataDrain;
 
 	constructor(audioTrack: InputAudioTrack) {
+		if (!(audioTrack instanceof InputAudioTrack)) {
+			throw new TypeError('audioTrack must be an InputAudioTrack.');
+		}
+
 		this._audioDataDrain = new AudioDataDrain(audioTrack);
 	}
 
@@ -635,6 +721,8 @@ export class AudioBufferDrain {
 	}
 
 	async getBuffer(timestamp: number) {
+		validateTimestamp(timestamp);
+
 		const data = await this._audioDataDrain.getData(timestamp);
 		return data && this._audioDataToWrappedArrayBuffer(data);
 	}

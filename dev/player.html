@@ -48,8 +48,8 @@ let videoRotation = 0;
 if (!videoTrack) {
 	canvas.style.display = 'none';
 } else {
-	canvas.width = await videoTrack.getRotatedWidth();
-	canvas.height = await videoTrack.getRotatedHeight();
+	canvas.width = await videoTrack.getDisplayWidth();
+	canvas.height = await videoTrack.getDisplayHeight();
 }
 
 const totalDuration = await input.computeDuration();

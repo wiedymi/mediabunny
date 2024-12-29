@@ -5,11 +5,6 @@ export declare const ALL_FORMATS: InputFormat[];
 export declare type AnyIterable<T> = Iterable<T> | AsyncIterable<T>;
 
 /** @public */
-export declare class ArrayBufferSource extends Source {
-    constructor(buffer: ArrayBuffer);
-}
-
-/** @public */
 export declare class ArrayBufferTarget extends Target {
     buffer: ArrayBuffer | null;
 }
@@ -84,6 +79,12 @@ export declare class BlobSource extends Source {
 }
 
 /** @public */
+declare class BufferSource_2 extends Source {
+    constructor(buffer: ArrayBuffer | Uint8Array);
+}
+export { BufferSource_2 as BufferSource }
+
+/** @public */
 export declare class CanvasDrain {
     constructor(videoTrack: InputVideoTrack, dimensions?: {
         width: number;
@@ -152,7 +153,7 @@ export declare class Input {
 
 /** @public */
 export declare class InputAudioTrack extends InputTrack {
-    getCodec(): Promise<"aac" | "opus">;
+    getCodec(): Promise<AudioCodec>;
     getNumberOfChannels(): Promise<number>;
     getSampleRate(): Promise<number>;
     getDecoderConfig(): Promise<AudioDecoderConfig>;
@@ -180,7 +181,7 @@ export declare abstract class InputTrack {
 
 /** @public */
 export declare class InputVideoTrack extends InputTrack {
-    getCodec(): Promise<"avc" | "hevc" | "vp8" | "vp9" | "av1">;
+    getCodec(): Promise<VideoCodec>;
     getCodedWidth(): Promise<number>;
     getCodedHeight(): Promise<number>;
     getRotation(): Promise<Rotation>;

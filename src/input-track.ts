@@ -58,7 +58,7 @@ export class InputVideoTrack extends InputTrack {
 		this._backing = backing;
 	}
 
-	getCodec() {
+	getCodec(): Promise<VideoCodec> {
 		return this._backing.getCodec();
 	}
 
@@ -118,7 +118,7 @@ export class InputAudioTrack extends InputTrack {
 		this._backing = backing;
 	}
 
-	getCodec() {
+	getCodec(): Promise<AudioCodec> {
 		return this._backing.getCodec();
 	}
 

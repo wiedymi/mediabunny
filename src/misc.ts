@@ -239,3 +239,9 @@ export const toAsyncIterator = async function* <T>(source: AnyIterable<T>): Asyn
 		yield* source[Symbol.asyncIterator]();
 	}
 };
+
+export const validateAnyIterable = (iterable: AnyIterable<unknown>) => {
+	if (!(Symbol.iterator in iterable) && !(Symbol.asyncIterator in iterable)) {
+		throw new TypeError('Argument must be an iterable or async iterable.');
+	}
+};
