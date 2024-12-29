@@ -18,7 +18,6 @@ export type SubtitleMetadata = {
 type SubtitleParserOptions = {
 	codec: 'webvtt';
 	output: (cue: SubtitleCue, metadata: SubtitleMetadata) => unknown;
-	error: (error: Error) => unknown;
 };
 
 const cueBlockHeaderRegex = /(?:(.+?)\n)?((?:\d{2}:)?\d{2}:\d{2}.\d{3})\s+-->\s+((?:\d{2}:)?\d{2}:\d{2}.\d{3})/g;
@@ -42,18 +41,14 @@ export class SubtitleParser {
 
 		if (!this.preambleText) {
 			if (!preambleStartRegex.test(text)) {
-				const error = new Error('WebVTT preamble incorrect.');
-				this.options.error(error);
-				throw error;
+				throw new Error('WebVTT preamble incorrect.');
 			}
 
 			match = cueBlockHeaderRegex.exec(text);
 			const preamble = text.slice(0, match?.index ?? text.length).trimEnd();
 
 			if (!preamble) {
-				const error = new Error('No WebVTT preamble provided.');
-				this.options.error(error);
-				throw error;
+				throw new Error('No WebVTT preamble provided.');
 			}
 
 			this.preambleText = preamble;

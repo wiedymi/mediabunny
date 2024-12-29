@@ -207,16 +207,12 @@ var SubtitleParser = class {
     let match;
     if (!this.preambleText) {
       if (!preambleStartRegex.test(text)) {
-        const error = new Error("WebVTT preamble incorrect.");
-        this.options.error(error);
-        throw error;
+        throw new Error("WebVTT preamble incorrect.");
       }
       match = cueBlockHeaderRegex.exec(text);
       const preamble = text.slice(0, match?.index ?? text.length).trimEnd();
       if (!preamble) {
-        const error = new Error("No WebVTT preamble provided.");
-        this.options.error(error);
-        throw error;
+        throw new Error("No WebVTT preamble provided.");
       }
       this.preambleText = preamble;
       if (match) {
@@ -3517,6 +3513,9 @@ var validateVideoCodecConfig = (config) => {
   if (config.latencyMode !== void 0 && !["quality", "realtime"].includes(config.latencyMode)) {
     throw new TypeError("config.latencyMode, when provided, must be 'quality' or 'realtime'.");
   }
+  if (config.onEncodingError !== void 0 && typeof config.onEncodingError !== "function") {
+    throw new TypeError("config.onEncodingError, when provided, must be a function.");
+  }
 };
 var VideoEncoderWrapper = class {
   constructor(source, codecConfig) {
@@ -3559,7 +3558,7 @@ var VideoEncoderWrapper = class {
     }
     this.encoder = new VideoEncoder({
       output: (chunk, meta) => void this.muxer.addEncodedVideoChunk(this.source._connectedTrack, chunk, meta),
-      error: (error) => console.error("Video encode error:", error)
+      error: this.codecConfig.onEncodingError ?? ((error) => console.error("VideoEncoder error:", error))
     });
     this.encoder.configure({
       codec: buildVideoCodecString(
@@ -3707,6 +3706,9 @@ var validateAudioCodecConfig = (config) => {
   if (!Number.isInteger(config.bitrate) || config.bitrate <= 0) {
     throw new TypeError("config.bitrate must be a positive integer.");
   }
+  if (config.onEncodingError !== void 0 && typeof config.onEncodingError !== "function") {
+    throw new TypeError("config.onEncodingError, when provided, must be a function.");
+  }
 };
 var AudioEncoderWrapper = class {
   constructor(source, codecConfig) {
@@ -3744,7 +3746,7 @@ var AudioEncoderWrapper = class {
     }
     this.encoder = new AudioEncoder({
       output: (chunk, meta) => void this.muxer.addEncodedAudioChunk(this.source._connectedTrack, chunk, meta),
-      error: (error) => console.error("Audio encode error:", error)
+      error: this.codecConfig.onEncodingError ?? ((error) => console.error("AudioEncoder error:", error))
     });
     this.encoder.configure({
       codec: buildAudioCodecString(this.codecConfig.codec, audioData.numberOfChannels, audioData.sampleRate),
@@ -3871,8 +3873,7 @@ var TextSubtitleSource = class extends SubtitleSource {
     super(codec);
     this._parser = new SubtitleParser({
       codec,
-      output: (cue, metadata) => this._connectedTrack?.output._muxer.addSubtitleCue(this._connectedTrack, cue, metadata),
-      error: (error) => console.error("Subtitle parse error:", error)
+      output: (cue, metadata) => this._connectedTrack?.output._muxer.addSubtitleCue(this._connectedTrack, cue, metadata)
     });
   }
   digest(text) {

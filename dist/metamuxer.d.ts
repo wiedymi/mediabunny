@@ -33,6 +33,7 @@ export declare type AudioCodec = typeof AUDIO_CODECS[number];
 export declare type AudioCodecConfig = {
     codec: AudioCodec;
     bitrate: number;
+    onEncodingError?: (error: Error) => void;
 };
 
 /** @public */
@@ -343,6 +344,7 @@ export declare type VideoCodecConfig = {
     codec: VideoCodec;
     bitrate: number;
     latencyMode?: VideoEncoderConfig['latencyMode'];
+    onEncodingError?: (error: Error) => void;
 };
 
 /** @public */

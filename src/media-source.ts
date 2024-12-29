@@ -113,6 +113,7 @@ export type VideoCodecConfig = {
 	codec: VideoCodec;
 	bitrate: number;
 	latencyMode?: VideoEncoderConfig['latencyMode'];
+	onEncodingError?: (error: Error) => void;
 };
 
 const validateVideoCodecConfig = (config: VideoCodecConfig) => {
@@ -127,6 +128,9 @@ const validateVideoCodecConfig = (config: VideoCodecConfig) => {
 	}
 	if (config.latencyMode !== undefined && !['quality', 'realtime'].includes(config.latencyMode)) {
 		throw new TypeError('config.latencyMode, when provided, must be \'quality\' or \'realtime\'.');
+	}
+	if (config.onEncodingError !== undefined && typeof config.onEncodingError !== 'function') {
+		throw new TypeError('config.onEncodingError, when provided, must be a function.');
 	}
 };
 
@@ -186,7 +190,7 @@ class VideoEncoderWrapper {
 
 		this.encoder = new VideoEncoder({
 			output: (chunk, meta) => void this.muxer!.addEncodedVideoChunk(this.source._connectedTrack!, chunk, meta),
-			error: error => console.error('Video encode error:', error),
+			error: this.codecConfig.onEncodingError ?? (error => console.error('VideoEncoder error:', error)),
 		});
 
 		this.encoder.configure({
@@ -382,6 +386,7 @@ export class EncodedAudioChunkSource extends AudioSource {
 export type AudioCodecConfig = {
 	codec: AudioCodec;
 	bitrate: number;
+	onEncodingError?: (error: Error) => void;
 };
 
 const validateAudioCodecConfig = (config: AudioCodecConfig) => {
@@ -393,6 +398,9 @@ const validateAudioCodecConfig = (config: AudioCodecConfig) => {
 	}
 	if (!Number.isInteger(config.bitrate) || config.bitrate <= 0) {
 		throw new TypeError('config.bitrate must be a positive integer.');
+	}
+	if (config.onEncodingError !== undefined && typeof config.onEncodingError !== 'function') {
+		throw new TypeError('config.onEncodingError, when provided, must be a function.');
 	}
 };
 
@@ -445,7 +453,7 @@ class AudioEncoderWrapper {
 
 		this.encoder = new AudioEncoder({
 			output: (chunk, meta) => void this.muxer!.addEncodedAudioChunk(this.source._connectedTrack!, chunk, meta),
-			error: error => console.error('Audio encode error:', error),
+			error: this.codecConfig.onEncodingError ?? (error => console.error('AudioEncoder error:', error)),
 		});
 
 		this.encoder.configure({
@@ -629,7 +637,6 @@ export class TextSubtitleSource extends SubtitleSource {
 			codec,
 			output: (cue, metadata) =>
 				this._connectedTrack?.output._muxer.addSubtitleCue(this._connectedTrack, cue, metadata),
-			error: error => console.error('Subtitle parse error:', error),
 		});
 	}
 
