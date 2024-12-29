@@ -168,7 +168,7 @@ export const buildVideoCodecString = (codec: VideoCodec, width: number, height: 
 
 		return `vp09.${profile}.${levelInfo.level.toString().padStart(2, '0')}.${bitDepth}`;
 	} else if (codec === 'av1') {
-		const profile = 0; // Main Profile
+		const profile = 0; // Main Profile, single digit
 
 		const pictureSize = width * height;
 		const levelInfo = AV1_LEVEL_TABLE.find(
@@ -273,59 +273,12 @@ export const extractVideoCodecString = (trackInfo: {
 			throw new Error('Missing AV1 codec info - unable to construct codec string.');
 		}
 
-		const profile = av1CodecInfo.seqProfile;
+		const profile = av1CodecInfo.seqProfile; // Single digit
 		const level = av1CodecInfo.seqLevelIdx0.toString().padStart(2, '0');
 		const tier = av1CodecInfo.seqTier0 ? 'H' : 'M';
 		const bitDepth = av1CodecInfo.bitDepth.toString().padStart(2, '0');
 
 		return `av01.${profile}.${level}${tier}.${bitDepth}`;
-
-		/*
-		const chunk = await videoTrack._backing.getFirstChunk({});
-		if (!chunk) {
-			throw new Error('ahh');
-		}
-
-		const buffer = new ArrayBuffer(chunk.byteLength);
-		chunk.copyTo(buffer);
-
-		console.log(new Uint8Array(buffer));
-
-		const view = new DataView(buffer);
-		let pos = 0;
-		const byte = view.getUint8(pos++);
-
-		const obuType = (byte & 0b1111000) >> 3;
-		const obuExtensionFlag = (byte & 0b100) >> 2;
-		const obuHasSizeField = (byte & 0b10) >> 1;
-
-		if (obuExtensionFlag) {
-			pos++;
-		}
-
-		function leb128() {
-			let value = 0;
-
-			for (let i = 0; i < 8; i++) {
-				const leb128_byte = view.getUint8(pos);
-				value |= (leb128_byte & 0x7f) << (i * 7); // Extract the lower 7 bits and shift them accordingly
-				pos++;
-
-				// Check if the most significant bit (MSB) is 0, signaling the end of the LEB128 sequence
-				if ((leb128_byte & 0x80) === 0) {
-					break;
-				}
-			}
-
-			return value;
-		}
-
-		if (obuHasSizeField) {
-			console.log(leb128());
-		}
-
-		// Some extra stuff, todo
-		*/
 	}
 
 	throw new TypeError(`Unhandled codec '${codec}'.`);

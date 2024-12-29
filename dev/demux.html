@@ -29,7 +29,6 @@
 		output.start();
 
 		for await (const frame of drain.frames(0, 10)) {
-			console.log(frame.timestamp, frame.duration)
 			await mediaSource.digest(frame);
 			frame.close();
 		}

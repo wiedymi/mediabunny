@@ -38,6 +38,8 @@ const input = new Metamuxer.Input({
 	source
 });
 
+console.log(await input.getMimeType())
+
 const videoTrack = await input.getPrimaryVideoTrack(); 
 const audioTrack = await input.getPrimaryAudioTrack(); 
 

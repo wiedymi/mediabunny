@@ -596,7 +596,7 @@ export const vpcC = (trackData: IsobmffVideoTrackData) => {
 	const decoderConfig = trackData.info.decoderConfig;
 	assert(decoderConfig.colorSpace); // This is guaranteed by an earlier validation step
 
-	const parts = decoderConfig.codec.split('.');
+	const parts = decoderConfig.codec.split('.'); // We can derive the required values from the codec string
 	const profile = Number(parts[1]);
 	const level = Number(parts[2]);
 
@@ -604,10 +604,15 @@ export const vpcC = (trackData: IsobmffVideoTrackData) => {
 	const chromaSubsampling = 0;
 	const thirdByte = (bitDepth << 4) + (chromaSubsampling << 1) + Number(decoderConfig.colorSpace.fullRange);
 
-	// Set all to undetermined. We could determine them using the codec color space info, but there's no need.
-	const colourPrimaries = 2;
-	const transferCharacteristics = 2;
-	const matrixCoefficients = 2;
+	const colourPrimaries = decoderConfig.colorSpace.primaries
+		? COLOR_PRIMARIES_MAP[decoderConfig.colorSpace.primaries]
+		: 2; // Default to undetermined
+	const transferCharacteristics = decoderConfig.colorSpace.transfer
+		? TRANSFER_CHARACTERISTICS_MAP[decoderConfig.colorSpace.transfer]
+		: 2;
+	const matrixCoefficients = decoderConfig.colorSpace.matrix
+		? MATRIX_COEFFICIENTS_MAP[decoderConfig.colorSpace.matrix]
+		: 2;
 
 	return fullBox('vpcC', 1, 0, [
 		u8(profile), // Profile
@@ -621,21 +626,45 @@ export const vpcC = (trackData: IsobmffVideoTrackData) => {
 };
 
 /** AV1 Configuration Box: Provides additional information to the decoder. */
-export const av1C = () => {
+export const av1C = (trackData: IsobmffVideoTrackData) => {
 	// Reference: https://aomediacodec.github.io/av1-isobmff/
+
+	const decoderConfig = trackData.info.decoderConfig;
+	const parts = decoderConfig.codec.split('.'); // We can derive the required values from the codec string
 
 	const marker = 1;
 	const version = 1;
 	const firstByte = (marker << 7) + version;
 
-	// The box contents are not correct like this, but its length is. Getting the values for the last three bytes
-	// requires peeking into the bitstream of the coded chunks. Might come back later.
-	// TODO
+	const profile = Number(parts[1]);
+	const levelAndTier = parts[2]!;
+	const level = Number(levelAndTier.slice(0, -1));
+	const tier = levelAndTier.slice(-1) === 'H' ? 1 : 0;
+	const bitDepth = Number(parts[3]);
+	const secondByte = (profile << 5) + level;
+
+	// The following values are educated, very likely guesses (typical 4:2:0 chroma subsampling)
+	const twelveBit = 0;
+	const monochrome = 0;
+	const chromaSubsamplingX = 1;
+	const chromaSubsamplingY = 1;
+	const chromaSamplePosition = 1; // CSP_VERTICAL
+	const thirdByte = (tier << 7)
+		+ ((bitDepth === 8 ? 0 : 1) << 6)
+		+ (twelveBit << 5)
+		+ (monochrome << 4)
+		+ (chromaSubsamplingX << 3)
+		+ (chromaSubsamplingY << 2)
+		+ chromaSamplePosition;
+
+	const initialPresentationDelayPresent = 0; // Should be fine
+	const fourthByte = initialPresentationDelayPresent;
+
 	return box('av1C', [
 		firstByte,
-		0,
-		0,
-		0,
+		secondByte,
+		thirdByte,
+		fourthByte,
 	]);
 };
 
