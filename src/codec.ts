@@ -470,6 +470,12 @@ export const getAudioEncoderConfigExtension = (codec: AudioCodec) => {
 	return {};
 };
 
+const VALID_VIDEO_CODEC_STRING_PREFIXES = ['avc1', 'avc3', 'hev1', 'hvc1', 'vp8', 'vp09', 'av01'];
+const AVC_CODEC_STRING_REGEX = /^(avc1|avc3)\.[0-9a-fA-F]{6}$/;
+const HEVC_CODEC_STRING_REGEX = /^(hev1|hvc1)\.(?:[ABC]?\d+)\.[0-9a-fA-F]{1,8}\.[LH]\d+(?:\.[0-9a-fA-F]{1,2}){0,6}$/;
+const VP9_CODEC_STRING_REGEX = /^vp09(?:\.\d{2}){3}(?:(?:\.\d{2}){5})?$/;
+const AV1_CODEC_STRING_REGEX = /^av01\.\d\.\d{2}[MH]\.\d{2}(?:\.\d\.\d{3}\.\d{2}\.\d{2}\.\d{2}\.\d)?$/;
+
 export const validateVideoChunkMetadata = (metadata: EncodedVideoChunkMetadata | undefined) => {
 	if (!metadata) {
 		throw new TypeError('Video chunk metadata must be provided.');
@@ -485,6 +491,12 @@ export const validateVideoChunkMetadata = (metadata: EncodedVideoChunkMetadata |
 	}
 	if (typeof metadata.decoderConfig.codec !== 'string') {
 		throw new TypeError('Video chunk metadata decoder configuration must specify a codec string.');
+	}
+	if (!VALID_VIDEO_CODEC_STRING_PREFIXES.some(prefix => metadata.decoderConfig!.codec.startsWith(prefix))) {
+		throw new TypeError(
+			'Video chunk metadata decoder configuration codec string must be a valid video codec string as specified in'
+			+ ' the WebCodecs codec registry.',
+		);
 	}
 	if (!Number.isInteger(metadata.decoderConfig.codedWidth) || metadata.decoderConfig.codedWidth! <= 0) {
 		throw new TypeError(
@@ -544,31 +556,66 @@ export const validateVideoChunkMetadata = (metadata: EncodedVideoChunkMetadata |
 		}
 	}
 
-	if (
-		(metadata.decoderConfig.codec.startsWith('avc1') || metadata.decoderConfig.codec.startsWith('avc3'))
-		&& !metadata.decoderConfig.description
-	) {
-		throw new TypeError(
-			'Video chunk metadata decoder configuration for AVC must include a description, which is expected to be an'
-			+ ' AVCDecoderConfigurationRecord as specified in ISO 14496-15.',
-		);
+	// AVC-specific validation
+	if (metadata.decoderConfig.codec.startsWith('avc1') || metadata.decoderConfig.codec.startsWith('avc3')) {
+		if (!AVC_CODEC_STRING_REGEX.test(metadata.decoderConfig.codec)) {
+			throw new TypeError(
+				'Video chunk metadata decoder configuration codec string for AVC must be a valid AVC codec string as'
+				+ ' specified in Section 3.4 of RFC 6381.',
+			);
+		}
+
+		if (!metadata.decoderConfig.description) {
+			throw new TypeError(
+				'Video chunk metadata decoder configuration for AVC must include a description, which is expected to be'
+				+ ' an AVCDecoderConfigurationRecord as specified in ISO 14496-15.',
+			);
+		}
 	}
-	if (
-		(metadata.decoderConfig.codec.startsWith('hev1') || metadata.decoderConfig.codec.startsWith('hvc1'))
-		&& !metadata.decoderConfig.description
-	) {
-		throw new TypeError(
-			'Video chunk metadata decoder configuration for HEVC must include a description, which is expected to be an'
-			+ ' HEVCDecoderConfigurationRecord as specified in ISO 14496-15.',
-		);
+
+	// HEVC-specific validation
+	if (metadata.decoderConfig.codec.startsWith('hev1') || metadata.decoderConfig.codec.startsWith('hvc1')) {
+		if (!HEVC_CODEC_STRING_REGEX.test(metadata.decoderConfig.codec)) {
+			throw new TypeError(
+				'Video chunk metadata decoder configuration codec string for HEVC must be a valid HEVC codec string as'
+				+ ' specified in Section E.3 of ISO 14496-15.',
+			);
+		}
+
+		if (!metadata.decoderConfig.description) {
+			throw new TypeError(
+				'Video chunk metadata decoder configuration for HEVC must include a description, which is expected to'
+				+ ' be an HEVCDecoderConfigurationRecord as specified in ISO 14496-15.',
+			);
+		}
 	}
-	if (
-		(metadata.decoderConfig.codec === 'vp8' || metadata.decoderConfig.codec.startsWith('vp09'))
-		&& metadata.decoderConfig.colorSpace === undefined
-	) {
-		throw new TypeError('Video chunk metadata decoder configuration for VP8/VP9 must include a colorSpace.');
+
+	// VP8-specific validation
+	if (metadata.decoderConfig.codec.startsWith('vp8')) {
+		if (metadata.decoderConfig.codec !== 'vp8') {
+			throw new TypeError('Video chunk metadata decoder configuration codec string for VP8 must be "vp8".');
+		}
 	}
-	// No added requirements for AV1 (based)
+
+	// VP9-specific validation
+	if (metadata.decoderConfig.codec.startsWith('vp09')) {
+		if (!VP9_CODEC_STRING_REGEX.test(metadata.decoderConfig.codec)) {
+			throw new TypeError(
+				'Video chunk metadata decoder configuration codec string for VP9 must be a valid VP9 codec string as'
+				+ ' specified in Section "Codecs Parameter String" of https://www.webmproject.org/vp9/mp4/.',
+			);
+		}
+	}
+
+	// AV1-specific validation
+	if (metadata.decoderConfig.codec.startsWith('av01')) {
+		if (!AV1_CODEC_STRING_REGEX.test(metadata.decoderConfig.codec)) {
+			throw new TypeError(
+				'Video chunk metadata decoder configuration codec string for AV1 must be a valid AV1 codec string as'
+				+ ' specified in Section "Codecs Parameter String" of https://aomediacodec.github.io/av1-isobmff/.',
+			);
+		}
+	}
 };
 
 export const validateAudioChunkMetadata = (metadata: EncodedAudioChunkMetadata | undefined) => {

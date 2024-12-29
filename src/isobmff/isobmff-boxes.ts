@@ -594,7 +594,6 @@ export const vpcC = (trackData: IsobmffVideoTrackData) => {
 	}
 
 	const decoderConfig = trackData.info.decoderConfig;
-	assert(decoderConfig.colorSpace); // This is guaranteed by an earlier validation step
 
 	const parts = decoderConfig.codec.split('.'); // We can derive the required values from the codec string
 	const profile = Number(parts[1]);
@@ -602,22 +601,22 @@ export const vpcC = (trackData: IsobmffVideoTrackData) => {
 
 	const bitDepth = Number(parts[3]);
 	const chromaSubsampling = parts[4] ? Number(parts[4]) : 1; // 4:2:0 colocated with luma (0,0)
-	const videoFullRangeFlag = parts[8] ? Number(parts[8]) : Number(decoderConfig.colorSpace.fullRange);
+	const videoFullRangeFlag = parts[8] ? Number(parts[8]) : Number(decoderConfig.colorSpace?.fullRange ?? 0);
 	const thirdByte = (bitDepth << 4) + (chromaSubsampling << 1) + videoFullRangeFlag;
 
 	const colourPrimaries = parts[5]
 		? Number(parts[5])
-		: decoderConfig.colorSpace.primaries
+		: decoderConfig.colorSpace?.primaries
 			? COLOR_PRIMARIES_MAP[decoderConfig.colorSpace.primaries]
 			: 2; // Default to undetermined
 	const transferCharacteristics = parts[6]
 		? Number(parts[6])
-		: decoderConfig.colorSpace.transfer
+		: decoderConfig.colorSpace?.transfer
 			? TRANSFER_CHARACTERISTICS_MAP[decoderConfig.colorSpace.transfer]
 			: 2;
 	const matrixCoefficients = parts[7]
 		? Number(parts[7])
-		: decoderConfig.colorSpace.matrix
+		: decoderConfig.colorSpace?.matrix
 			? MATRIX_COEFFICIENTS_MAP[decoderConfig.colorSpace.matrix]
 			: 2;
 
