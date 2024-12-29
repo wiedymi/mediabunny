@@ -1,10 +1,12 @@
 import {
 	AudioCodec,
+	Av1CodecInfo,
 	extractAudioCodecString,
 	extractVideoCodecString,
 	MediaCodec,
 	parseAacAudioSpecificConfig,
 	VideoCodec,
+	Vp9CodecInfo,
 } from '../codec';
 import { Demuxer } from '../demuxer';
 import { Input } from '../input';
@@ -54,7 +56,9 @@ type InternalTrack = {
 		height: number;
 		codec: VideoCodec | null;
 		codecDescription: Uint8Array | null;
-		colorSpace?: VideoColorSpaceInit | null;
+		colorSpace: VideoColorSpaceInit | null;
+		vp9CodecInfo: Vp9CodecInfo | null;
+		av1CodecInfo: Av1CodecInfo | null;
 	};
 } | {
 	info: {
@@ -543,6 +547,8 @@ export class IsobmffDemuxer extends Demuxer {
 						codec: null,
 						codecDescription: null,
 						colorSpace: null,
+						vp9CodecInfo: null,
+						av1CodecInfo: null,
 					};
 				} else if (handlerType === 'soun') {
 					track.info = {
@@ -585,9 +591,15 @@ export class IsobmffDemuxer extends Demuxer {
 							track.info.codec = 'avc';
 						} else if (sampleBoxInfo.name === 'hvc1' || sampleBoxInfo.name === 'hev1') {
 							track.info.codec = 'hevc';
+						} else if (sampleBoxInfo.name === 'vp08') {
+							track.info.codec = 'vp8';
+						} else if (sampleBoxInfo.name === 'vp09') {
+							track.info.codec = 'vp9';
+						} else if (sampleBoxInfo.name === 'av01') {
+							track.info.codec = 'av1';
 						} else {
-							// TODO a more user-friendly message
-							console.warn(`Unsupported video sample entry type ${sampleBoxInfo.name}.`);
+							const { name } = sampleBoxInfo;
+							console.warn(`Unsupported video codec (sample entry type '${name}') - discarding track.`);
 							break;
 						}
 
@@ -605,7 +617,8 @@ export class IsobmffDemuxer extends Demuxer {
 						} else if (sampleBoxInfo.name.toLowerCase() === 'opus') {
 							track.info.codec = 'opus';
 						} else {
-							console.warn(`Unsupported audio sample entry type ${sampleBoxInfo.name}.`);
+							const { name } = sampleBoxInfo;
+							console.warn(`Unsupported audio codec (sample entry type '${name}') - discarding track.`);
 							break;
 						}
 
@@ -704,6 +717,49 @@ export class IsobmffDemuxer extends Demuxer {
 					this.isobmffReader.pos,
 					this.isobmffReader.pos + boxInfo.contentSize,
 				);
+			}; break;
+
+			case 'vpcC': {
+				const track = this.currentTrack;
+				assert(track && track.info?.type === 'video');
+
+				this.isobmffReader.pos += 4; // Version + flags
+
+				const profile = this.isobmffReader.readU8();
+				const level = this.isobmffReader.readU8();
+				const thirdByte = this.isobmffReader.readU8();
+
+				track.info.vp9CodecInfo = {
+					profile: profile,
+					level: level,
+					bitDepth: thirdByte >> 4,
+				};
+			}; break;
+
+			case 'av1C': {
+				const track = this.currentTrack;
+				assert(track && track.info?.type === 'video');
+
+				this.isobmffReader.pos += 1; // Marker + version
+
+				const secondByte = this.isobmffReader.readU8();
+				const seqProfile = secondByte >> 5;
+				const seqLevelIdx0 = secondByte & 0b11111;
+
+				const thirdByte = this.isobmffReader.readU8();
+				const seqTier0 = thirdByte >> 7;
+				const highBitDepth = (thirdByte >> 6) & 1;
+				const twelveBit = (thirdByte >> 5) & 1;
+
+				// Logic from https://aomediacodec.github.io/av1-spec/av1-spec.pdf
+				const bitDepth = seqProfile == 2 && highBitDepth ? (twelveBit ? 12 : 10) : (highBitDepth ? 10 : 8);
+
+				track.info.av1CodecInfo = {
+					seqProfile,
+					seqLevelIdx0,
+					seqTier0,
+					bitDepth,
+				};
 			}; break;
 
 			case 'colr': {
@@ -1319,8 +1375,7 @@ abstract class IsobmffTrackBacking<Chunk extends EncodedVideoChunk | EncodedAudi
 
 	async computeDuration() {
 		const lastChunk = await this.getChunk(Infinity, { metadataOnly: true });
-		const timestamp = lastChunk?.timestamp;
-		return timestamp ? timestamp / 1e6 : 0;
+		return ((lastChunk?.timestamp ?? 0) + (lastChunk?.duration ?? 0)) / 1e6;
 	}
 
 	abstract createChunk(
@@ -1820,7 +1875,7 @@ class IsobmffVideoTrackBacking extends IsobmffTrackBacking<EncodedVideoChunk> im
 
 	async getDecoderConfig(): Promise<VideoDecoderConfig> {
 		return {
-			codec: extractVideoCodecString(this.internalTrack.info.codec!, this.internalTrack.info.codecDescription),
+			codec: extractVideoCodecString(this.internalTrack.info),
 			codedWidth: this.internalTrack.info.width,
 			codedHeight: this.internalTrack.info.height,
 			description: this.internalTrack.info.codecDescription ?? undefined,

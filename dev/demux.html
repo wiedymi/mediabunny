@@ -16,6 +16,40 @@
 		const videoTrack = await input.getPrimaryVideoTrack();
 		const drain = new Metamuxer.VideoFrameDrain(videoTrack);
 
+		const target = new Metamuxer.ArrayBufferTarget();
+		const format = new Metamuxer.Mp4OutputFormat();
+		const output = new Metamuxer.Output({ target, format });
+
+		const mediaSource = new Metamuxer.VideoFrameSource({
+			codec: 'av1',
+			bitrate: 1e6
+		});
+		output.addVideoTrack(mediaSource);
+
+		output.start();
+
+		for await (const frame of drain.frames(0, 10)) {
+			console.log(frame.timestamp, frame.duration)
+			await mediaSource.digest(frame);
+			frame.close();
+		}
+
+		await output.finalize();
+		function download(blob, filename) {
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = filename;
+			a.click();
+			URL.revokeObjectURL(url);
+		}
+
+		download(new Blob([target.buffer]), 'converted.mp4');
+
+		/*
+		const videoTrack = await input.getPrimaryVideoTrack();
+		const drain = new Metamuxer.VideoFrameDrain(videoTrack);
+
 		async function* timestamps() {
 			const fromTime = 0;
 			const toTime = await videoTrack.computeDuration();
@@ -50,6 +84,7 @@
 			console.log(clone)
 		}
 		console.log("done")
+		*/
 
 		/*
 		const videoTrack = await input.getPrimaryVideoTrack();

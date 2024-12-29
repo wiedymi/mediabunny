@@ -630,6 +630,7 @@ export const av1C = () => {
 
 	// The box contents are not correct like this, but its length is. Getting the values for the last three bytes
 	// requires peeking into the bitstream of the coded chunks. Might come back later.
+	// TODO
 	return box('av1C', [
 		firstByte,
 		0,

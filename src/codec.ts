@@ -166,7 +166,7 @@ export const buildVideoCodecString = (codec: VideoCodec, width: number, height: 
 
 		const bitDepth = '08'; // 8-bit
 
-		return `vp09.${profile}.${levelInfo.level}.${bitDepth}`;
+		return `vp09.${profile}.${levelInfo.level.toString().padStart(2, '0')}.${bitDepth}`;
 	} else if (codec === 'av1') {
 		const profile = 0; // Main Profile
 
@@ -184,7 +184,27 @@ export const buildVideoCodecString = (codec: VideoCodec, width: number, height: 
 	throw new TypeError(`Unhandled codec '${codec}'.`);
 };
 
-export const extractVideoCodecString = (codec: VideoCodec, description: Uint8Array | null) => {
+export type Vp9CodecInfo = {
+	profile: number;
+	level: number;
+	bitDepth: number;
+};
+
+export type Av1CodecInfo = {
+	seqProfile: number;
+	seqLevelIdx0: number;
+	seqTier0: number;
+	bitDepth: number;
+};
+
+export const extractVideoCodecString = (trackInfo: {
+	codec: VideoCodec | null;
+	codecDescription: Uint8Array | null;
+	vp9CodecInfo: Vp9CodecInfo | null;
+	av1CodecInfo: Av1CodecInfo | null;
+}) => {
+	const { codec, codecDescription: description, vp9CodecInfo, av1CodecInfo } = trackInfo;
+
 	if (codec === 'avc') {
 		if (!description || description.byteLength < 4) {
 			throw new TypeError('AVC description must be at least 4 bytes long.');
@@ -236,9 +256,77 @@ export const extractVideoCodecString = (codec: VideoCodec, description: Uint8Arr
 		codecString += constraintFlags.map(x => x.toString(16)).join('.');
 
 		return codecString;
-	}
+	} else if (codec === 'vp8') {
+		return 'vp8'; // Easy, this one
+	} else if (codec === 'vp9') {
+		if (!vp9CodecInfo) {
+			throw new Error('Missing VP9 codec info - unable to construct codec string.');
+		}
 
-	// TODO
+		const profile = vp9CodecInfo.profile.toString().padStart(2, '0');
+		const level = vp9CodecInfo.level.toString().padStart(2, '0');
+		const bitDepth = vp9CodecInfo.bitDepth.toString().padStart(2, '0');
+
+		return `vp09.${profile}.${level}.${bitDepth}`;
+	} else if (codec === 'av1') {
+		if (!av1CodecInfo) {
+			throw new Error('Missing AV1 codec info - unable to construct codec string.');
+		}
+
+		const profile = av1CodecInfo.seqProfile;
+		const level = av1CodecInfo.seqLevelIdx0.toString().padStart(2, '0');
+		const tier = av1CodecInfo.seqTier0 ? 'H' : 'M';
+		const bitDepth = av1CodecInfo.bitDepth.toString().padStart(2, '0');
+
+		return `av01.${profile}.${level}${tier}.${bitDepth}`;
+
+		/*
+		const chunk = await videoTrack._backing.getFirstChunk({});
+		if (!chunk) {
+			throw new Error('ahh');
+		}
+
+		const buffer = new ArrayBuffer(chunk.byteLength);
+		chunk.copyTo(buffer);
+
+		console.log(new Uint8Array(buffer));
+
+		const view = new DataView(buffer);
+		let pos = 0;
+		const byte = view.getUint8(pos++);
+
+		const obuType = (byte & 0b1111000) >> 3;
+		const obuExtensionFlag = (byte & 0b100) >> 2;
+		const obuHasSizeField = (byte & 0b10) >> 1;
+
+		if (obuExtensionFlag) {
+			pos++;
+		}
+
+		function leb128() {
+			let value = 0;
+
+			for (let i = 0; i < 8; i++) {
+				const leb128_byte = view.getUint8(pos);
+				value |= (leb128_byte & 0x7f) << (i * 7); // Extract the lower 7 bits and shift them accordingly
+				pos++;
+
+				// Check if the most significant bit (MSB) is 0, signaling the end of the LEB128 sequence
+				if ((leb128_byte & 0x80) === 0) {
+					break;
+				}
+			}
+
+			return value;
+		}
+
+		if (obuHasSizeField) {
+			console.log(leb128());
+		}
+
+		// Some extra stuff, todo
+		*/
+	}
 
 	throw new TypeError(`Unhandled codec '${codec}'.`);
 };
