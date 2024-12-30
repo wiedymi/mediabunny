@@ -613,7 +613,7 @@ export class IsobmffDemuxer extends Demuxer {
 						this.readContiguousBoxes(startPos + sampleBoxInfo.totalSize - this.isobmffReader.pos);
 					} else {
 						if (sampleBoxInfo.name === 'mp4a') {
-							track.info.codec = 'aac';
+							// We don't know the codec yet, need to read the esds box
 						} else if (sampleBoxInfo.name.toLowerCase() === 'opus') {
 							track.info.codec = 'opus';
 						} else {
@@ -811,12 +811,12 @@ export class IsobmffDemuxer extends Demuxer {
 
 			case 'esds': {
 				const track = this.currentTrack;
-				assert(track && track.info);
+				assert(track && track.info?.type === 'audio');
 
 				this.isobmffReader.pos += 4; // Version + flags
 
 				const tag = this.isobmffReader.readU8();
-				assert(tag === 0x03);
+				assert(tag === 0x03); // ES Descriptor
 
 				this.isobmffReader.readIsomVariableInteger(); // Length
 
@@ -839,24 +839,38 @@ export class IsobmffDemuxer extends Demuxer {
 				}
 
 				const decoderConfigTag = this.isobmffReader.readU8();
-				assert(decoderConfigTag === 0x04);
+				assert(decoderConfigTag === 0x04); // DecoderConfigDescriptor
 
-				this.isobmffReader.readIsomVariableInteger(); // Length
+				const decoderConfigDescriptorLength = this.isobmffReader.readIsomVariableInteger(); // Length
+
+				const payloadStart = this.isobmffReader.pos;
 
 				const objectTypeIndication = this.isobmffReader.readU8();
-				assert(objectTypeIndication === 0x40); // Assert it's MPEG-4 audio
+				if (objectTypeIndication === 0x40) {
+					track.info.codec = 'aac';
+				} else if (objectTypeIndication === 0x69 || objectTypeIndication === 0x6b) {
+					track.info.codec = 'mp3';
+				} else {
+					console.warn(
+						`Unsupported audio codec (objectTypeIndication ${objectTypeIndication}) - discarding track.`,
+					);
+				}
 
 				this.isobmffReader.pos += 1 + 3 + 4 + 4;
 
-				const decoderSpecificInfoTag = this.isobmffReader.readU8();
-				assert(decoderSpecificInfoTag === 0x05);
+				if (decoderConfigDescriptorLength > this.isobmffReader.pos - payloadStart) {
+					// There's a DecoderSpecificInfo at the end, let's read it
 
-				const decoderSpecificInfoLength = this.isobmffReader.readIsomVariableInteger();
+					const decoderSpecificInfoTag = this.isobmffReader.readU8();
+					assert(decoderSpecificInfoTag === 0x05); // DecoderSpecificInfo
 
-				track.info.codecDescription = this.isobmffReader.readRange(
-					this.isobmffReader.pos,
-					this.isobmffReader.pos + decoderSpecificInfoLength,
-				);
+					const decoderSpecificInfoLength = this.isobmffReader.readIsomVariableInteger();
+
+					track.info.codecDescription = this.isobmffReader.readRange(
+						this.isobmffReader.pos,
+						this.isobmffReader.pos + decoderSpecificInfoLength,
+					);
+				}
 			}; break;
 
 			case 'stts': {
@@ -2003,17 +2017,16 @@ const getSampleInfo = (sampleTable: SampleTable, sampleIndex: number): SampleInf
 		+ Math.floor((sampleIndex - chunkEntry.startSampleIndex) / chunkEntry.samplesPerChunk);
 	const chunkOffset = sampleTable.chunkOffsets[chunkIndex]!;
 
+	const startSampleIndexOfChunk = chunkEntry.startSampleIndex
+		+ (chunkIndex - chunkEntry.startChunkIndex) * chunkEntry.samplesPerChunk;
 	let chunkSize = 0;
-
 	let sampleOffset = chunkOffset;
+
 	if (sampleTable.sampleSizes.length === 1) {
-		sampleOffset += sampleSize * (sampleIndex - chunkEntry.startSampleIndex);
+		sampleOffset += sampleSize * (sampleIndex - startSampleIndexOfChunk);
 		chunkSize += sampleSize * chunkEntry.samplesPerChunk;
 	} else {
-		const startSampleIndex = chunkEntry.startSampleIndex
-			+ (chunkIndex - chunkEntry.startChunkIndex) * chunkEntry.samplesPerChunk;
-
-		for (let i = startSampleIndex; i < startSampleIndex + chunkEntry.samplesPerChunk; i++) {
+		for (let i = startSampleIndexOfChunk; i < startSampleIndexOfChunk + chunkEntry.samplesPerChunk; i++) {
 			const sampleSize = sampleTable.sampleSizes[i]!;
 
 			if (i < sampleIndex) {

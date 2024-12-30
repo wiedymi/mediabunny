@@ -13,7 +13,7 @@ import { SubtitleMetadata } from './subtitles';
 /** @public */
 export const VIDEO_CODECS = ['avc', 'hevc', 'vp8', 'vp9', 'av1'] as const;
 /** @public */
-export const AUDIO_CODECS = ['aac', 'opus'] as const; // TODO add the rest
+export const AUDIO_CODECS = ['aac', 'mp3', 'opus'] as const; // TODO add the rest
 /** @public */
 export const SUBTITLE_CODECS = ['webvtt'] as const; // TODO add the rest
 
@@ -353,6 +353,8 @@ export const buildAudioCodecString = (codec: AudioCodec, numberOfChannels: numbe
 
 		// Default to standard AAC-LC for higher sample rates
 		return 'mp4a.40.2'; // AAC-LC
+	} else if (codec === 'mp3') {
+		return 'mp3'; // Easy, this one
 	} else if (codec === 'opus') {
 		return 'opus'; // Easy, this one
 	} else if (codec === 'vorbis') {
@@ -367,6 +369,8 @@ export const extractAudioCodecString = (codec: AudioCodec, description: Uint8Arr
 	if (codec === 'aac') {
 		const audioSpecificConfig = parseAacAudioSpecificConfig(description);
 		return `mp4a.40.${audioSpecificConfig.objectType}`;
+	} else if (codec === 'mp3') {
+		return 'mp3';
 	} else if (codec === 'opus') {
 		return 'opus';
 	} else if (codec === 'vorbis') {
