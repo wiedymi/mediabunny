@@ -5,9 +5,11 @@ export class IsobmffReader {
 
 	constructor(public reader: Reader) {}
 
-	readRange(start: number, end: number) {
-		const { view, offset } = this.reader.getViewAndOffset(start, end);
-		return new Uint8Array(view.buffer, offset, end - start);
+	readBytes(length: number) {
+		const { view, offset } = this.reader.getViewAndOffset(this.pos, this.pos + length);
+		this.pos += length;
+
+		return new Uint8Array(view.buffer, offset, length);
 	}
 
 	readU8() {
@@ -31,13 +33,6 @@ export class IsobmffReader {
 		const high = view.getUint16(offset, false);
 		const low = view.getUint8(offset + 2);
 		return high * 0x100 + low;
-	}
-
-	readS32() {
-		const { view, offset } = this.reader.getViewAndOffset(this.pos, this.pos + 4);
-		this.pos += 4;
-
-		return view.getInt32(offset, false);
 	}
 
 	readU32() {
@@ -68,11 +63,11 @@ export class IsobmffReader {
 	}
 
 	readFixed_16_16() {
-		return this.readS32() / 0x10000;
+		return this.readI32() / 0x10000;
 	}
 
 	readFixed_2_30() {
-		return this.readS32() / 0x40000000;
+		return this.readI32() / 0x40000000;
 	}
 
 	readAscii(length: number) {

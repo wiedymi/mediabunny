@@ -35,6 +35,8 @@ export const AUDIO_CODECS = [
 	'aac',
 	'mp3',
 	'opus',
+	'vorbis',
+	'flac',
 	'ulaw',
 	'alaw',
 	...PCM_CODECS,
@@ -398,14 +400,16 @@ export const extractAudioCodecString = (codec: AudioCodec, description: Uint8Arr
 		return 'mp3';
 	} else if (codec === 'opus') {
 		return 'opus';
+	} else if (codec === 'vorbis') {
+		return 'vorbis';
+	} else if (codec === 'flac') {
+		return 'flac';
 	} else if (codec.startsWith('pcm-')) {
 		return codec;
 	} else if (codec === 'ulaw') {
 		return 'ulaw';
 	} else if (codec === 'alaw') {
 		return 'alaw';
-	} else if (codec === 'vorbis') {
-		return 'vorbis';
 	}
 
 	throw new TypeError(`Unhandled codec '${codec}'.`);

@@ -707,6 +707,8 @@ export class IsobmffDemuxer extends Demuxer {
 							// We don't know the codec yet (might be AAC, might be MP3), need to read the esds box
 						} else if (lowercaseBoxName === 'opus') {
 							track.info.codec = 'opus';
+						} else if (lowercaseBoxName === 'flac') {
+							track.info.codec = 'flac';
 						} else if (
 							lowercaseBoxName === 'twos'
 							|| lowercaseBoxName === 'sowt'
@@ -833,20 +835,14 @@ export class IsobmffDemuxer extends Demuxer {
 				const track = this.currentTrack;
 				assert(track && track.info);
 
-				track.info.codecDescription = this.isobmffReader.readRange(
-					this.isobmffReader.pos,
-					this.isobmffReader.pos + boxInfo.contentSize,
-				);
+				track.info.codecDescription = this.isobmffReader.readBytes(boxInfo.contentSize);
 			}; break;
 
 			case 'hvcC': {
 				const track = this.currentTrack;
 				assert(track && track.info);
 
-				track.info.codecDescription = this.isobmffReader.readRange(
-					this.isobmffReader.pos,
-					this.isobmffReader.pos + boxInfo.contentSize,
-				);
+				track.info.codecDescription = this.isobmffReader.readBytes(boxInfo.contentSize);
 			}; break;
 
 			case 'vpcC': {
@@ -980,6 +976,9 @@ export class IsobmffDemuxer extends Demuxer {
 					track.info.codec = 'aac';
 				} else if (objectTypeIndication === 0x69 || objectTypeIndication === 0x6b) {
 					track.info.codec = 'mp3';
+				} else if (objectTypeIndication === 0xdd) {
+					// TODO
+					track.info.codec = 'vorbis'; // "nonstandard, gpac uses it" - FFmpeg
 				} else {
 					console.warn(
 						`Unsupported audio codec (objectTypeIndication ${objectTypeIndication}) - discarding track.`,
@@ -995,11 +994,7 @@ export class IsobmffDemuxer extends Demuxer {
 					assert(decoderSpecificInfoTag === 0x05); // DecoderSpecificInfo
 
 					const decoderSpecificInfoLength = this.isobmffReader.readIsomVariableInteger();
-
-					track.info.codecDescription = this.isobmffReader.readRange(
-						this.isobmffReader.pos,
-						this.isobmffReader.pos + decoderSpecificInfoLength,
-					);
+					track.info.codecDescription = this.isobmffReader.readBytes(decoderSpecificInfoLength);
 				}
 			}; break;
 
@@ -1020,6 +1015,62 @@ export class IsobmffDemuxer extends Demuxer {
 						track.info.codec = 'pcm-f32le';
 					}
 				}
+			}; break;
+
+			case 'dfLa': { // Used for FLAC audio
+				const track = this.currentTrack;
+				assert(track && track.info?.type === 'audio');
+
+				this.isobmffReader.pos += 4; // Version + flags
+
+				// https://datatracker.ietf.org/doc/rfc9639/
+
+				const BLOCK_TYPE_MASK = 0x7f;
+				const LAST_METADATA_BLOCK_FLAG_MASK = 0x80;
+
+				const startPos = this.isobmffReader.pos;
+
+				while (true) {
+					const flagAndType = this.isobmffReader.readU8();
+					const metadataBlockLength = this.isobmffReader.readU24();
+					const type = flagAndType & BLOCK_TYPE_MASK;
+
+					// It's a STREAMINFO block; let's extract the actual sample rate and channel count
+					if (type === 0) {
+						this.isobmffReader.pos += 10;
+
+						// Extract sample rate
+						const word = this.isobmffReader.readU32();
+						const sampleRate = word >>> 12;
+						const numberOfChannels = ((word >> 9) & 0b111) + 1;
+
+						track.info.sampleRate = sampleRate;
+						track.info.numberOfChannels = numberOfChannels;
+
+						this.isobmffReader.pos += 20;
+					} else {
+						// Simply skip ahead to the next block
+						this.isobmffReader.pos += metadataBlockLength;
+					}
+
+					if (flagAndType & LAST_METADATA_BLOCK_FLAG_MASK) {
+						break;
+					}
+				}
+
+				const endPos = this.isobmffReader.pos;
+				this.isobmffReader.pos = startPos;
+				const bytes = this.isobmffReader.readBytes(endPos - startPos);
+
+				const description = new Uint8Array(4 + bytes.byteLength);
+				description[0] = 0x66; // f
+				description[1] = 0x4C; // L
+				description[2] = 0x61; // a
+				description[3] = 0x43; // C
+				description.set(bytes, 4);
+
+				// Set the codec description to be 'fLaC' + all metadata blocks
+				track.info.codecDescription = description;
 			}; break;
 
 			case 'stts': {
@@ -1807,10 +1858,8 @@ abstract class IsobmffTrackBacking<Chunk extends EncodedVideoChunk | EncodedAudi
 				sampleInfo.chunkOffset + sampleInfo.chunkSize,
 			);
 
-			data = this.internalTrack.demuxer.chunkReader.readRange(
-				sampleInfo.sampleOffset,
-				sampleInfo.sampleOffset + sampleInfo.sampleSize,
-			);
+			this.internalTrack.demuxer.chunkReader.pos = sampleInfo.sampleOffset;
+			data = this.internalTrack.demuxer.chunkReader.readBytes(sampleInfo.sampleSize);
 		}
 
 		const timestamp = 1e6 * sampleInfo.presentationTimestamp / this.internalTrack.timescale;
@@ -1838,10 +1887,8 @@ abstract class IsobmffTrackBacking<Chunk extends EncodedVideoChunk | EncodedAudi
 			// Load the entire fragment
 			await this.internalTrack.demuxer.chunkReader.reader.loadRange(fragment.dataStart, fragment.dataEnd);
 
-			data = this.internalTrack.demuxer.chunkReader.readRange(
-				sample.byteOffset,
-				sample.byteOffset + sample.byteSize,
-			);
+			this.internalTrack.demuxer.chunkReader.pos = sample.byteOffset;
+			data = this.internalTrack.demuxer.chunkReader.readBytes(sample.byteSize);
 		}
 
 		const timestamp = 1e6 * sample.presentationTimestamp / this.internalTrack.timescale;
