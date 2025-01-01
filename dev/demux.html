@@ -13,6 +13,12 @@
 			source
 		});
 
+		const audioTrack = await input.getPrimaryAudioTrack();
+		const drain = new Metamuxer.EncodedAudioChunkDrain(audioTrack);
+
+		console.log(await drain.getFirstChunk());
+
+		/*
 		const videoTrack = await input.getPrimaryVideoTrack();
 		const drain = new Metamuxer.VideoFrameDrain(videoTrack);
 
@@ -44,6 +50,7 @@
 		}
 
 		download(new Blob([target.buffer]), 'converted.mp4');
+		*/
 
 		/*
 		const videoTrack = await input.getPrimaryVideoTrack();

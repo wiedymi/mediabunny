@@ -1,5 +1,14 @@
+import { PCM_CODECS, PcmAudioCodec } from './codec';
 import { InputAudioTrack, InputVideoTrack } from './input-track';
-import { AnyIterable, assert, promiseWithResolvers, toAsyncIterator, validateAnyIterable } from './misc';
+import {
+	AnyIterable,
+	assert,
+	getInt24,
+	getUint24,
+	promiseWithResolvers,
+	toAsyncIterator,
+	validateAnyIterable,
+} from './misc';
 
 /** @public */
 export type ChunkRetrievalOptions = {
@@ -104,6 +113,21 @@ export abstract class BaseChunkDrain<Chunk extends EncodedVideoChunk | EncodedAu
 	}
 }
 
+abstract class DecoderWrapper<
+	Chunk extends EncodedVideoChunk | EncodedAudioChunk,
+	MediaFrame extends VideoFrame | AudioData,
+> {
+	constructor(
+		public onMedia: (media: MediaFrame) => unknown,
+		public onError: (error: DOMException) => unknown,
+	) {}
+
+	abstract getDecodeQueueSize(): number;
+	abstract decode(chunk: Chunk): void;
+	abstract flush(): Promise<void>;
+	abstract close(): void;
+}
+
 /** @public */
 export abstract class BaseMediaFrameDrain<
 	Chunk extends EncodedVideoChunk | EncodedAudioChunk,
@@ -113,7 +137,7 @@ export abstract class BaseMediaFrameDrain<
 	abstract _createDecoder(
 		onMedia: (media: MediaFrame) => unknown,
 		onError: (error: DOMException) => unknown
-	): Promise<VideoDecoder | AudioDecoder>;
+	): Promise<DecoderWrapper<Chunk, MediaFrame>>;
 	/** @internal */
 	abstract _createChunkDrain(): BaseChunkDrain<Chunk>;
 
@@ -185,7 +209,7 @@ export abstract class BaseMediaFrameDrain<
 			for await (const timestamp of timestampIterator) {
 				validateTimestamp(timestamp);
 
-				while (frameQueue.length + decoder.decodeQueueSize > MAX_QUEUE_SIZE) {
+				while (frameQueue.length + decoder.getDecodeQueueSize() > MAX_QUEUE_SIZE) {
 					({ promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers());
 					await queueDequeue;
 				}
@@ -235,10 +259,6 @@ export abstract class BaseMediaFrameDrain<
 
 					lastChunk = nextChunk;
 					decoder.decode(nextChunk);
-				}
-
-				if (decoder.decodeQueueSize >= 10) {
-					await new Promise(resolve => decoder.addEventListener('dequeue', resolve, { once: true }));
 				}
 			}
 
@@ -376,7 +396,7 @@ export abstract class BaseMediaFrameDrain<
 			await chunks.next();
 
 			while (currentChunk && !ended) {
-				if (frameQueue.length + decoder.decodeQueueSize > MAX_QUEUE_SIZE) {
+				if (frameQueue.length + decoder.getDecodeQueueSize() > MAX_QUEUE_SIZE) {
 					({ promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers());
 					await queueDequeue;
 					continue;
@@ -483,6 +503,37 @@ export class EncodedVideoChunkDrain extends BaseChunkDrain<EncodedVideoChunk> {
 	}
 }
 
+class VideoDecoderWrapper extends DecoderWrapper<EncodedVideoChunk, VideoFrame> {
+	decoder: VideoDecoder;
+
+	constructor(
+		onFrame: (frame: VideoFrame) => unknown,
+		onError: (error: DOMException) => unknown,
+		decoderConfig: VideoDecoderConfig,
+	) {
+		super(onFrame, onError);
+
+		this.decoder = new VideoDecoder({ output: onFrame, error: onError });
+		this.decoder.configure(decoderConfig);
+	}
+
+	getDecodeQueueSize() {
+		return this.decoder.decodeQueueSize;
+	}
+
+	decode(chunk: EncodedVideoChunk) {
+		this.decoder.decode(chunk);
+	}
+
+	flush() {
+		return this.decoder.flush();
+	}
+
+	close() {
+		this.decoder.close();
+	}
+}
+
 /** @public */
 export class VideoFrameDrain extends BaseMediaFrameDrain<EncodedVideoChunk, VideoFrame> {
 	/** @internal */
@@ -503,11 +554,7 @@ export class VideoFrameDrain extends BaseMediaFrameDrain<EncodedVideoChunk, Vide
 	/** @internal */
 	async _createDecoder(onFrame: (frame: VideoFrame) => unknown, onError: (error: DOMException) => unknown) {
 		this._decoderConfig ??= await this._videoTrack.getDecoderConfig();
-
-		const decoder = new VideoDecoder({ output: onFrame, error: onError });
-		decoder.configure(this._decoderConfig);
-
-		return decoder;
+		return new VideoDecoderWrapper(onFrame, onError, this._decoderConfig);
 	}
 
 	/** @internal */
@@ -668,6 +715,185 @@ export class EncodedAudioChunkDrain extends BaseChunkDrain<EncodedAudioChunk> {
 	}
 }
 
+class AudioDecoderWrapper extends DecoderWrapper<EncodedAudioChunk, AudioData> {
+	decoder: AudioDecoder;
+
+	constructor(
+		onData: (data: AudioData) => unknown,
+		onError: (error: DOMException) => unknown,
+		decoderConfig: AudioDecoderConfig,
+	) {
+		super(onData, onError);
+
+		this.decoder = new AudioDecoder({ output: onData, error: onError });
+		this.decoder.configure(decoderConfig);
+	}
+
+	getDecodeQueueSize() {
+		return this.decoder.decodeQueueSize;
+	}
+
+	decode(chunk: EncodedAudioChunk) {
+		this.decoder.decode(chunk);
+	}
+
+	flush() {
+		return this.decoder.flush();
+	}
+
+	close() {
+		this.decoder.close();
+	}
+}
+
+const PCM_CODEC_REGEX = /^pcm-([usf])(\d+)+(be|le)?$/;
+
+// There are a lot of PCM variants not natively supported by the browser and by AudioData. Therefore we need a simple
+// decoder that maps any input PCM format into a PCM format supported by the browser.
+class PcmAudioDecoderWrapper extends DecoderWrapper<EncodedAudioChunk, AudioData> {
+	codec: PcmAudioCodec;
+
+	inputSampleSize: 1 | 2 | 3 | 4;
+	readInputValue: (view: DataView, byteOffset: number) => number;
+
+	outputSampleSize: 1 | 2 | 4;
+	outputFormat: 'u8' | 's16' | 's32' | 'f32';
+	writeOutputValue: (view: DataView, byteOffset: number, value: number) => void;
+
+	constructor(
+		onData: (data: AudioData) => unknown,
+		onError: (error: DOMException) => unknown,
+		public decoderConfig: AudioDecoderConfig,
+	) {
+		super(onData, onError);
+
+		assert((PCM_CODECS as readonly string[]).includes(decoderConfig.codec));
+		this.codec = decoderConfig.codec as PcmAudioCodec;
+
+		const match = this.codec.match(PCM_CODEC_REGEX);
+		assert(match);
+
+		let dataType: 'unsigned' | 'signed' | 'float';
+		if (match[1] === 'u') {
+			dataType = 'unsigned';
+		} else if (match[1] === 's') {
+			dataType = 'signed';
+		} else {
+			dataType = 'float';
+		}
+
+		this.inputSampleSize = (Number(match[2]) / 8) as 1 | 2 | 3 | 4;
+		const littleEndian = match[3] === 'le';
+
+		switch (this.inputSampleSize) {
+			case 1: {
+				if (dataType === 'unsigned') {
+					this.readInputValue = (view, byteOffset) => view.getUint8(byteOffset) - 2 ** 7;
+				} else {
+					this.readInputValue = (view, byteOffset) => view.getInt8(byteOffset);
+				}
+			}; break;
+			case 2: {
+				if (dataType === 'unsigned') {
+					this.readInputValue = (view, byteOffset) => view.getUint16(byteOffset, littleEndian) - 2 ** 15;
+				} else {
+					this.readInputValue = (view, byteOffset) => view.getInt16(byteOffset, littleEndian);
+				}
+			}; break;
+			case 3: {
+				if (dataType === 'unsigned') {
+					this.readInputValue = (view, byteOffset) => getUint24(view, byteOffset, littleEndian) - 2 ** 23;
+				} else {
+					this.readInputValue = (view, byteOffset) => getInt24(view, byteOffset, littleEndian);
+				}
+			}; break;
+			case 4: {
+				if (dataType === 'unsigned') {
+					this.readInputValue = (view, byteOffset) => view.getUint32(byteOffset, littleEndian) - 2 ** 31;
+				} else if (dataType === 'signed') {
+					this.readInputValue = (view, byteOffset) => view.getInt32(byteOffset, littleEndian);
+				} else {
+					this.readInputValue = (view, byteOffset) => view.getFloat32(byteOffset, littleEndian);
+				}
+			}; break;
+		}
+
+		switch (this.inputSampleSize) {
+			case 1: {
+				this.outputSampleSize = 1;
+				this.outputFormat = 'u8';
+				this.writeOutputValue = (view, byteOffset, value) => view.setUint8(byteOffset, value + 2 ** 7);
+			}; break;
+			case 2: {
+				this.outputSampleSize = 2;
+				this.outputFormat = 's16';
+				this.writeOutputValue = (view, byteOffset, value) => view.setInt16(byteOffset, value, true);
+			}; break;
+			case 3: {
+				this.outputSampleSize = 4;
+				this.outputFormat = 's32';
+				// From https://www.w3.org/TR/webcodecs:
+				// AudioData containing 24-bit samples SHOULD store those samples in s32 or f32. When samples are
+				// stored in s32, each sample MUST be left-shifted by 8 bits.
+				this.writeOutputValue = (view, byteOffset, value) => view.setInt32(byteOffset, value << 8, true);
+			}; break;
+			case 4: {
+				this.outputSampleSize = 4;
+
+				if (dataType === 'float') {
+					this.outputFormat = 'f32';
+					this.writeOutputValue = (view, byteOffset, value) => view.setFloat32(byteOffset, value, true);
+				} else {
+					this.outputFormat = 's32';
+					this.writeOutputValue = (view, byteOffset, value) => view.setInt32(byteOffset, value, true);
+				}
+			}; break;
+		};
+	}
+
+	getDecodeQueueSize() {
+		return 0;
+	}
+
+	decode(chunk: EncodedAudioChunk) {
+		const inputBuffer = new ArrayBuffer(chunk.byteLength);
+		const inputView = new DataView(inputBuffer);
+		chunk.copyTo(inputBuffer);
+
+		const numberOfFrames = chunk.byteLength / this.decoderConfig.numberOfChannels / this.inputSampleSize;
+
+		const outputBufferSize = numberOfFrames * this.decoderConfig.numberOfChannels * this.outputSampleSize;
+		const outputBuffer = new ArrayBuffer(outputBufferSize);
+		const outputView = new DataView(outputBuffer);
+
+		for (let i = 0; i < numberOfFrames * this.decoderConfig.numberOfChannels; i++) {
+			const inputIndex = i * this.inputSampleSize;
+			const outputIndex = i * this.outputSampleSize;
+
+			const value = this.readInputValue(inputView, inputIndex);
+			this.writeOutputValue(outputView, outputIndex, value);
+		}
+
+		const audioData = new AudioData({
+			format: this.outputFormat,
+			data: outputBuffer,
+			numberOfChannels: this.decoderConfig.numberOfChannels,
+			sampleRate: this.decoderConfig.sampleRate,
+			numberOfFrames,
+			timestamp: chunk.timestamp,
+		});
+		this.onMedia(audioData);
+	}
+
+	async flush() {
+		// Do nothing
+	}
+
+	close() {
+		// Do nothing
+	}
+}
+
 /** @public */
 export class AudioDataDrain extends BaseMediaFrameDrain<EncodedAudioChunk, AudioData> {
 	/** @internal */
@@ -689,10 +915,11 @@ export class AudioDataDrain extends BaseMediaFrameDrain<EncodedAudioChunk, Audio
 	async _createDecoder(onData: (data: AudioData) => unknown, onError: (error: DOMException) => unknown) {
 		this._decoderConfig ??= await this._audioTrack.getDecoderConfig();
 
-		const decoder = new AudioDecoder({ output: onData, error: onError });
-		decoder.configure(this._decoderConfig);
-
-		return decoder;
+		if (this._decoderConfig.codec.startsWith('pcm-')) {
+			return new PcmAudioDecoderWrapper(onData, onError, this._decoderConfig);
+		} else {
+			return new AudioDecoderWrapper(onData, onError, this._decoderConfig);
+		}
 	}
 
 	/** @internal */

@@ -11,9 +11,32 @@ import {
 import { SubtitleMetadata } from './subtitles';
 
 /** @public */
-export const VIDEO_CODECS = ['avc', 'hevc', 'vp8', 'vp9', 'av1'] as const;
+export const VIDEO_CODECS = [
+	'avc',
+	'hevc',
+	'vp8',
+	'vp9',
+	'av1',
+] as const;
 /** @public */
-export const AUDIO_CODECS = ['aac', 'mp3', 'opus'] as const; // TODO add the rest
+export const PCM_CODECS = [
+	'pcm-u8',
+	'pcm-s8',
+	'pcm-s16be',
+	'pcm-s16le',
+	'pcm-s24be',
+	'pcm-s24le',
+	'pcm-s32be',
+	'pcm-s32le',
+	'pcm-f32be',
+	'pcm-f32le',
+] as const;
+export const AUDIO_CODECS = [
+	'aac',
+	'mp3',
+	'opus',
+	...PCM_CODECS,
+] as const; // TODO add the rest
 /** @public */
 export const SUBTITLE_CODECS = ['webvtt'] as const; // TODO add the rest
 
@@ -21,6 +44,7 @@ export const SUBTITLE_CODECS = ['webvtt'] as const; // TODO add the rest
 export type VideoCodec = typeof VIDEO_CODECS[number];
 /** @public */
 export type AudioCodec = typeof AUDIO_CODECS[number];
+export type PcmAudioCodec = typeof PCM_CODECS[number];
 /** @public */
 export type SubtitleCodec = typeof SUBTITLE_CODECS[number];
 /** @public */
@@ -361,7 +385,6 @@ export const buildAudioCodecString = (codec: AudioCodec, numberOfChannels: numbe
 		return 'vorbis'; // Also easy, this one
 	}
 
-	// eslint-disable-next-line @typescript-eslint/restrict-template-expressions
 	throw new TypeError(`Unhandled codec '${codec}'.`);
 };
 
@@ -373,11 +396,12 @@ export const extractAudioCodecString = (codec: AudioCodec, description: Uint8Arr
 		return 'mp3';
 	} else if (codec === 'opus') {
 		return 'opus';
+	} else if (codec.startsWith('pcm-')) {
+		return codec;
 	} else if (codec === 'vorbis') {
 		return 'vorbis';
 	}
 
-	// eslint-disable-next-line @typescript-eslint/restrict-template-expressions
 	throw new TypeError(`Unhandled codec '${codec}'.`);
 };
 

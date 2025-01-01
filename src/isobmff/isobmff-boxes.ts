@@ -681,14 +681,14 @@ export const soundSampleDescription = (
 ) => box(compressionType, [
 	Array(6).fill(0), // Reserved
 	u16(1), // Data reference index
-	u16(0), // Version
+	u16(0), // Version (AudioSampleEntry, not AudioSampleEntryV1)
 	u16(0), // Revision level
 	u32(0), // Vendor
 	u16(trackData.info.numberOfChannels), // Number of channels
 	u16(16), // Sample size (bits)
 	u16(0), // Compression ID
 	u16(0), // Packet size
-	fixed_16_16(trackData.info.sampleRate), // Sample rate
+	u32(2 ** 16 * trackData.info.sampleRate), // Sample rate
 ], [
 	AUDIO_CODEC_TO_CONFIGURATION_BOX[trackData.track.source._codec](trackData),
 ]);

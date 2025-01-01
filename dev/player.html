@@ -134,7 +134,9 @@ async function seek() {
 	currentFrame = newCurrentFrame;
 	nextFrame = newNextFrame;
 
-	context.drawImage(currentFrame.canvas, 0, 0);
+	if (currentFrame) {
+		context.drawImage(currentFrame.canvas, 0, 0);
+	}
 	
 	seeking = false;
 }

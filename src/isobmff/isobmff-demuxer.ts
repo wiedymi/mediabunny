@@ -83,7 +83,7 @@ type SampleTable = {
 	presentationTimestamps: {
 		presentationTimestamp: number;
 		sampleIndex: number;
-	}[];
+	}[] | null;
 };
 type SampleTimingEntry = {
 	startIndex: number;
@@ -263,7 +263,7 @@ export class IsobmffDemuxer extends Demuxer {
 			keySampleIndices: null,
 			chunkOffsets: [],
 			sampleToChunk: [],
-			presentationTimestamps: [],
+			presentationTimestamps: null,
 		};
 		internalTrack.sampleTable = sampleTable;
 
@@ -272,28 +272,116 @@ export class IsobmffDemuxer extends Demuxer {
 		this.traverseBox();
 		this.currentTrack = null;
 
-		for (const entry of sampleTable.sampleTimingEntries) {
-			for (let i = 0; i < entry.count; i++) {
-				sampleTable.presentationTimestamps.push({
-					presentationTimestamp: entry.startDecodeTimestamp + i * entry.delta,
-					sampleIndex: entry.startIndex + i,
-				});
-			}
-		}
+		if (
+			internalTrack.info?.type === 'audio'
+			&& internalTrack.info.codec?.startsWith('pcm-')
+			&& sampleTable.sampleCompositionTimeOffsets.length === 0
+		) {
+			// If the audio has PCM samples, the way the samples are defined in the sample table is somewhat
+			// suboptimal: Each individual audio sample is its own sample, meaning we can have 48000 samples per second.
+			// Because we treat each sample as its own atomic unit that can be decoded, this would lead to a huge
+			// amount of very short samples for PCM audio. So instead, we make a transformation: If the audio is in PCM,
+			// we say that each chunk (that normally holds many samples) now is one big sample. We can this because
+			// the samples in the chunk are contiguous and the format is PCM, so the entire chunk as one thing still
+			// encodes valid audio information.
 
-		for (const entry of sampleTable.sampleCompositionTimeOffsets) {
-			for (let i = 0; i < entry.count; i++) {
-				const sampleIndex = entry.startIndex + i;
-				const sample = sampleTable.presentationTimestamps[sampleIndex];
-				if (!sample) {
-					continue;
+			const newSampleTimingEntries: SampleTimingEntry[] = [];
+			const newSampleSizes: number[] = [];
+
+			for (let i = 0; i < sampleTable.sampleToChunk.length; i++) {
+				const chunkEntry = sampleTable.sampleToChunk[i]!;
+				const nextEntry = sampleTable.sampleToChunk[i + 1];
+				const chunkCount = (nextEntry ? nextEntry.startChunkIndex : sampleTable.chunkOffsets.length)
+					- chunkEntry.startChunkIndex;
+
+				for (let j = 0; j < chunkCount; j++) {
+					const startSampleIndex = chunkEntry.startSampleIndex + j * chunkEntry.samplesPerChunk;
+					const endSampleIndex = startSampleIndex + chunkEntry.samplesPerChunk; // Exclusive, outside of chunk
+
+					const startTimingEntryIndex = binarySearchLessOrEqual(
+						sampleTable.sampleTimingEntries,
+						chunkEntry.startSampleIndex,
+						x => x.startIndex,
+					);
+					const startTimingEntry = sampleTable.sampleTimingEntries[startTimingEntryIndex]!;
+					const endTimingEntryIndex = binarySearchLessOrEqual(
+						sampleTable.sampleTimingEntries,
+						endSampleIndex,
+						x => x.startIndex,
+					);
+					const endTimingEntry = sampleTable.sampleTimingEntries[endTimingEntryIndex]!;
+
+					const firstSampleTimestamp = startTimingEntry.startDecodeTimestamp
+						+ (startSampleIndex - startTimingEntry.startIndex) * startTimingEntry.delta;
+					const lastSampleTimestamp = endTimingEntry.startDecodeTimestamp
+						+ (endSampleIndex - endTimingEntry.startIndex) * endTimingEntry.delta;
+					const delta = lastSampleTimestamp - firstSampleTimestamp;
+
+					const lastSampleTimingEntry = last(newSampleTimingEntries);
+					if (lastSampleTimingEntry && lastSampleTimingEntry.delta === delta) {
+						lastSampleTimingEntry.count++;
+					} else {
+						// One sample for the entire chunk
+						newSampleTimingEntries.push({
+							startIndex: chunkEntry.startChunkIndex,
+							startDecodeTimestamp: firstSampleTimestamp,
+							count: 1,
+							delta,
+						});
+					}
+
+					// Compute the chunk size by summing the sample sizes
+					let chunkSize = 0;
+					if (sampleTable.sampleSizes.length === 1) {
+						// Given PCM, this branch should be the likely one
+						chunkSize = sampleTable.sampleSizes[0]! * chunkEntry.samplesPerChunk;
+					} else {
+						for (let k = startSampleIndex; k < endSampleIndex; k++) {
+							chunkSize += sampleTable.sampleSizes[k]!;
+						}
+					}
+
+					newSampleSizes.push(chunkSize);
 				}
 
-				sample.presentationTimestamp += entry.offset;
+				chunkEntry.startSampleIndex = chunkEntry.startChunkIndex;
+				chunkEntry.samplesPerChunk = 1;
 			}
+
+			sampleTable.sampleTimingEntries = newSampleTimingEntries;
+			sampleTable.sampleSizes = newSampleSizes;
 		}
 
-		sampleTable.presentationTimestamps.sort((a, b) => a.presentationTimestamp - b.presentationTimestamp);
+		if (sampleTable.sampleCompositionTimeOffsets.length > 0) {
+			// If composition time offsets are defined, we must build a list of all presentation timestamps and then
+			// sort them
+			sampleTable.presentationTimestamps = [];
+
+			for (const entry of sampleTable.sampleTimingEntries) {
+				for (let i = 0; i < entry.count; i++) {
+					sampleTable.presentationTimestamps.push({
+						presentationTimestamp: entry.startDecodeTimestamp + i * entry.delta,
+						sampleIndex: entry.startIndex + i,
+					});
+				}
+			}
+
+			for (const entry of sampleTable.sampleCompositionTimeOffsets) {
+				for (let i = 0; i < entry.count; i++) {
+					const sampleIndex = entry.startIndex + i;
+					const sample = sampleTable.presentationTimestamps[sampleIndex];
+					if (!sample) {
+						continue;
+					}
+
+					sample.presentationTimestamp += entry.offset;
+				}
+			}
+
+			sampleTable.presentationTimestamps.sort((a, b) => a.presentationTimestamp - b.presentationTimestamp);
+		} else {
+			// If they're not defined, we can simply use the decode timestamps as presentation timestamps
+		}
 
 		return internalTrack.sampleTable;
 	}
@@ -613,9 +701,20 @@ export class IsobmffDemuxer extends Demuxer {
 						this.readContiguousBoxes(startPos + sampleBoxInfo.totalSize - this.isobmffReader.pos);
 					} else {
 						if (sampleBoxInfo.name === 'mp4a') {
-							// We don't know the codec yet, need to read the esds box
+							// We don't know the codec yet (might be AAC, might be MP3), need to read the esds box
 						} else if (sampleBoxInfo.name.toLowerCase() === 'opus') {
 							track.info.codec = 'opus';
+						} else if (
+							sampleBoxInfo.name === 'twos'
+							|| sampleBoxInfo.name === 'sowt'
+							|| sampleBoxInfo.name === 'raw '
+							|| sampleBoxInfo.name === 'in24'
+							|| sampleBoxInfo.name === 'in32'
+							|| sampleBoxInfo.name === 'fl32'
+							|| sampleBoxInfo.name === 'lpcm'
+						) {
+							// It's PCM
+							// developer.apple.com/documentation/quicktime-file-format/sound_sample_descriptions/
 						} else {
 							const { name } = sampleBoxInfo;
 							console.warn(`Unsupported audio codec (sample entry type '${name}') - discarding track.`);
@@ -628,8 +727,9 @@ export class IsobmffDemuxer extends Demuxer {
 						this.isobmffReader.pos += 3 * 2;
 
 						let channelCount = this.isobmffReader.readU16();
+						let sampleSize = this.isobmffReader.readU16();
 
-						this.isobmffReader.pos += 2 + 2 + 2;
+						this.isobmffReader.pos += 2 * 2;
 
 						// Can't use fixed16_16 as that's signed
 						let sampleRate = this.isobmffReader.readU32() / 0x10000;
@@ -643,18 +743,13 @@ export class IsobmffDemuxer extends Demuxer {
 								sampleRate = this.isobmffReader.readF64();
 								channelCount = this.isobmffReader.readU32();
 								this.isobmffReader.pos += 4; // Always 0x7F000000
-								// eslint-disable-next-line @typescript-eslint/no-unused-vars
-								const sampleSize = this.isobmffReader.readU32();
 
-								// eslint-disable-next-line @typescript-eslint/no-unused-vars
+								sampleSize = this.isobmffReader.readU32();
+
 								const flags = this.isobmffReader.readU32();
 
-								// eslint-disable-next-line @typescript-eslint/no-unused-vars
-								const bytesPerFrame = this.isobmffReader.readU32();
-								// eslint-disable-next-line @typescript-eslint/no-unused-vars
-								const samplesPerFrame = this.isobmffReader.readU32();
+								this.isobmffReader.pos += 2 * 4;
 
-								/*
 								if (sampleBoxInfo.name === 'lpcm') {
 									const bytesPerSample = (sampleSize + 7) >> 3;
 									const isFloat = Boolean(flags & 1);
@@ -664,35 +759,63 @@ export class IsobmffDemuxer extends Demuxer {
 									if (sampleSize > 0 && sampleSize <= 64) {
 										if (isFloat) {
 											if (sampleSize === 32 && !isBigEndian) {
-												track.pcmType = 'pcm-f32';
+												track.info.codec = isBigEndian ? 'pcm-f32be' : 'pcm-f32le';
 											}
 										} else {
 											if (sFlags & (1 << (bytesPerSample - 1))) {
-												if (bytesPerSample === 2 && !isBigEndian) {
-													track.pcmType = 'pcm-s16';
-												} else if (bytesPerSample === 3 && !isBigEndian) {
-													track.pcmType = 'pcm-s24';
-												} else if (bytesPerSample === 4 && !isBigEndian) {
-													track.pcmType = 'pcm-s32';
+												if (bytesPerSample === 1) {
+													track.info.codec = 'pcm-s8';
+												} else if (bytesPerSample === 2) {
+													track.info.codec = isBigEndian ? 'pcm-s16be' : 'pcm-s16le';
+												} else if (bytesPerSample === 3) {
+													track.info.codec = isBigEndian ? 'pcm-s24be' : 'pcm-s24le';
+												} else if (bytesPerSample === 4) {
+													track.info.codec = isBigEndian ? 'pcm-s32be' : 'pcm-s32le';
 												}
 											} else {
 												if (bytesPerSample === 1) {
-													track.pcmType = 'pcm-u8';
+													track.info.codec = 'pcm-u8';
 												}
 											}
 										}
 									}
 
-									if (track.pcmType === null) {
-										throw new Error(`Unsupported linear PCM type.`);
+									if (track.info.codec === null) {
+										console.warn('Unsupportedd PCM format.');
+										break;
 									}
 								}
-								*/
 							}
 						}
 
 						track.info.numberOfChannels = channelCount;
 						track.info.sampleRate = sampleRate;
+
+						if (sampleBoxInfo.name === 'twos') {
+							if (sampleSize === 8) {
+								track.info.codec = 'pcm-s8';
+							} else if (sampleSize === 16) {
+								track.info.codec = 'pcm-s16be';
+							} else {
+								throw new Error(`Unsupported sample size ${sampleSize} for codec 'twos'.`);
+							}
+						} else if (sampleBoxInfo.name === 'sowt') {
+							if (sampleSize === 8) {
+								track.info.codec = 'pcm-s8';
+							} else if (sampleSize === 16) {
+								track.info.codec = 'pcm-s16le';
+							} else {
+								throw new Error(`Unsupported sample size ${sampleSize} for codec 'sowt'.`);
+							}
+						} else if (sampleBoxInfo.name === 'raw ') {
+							track.info.codec = 'pcm-u8';
+						} else if (sampleBoxInfo.name === 'in24') {
+							track.info.codec = 'pcm-s24be';
+						} else if (sampleBoxInfo.name === 'in32') {
+							track.info.codec = 'pcm-s32be';
+						} else if (sampleBoxInfo.name === 'fl32') {
+							track.info.codec = 'pcm-f32be';
+						}
 
 						this.readContiguousBoxes(startPos + sampleBoxInfo.totalSize - this.isobmffReader.pos);
 					}
@@ -870,6 +993,25 @@ export class IsobmffDemuxer extends Demuxer {
 						this.isobmffReader.pos,
 						this.isobmffReader.pos + decoderSpecificInfoLength,
 					);
+				}
+			}; break;
+
+			case 'enda': {
+				const track = this.currentTrack;
+				assert(track && track.info?.type === 'audio');
+
+				const littleEndian = this.isobmffReader.readU16() & 0xff; // 0xff is from FFmpeg
+
+				if (littleEndian) {
+					if (track.info.codec === 'pcm-s16be') {
+						track.info.codec = 'pcm-s16le';
+					} else if (track.info.codec === 'pcm-s24be') {
+						track.info.codec = 'pcm-s24le';
+					} else if (track.info.codec === 'pcm-s32be') {
+						track.info.codec = 'pcm-s32le';
+					} else if (track.info.codec === 'pcm-f32be') {
+						track.info.codec = 'pcm-f32le';
+					}
 				}
 			}; break;
 
@@ -1966,16 +2108,30 @@ class IsobmffAudioTrackBacking extends IsobmffTrackBacking<EncodedAudioChunk> im
 }
 
 const getSampleIndexForTimestamp = (sampleTable: SampleTable, timescaleUnits: number) => {
-	const index = binarySearchLessOrEqual(
-		sampleTable.presentationTimestamps,
-		timescaleUnits,
-		x => x.presentationTimestamp,
-	);
-	if (index === -1) {
-		return -1;
-	}
+	if (sampleTable.presentationTimestamps) {
+		const index = binarySearchLessOrEqual(
+			sampleTable.presentationTimestamps,
+			timescaleUnits,
+			x => x.presentationTimestamp,
+		);
+		if (index === -1) {
+			return -1;
+		}
 
-	return sampleTable.presentationTimestamps[index]!.sampleIndex;
+		return sampleTable.presentationTimestamps[index]!.sampleIndex;
+	} else {
+		const index = binarySearchLessOrEqual(
+			sampleTable.sampleTimingEntries,
+			timescaleUnits,
+			x => x.startDecodeTimestamp,
+		);
+		if (index === -1) {
+			return -1;
+		}
+
+		const entry = sampleTable.sampleTimingEntries[index]!;
+		return entry.startIndex + Math.floor((timescaleUnits - entry.startDecodeTimestamp) / entry.delta);
+	}
 };
 
 type SampleInfo = {

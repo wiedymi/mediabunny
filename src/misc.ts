@@ -245,3 +245,26 @@ export const validateAnyIterable = (iterable: AnyIterable<unknown>) => {
 		throw new TypeError('Argument must be an iterable or async iterable.');
 	}
 };
+
+export const assertNever = (x: never) => {
+	// eslint-disable-next-line @typescript-eslint/restrict-template-expressions
+	throw new Error(`Unexpected value: ${x}`);
+};
+
+export const getUint24 = (view: DataView, byteOffset: number, littleEndian: boolean) => {
+	const byte1 = view.getUint8(byteOffset);
+	const byte2 = view.getUint8(byteOffset + 1);
+	const byte3 = view.getUint8(byteOffset + 2);
+
+	if (littleEndian) {
+		return byte1 | (byte2 << 8) | (byte3 << 16);
+	} else {
+		return (byte1 << 16) | (byte2 << 8) | byte3;
+	}
+};
+
+export const getInt24 = (view: DataView, byteOffset: number, littleEndian: boolean) => {
+	// The left shift pushes the most significant bit into the sign bit region, and the subsequent right shift
+	// then correctly interprets the sign bit.
+	return getUint24(view, byteOffset, littleEndian) << 8 >> 8;
+};
