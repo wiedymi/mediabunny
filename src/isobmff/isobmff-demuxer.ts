@@ -272,11 +272,13 @@ export class IsobmffDemuxer extends Demuxer {
 		this.traverseBox();
 		this.currentTrack = null;
 
-		if (
-			internalTrack.info?.type === 'audio'
-			&& internalTrack.info.codec?.startsWith('pcm-')
-			&& sampleTable.sampleCompositionTimeOffsets.length === 0
-		) {
+		const isPcmCodec = internalTrack.info?.type === 'audio' && (
+			internalTrack.info.codec?.startsWith('pcm-')
+			|| internalTrack.info.codec === 'ulaw'
+			|| internalTrack.info.codec === 'alaw'
+		);
+
+		if (isPcmCodec && sampleTable.sampleCompositionTimeOffsets.length === 0) {
 			// If the audio has PCM samples, the way the samples are defined in the sample table is somewhat
 			// suboptimal: Each individual audio sample is its own sample, meaning we can have 48000 samples per second.
 			// Because we treat each sample as its own atomic unit that can be decoded, this would lead to a huge
@@ -673,17 +675,18 @@ export class IsobmffDemuxer extends Demuxer {
 
 				for (let i = 0; i < entries; i++) {
 					const sampleBoxInfo = this.isobmffReader.readBoxHeader();
+					const lowercaseBoxName = sampleBoxInfo.name.toLowerCase();
 
 					if (track.info.type === 'video') {
-						if (sampleBoxInfo.name === 'avc1') {
+						if (lowercaseBoxName === 'avc1') {
 							track.info.codec = 'avc';
-						} else if (sampleBoxInfo.name === 'hvc1' || sampleBoxInfo.name === 'hev1') {
+						} else if (lowercaseBoxName === 'hvc1' || lowercaseBoxName === 'hev1') {
 							track.info.codec = 'hevc';
-						} else if (sampleBoxInfo.name === 'vp08') {
+						} else if (lowercaseBoxName === 'vp08') {
 							track.info.codec = 'vp8';
-						} else if (sampleBoxInfo.name === 'vp09') {
+						} else if (lowercaseBoxName === 'vp09') {
 							track.info.codec = 'vp9';
-						} else if (sampleBoxInfo.name === 'av01') {
+						} else if (lowercaseBoxName === 'av01') {
 							track.info.codec = 'av1';
 						} else {
 							const { name } = sampleBoxInfo;
@@ -700,21 +703,25 @@ export class IsobmffDemuxer extends Demuxer {
 
 						this.readContiguousBoxes(startPos + sampleBoxInfo.totalSize - this.isobmffReader.pos);
 					} else {
-						if (sampleBoxInfo.name === 'mp4a') {
+						if (lowercaseBoxName === 'mp4a') {
 							// We don't know the codec yet (might be AAC, might be MP3), need to read the esds box
-						} else if (sampleBoxInfo.name.toLowerCase() === 'opus') {
+						} else if (lowercaseBoxName === 'opus') {
 							track.info.codec = 'opus';
 						} else if (
-							sampleBoxInfo.name === 'twos'
-							|| sampleBoxInfo.name === 'sowt'
-							|| sampleBoxInfo.name === 'raw '
-							|| sampleBoxInfo.name === 'in24'
-							|| sampleBoxInfo.name === 'in32'
-							|| sampleBoxInfo.name === 'fl32'
-							|| sampleBoxInfo.name === 'lpcm'
+							lowercaseBoxName === 'twos'
+							|| lowercaseBoxName === 'sowt'
+							|| lowercaseBoxName === 'raw '
+							|| lowercaseBoxName === 'in24'
+							|| lowercaseBoxName === 'in32'
+							|| lowercaseBoxName === 'fl32'
+							|| lowercaseBoxName === 'lpcm'
 						) {
 							// It's PCM
 							// developer.apple.com/documentation/quicktime-file-format/sound_sample_descriptions/
+						} else if (lowercaseBoxName === 'ulaw') {
+							track.info.codec = 'ulaw';
+						} else if (lowercaseBoxName === 'alaw') {
+							track.info.codec = 'alaw';
 						} else {
 							const { name } = sampleBoxInfo;
 							console.warn(`Unsupported audio codec (sample entry type '${name}') - discarding track.`);
@@ -750,7 +757,7 @@ export class IsobmffDemuxer extends Demuxer {
 
 								this.isobmffReader.pos += 2 * 4;
 
-								if (sampleBoxInfo.name === 'lpcm') {
+								if (lowercaseBoxName === 'lpcm') {
 									const bytesPerSample = (sampleSize + 7) >> 3;
 									const isFloat = Boolean(flags & 1);
 									const isBigEndian = Boolean(flags & 2);
@@ -791,7 +798,7 @@ export class IsobmffDemuxer extends Demuxer {
 						track.info.numberOfChannels = channelCount;
 						track.info.sampleRate = sampleRate;
 
-						if (sampleBoxInfo.name === 'twos') {
+						if (lowercaseBoxName === 'twos') {
 							if (sampleSize === 8) {
 								track.info.codec = 'pcm-s8';
 							} else if (sampleSize === 16) {
@@ -799,7 +806,7 @@ export class IsobmffDemuxer extends Demuxer {
 							} else {
 								throw new Error(`Unsupported sample size ${sampleSize} for codec 'twos'.`);
 							}
-						} else if (sampleBoxInfo.name === 'sowt') {
+						} else if (lowercaseBoxName === 'sowt') {
 							if (sampleSize === 8) {
 								track.info.codec = 'pcm-s8';
 							} else if (sampleSize === 16) {
@@ -807,13 +814,13 @@ export class IsobmffDemuxer extends Demuxer {
 							} else {
 								throw new Error(`Unsupported sample size ${sampleSize} for codec 'sowt'.`);
 							}
-						} else if (sampleBoxInfo.name === 'raw ') {
+						} else if (lowercaseBoxName === 'raw ') {
 							track.info.codec = 'pcm-u8';
-						} else if (sampleBoxInfo.name === 'in24') {
+						} else if (lowercaseBoxName === 'in24') {
 							track.info.codec = 'pcm-s24be';
-						} else if (sampleBoxInfo.name === 'in32') {
+						} else if (lowercaseBoxName === 'in32') {
 							track.info.codec = 'pcm-s32be';
-						} else if (sampleBoxInfo.name === 'fl32') {
+						} else if (lowercaseBoxName === 'fl32') {
 							track.info.codec = 'pcm-f32be';
 						}
 

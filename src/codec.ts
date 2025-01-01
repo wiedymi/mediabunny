@@ -35,6 +35,8 @@ export const AUDIO_CODECS = [
 	'aac',
 	'mp3',
 	'opus',
+	'ulaw',
+	'alaw',
 	...PCM_CODECS,
 ] as const; // TODO add the rest
 /** @public */
@@ -398,6 +400,10 @@ export const extractAudioCodecString = (codec: AudioCodec, description: Uint8Arr
 		return 'opus';
 	} else if (codec.startsWith('pcm-')) {
 		return codec;
+	} else if (codec === 'ulaw') {
+		return 'ulaw';
+	} else if (codec === 'alaw') {
+		return 'alaw';
 	} else if (codec === 'vorbis') {
 		return 'vorbis';
 	}
