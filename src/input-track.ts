@@ -95,13 +95,18 @@ export class InputVideoTrack extends InputTrack {
 	}
 
 	async canDecode() {
-		const decoderConfig = await this._backing.getDecoderConfig();
-		if (!decoderConfig) {
+		try {
+			const decoderConfig = await this._backing.getDecoderConfig();
+			if (!decoderConfig) {
+				return false;
+			}
+
+			const support = await VideoDecoder.isConfigSupported(decoderConfig);
+			return support.supported === true;
+		} catch (error) {
+			console.error('Error during decodability check:', error);
 			return false;
 		}
-
-		const support = await VideoDecoder.isConfigSupported(decoderConfig);
-		return support.supported === true;
 	}
 }
 
@@ -151,16 +156,21 @@ export class InputAudioTrack extends InputTrack {
 	}
 
 	async canDecode() {
-		const decoderConfig = await this._backing.getDecoderConfig();
-		if (!decoderConfig) {
-			return false;
-		}
+		try {
+			const decoderConfig = await this._backing.getDecoderConfig();
+			if (!decoderConfig) {
+				return false;
+			}
 
-		if (decoderConfig.codec.startsWith('pcm-')) {
-			return true; // Since we decode it ourselves
-		} else {
-			const support = await AudioDecoder.isConfigSupported(decoderConfig);
-			return support.supported === true;
+			if (decoderConfig.codec.startsWith('pcm-')) {
+				return true; // Since we decode it ourselves
+			} else {
+				const support = await AudioDecoder.isConfigSupported(decoderConfig);
+				return support.supported === true;
+			}
+		} catch (error) {
+			console.error('Error during decodability check:', error);
+			return false;
 		}
 	}
 }
