@@ -1,4 +1,3 @@
-- Progress reporting
 - Test tree shaking
 - Throw if edit list detected
 - Audio codec string regex validation

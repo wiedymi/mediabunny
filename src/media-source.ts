@@ -122,7 +122,8 @@ export type VideoCodecConfig = {
 	bitrate: number;
 	latencyMode?: VideoEncoderConfig['latencyMode'];
 	keyFrameInterval?: number;
-	onEncodingError?: (error: Error) => void;
+	onEncodedChunk?: (chunk: EncodedVideoChunk, meta: EncodedVideoChunkMetadata | undefined) => unknown;
+	onEncodingError?: (error: Error) => unknown;
 };
 
 const validateVideoCodecConfig = (config: VideoCodecConfig) => {
@@ -143,6 +144,9 @@ const validateVideoCodecConfig = (config: VideoCodecConfig) => {
 		&& (!Number.isFinite(config.keyFrameInterval) || config.keyFrameInterval < 0)
 	) {
 		throw new TypeError('config.keyFrameInterval, when provided, must be a non-negative number.');
+	}
+	if (config.onEncodedChunk !== undefined && typeof config.onEncodedChunk !== 'function') {
+		throw new TypeError('config.onEncodedChunk, when provided, must be a function.');
 	}
 	if (config.onEncodingError !== undefined && typeof config.onEncodingError !== 'function') {
 		throw new TypeError('config.onEncodingError, when provided, must be a function.');
@@ -206,7 +210,10 @@ class VideoEncoderWrapper {
 		}
 
 		this.encoder = new VideoEncoder({
-			output: (chunk, meta) => void this.muxer!.addEncodedVideoChunk(this.source._connectedTrack!, chunk, meta),
+			output: (chunk, meta) => {
+				this.codecConfig.onEncodedChunk?.(chunk, meta);
+				void this.muxer!.addEncodedVideoChunk(this.source._connectedTrack!, chunk, meta);
+			},
 			error: this.codecConfig.onEncodingError ?? (error => console.error('VideoEncoder error:', error)),
 		});
 
@@ -403,7 +410,8 @@ export class EncodedAudioChunkSource extends AudioSource {
 export type AudioCodecConfig = {
 	codec: AudioCodec;
 	bitrate: number;
-	onEncodingError?: (error: Error) => void;
+	onEncodedChunk?: (chunk: EncodedAudioChunk, meta: EncodedAudioChunkMetadata | undefined) => unknown;
+	onEncodingError?: (error: Error) => unknown;
 };
 
 const validateAudioCodecConfig = (config: AudioCodecConfig) => {
@@ -469,7 +477,10 @@ class AudioEncoderWrapper {
 		}
 
 		this.encoder = new AudioEncoder({
-			output: (chunk, meta) => void this.muxer!.addEncodedAudioChunk(this.source._connectedTrack!, chunk, meta),
+			output: (chunk, meta) => {
+				this.codecConfig.onEncodedChunk?.(chunk, meta);
+				void this.muxer!.addEncodedAudioChunk(this.source._connectedTrack!, chunk, meta);
+			},
 			error: this.codecConfig.onEncodingError ?? (error => console.error('AudioEncoder error:', error)),
 		});
 
