@@ -9,8 +9,8 @@ export {
 	WebMOutputFormatOptions,
 } from './output-format';
 export {
-	VideoCodecConfig,
-	AudioCodecConfig,
+	VideoEncodingConfig,
+	AudioEncodingConfig,
 	MediaSource,
 	VideoSource,
 	EncodedVideoChunkSource,

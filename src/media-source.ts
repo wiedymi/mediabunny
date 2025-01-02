@@ -117,7 +117,7 @@ export class EncodedVideoChunkSource extends VideoSource {
 }
 
 /** @public */
-export type VideoCodecConfig = {
+export type VideoEncodingConfig = {
 	codec: VideoCodec;
 	bitrate: number;
 	latencyMode?: VideoEncoderConfig['latencyMode'];
@@ -126,9 +126,9 @@ export type VideoCodecConfig = {
 	onEncodingError?: (error: Error) => unknown;
 };
 
-const validateVideoCodecConfig = (config: VideoCodecConfig) => {
+const validateVideoEncodingConfig = (config: VideoEncodingConfig) => {
 	if (!config || typeof config !== 'object') {
-		throw new TypeError('Codec config must be an object.');
+		throw new TypeError('Encoding config must be an object.');
 	}
 	if (!VIDEO_CODECS.includes(config.codec)) {
 		throw new TypeError(`Invalid video codec '${config.codec}'. Must be one of: ${VIDEO_CODECS.join(', ')}.`);
@@ -160,8 +160,8 @@ class VideoEncoderWrapper {
 	private lastWidth: number | null = null;
 	private lastHeight: number | null = null;
 
-	constructor(private source: VideoSource, private codecConfig: VideoCodecConfig) {
-		validateVideoCodecConfig(codecConfig);
+	constructor(private source: VideoSource, private encodingConfig: VideoEncodingConfig) {
+		validateVideoEncodingConfig(encodingConfig);
 	}
 
 	async digest(videoFrame: VideoFrame, encodeOptions?: VideoEncoderEncodeOptions) {
@@ -183,7 +183,7 @@ class VideoEncoderWrapper {
 		this.ensureEncoder(videoFrame);
 		assert(this.encoder);
 
-		const keyFrameInterval = this.codecConfig.keyFrameInterval ?? 5;
+		const keyFrameInterval = this.encodingConfig.keyFrameInterval ?? 5;
 		const multipleOfKeyFrameInterval = Math.floor((videoFrame.timestamp / 1e6) / keyFrameInterval);
 
 		// Ensure a key frame every KEY_FRAME_INTERVAL seconds. It is important that all video tracks follow the same
@@ -211,25 +211,25 @@ class VideoEncoderWrapper {
 
 		this.encoder = new VideoEncoder({
 			output: (chunk, meta) => {
-				this.codecConfig.onEncodedChunk?.(chunk, meta);
+				this.encodingConfig.onEncodedChunk?.(chunk, meta);
 				void this.muxer!.addEncodedVideoChunk(this.source._connectedTrack!, chunk, meta);
 			},
-			error: this.codecConfig.onEncodingError ?? (error => console.error('VideoEncoder error:', error)),
+			error: this.encodingConfig.onEncodingError ?? (error => console.error('VideoEncoder error:', error)),
 		});
 
 		this.encoder.configure({
 			codec: buildVideoCodecString(
-				this.codecConfig.codec,
+				this.encodingConfig.codec,
 				videoFrame.codedWidth,
 				videoFrame.codedHeight,
-				this.codecConfig.bitrate,
+				this.encodingConfig.bitrate,
 			),
 			width: videoFrame.codedWidth,
 			height: videoFrame.codedHeight,
-			bitrate: this.codecConfig.bitrate,
+			bitrate: this.encodingConfig.bitrate,
 			framerate: this.source._connectedTrack?.metadata.frameRate,
-			latencyMode: this.codecConfig.latencyMode,
-			...getVideoEncoderConfigExtension(this.codecConfig.codec),
+			latencyMode: this.encodingConfig.latencyMode,
+			...getVideoEncoderConfigExtension(this.encodingConfig.codec),
 		});
 
 		assert(this.source._connectedTrack);
@@ -249,9 +249,9 @@ export class VideoFrameSource extends VideoSource {
 	/** @internal */
 	private _encoder: VideoEncoderWrapper;
 
-	constructor(codecConfig: VideoCodecConfig) {
-		super(codecConfig.codec);
-		this._encoder = new VideoEncoderWrapper(this, codecConfig);
+	constructor(encodingConfig: VideoEncodingConfig) {
+		super(encodingConfig.codec);
+		this._encoder = new VideoEncoderWrapper(this, encodingConfig);
 	}
 
 	digest(videoFrame: VideoFrame, encodeOptions?: VideoEncoderEncodeOptions) {
@@ -275,13 +275,13 @@ export class CanvasSource extends VideoSource {
 	/** @internal */
 	private _canvas: HTMLCanvasElement | OffscreenCanvas;
 
-	constructor(canvas: HTMLCanvasElement | OffscreenCanvas, codecConfig: VideoCodecConfig) {
+	constructor(canvas: HTMLCanvasElement | OffscreenCanvas, encodingConfig: VideoEncodingConfig) {
 		if (!(canvas instanceof HTMLCanvasElement)) {
 			throw new TypeError('canvas must be an HTMLCanvasElement.');
 		}
 
-		super(codecConfig.codec);
-		this._encoder = new VideoEncoderWrapper(this, codecConfig);
+		super(encodingConfig.codec);
+		this._encoder = new VideoEncoderWrapper(this, encodingConfig);
 		this._canvas = canvas;
 	}
 
@@ -323,18 +323,18 @@ export class MediaStreamVideoTrackSource extends VideoSource {
 	/** @internal */
 	override _offsetTimestamps = true;
 
-	constructor(track: MediaStreamVideoTrack, codecConfig: VideoCodecConfig) {
+	constructor(track: MediaStreamVideoTrack, encodingConfig: VideoEncodingConfig) {
 		if (!(track instanceof MediaStreamTrack) || track.kind !== 'video') {
 			throw new TypeError('track must be a video MediaStreamTrack.');
 		}
 
-		codecConfig = {
-			...codecConfig,
+		encodingConfig = {
+			...encodingConfig,
 			latencyMode: 'realtime',
 		};
 
-		super(codecConfig.codec);
-		this._encoder = new VideoEncoderWrapper(this, codecConfig);
+		super(encodingConfig.codec);
+		this._encoder = new VideoEncoderWrapper(this, encodingConfig);
 		this._track = track;
 	}
 
@@ -407,16 +407,16 @@ export class EncodedAudioChunkSource extends AudioSource {
 	}
 }
 /** @public */
-export type AudioCodecConfig = {
+export type AudioEncodingConfig = {
 	codec: AudioCodec;
 	bitrate: number;
 	onEncodedChunk?: (chunk: EncodedAudioChunk, meta: EncodedAudioChunkMetadata | undefined) => unknown;
 	onEncodingError?: (error: Error) => unknown;
 };
 
-const validateAudioCodecConfig = (config: AudioCodecConfig) => {
+const validateAudioEncodingConfig = (config: AudioEncodingConfig) => {
 	if (!config || typeof config !== 'object') {
-		throw new TypeError('Codec config must be an object.');
+		throw new TypeError('Encoding config must be an object.');
 	}
 	if (!AUDIO_CODECS.includes(config.codec)) {
 		throw new TypeError(`Invalid audio codec '${config.codec}'. Must be one of: ${AUDIO_CODECS.join(', ')}.`);
@@ -435,8 +435,8 @@ class AudioEncoderWrapper {
 	private lastNumberOfChannels: number | null = null;
 	private lastSampleRate: number | null = null;
 
-	constructor(private source: AudioSource, private codecConfig: AudioCodecConfig) {
-		validateAudioCodecConfig(codecConfig);
+	constructor(private source: AudioSource, private encodingConfig: AudioEncodingConfig) {
+		validateAudioEncodingConfig(encodingConfig);
 	}
 
 	async digest(audioData: AudioData) {
@@ -478,18 +478,18 @@ class AudioEncoderWrapper {
 
 		this.encoder = new AudioEncoder({
 			output: (chunk, meta) => {
-				this.codecConfig.onEncodedChunk?.(chunk, meta);
+				this.encodingConfig.onEncodedChunk?.(chunk, meta);
 				void this.muxer!.addEncodedAudioChunk(this.source._connectedTrack!, chunk, meta);
 			},
-			error: this.codecConfig.onEncodingError ?? (error => console.error('AudioEncoder error:', error)),
+			error: this.encodingConfig.onEncodingError ?? (error => console.error('AudioEncoder error:', error)),
 		});
 
 		this.encoder.configure({
-			codec: buildAudioCodecString(this.codecConfig.codec, audioData.numberOfChannels, audioData.sampleRate),
+			codec: buildAudioCodecString(this.encodingConfig.codec, audioData.numberOfChannels, audioData.sampleRate),
 			numberOfChannels: audioData.numberOfChannels,
 			sampleRate: audioData.sampleRate,
-			bitrate: this.codecConfig.bitrate,
-			...getAudioEncoderConfigExtension(this.codecConfig.codec),
+			bitrate: this.encodingConfig.bitrate,
+			...getAudioEncoderConfigExtension(this.encodingConfig.codec),
 		});
 
 		assert(this.source._connectedTrack);
@@ -509,9 +509,9 @@ export class AudioDataSource extends AudioSource {
 	/** @internal */
 	private _encoder: AudioEncoderWrapper;
 
-	constructor(codecConfig: AudioCodecConfig) {
-		super(codecConfig.codec);
-		this._encoder = new AudioEncoderWrapper(this, codecConfig);
+	constructor(encodingConfig: AudioEncodingConfig) {
+		super(encodingConfig.codec);
+		this._encoder = new AudioEncoderWrapper(this, encodingConfig);
 	}
 
 	digest(audioData: AudioData) {
@@ -535,9 +535,9 @@ export class AudioBufferSource extends AudioSource {
 	/** @internal */
 	private _accumulatedFrameCount = 0;
 
-	constructor(codecConfig: AudioCodecConfig) {
-		super(codecConfig.codec);
-		this._encoder = new AudioEncoderWrapper(this, codecConfig);
+	constructor(encodingConfig: AudioEncodingConfig) {
+		super(encodingConfig.codec);
+		this._encoder = new AudioEncoderWrapper(this, encodingConfig);
 	}
 
 	digest(audioBuffer: AudioBuffer) {
@@ -608,13 +608,13 @@ export class MediaStreamAudioTrackSource extends AudioSource {
 	/** @internal */
 	override _offsetTimestamps = true;
 
-	constructor(track: MediaStreamAudioTrack, codecConfig: AudioCodecConfig) {
+	constructor(track: MediaStreamAudioTrack, encodingConfig: AudioEncodingConfig) {
 		if (!(track instanceof MediaStreamTrack) || track.kind !== 'audio') {
 			throw new TypeError('track must be an audio MediaStreamTrack.');
 		}
 
-		super(codecConfig.codec);
-		this._encoder = new AudioEncoderWrapper(this, codecConfig);
+		super(encodingConfig.codec);
+		this._encoder = new AudioEncoderWrapper(this, encodingConfig);
 		this._track = track;
 	}
 
