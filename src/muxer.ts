@@ -25,8 +25,6 @@ export abstract class Muxer {
 	abstract finalize(): Promise<void>;
 
 	// eslint-disable-next-line @typescript-eslint/no-unused-vars
-	beforeTrackAdd(track: OutputTrack) {}
-	// eslint-disable-next-line @typescript-eslint/no-unused-vars
 	onTrackClose(track: OutputTrack) {}
 
 	private trackTimestampInfo = new WeakMap<OutputTrack, {

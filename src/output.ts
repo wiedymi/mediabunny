@@ -45,6 +45,10 @@ export type SubtitleTrackMetadata = {};
 /** @public */
 export class Output {
 	/** @internal */
+	_format: OutputFormat;
+	/** @internal */
+	_target: Target;
+	/** @internal */
 	_muxer: Muxer;
 	/** @internal */
 	_writer: Writer;
@@ -74,6 +78,9 @@ export class Output {
 			throw new Error('Target is already used for another output.');
 		}
 		options.target._output = this;
+
+		this._format = options.format;
+		this._target = options.target;
 
 		this._writer = options.target._createWriter();
 		this._muxer = options.format._createMuxer(this);
@@ -145,7 +152,52 @@ export class Output {
 			metadata,
 		} as OutputTrack;
 
-		this._muxer.beforeTrackAdd(track);
+		if (track.type === 'video') {
+			const supportedVideoCodecs = this._format.getSupportedVideoCodecs();
+
+			if (supportedVideoCodecs.length === 0) {
+				throw new Error(
+					`${this._format._getName()} does not support video tracks.`
+					+ this._format._codecUnsupportedHint(track.source._codec),
+				);
+			} else if (!supportedVideoCodecs.includes(track.source._codec)) {
+				throw new Error(
+					`Codec '${track.source._codec}' cannot be contained within ${this._format._getName()}. Supported`
+					+ ` video codecs are: ${supportedVideoCodecs.map(codec => `'${codec}'`).join(', ')}.`
+					+ this._format._codecUnsupportedHint(track.source._codec),
+				);
+			}
+		} else if (track.type === 'audio') {
+			const supportedAudioCodecs = this._format.getSupportedAudioCodecs();
+
+			if (supportedAudioCodecs.length === 0) {
+				throw new Error(
+					`${this._format._getName()} does not support audio tracks.`
+					+ this._format._codecUnsupportedHint(track.source._codec),
+				);
+			} else if (!supportedAudioCodecs.includes(track.source._codec)) {
+				throw new Error(
+					`Codec '${track.source._codec}' cannot be contained within ${this._format._getName()}. Supported`
+					+ ` audio codecs are: ${supportedAudioCodecs.map(codec => `'${codec}'`).join(', ')}.`
+					+ this._format._codecUnsupportedHint(track.source._codec),
+				);
+			}
+		} else if (track.type === 'subtitle') {
+			const supportedSubtitleCodecs = this._format.getSupportedSubtitleCodecs();
+
+			if (supportedSubtitleCodecs.length === 0) {
+				throw new Error(
+					`${this._format._getName()} does not support subtitle tracks.`
+					+ this._format._codecUnsupportedHint(track.source._codec),
+				);
+			} else if (!supportedSubtitleCodecs.includes(track.source._codec)) {
+				throw new Error(
+					`Codec '${track.source._codec}' cannot be contained within ${this._format._getName()}. Supported`
+					+ ` subtitle codecs are: ${supportedSubtitleCodecs.map(codec => `'${codec}'`).join(', ')}.`
+					+ this._format._codecUnsupportedHint(track.source._codec),
+				);
+			}
+		}
 
 		this._tracks.push(track);
 		source._connectedTrack = track;

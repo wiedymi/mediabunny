@@ -1,3 +1,4 @@
+import { AUDIO_CODECS, MediaCodec, SUBTITLE_CODECS, VIDEO_CODECS } from './codec';
 import { IsobmffMuxer } from './isobmff/isobmff-muxer';
 import { MatroskaMuxer } from './matroska/matroska-muxer';
 import { Muxer } from './muxer';
@@ -7,6 +8,28 @@ import { Output } from './output';
 export abstract class OutputFormat {
 	/** @internal */
 	abstract _createMuxer(output: Output): Muxer;
+
+	/** @internal */
+	abstract _getName(): string;
+	abstract getSupportedCodecs(): MediaCodec[];
+
+	getSupportedVideoCodecs() {
+		return this.getSupportedCodecs().filter(codec => (VIDEO_CODECS as readonly string[]).includes(codec));
+	}
+
+	getSupportedAudioCodecs() {
+		return this.getSupportedCodecs().filter(codec => (AUDIO_CODECS as readonly string[]).includes(codec));
+	}
+
+	getSupportedSubtitleCodecs() {
+		return this.getSupportedCodecs().filter(codec => (SUBTITLE_CODECS as readonly string[]).includes(codec));
+	}
+
+	/** @internal */
+	// eslint-disable-next-line @typescript-eslint/no-unused-vars
+	_codecUnsupportedHint(codec: MediaCodec) {
+		return '';
+	}
 }
 
 /** @public */
@@ -35,6 +58,23 @@ export class Mp4OutputFormat extends OutputFormat {
 	/** @internal */
 	override _createMuxer(output: Output) {
 		return new IsobmffMuxer(output, this);
+	}
+
+	/** @internal */
+	_getName() {
+		return 'MP4';
+	}
+
+	getSupportedCodecs() {
+		return Mp4OutputFormat.getSupportedCodecs();
+	}
+
+	static getSupportedCodecs(): MediaCodec[] {
+		return [
+			'avc', 'hevc', 'vp8', 'vp9', 'av1',
+			'aac', 'opus',
+			'webvtt',
+		];
 	}
 }
 
@@ -65,10 +105,53 @@ export class MkvOutputFormat extends OutputFormat {
 	override _createMuxer(output: Output) {
 		return new MatroskaMuxer(output, this);
 	}
+
+	/** @internal */
+	_getName() {
+		return 'Matroska';
+	}
+
+	getSupportedCodecs() {
+		return MkvOutputFormat.getSupportedCodecs();
+	}
+
+	static getSupportedCodecs(): MediaCodec[] {
+		return [
+			'avc', 'hevc', 'vp8', 'vp9', 'av1',
+			'aac', 'opus', 'vorbis',
+			'webvtt',
+		];
+	}
 }
 
 /** @public */
 export type WebMOutputFormatOptions = MkvOutputFormatOptions;
 
 /** @public */
-export class WebMOutputFormat extends MkvOutputFormat {}
+export class WebMOutputFormat extends MkvOutputFormat {
+	override getSupportedCodecs() {
+		return WebMOutputFormat.getSupportedCodecs();
+	}
+
+	/** @internal */
+	override _getName() {
+		return 'WebM';
+	}
+
+	static override getSupportedCodecs(): MediaCodec[] {
+		return [
+			'vp8', 'vp9', 'av1',
+			'opus', 'vorbis',
+			'webvtt',
+		];
+	}
+
+	/** @internal */
+	override _codecUnsupportedHint(codec: MediaCodec) {
+		if (MkvOutputFormat.getSupportedCodecs().includes(codec)) {
+			return ' Switching to MKV will grant support for this codec.';
+		} else {
+			return '';
+		}
+	}
+}

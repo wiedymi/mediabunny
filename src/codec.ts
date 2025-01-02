@@ -19,7 +19,6 @@ export const VIDEO_CODECS = [
 	'vp9',
 	'av1',
 ] as const;
-/** @public */
 export const PCM_CODECS = [
 	'pcm-u8',
 	'pcm-s8',
@@ -32,6 +31,7 @@ export const PCM_CODECS = [
 	'pcm-f32',
 	'pcm-f32be',
 ] as const;
+/** @public */
 export const AUDIO_CODECS = [
 	'aac',
 	'mp3',

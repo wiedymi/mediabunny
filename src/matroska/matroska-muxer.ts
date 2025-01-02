@@ -101,7 +101,7 @@ type MatroskaVideoTrackData = MatroskaTrackData & { type: 'video' };
 type MatroskaAudioTrackData = MatroskaTrackData & { type: 'audio' };
 type MatroskaSubtitleTrackData = MatroskaTrackData & { type: 'subtitle' };
 
-const CODEC_STRING_MAP: Record<VideoCodec | AudioCodec | SubtitleCodec, string> = {
+const CODEC_STRING_MAP: Partial<Record<VideoCodec | AudioCodec | SubtitleCodec, string>> = {
 	avc: 'V_MPEG4/ISO/AVC',
 	hevc: 'V_MPEGH/ISO/HEVC',
 	vp8: 'V_VP8',
@@ -109,6 +109,7 @@ const CODEC_STRING_MAP: Record<VideoCodec | AudioCodec | SubtitleCodec, string> 
 	av1: 'V_AV1',
 	aac: 'A_AAC', // TODO is this even correct
 	opus: 'A_OPUS',
+	vorbis: 'A_VORBIS',
 	webvtt: 'S_TEXT/WEBVTT',
 };
 
@@ -330,36 +331,6 @@ export class MatroskaMuxer extends Muxer {
 		}
 	}
 
-	override beforeTrackAdd(track: OutputTrack) {
-		if (!(this.format instanceof WebMOutputFormat)) {
-			return;
-		}
-
-		if (track.type === 'video') {
-			if (!['vp8', 'vp9', 'av1'].includes(track.source._codec)) {
-				throw new Error(
-					`WebM only supports VP8, VP9 and AV1 as video codecs. Switching to MKV removes this restriction.`,
-				);
-			}
-		} else if (track.type === 'audio') {
-			if (!['opus', 'vorbis'].includes(track.source._codec)) {
-				throw new Error(
-					`WebM only supports Opus and Vorbis as audio codecs. Switching to MKV removes this restriction.`,
-				);
-			}
-		} else if (track.type === 'subtitle') {
-			if (track.source._codec !== 'webvtt') {
-				throw new Error(
-					`WebM only supports WebVTT as subtitle codec. Switching to MKV removes this restriction.`,
-				);
-			}
-		} else {
-			throw new Error(
-				'WebM only supports video, audio and subtitle tracks. Switching to MKV removes this restriction.',
-			);
-		}
-	}
-
 	async start() {
 		const release = await this.mutex.acquire();
 
@@ -434,11 +405,14 @@ export class MatroskaMuxer extends Muxer {
 		this.tracksElement = tracksElement;
 
 		for (const trackData of this.trackDatas) {
+			const codecId = CODEC_STRING_MAP[trackData.track.source._codec];
+			assert(codecId);
+
 			tracksElement.data.push({ id: EBMLId.TrackEntry, data: [
 				{ id: EBMLId.TrackNumber, data: trackData.track.id },
 				{ id: EBMLId.TrackUID, data: trackData.track.id },
 				{ id: EBMLId.TrackType, data: TRACK_TYPE_MAP[trackData.type] },
-				{ id: EBMLId.CodecID, data: CODEC_STRING_MAP[trackData.track.source._codec] },
+				{ id: EBMLId.CodecID, data: codecId },
 				(trackData.type === 'video' ? this.videoSpecificTrackInfo(trackData) : null),
 				(trackData.type === 'audio' ? this.audioSpecificTrackInfo(trackData) : null),
 				(trackData.type === 'subtitle' ? this.subtitleSpecificTrackInfo(trackData) : null),

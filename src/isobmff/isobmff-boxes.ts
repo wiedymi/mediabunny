@@ -520,8 +520,11 @@ export const stsd = (trackData: IsobmffTrackData) => {
 			trackData,
 		);
 	} else if (trackData.type === 'audio') {
+		const boxName = AUDIO_CODEC_TO_BOX_NAME[trackData.track.source._codec];
+		assert(boxName);
+
 		sampleDescription = soundSampleDescription(
-			AUDIO_CODEC_TO_BOX_NAME[trackData.track.source._codec],
+			boxName,
 			trackData,
 		);
 	} else if (trackData.type === 'subtitle') {
@@ -690,7 +693,7 @@ export const soundSampleDescription = (
 	u16(0), // Packet size
 	u32(2 ** 16 * trackData.info.sampleRate), // Sample rate
 ], [
-	AUDIO_CODEC_TO_CONFIGURATION_BOX[trackData.track.source._codec](trackData),
+	AUDIO_CODEC_TO_CONFIGURATION_BOX[trackData.track.source._codec]!(trackData),
 ]);
 
 /** MPEG-4 Elementary Stream Descriptor Box. */
@@ -1086,12 +1089,14 @@ const VIDEO_CODEC_TO_CONFIGURATION_BOX: Record<VideoCodec, (trackData: IsobmffVi
 	av1: av1C,
 };
 
-const AUDIO_CODEC_TO_BOX_NAME: Record<AudioCodec, string> = {
+const AUDIO_CODEC_TO_BOX_NAME: Partial<Record<AudioCodec, string>> = {
 	aac: 'mp4a',
 	opus: 'Opus',
 };
 
-const AUDIO_CODEC_TO_CONFIGURATION_BOX: Record<AudioCodec, (trackData: IsobmffAudioTrackData) => Box | null> = {
+const AUDIO_CODEC_TO_CONFIGURATION_BOX: Partial<
+	Record<AudioCodec, (trackData: IsobmffAudioTrackData) => Box | null>
+> = {
 	aac: esds,
 	opus: dOps,
 };
