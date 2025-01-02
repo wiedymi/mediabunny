@@ -383,11 +383,17 @@ export const buildAudioCodecString = (codec: AudioCodec, numberOfChannels: numbe
 		// Default to standard AAC-LC for higher sample rates
 		return 'mp4a.40.2'; // AAC-LC
 	} else if (codec === 'mp3') {
-		return 'mp3'; // Easy, this one
+		return 'mp3';
 	} else if (codec === 'opus') {
-		return 'opus'; // Easy, this one
+		return 'opus';
 	} else if (codec === 'vorbis') {
-		return 'vorbis'; // Also easy, this one
+		return 'vorbis';
+	} else if (codec === 'flac') {
+		return 'flac';
+	} else if (codec === 'ulaw') {
+		return 'ulaw';
+	} else if (codec === 'alaw') {
+		return 'alaw';
 	}
 
 	throw new TypeError(`Unhandled codec '${codec}'.`);
@@ -824,4 +830,98 @@ export const validateSubtitleMetadata = (metadata: SubtitleMetadata | undefined)
 	if (typeof metadata.config.description !== 'string') {
 		throw new TypeError('Subtitle metadata config description must be a string.');
 	}
+};
+
+/** @public */
+export const canEncode = (codec: MediaCodec) => {
+	if ((VIDEO_CODECS as readonly string[]).includes(codec)) {
+		return canEncodeVideo(codec as VideoCodec);
+	} else if ((AUDIO_CODECS as readonly string[]).includes(codec)) {
+		return canEncodeAudio(codec as AudioCodec);
+	} else if ((SUBTITLE_CODECS as readonly string[]).includes(codec)) {
+		return canEncodeSubtitles(codec as SubtitleCodec);
+	}
+
+	throw new Error('Unhandled codec.');
+};
+
+/** @public */
+export const canEncodeVideo = async (codec: VideoCodec, { width = 1280, height = 720, bitrate = 1e6 }: {
+	width?: number;
+	height?: number;
+	bitrate?: 1e6;
+} = {}) => {
+	if (typeof VideoEncoder === 'undefined') {
+		return false;
+	}
+
+	const support = await VideoEncoder.isConfigSupported({
+		codec: buildVideoCodecString(codec, width, height, bitrate),
+		width,
+		height,
+		bitrate,
+		...getVideoEncoderConfigExtension(codec),
+	});
+
+	return support.supported === true;
+};
+
+/** @public */
+export const canEncodeAudio = async (codec: AudioCodec, { numberOfChannels = 2, sampleRate = 48000, bitrate = 128e3 }: {
+	numberOfChannels?: number;
+	sampleRate?: number;
+	bitrate?: number;
+} = {}) => {
+	if (typeof AudioEncoder === 'undefined') {
+		return false;
+	}
+
+	if ((PCM_CODECS as readonly string[]).includes(codec)) {
+		return false; // TODO write encoder
+	}
+
+	const support = await AudioEncoder.isConfigSupported({
+		codec: buildAudioCodecString(codec, numberOfChannels, sampleRate),
+		numberOfChannels,
+		sampleRate,
+		bitrate,
+		...getAudioEncoderConfigExtension(codec),
+	});
+
+	return support.supported === true;
+};
+
+/** @public */
+export const getEncodableCodecs = async (): Promise<MediaCodec[]> => {
+	const [videoCodecs, audioCodecs, subtitleCodecs] = await Promise.all([
+		getEncodableVideoCodecs(),
+		getEncodableAudioCodecs(),
+		getEncodableSubtitleCodecs(),
+	]);
+
+	return [...videoCodecs, ...audioCodecs, ...subtitleCodecs];
+};
+
+/** @public */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export const canEncodeSubtitles = async (codec: SubtitleCodec) => {
+	return true;
+};
+
+/** @public */
+export const getEncodableVideoCodecs = async (): Promise<VideoCodec[]> => {
+	const bools = await Promise.all(VIDEO_CODECS.map(canEncode));
+	return VIDEO_CODECS.filter((_, i) => bools[i]);
+};
+
+/** @public */
+export const getEncodableAudioCodecs = async (): Promise<AudioCodec[]> => {
+	const bools = await Promise.all(AUDIO_CODECS.map(canEncode));
+	return AUDIO_CODECS.filter((_, i) => bools[i]);
+};
+
+/** @public */
+export const getEncodableSubtitleCodecs = async (): Promise<SubtitleCodec[]> => {
+	const bools = await Promise.all(SUBTITLE_CODECS.map(canEncode));
+	return SUBTITLE_CODECS.filter((_, i) => bools[i]);
 };

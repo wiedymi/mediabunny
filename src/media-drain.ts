@@ -282,7 +282,7 @@ export abstract class BaseMediaFrameDrain<
 				}
 			}
 
-			await decoder.flush();
+			if (!terminated) await decoder.flush();
 			decoder.close();
 
 			decoderIsFlushed = true;
@@ -452,7 +452,7 @@ export abstract class BaseMediaFrameDrain<
 
 			await chunks.return();
 
-			await decoder.flush();
+			if (!terminated) await decoder.flush();
 			decoder.close();
 
 			if (!firstFrameQueued && lastFrame) {

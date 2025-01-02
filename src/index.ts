@@ -33,6 +33,14 @@ export {
 	SUBTITLE_CODECS,
 	SubtitleCodec,
 	MediaCodec,
+	canEncode,
+	canEncodeVideo,
+	canEncodeAudio,
+	canEncodeSubtitles,
+	getEncodableCodecs,
+	getEncodableVideoCodecs,
+	getEncodableAudioCodecs,
+	getEncodableSubtitleCodecs,
 } from './codec';
 export { Target, ArrayBufferTarget, StreamTarget, StreamTargetChunk, StreamTargetOptions } from './target';
 export { Rotation, TransformationMatrix, AnyIterable } from './misc';
