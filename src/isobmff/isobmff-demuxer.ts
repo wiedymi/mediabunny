@@ -392,7 +392,7 @@ export class IsobmffDemuxer extends Demuxer {
 			// If they're not defined, we can simply use the decode timestamps as presentation timestamps
 		}
 
-		return internalTrack.sampleTable;
+		return sampleTable;
 	}
 
 	async readFragment(): Promise<Fragment> {
@@ -2239,7 +2239,8 @@ const getSampleIndexForTimestamp = (sampleTable: SampleTable, timescaleUnits: nu
 		}
 
 		const entry = sampleTable.sampleTimingEntries[index]!;
-		return entry.startIndex + Math.floor((timescaleUnits - entry.startDecodeTimestamp) / entry.delta);
+		return entry.startIndex
+			+ Math.min(Math.floor((timescaleUnits - entry.startDecodeTimestamp) / entry.delta), entry.count - 1);
 	}
 };
 
