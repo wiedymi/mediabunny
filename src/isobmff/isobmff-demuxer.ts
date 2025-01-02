@@ -1,4 +1,5 @@
 import {
+	AacCodecInfo,
 	AudioCodec,
 	Av1CodecInfo,
 	extractAudioCodecString,
@@ -67,6 +68,7 @@ type InternalTrack = {
 		sampleRate: number;
 		codec: AudioCodec | null;
 		codecDescription: Uint8Array | null;
+		aacCodecInfo: AacCodecInfo | null;
 	};
 });
 
@@ -647,6 +649,7 @@ export class IsobmffDemuxer extends Demuxer {
 						sampleRate: -1,
 						codec: null,
 						codecDescription: null,
+						aacCodecInfo: null,
 					};
 				}
 			}; break;
@@ -972,8 +975,9 @@ export class IsobmffDemuxer extends Demuxer {
 				const payloadStart = this.isobmffReader.pos;
 
 				const objectTypeIndication = this.isobmffReader.readU8();
-				if (objectTypeIndication === 0x40) {
+				if (objectTypeIndication === 0x40 || objectTypeIndication === 0x67) {
 					track.info.codec = 'aac';
+					track.info.aacCodecInfo = { isMpeg2: objectTypeIndication === 0x67 };
 				} else if (objectTypeIndication === 0x69 || objectTypeIndication === 0x6b) {
 					track.info.codec = 'mp3';
 				} else if (objectTypeIndication === 0xdd) {
@@ -2179,7 +2183,7 @@ class IsobmffAudioTrackBacking extends IsobmffTrackBacking<EncodedAudioChunk> im
 
 	async getDecoderConfig(): Promise<AudioDecoderConfig> {
 		return {
-			codec: extractAudioCodecString(this.internalTrack.info.codec!, this.internalTrack.info.codecDescription),
+			codec: extractAudioCodecString(this.internalTrack.info),
 			numberOfChannels: this.internalTrack.info.numberOfChannels,
 			sampleRate: this.internalTrack.info.sampleRate,
 			description: this.internalTrack.info.codecDescription ?? undefined,

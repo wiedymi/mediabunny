@@ -2,6 +2,7 @@ import {
 	COLOR_PRIMARIES_MAP,
 	MATRIX_COEFFICIENTS_MAP,
 	TRANSFER_CHARACTERISTICS_MAP,
+	assert,
 	bytesToHexString,
 	isAllowSharedBufferSource,
 	last,
@@ -392,10 +393,26 @@ export const buildAudioCodecString = (codec: AudioCodec, numberOfChannels: numbe
 	throw new TypeError(`Unhandled codec '${codec}'.`);
 };
 
-export const extractAudioCodecString = (codec: AudioCodec, description: Uint8Array | null) => {
+export type AacCodecInfo = {
+	isMpeg2: boolean;
+};
+
+export const extractAudioCodecString = (trackInfo: {
+	codec: AudioCodec | null;
+	codecDescription: Uint8Array | null;
+	aacCodecInfo: AacCodecInfo | null;
+}) => {
+	const { codec, codecDescription, aacCodecInfo } = trackInfo;
+
 	if (codec === 'aac') {
-		const audioSpecificConfig = parseAacAudioSpecificConfig(description);
-		return `mp4a.40.${audioSpecificConfig.objectType}`;
+		assert(aacCodecInfo);
+
+		if (aacCodecInfo.isMpeg2) {
+			return 'mp4a.67';
+		} else {
+			const audioSpecificConfig = parseAacAudioSpecificConfig(codecDescription);
+			return `mp4a.40.${audioSpecificConfig.objectType}`;
+		}
 	} else if (codec === 'mp3') {
 		return 'mp3';
 	} else if (codec === 'opus') {
@@ -404,7 +421,7 @@ export const extractAudioCodecString = (codec: AudioCodec, description: Uint8Arr
 		return 'vorbis';
 	} else if (codec === 'flac') {
 		return 'flac';
-	} else if (codec.startsWith('pcm-')) {
+	} else if (codec?.startsWith('pcm-')) {
 		return codec;
 	} else if (codec === 'ulaw') {
 		return 'ulaw';
