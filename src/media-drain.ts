@@ -592,8 +592,6 @@ class VideoDecoderWrapper extends DecoderWrapper<EncodedVideoChunk, VideoFrame> 
 export class VideoFrameDrain extends BaseMediaFrameDrain<EncodedVideoChunk, VideoFrame> {
 	/** @internal */
 	_videoTrack: InputVideoTrack;
-	/** @internal */
-	_decoderConfig: VideoDecoderConfig | null = null;
 
 	constructor(videoTrack: InputVideoTrack) {
 		if (!(videoTrack instanceof InputVideoTrack)) {
@@ -607,8 +605,17 @@ export class VideoFrameDrain extends BaseMediaFrameDrain<EncodedVideoChunk, Vide
 
 	/** @internal */
 	async _createDecoder(onFrame: (frame: VideoFrame) => unknown, onError: (error: DOMException) => unknown) {
-		this._decoderConfig ??= await this._videoTrack.getDecoderConfig();
-		return new VideoDecoderWrapper(onFrame, onError, this._decoderConfig);
+		if (!(await this._videoTrack.canDecode())) {
+			throw new Error(
+				'This video track cannot be decoded by this browser. Make sure to check decodability before using'
+				+ ' a track.',
+			);
+		}
+
+		const decoderConfig = await this._videoTrack.getDecoderConfig();
+		assert(decoderConfig);
+
+		return new VideoDecoderWrapper(onFrame, onError, decoderConfig);
 	}
 
 	/** @internal */
@@ -956,8 +963,6 @@ class PcmAudioDecoderWrapper extends DecoderWrapper<EncodedAudioChunk, AudioData
 export class AudioDataDrain extends BaseMediaFrameDrain<EncodedAudioChunk, AudioData> {
 	/** @internal */
 	_audioTrack: InputAudioTrack;
-	/** @internal */
-	_decoderConfig: AudioDecoderConfig | null = null;
 
 	constructor(audioTrack: InputAudioTrack) {
 		if (!(audioTrack instanceof InputAudioTrack)) {
@@ -971,12 +976,20 @@ export class AudioDataDrain extends BaseMediaFrameDrain<EncodedAudioChunk, Audio
 
 	/** @internal */
 	async _createDecoder(onData: (data: AudioData) => unknown, onError: (error: DOMException) => unknown) {
-		this._decoderConfig ??= await this._audioTrack.getDecoderConfig();
+		if (!(await this._audioTrack.canDecode())) {
+			throw new Error(
+				'This audio track cannot be decoded by this browser. Make sure to check decodability before using'
+				+ ' a track.',
+			);
+		}
 
-		if (this._decoderConfig.codec.startsWith('pcm-')) {
-			return new PcmAudioDecoderWrapper(onData, onError, this._decoderConfig);
+		const decoderConfig = await this._audioTrack.getDecoderConfig();
+		assert(decoderConfig);
+
+		if (decoderConfig.codec.startsWith('pcm-')) {
+			return new PcmAudioDecoderWrapper(onData, onError, decoderConfig);
 		} else {
-			return new AudioDecoderWrapper(onData, onError, this._decoderConfig);
+			return new AudioDecoderWrapper(onData, onError, decoderConfig);
 		}
 	}
 

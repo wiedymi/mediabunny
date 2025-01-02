@@ -40,8 +40,15 @@ const input = new Metamuxer.Input({
 
 console.log(await input.getMimeType())
 
-const videoTrack = await input.getPrimaryVideoTrack(); 
-const audioTrack = await input.getPrimaryAudioTrack(); 
+let videoTrack = await input.getPrimaryVideoTrack(); 
+let audioTrack = await input.getPrimaryAudioTrack(); 
+
+if (!(await videoTrack.canDecode())) {
+	videoTrack = null;
+}
+if (!(await audioTrack.canDecode())) {
+	audioTrack = null;	
+}
 
 const canvas = document.querySelector('canvas');
 const context = canvas.getContext('2d');

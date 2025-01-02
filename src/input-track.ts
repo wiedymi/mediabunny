@@ -3,7 +3,7 @@ import { ChunkRetrievalOptions } from './media-drain';
 import { Rotation } from './misc';
 
 export interface InputTrackBacking {
-	getCodec(): Promise<MediaCodec>;
+	getCodec(): Promise<MediaCodec | null>;
 	computeDuration(): Promise<number>;
 }
 
@@ -17,8 +17,9 @@ export abstract class InputTrack {
 		this._backing = backing;
 	}
 
-	abstract getCodec(): Promise<MediaCodec>;
-	abstract getCodecMimeType(): Promise<string>;
+	abstract getCodec(): Promise<MediaCodec | null>;
+	abstract getCodecMimeType(): Promise<string | null>;
+	abstract canDecode(): Promise<boolean>;
 
 	isVideoTrack(): this is InputVideoTrack {
 		return this instanceof InputVideoTrack;
@@ -34,11 +35,11 @@ export abstract class InputTrack {
 }
 
 export interface InputVideoTrackBacking extends InputTrackBacking {
-	getCodec(): Promise<VideoCodec>;
+	getCodec(): Promise<VideoCodec | null>;
 	getCodedWidth(): Promise<number>;
 	getCodedHeight(): Promise<number>;
 	getRotation(): Promise<Rotation>;
-	getDecoderConfig(): Promise<VideoDecoderConfig>;
+	getDecoderConfig(): Promise<VideoDecoderConfig | null>;
 	getFirstChunk(options: ChunkRetrievalOptions): Promise<EncodedVideoChunk | null>;
 	getChunk(timestamp: number, options: ChunkRetrievalOptions): Promise<EncodedVideoChunk | null>;
 	getNextChunk(chunk: EncodedVideoChunk, options: ChunkRetrievalOptions): Promise<EncodedVideoChunk | null>;
@@ -58,7 +59,7 @@ export class InputVideoTrack extends InputTrack {
 		this._backing = backing;
 	}
 
-	getCodec(): Promise<VideoCodec> {
+	getCodec(): Promise<VideoCodec | null> {
 		return this._backing.getCodec();
 	}
 
@@ -90,15 +91,25 @@ export class InputVideoTrack extends InputTrack {
 
 	async getCodecMimeType() {
 		const decoderConfig = await this.getDecoderConfig();
-		return decoderConfig.codec;
+		return decoderConfig?.codec ?? null;
+	}
+
+	async canDecode() {
+		const decoderConfig = await this._backing.getDecoderConfig();
+		if (!decoderConfig) {
+			return false;
+		}
+
+		const support = await VideoDecoder.isConfigSupported(decoderConfig);
+		return support.supported === true;
 	}
 }
 
 export interface InputAudioTrackBacking extends InputTrackBacking {
-	getCodec(): Promise<AudioCodec>;
+	getCodec(): Promise<AudioCodec | null>;
 	getNumberOfChannels(): Promise<number>;
 	getSampleRate(): Promise<number>;
-	getDecoderConfig(): Promise<AudioDecoderConfig>;
+	getDecoderConfig(): Promise<AudioDecoderConfig | null>;
 	getFirstChunk(options: ChunkRetrievalOptions): Promise<EncodedAudioChunk | null>;
 	getChunk(timestamp: number, options: ChunkRetrievalOptions): Promise<EncodedAudioChunk | null>;
 	getNextChunk(chunk: EncodedAudioChunk, options: ChunkRetrievalOptions): Promise<EncodedAudioChunk | null>;
@@ -118,7 +129,7 @@ export class InputAudioTrack extends InputTrack {
 		this._backing = backing;
 	}
 
-	getCodec(): Promise<AudioCodec> {
+	getCodec(): Promise<AudioCodec | null> {
 		return this._backing.getCodec();
 	}
 
@@ -136,6 +147,20 @@ export class InputAudioTrack extends InputTrack {
 
 	async getCodecMimeType() {
 		const decoderConfig = await this.getDecoderConfig();
-		return decoderConfig.codec;
+		return decoderConfig?.codec ?? null;
+	}
+
+	async canDecode() {
+		const decoderConfig = await this._backing.getDecoderConfig();
+		if (!decoderConfig) {
+			return false;
+		}
+
+		if (decoderConfig.codec.startsWith('pcm-')) {
+			return true; // Since we decode it ourselves
+		} else {
+			const support = await AudioDecoder.isConfigSupported(decoderConfig);
+			return support.supported === true;
+		}
 	}
 }

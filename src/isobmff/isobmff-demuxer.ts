@@ -166,6 +166,7 @@ export class IsobmffDemuxer extends Demuxer {
 	metadataPromise: Promise<void> | null = null;
 	movieTimescale = -1;
 	movieDurationInTimescale = -1;
+	isQuickTime = false;
 
 	isFragmented = false;
 	fragmentTrackDefaults: FragmentTrackDefaults[] = [];
@@ -196,11 +197,11 @@ export class IsobmffDemuxer extends Demuxer {
 	override async getMimeType() {
 		await this.readMetadata();
 
-		let string = 'video/mp4';
+		let string = this.isQuickTime ? 'video/quicktime' : 'video/mp4';
 
 		if (this.tracks.length > 0) {
 			const codecMimeTypes = await Promise.all(this.tracks.map(x => x.inputTrack!.getCodecMimeType()));
-			const uniqueCodecMimeTypes = [...new Set(codecMimeTypes)];
+			const uniqueCodecMimeTypes = [...new Set(codecMimeTypes.filter(Boolean))];
 
 			string += `; codecs="${uniqueCodecMimeTypes.join(', ')}"`;
 		}
@@ -217,7 +218,10 @@ export class IsobmffDemuxer extends Demuxer {
 				const startPos = this.isobmffReader.pos;
 				const boxInfo = this.isobmffReader.readBoxHeader();
 
-				if (boxInfo.name === 'moov') {
+				if (boxInfo.name === 'ftyp') {
+					const majorBrand = this.isobmffReader.readAscii(4);
+					this.isQuickTime = majorBrand === 'qt  ';
+				} else if (boxInfo.name === 'moov') {
 					// Found moov, load it
 					await this.isobmffReader.reader.loadRange(
 						this.isobmffReader.pos,
@@ -543,26 +547,14 @@ export class IsobmffDemuxer extends Demuxer {
 				this.readContiguousBoxes(boxInfo.contentSize);
 
 				if (track.id !== -1 && track.timescale !== -1 && track.info !== null) {
-					if (track.info.type === 'video' && track.info.codec !== null) {
+					if (track.info.type === 'video' && track.info.width !== -1) {
 						const videoTrack = track as InternalVideoTrack;
 						track.inputTrack = new InputVideoTrack(new IsobmffVideoTrackBacking(videoTrack));
 						this.tracks.push(track);
-					} else if (track.info.type === 'audio' && track.info.codec !== null) {
+					} else if (track.info.type === 'audio' && track.info.numberOfChannels !== 1) {
 						const audioTrack = track as InternalAudioTrack;
 						track.inputTrack = new InputAudioTrack(new IsobmffAudioTrackBacking(audioTrack));
 						this.tracks.push(track);
-
-						if (track.info.codec === 'aac') {
-							// Some videos have metadata mismatch, so let's try to deduce more accurate values directly
-							// from the AudioSpecificConfig:
-							const audioSpecificConfig = parseAacAudioSpecificConfig(track.info.codecDescription);
-							if (audioSpecificConfig.numberOfChannels !== null) {
-								track.info.numberOfChannels = audioSpecificConfig.numberOfChannels;
-							}
-							if (audioSpecificConfig.sampleRate !== null) {
-								track.info.sampleRate = audioSpecificConfig.sampleRate;
-							}
-						}
 					}
 				}
 
@@ -699,9 +691,7 @@ export class IsobmffDemuxer extends Demuxer {
 						} else if (lowercaseBoxName === 'av01') {
 							track.info.codec = 'av1';
 						} else {
-							const { name } = sampleBoxInfo;
-							console.warn(`Unsupported video codec (sample entry type '${name}') - discarding track.`);
-							break;
+							console.warn(`Unsupported video codec (sample entry type '${sampleBoxInfo.name}').`);
 						}
 
 						this.isobmffReader.pos += 6 * 1 + 2 + 2 + 2 + 3 * 4;
@@ -735,9 +725,7 @@ export class IsobmffDemuxer extends Demuxer {
 						} else if (lowercaseBoxName === 'alaw') {
 							track.info.codec = 'alaw';
 						} else {
-							const { name } = sampleBoxInfo;
-							console.warn(`Unsupported audio codec (sample entry type '${name}') - discarding track.`);
-							break;
+							console.warn(`Unsupported audio codec (sample entry type '${sampleBoxInfo.name}').`);
 						}
 
 						this.isobmffReader.pos += 6 * 1 + 2;
@@ -801,7 +789,6 @@ export class IsobmffDemuxer extends Demuxer {
 
 									if (track.info.codec === null) {
 										console.warn('Unsupportedd PCM format.');
-										break;
 									}
 								}
 							}
@@ -1005,6 +992,17 @@ export class IsobmffDemuxer extends Demuxer {
 
 					const decoderSpecificInfoLength = this.isobmffReader.readIsomVariableInteger();
 					track.info.codecDescription = this.isobmffReader.readBytes(decoderSpecificInfoLength);
+
+					if (track.info.codec === 'aac') {
+						// Let's try to deduce more accurate values directly from the AudioSpecificConfig:
+						const audioSpecificConfig = parseAacAudioSpecificConfig(track.info.codecDescription);
+						if (audioSpecificConfig.numberOfChannels !== null) {
+							track.info.numberOfChannels = audioSpecificConfig.numberOfChannels;
+						}
+						if (audioSpecificConfig.sampleRate !== null) {
+							track.info.sampleRate = audioSpecificConfig.sampleRate;
+						}
+					}
 				}
 			}; break;
 
@@ -1648,7 +1646,7 @@ abstract class IsobmffTrackBacking<Chunk extends EncodedVideoChunk | EncodedAudi
 
 	constructor(public internalTrack: InternalTrack) {}
 
-	getCodec(): Promise<MediaCodec> {
+	getCodec(): Promise<MediaCodec | null> {
 		throw new Error('Not implemented on base class.');
 	}
 
@@ -2135,8 +2133,8 @@ class IsobmffVideoTrackBacking extends IsobmffTrackBacking<EncodedVideoChunk> im
 		this.internalTrack = internalTrack;
 	}
 
-	override async getCodec(): Promise<VideoCodec> {
-		return this.internalTrack.info.codec!;
+	override async getCodec(): Promise<VideoCodec | null> {
+		return this.internalTrack.info.codec;
 	}
 
 	async getCodedWidth() {
@@ -2151,7 +2149,11 @@ class IsobmffVideoTrackBacking extends IsobmffTrackBacking<EncodedVideoChunk> im
 		return this.internalTrack.rotation;
 	}
 
-	async getDecoderConfig(): Promise<VideoDecoderConfig> {
+	async getDecoderConfig(): Promise<VideoDecoderConfig | null> {
+		if (!this.internalTrack.info.codec) {
+			return null;
+		}
+
 		return {
 			codec: extractVideoCodecString(this.internalTrack.info),
 			codedWidth: this.internalTrack.info.width,
@@ -2179,8 +2181,8 @@ class IsobmffAudioTrackBacking extends IsobmffTrackBacking<EncodedAudioChunk> im
 		this.internalTrack = internalTrack;
 	}
 
-	override async getCodec(): Promise<AudioCodec> {
-		return this.internalTrack.info.codec!;
+	override async getCodec(): Promise<AudioCodec | null> {
+		return this.internalTrack.info.codec;
 	}
 
 	async getNumberOfChannels() {
@@ -2191,7 +2193,11 @@ class IsobmffAudioTrackBacking extends IsobmffTrackBacking<EncodedAudioChunk> im
 		return this.internalTrack.info.sampleRate;
 	}
 
-	async getDecoderConfig(): Promise<AudioDecoderConfig> {
+	async getDecoderConfig(): Promise<AudioDecoderConfig | null> {
+		if (!this.internalTrack.info.codec) {
+			return null;
+		}
+
 		return {
 			codec: extractAudioCodecString(this.internalTrack.info),
 			numberOfChannels: this.internalTrack.info.numberOfChannels,
