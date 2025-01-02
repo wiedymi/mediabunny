@@ -107,7 +107,7 @@ const CODEC_STRING_MAP: Record<VideoCodec | AudioCodec | SubtitleCodec, string> 
 	vp8: 'V_VP8',
 	vp9: 'V_VP9',
 	av1: 'V_AV1',
-	aac: 'A_AAC',
+	aac: 'A_AAC', // TODO is this even correct
 	opus: 'A_OPUS',
 	webvtt: 'S_TEXT/WEBVTT',
 };

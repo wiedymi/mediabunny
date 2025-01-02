@@ -809,7 +809,7 @@ class AudioDecoderWrapper extends DecoderWrapper<EncodedAudioChunk, AudioData> {
 	}
 }
 
-const PCM_CODEC_REGEX = /^pcm-([usf])(\d+)+(be|le)?$/;
+const PCM_CODEC_REGEX = /^pcm-([usf])(\d+)+(be)?$/;
 
 // There are a lot of PCM variants not natively supported by the browser and by AudioData. Therefore we need a simple
 // decoder that maps any input PCM format into a PCM format supported by the browser.
@@ -846,7 +846,7 @@ class PcmAudioDecoderWrapper extends DecoderWrapper<EncodedAudioChunk, AudioData
 		}
 
 		this.inputSampleSize = (Number(match[2]) / 8) as 1 | 2 | 3 | 4;
-		const littleEndian = match[3] === 'le';
+		const littleEndian = match[3] !== 'be';
 
 		switch (this.inputSampleSize) {
 			case 1: {

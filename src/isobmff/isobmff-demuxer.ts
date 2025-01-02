@@ -766,18 +766,18 @@ export class IsobmffDemuxer extends Demuxer {
 									if (sampleSize > 0 && sampleSize <= 64) {
 										if (isFloat) {
 											if (sampleSize === 32 && !isBigEndian) {
-												track.info.codec = isBigEndian ? 'pcm-f32be' : 'pcm-f32le';
+												track.info.codec = isBigEndian ? 'pcm-f32be' : 'pcm-f32';
 											}
 										} else {
 											if (sFlags & (1 << (bytesPerSample - 1))) {
 												if (bytesPerSample === 1) {
 													track.info.codec = 'pcm-s8';
 												} else if (bytesPerSample === 2) {
-													track.info.codec = isBigEndian ? 'pcm-s16be' : 'pcm-s16le';
+													track.info.codec = isBigEndian ? 'pcm-s16be' : 'pcm-s16';
 												} else if (bytesPerSample === 3) {
-													track.info.codec = isBigEndian ? 'pcm-s24be' : 'pcm-s24le';
+													track.info.codec = isBigEndian ? 'pcm-s24be' : 'pcm-s24';
 												} else if (bytesPerSample === 4) {
-													track.info.codec = isBigEndian ? 'pcm-s32be' : 'pcm-s32le';
+													track.info.codec = isBigEndian ? 'pcm-s32be' : 'pcm-s32';
 												}
 											} else {
 												if (bytesPerSample === 1) {
@@ -809,7 +809,7 @@ export class IsobmffDemuxer extends Demuxer {
 							if (sampleSize === 8) {
 								track.info.codec = 'pcm-s8';
 							} else if (sampleSize === 16) {
-								track.info.codec = 'pcm-s16le';
+								track.info.codec = 'pcm-s16';
 							} else {
 								throw new Error(`Unsupported sample size ${sampleSize} for codec 'sowt'.`);
 							}
@@ -1014,13 +1014,13 @@ export class IsobmffDemuxer extends Demuxer {
 
 				if (littleEndian) {
 					if (track.info.codec === 'pcm-s16be') {
-						track.info.codec = 'pcm-s16le';
+						track.info.codec = 'pcm-s16';
 					} else if (track.info.codec === 'pcm-s24be') {
-						track.info.codec = 'pcm-s24le';
+						track.info.codec = 'pcm-s24';
 					} else if (track.info.codec === 'pcm-s32be') {
-						track.info.codec = 'pcm-s32le';
+						track.info.codec = 'pcm-s32';
 					} else if (track.info.codec === 'pcm-f32be') {
-						track.info.codec = 'pcm-f32le';
+						track.info.codec = 'pcm-f32';
 					}
 				}
 			}; break;

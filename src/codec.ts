@@ -23,14 +23,14 @@ export const VIDEO_CODECS = [
 export const PCM_CODECS = [
 	'pcm-u8',
 	'pcm-s8',
+	'pcm-s16', // We don't prefix 'le' so we're compatible with the WebCodecs-registered PCM codec strings
 	'pcm-s16be',
-	'pcm-s16le',
+	'pcm-s24',
 	'pcm-s24be',
-	'pcm-s24le',
+	'pcm-s32',
 	'pcm-s32be',
-	'pcm-s32le',
+	'pcm-f32',
 	'pcm-f32be',
-	'pcm-f32le',
 ] as const;
 export const AUDIO_CODECS = [
 	'aac',
@@ -673,6 +673,8 @@ export const validateVideoChunkMetadata = (metadata: EncodedVideoChunkMetadata |
 	}
 };
 
+const VALID_AUDIO_CODEC_STRING_PREFIXES = ['mp4a', 'mp3', 'opus', 'vorbis', 'flac', 'ulaw', 'alaw', 'pcm'];
+
 export const validateAudioChunkMetadata = (metadata: EncodedAudioChunkMetadata | undefined) => {
 	if (!metadata) {
 		throw new TypeError('Audio chunk metadata must be provided.');
@@ -688,6 +690,12 @@ export const validateAudioChunkMetadata = (metadata: EncodedAudioChunkMetadata |
 	}
 	if (typeof metadata.decoderConfig.codec !== 'string') {
 		throw new TypeError('Audio chunk metadata decoder configuration must specify a codec string.');
+	}
+	if (!VALID_AUDIO_CODEC_STRING_PREFIXES.some(prefix => metadata.decoderConfig!.codec.startsWith(prefix))) {
+		throw new TypeError(
+			'Audio chunk metadata decoder configuration codec string must be a valid audio codec string as specified in'
+			+ ' the WebCodecs codec registry.',
+		);
 	}
 	if (!Number.isInteger(metadata.decoderConfig.sampleRate) || metadata.decoderConfig.sampleRate <= 0) {
 		throw new TypeError(
@@ -708,18 +716,95 @@ export const validateAudioChunkMetadata = (metadata: EncodedAudioChunkMetadata |
 		}
 	}
 
-	if (metadata.decoderConfig.codec.startsWith('mp4a') && !metadata.decoderConfig.description) {
-		throw new TypeError(
-			'Audio chunk metadata decoder configuration for AAC must include a description, which is expected to be an'
-			+ ' AudioSpecificConfig as specified in ISO 14496-3.',
-		);
+	// AAC-specific validation
+	if (metadata.decoderConfig.codec.startsWith('mp4a')) {
+		const validStrings = ['mp4a.40.2', 'mp4a.40.02', 'mp4a.40.5', 'mp4a.40.05', 'mp4a.40.29', 'mp4a.67'];
+		if (!validStrings.includes(metadata.decoderConfig.codec)) {
+			throw new TypeError(
+				'Audio chunk metadata decoder configuration codec string for AAC must be a valid AAC codec string as'
+				+ ' specified in https://www.w3.org/TR/webcodecs-aac-codec-registration/.',
+			);
+		}
+
+		if (!metadata.decoderConfig.description) {
+			throw new TypeError(
+				'Audio chunk metadata decoder configuration for AAC must include a description, which is expected to be'
+				+ ' an AudioSpecificConfig as specified in ISO 14496-3.',
+			);
+		}
 	}
-	if (
-		metadata.decoderConfig.codec === 'opus'
-		&& metadata.decoderConfig.description
-		&& metadata.decoderConfig.description.byteLength < 18
-	) {
-		throw new TypeError('Invalid decoder description provided for Opus; must be at least 18 bytes long.');
+
+	// MP3-specific validation
+	if (metadata.decoderConfig.codec === 'mp3') {
+		if (metadata.decoderConfig.codec !== 'mp3') {
+			throw new TypeError('Audio chunk metadata decoder configuration codec string for MP3 must be "mp3".');
+		}
+	}
+
+	// Opus-specific validation
+	if (metadata.decoderConfig.codec === 'opus') {
+		if (metadata.decoderConfig.codec !== 'opus') {
+			throw new TypeError('Audio chunk metadata decoder configuration codec string for Opus must be "opus".');
+		}
+
+		if (!metadata.decoderConfig.description) {
+			throw new TypeError(
+				'Audio chunk metadata decoder configuration for Opus must include a description, which is expected to'
+				+ ' be an Identification Header as specified in Section 5.1 of RFC 7845.',
+			);
+		}
+	}
+
+	// Vorbis-specific validation
+	if (metadata.decoderConfig.codec === 'vorbis') {
+		if (metadata.decoderConfig.codec !== 'vorbis') {
+			throw new TypeError('Audio chunk metadata decoder configuration codec string for Vorbis must be "vorbis".');
+		}
+
+		if (!metadata.decoderConfig.description) {
+			throw new TypeError(
+				'Audio chunk metadata decoder configuration for Vorbis must include a description, which is expected to'
+				+ ' adhere to the format described in https://www.w3.org/TR/webcodecs-vorbis-codec-registration/.',
+			);
+		}
+	}
+
+	// FLAC-specific validation
+	if (metadata.decoderConfig.codec === 'flac') {
+		if (metadata.decoderConfig.codec !== 'flac') {
+			throw new TypeError('Audio chunk metadata decoder configuration codec string for FLAC must be "flac".');
+		}
+
+		if (!metadata.decoderConfig.description) {
+			throw new TypeError(
+				'Audio chunk metadata decoder configuration for FLAC must include a description, which is expected to'
+				+ ' adhere to the format described in https://www.w3.org/TR/webcodecs-flac-codec-registration/.',
+			);
+		}
+	}
+
+	// ulaw-specific validation
+	if (metadata.decoderConfig.codec === 'ulaw') {
+		if (metadata.decoderConfig.codec !== 'ulaw') {
+			throw new TypeError('Audio chunk metadata decoder configuration codec string for uLaw must be "ulaw".');
+		}
+	}
+
+	// alaw-specific validation
+	if (metadata.decoderConfig.codec === 'alaw') {
+		if (metadata.decoderConfig.codec !== 'alaw') {
+			throw new TypeError('Audio chunk metadata decoder configuration codec string for A-law must be "alaw".');
+		}
+	}
+
+	// PCM-specific validation
+	if (metadata.decoderConfig.codec.startsWith('pcm')) {
+		if (!(PCM_CODECS as readonly string[]).includes(metadata.decoderConfig.codec)) {
+			throw new TypeError(
+				'Audio chunk metadata decoder configuration codec string for PCM must be one of the supported PCM'
+				+ ` codecs (${PCM_CODECS.join(', ')}).`,
+			);
+		}
 	}
 };
 
