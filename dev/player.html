@@ -43,10 +43,10 @@ console.log(await input.getMimeType())
 let videoTrack = await input.getPrimaryVideoTrack(); 
 let audioTrack = await input.getPrimaryAudioTrack(); 
 
-if (!(await videoTrack.canDecode())) {
+if (!(await videoTrack?.canDecode())) {
 	videoTrack = null;
 }
-if (!(await audioTrack.canDecode())) {
+if (!(await audioTrack?.canDecode())) {
 	audioTrack = null;	
 }
 

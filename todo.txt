@@ -3,3 +3,4 @@
 - Add the new audio codecs to muxers
 - Mov muxer!!! Only mov can hold PCM audio, MP4 cannot
 - Metadata methods for computing average fps and bitrate
+- A stream source?? Or like a callback-driven source
