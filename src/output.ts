@@ -53,6 +53,8 @@ export class Output {
 	/** @internal */
 	_started = false;
 	/** @internal */
+	_canceled = false;
+	/** @internal */
 	_finalizing = false;
 	/** @internal */
 	_mutex = new AsyncMutex();
@@ -150,6 +152,9 @@ export class Output {
 	}
 
 	async start() {
+		if (this._canceled) {
+			throw new Error('Output has been canceled.');
+		}
 		if (this._started) {
 			throw new Error('Output already started.');
 		}
@@ -164,6 +169,25 @@ export class Output {
 		for (const track of this._tracks) {
 			track.source._start();
 		}
+
+		release();
+	}
+
+	async cancel() {
+		if (this._finalizing) {
+			throw new Error('Cannot cancel after calling finalize.');
+		}
+		if (this._canceled) {
+			throw new Error('Output already canceled.');
+		}
+		this._canceled = true;
+
+		const release = await this._mutex.acquire();
+
+		const promises = this._tracks.map(x => x.source._flush());
+		await Promise.all(promises);
+
+		await this._writer.close();
 
 		release();
 	}

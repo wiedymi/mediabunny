@@ -17,6 +17,8 @@ export abstract class Writer {
 	abstract flush(): Promise<void>;
 	/** Called after muxing has finished. */
 	abstract finalize(): Promise<void>;
+	/** Closes the writer. */
+	abstract close(): Promise<void>;
 }
 
 /**
@@ -73,6 +75,8 @@ export class ArrayBufferTargetWriter extends Writer {
 		this.ensureSize(this.pos);
 		this.target.buffer = this.buffer.slice(0, Math.max(this.maxPos, this.pos));
 	}
+
+	async close() {}
 
 	getSlice(start: number, end: number) {
 		return this.bytes.slice(start, end);
@@ -184,6 +188,10 @@ export class StreamTargetWriter extends Writer {
 	finalize() {
 		assert(this.writer);
 		return this.writer.close();
+	}
+
+	async close() {
+		return this.writer?.close();
 	}
 }
 
@@ -374,5 +382,9 @@ export class ChunkedStreamTargetWriter extends Writer {
 		await this.flush();
 
 		return this.writer.close();
+	}
+
+	async close() {
+		return this.writer?.close();
 	}
 }

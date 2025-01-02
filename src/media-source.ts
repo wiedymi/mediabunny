@@ -20,6 +20,8 @@ export abstract class MediaSource {
 	/** @internal */
 	_connectedTrack: OutputTrack | null = null;
 	/** @internal */
+	_closing = false;
+	/** @internal */
 	_closed = false;
 	/** @internal */
 	_offsetTimestamps = false;
@@ -28,6 +30,10 @@ export abstract class MediaSource {
 	_ensureValidDigest() {
 		if (!this._connectedTrack) {
 			throw new Error('Cannot call digest without connecting the source to an output track.');
+		}
+
+		if (this._connectedTrack.output._canceled) {
+			throw new Error('Cannot call digest after output has been canceled.');
 		}
 
 		if (!this._connectedTrack.output._started) {
@@ -48,8 +54,8 @@ export abstract class MediaSource {
 	/** @internal */
 	async _flush() {}
 
-	close() {
-		if (this._closed) {
+	async close() {
+		if (this._closing) {
 			throw new Error('Source already closed.');
 		}
 
@@ -60,6 +66,10 @@ export abstract class MediaSource {
 		if (!this._connectedTrack.output._started) {
 			throw new Error('Cannot call close before output has been started.');
 		}
+
+		this._closing = true;
+
+		await this._flush();
 
 		this._closed = true;
 

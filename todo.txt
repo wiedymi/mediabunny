@@ -5,4 +5,3 @@
 - Add the new audio codecs to muxers
 - Mov muxer!!! Only mov can hold PCM audio, MP4 cannot
 - Metadata methods for computing average fps and bitrate
-- close method on Output to cancel it (and dispose the encoders). Perhaps abort is a better title
