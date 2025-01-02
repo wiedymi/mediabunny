@@ -5,6 +5,7 @@ import {
 	assert,
 	getInt24,
 	getUint24,
+	mapAsyncGenerator,
 	promiseWithResolvers,
 	toAsyncIterator,
 	validateAnyIterable,
@@ -38,12 +39,13 @@ export abstract class BaseChunkDrain<Chunk extends EncodedVideoChunk | EncodedAu
 	abstract getKeyChunk(timestamp: number, options?: ChunkRetrievalOptions): Promise<Chunk | null>;
 	abstract getNextKeyChunk(chunk: Chunk, options?: ChunkRetrievalOptions): Promise<Chunk | null>;
 
-	async* chunks(startChunk?: Chunk, endTimestamp = Infinity) {
+	chunks(startChunk?: Chunk, endTimestamp = Infinity): AsyncGenerator<Chunk, void, unknown> {
 		const chunkQueue: Chunk[] = [];
 
 		let { promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers();
 		let { promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers();
 		let ended = false;
+		let terminated = false;
 
 		// This stores errors that are "out of band" in the sense that they didn't occur in the normal flow of this
 		// method but instead in a different context. This error should not go unnoticed and must be bubbled up to
@@ -58,7 +60,7 @@ export abstract class BaseChunkDrain<Chunk extends EncodedVideoChunk | EncodedAu
 		(async () => {
 			let chunk = startChunk ?? await this.getFirstChunk();
 
-			while (chunk && !ended) {
+			while (chunk && !terminated) {
 				if (chunk.timestamp / 1e6 >= endTimestamp) {
 					break;
 				}
@@ -86,30 +88,46 @@ export abstract class BaseChunkDrain<Chunk extends EncodedVideoChunk | EncodedAu
 			}
 		});
 
-		try {
-			while (true) {
-				if (outOfBandError) {
-					throw outOfBandError;
-				} else if (chunkQueue.length > 0) {
-					yield chunkQueue.shift()!;
-					const now = performance.now();
-					timestamps.push(now);
+		return {
+			async next() {
+				while (true) {
+					if (terminated) {
+						return { value: undefined, done: true };
+					} else if (outOfBandError) {
+						throw outOfBandError;
+					} else if (chunkQueue.length > 0) {
+						const value = chunkQueue.shift()!;
+						const now = performance.now();
+						timestamps.push(now);
 
-					while (timestamps.length > 0 && now - timestamps[0]! >= 1000) {
-						timestamps.shift();
+						while (timestamps.length > 0 && now - timestamps[0]! >= 1000) {
+							timestamps.shift();
+						}
+
+						onQueueDequeue();
+
+						return { value, done: false };
+					} else if (ended) {
+						return { value: undefined, done: true };
+					} else {
+						await queueNotEmpty;
 					}
-
-					onQueueDequeue();
-				} else if (!ended) {
-					await queueNotEmpty;
-				} else {
-					break;
 				}
-			}
-		} finally {
-			ended = true;
-			onQueueDequeue();
-		}
+			},
+			async return() {
+				terminated = true;
+				onQueueDequeue();
+				onQueueNotEmpty();
+
+				return { value: undefined, done: true };
+			},
+			async throw(error) {
+				throw error;
+			},
+			[Symbol.asyncIterator]() {
+				return this;
+			},
+		};
 	}
 }
 
@@ -146,7 +164,9 @@ export abstract class BaseMediaFrameDrain<
 		return structuredClone(frame);
 	}
 
-	protected async* mediaFramesAtTimestamps(timestamps: AnyIterable<number>) {
+	protected mediaFramesAtTimestamps(
+		timestamps: AnyIterable<number>,
+	): AsyncGenerator<MediaFrame | null, void, unknown> {
 		validateAnyIterable(timestamps);
 		const timestampIterator = toAsyncIterator(timestamps);
 		const timestampsOfInterest: number[] = [];
@@ -156,7 +176,7 @@ export abstract class BaseMediaFrameDrain<
 		let { promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers();
 		let { promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers();
 		let decoderIsFlushed = false;
-		let ended = false;
+		let terminated = false;
 
 		// This stores errors that are "out of band" in the sense that they didn't occur in the normal flow of this
 		// method but instead in a different context. This error should not go unnoticed and must be bubbled up to
@@ -170,38 +190,38 @@ export abstract class BaseMediaFrameDrain<
 			({ promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers());
 		};
 
-		const decoderError = new Error();
-		const decoder = await this._createDecoder((frame) => {
-			onQueueDequeue();
-
-			if (ended) {
-				frame.close();
-				return;
-			}
-
-			let frameUsed = false;
-			while (timestampsOfInterest.length > 0 && timestampsOfInterest[0] === frame.timestamp) {
-				pushToQueue(this._duplicateFrame(frame));
-				timestampsOfInterest.shift();
-				frameUsed = true;
-			}
-
-			if (frameUsed) {
-				lastUsedFrame?.close();
-				lastUsedFrame = frame;
-			} else {
-				frame.close();
-			}
-		}, (error) => {
-			if (!outOfBandError) {
-				error.stack = decoderError.stack; // Provide a more useful stack trace
-				outOfBandError = error;
-				onQueueNotEmpty();
-			}
-		});
-
 		// The following is the "pump" process that keeps pumping chunks into the decoder
 		(async () => {
+			const decoderError = new Error();
+			const decoder = await this._createDecoder((frame) => {
+				onQueueDequeue();
+
+				if (terminated) {
+					frame.close();
+					return;
+				}
+
+				let frameUsed = false;
+				while (timestampsOfInterest.length > 0 && timestampsOfInterest[0] === frame.timestamp) {
+					pushToQueue(this._duplicateFrame(frame));
+					timestampsOfInterest.shift();
+					frameUsed = true;
+				}
+
+				if (frameUsed) {
+					lastUsedFrame?.close();
+					lastUsedFrame = frame;
+				} else {
+					frame.close();
+				}
+			}, (error) => {
+				if (!outOfBandError) {
+					error.stack = decoderError.stack; // Provide a more useful stack trace
+					outOfBandError = error;
+					onQueueNotEmpty();
+				}
+			});
+
 			const chunkDrain = this._createChunkDrain();
 			let lastKeyChunk: Chunk | null = null;
 			let lastChunk: Chunk | null = null;
@@ -209,12 +229,12 @@ export abstract class BaseMediaFrameDrain<
 			for await (const timestamp of timestampIterator) {
 				validateTimestamp(timestamp);
 
-				while (frameQueue.length + decoder.getDecodeQueueSize() > MAX_QUEUE_SIZE) {
+				while (frameQueue.length + decoder.getDecodeQueueSize() > MAX_QUEUE_SIZE && !terminated) {
 					({ promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers());
 					await queueDequeue;
 				}
 
-				if (ended) {
+				if (terminated) {
 					break;
 				}
 
@@ -274,33 +294,50 @@ export abstract class BaseMediaFrameDrain<
 			}
 		});
 
-		try {
-			while (true) {
-				if (outOfBandError) {
-					throw outOfBandError;
-				} else if (frameQueue.length > 0) {
-					const nextFrame = frameQueue.shift();
-					assert(nextFrame !== undefined);
-					yield nextFrame;
-					onQueueDequeue();
-				} else if (!decoderIsFlushed) {
-					await queueNotEmpty;
-				} else {
-					break;
+		return {
+			async next() {
+				while (true) {
+					if (terminated) {
+						return { value: undefined, done: true };
+					} else if (outOfBandError) {
+						throw outOfBandError;
+					} else if (frameQueue.length > 0) {
+						const value = frameQueue.shift();
+						assert(value !== undefined);
+						onQueueDequeue();
+						return { value, done: false };
+					} else if (!decoderIsFlushed) {
+						await queueNotEmpty;
+					} else {
+						return { value: undefined, done: true };
+					}
 				}
-			}
-		} finally {
-			ended = true;
-			onQueueDequeue();
+			},
+			async return() {
+				terminated = true;
+				onQueueDequeue();
+				onQueueNotEmpty();
 
-			for (const frame of frameQueue) {
-				frame?.close();
-			}
-			lastUsedFrame?.close();
-		}
+				for (const frame of frameQueue) {
+					frame?.close();
+				}
+				lastUsedFrame?.close();
+
+				return { value: undefined, done: true };
+			},
+			async throw(error) {
+				throw error;
+			},
+			[Symbol.asyncIterator]() {
+				return this;
+			},
+		};
 	}
 
-	protected async* mediaFramesInRange(startTimestamp = 0, endTimestamp = Infinity) {
+	protected mediaFramesInRange(
+		startTimestamp = 0,
+		endTimestamp = Infinity,
+	): AsyncGenerator<MediaFrame, void, unknown> {
 		validateTimestamp(startTimestamp);
 		validateTimestamp(endTimestamp);
 
@@ -312,66 +349,67 @@ export abstract class BaseMediaFrameDrain<
 		let { promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers();
 		let decoderIsFlushed = false;
 		let ended = false;
+		let terminated = false;
 
 		// This stores errors that are "out of band" in the sense that they didn't occur in the normal flow of this
 		// method but instead in a different context. This error should not go unnoticed and must be bubbled up to
 		// the consumer.
 		let outOfBandError = null as Error | null;
 
-		const decoderError = new Error();
-		const decoder = await this._createDecoder((frame) => {
-			onQueueDequeue();
-			const frameTimestamp = frame.timestamp / 1e6;
+		// The following is the "pump" process that keeps pumping chunks into the decoder
+		(async () => {
+			const decoderError = new Error();
+			const decoder = await this._createDecoder((frame) => {
+				onQueueDequeue();
+				const frameTimestamp = frame.timestamp / 1e6;
 
-			if (frameTimestamp >= endTimestamp) {
-				ended = true;
-			}
+				if (frameTimestamp >= endTimestamp) {
+					ended = true;
+				}
 
-			if (ended) {
-				frame.close();
+				if (ended) {
+					frame.close();
+					return;
+				}
+
+				if (lastFrame) {
+					if (frameTimestamp > startTimestamp) {
+						// We don't know ahead of time what the first first is. This is because the first first is the
+						// last first whose timestamp is less than or equal to the start timestamp. Therefore we need to
+						// wait for the first first after the start timestamp, and then we'll know that the previous
+						// first was the first first.
+						frameQueue.push(lastFrame);
+						firstFrameQueued = true;
+					} else {
+						lastFrame.close();
+					}
+				}
+
+				if (frameTimestamp >= startTimestamp) {
+					frameQueue.push(frame);
+					firstFrameQueued = true;
+				}
+
+				lastFrame = firstFrameQueued ? null : frame;
+
+				if (frameQueue.length > 0) {
+					onQueueNotEmpty();
+					({ promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers());
+				}
+			}, (error) => {
+				if (!outOfBandError) {
+					error.stack = decoderError.stack; // Provide a more useful stack trace
+					outOfBandError = error;
+					onQueueNotEmpty();
+				}
+			});
+
+			const chunkDrain = this._createChunkDrain();
+			const keyChunk = await chunkDrain.getKeyChunk(startTimestamp) ?? await chunkDrain.getFirstChunk();
+			if (!keyChunk) {
 				return;
 			}
 
-			if (lastFrame) {
-				if (frameTimestamp > startTimestamp) {
-					// We don't know ahead of time what the first first is. This is because the first first is the last
-					// first whose timestamp is less than or equal to the start timestamp. Therefore we need to wait
-					// for the first first after the start timestamp, and then we'll know that the previous first was
-					// the first first.
-					frameQueue.push(lastFrame);
-					firstFrameQueued = true;
-				} else {
-					lastFrame.close();
-				}
-			}
-
-			if (frameTimestamp >= startTimestamp) {
-				frameQueue.push(frame);
-				firstFrameQueued = true;
-			}
-
-			lastFrame = firstFrameQueued ? null : frame;
-
-			if (frameQueue.length > 0) {
-				onQueueNotEmpty();
-				({ promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers());
-			}
-		}, (error) => {
-			if (!outOfBandError) {
-				error.stack = decoderError.stack; // Provide a more useful stack trace
-				outOfBandError = error;
-				onQueueNotEmpty();
-			}
-		});
-
-		const chunkDrain = this._createChunkDrain();
-		const keyChunk = await chunkDrain.getKeyChunk(startTimestamp) ?? await chunkDrain.getFirstChunk();
-		if (!keyChunk) {
-			return;
-		}
-
-		// The following is the "pump" process that keeps pumping chunks into the decoder
-		(async () => {
 			let currentChunk: Chunk | null = keyChunk;
 
 			let chunksEndTimestamp = Infinity;
@@ -430,27 +468,43 @@ export abstract class BaseMediaFrameDrain<
 			}
 		});
 
-		try {
-			while (true) {
-				if (outOfBandError) {
-					throw outOfBandError;
-				} else if (frameQueue.length > 0) {
-					yield frameQueue.shift()!;
-					onQueueDequeue();
-				} else if (!decoderIsFlushed) {
-					await queueNotEmpty;
-				} else {
-					break;
+		return {
+			async next() {
+				while (true) {
+					if (terminated) {
+						return { value: undefined, done: true };
+					} else if (outOfBandError) {
+						throw outOfBandError;
+					} else if (frameQueue.length > 0) {
+						const value = frameQueue.shift()!;
+						onQueueDequeue();
+						return { value, done: false };
+					} else if (!decoderIsFlushed) {
+						await queueNotEmpty;
+					} else {
+						return { value: undefined, done: true };
+					}
 				}
-			}
-		} finally {
-			ended = true;
-			onQueueDequeue();
+			},
+			async return() {
+				terminated = true;
+				ended = true;
+				onQueueDequeue();
+				onQueueNotEmpty();
 
-			for (const frame of frameQueue) {
-				frame.close();
-			}
-		}
+				for (const frame of frameQueue) {
+					frame.close();
+				}
+
+				return { value: undefined, done: true };
+			},
+			async throw(error) {
+				throw error;
+			},
+			[Symbol.asyncIterator]() {
+				return this;
+			},
+		};
 	}
 }
 
@@ -653,16 +707,18 @@ export class CanvasDrain {
 		return frame && this._videoFrameToWrappedCanvas(frame);
 	}
 
-	async* canvases(startTimestamp = 0, endTimestamp = Infinity) {
-		for await (const frame of this._videoFrameDrain.frames(startTimestamp, endTimestamp)) {
-			yield this._videoFrameToWrappedCanvas(frame);
-		}
+	canvases(startTimestamp = 0, endTimestamp = Infinity) {
+		return mapAsyncGenerator(
+			this._videoFrameDrain.frames(startTimestamp, endTimestamp),
+			frame => this._videoFrameToWrappedCanvas(frame),
+		);
 	}
 
-	async* canvasesAtTimestamps(timestamps: AnyIterable<number>) {
-		for await (const frame of this._videoFrameDrain.framesAtTimestamps(timestamps)) {
-			yield frame && this._videoFrameToWrappedCanvas(frame);
-		}
+	canvasesAtTimestamps(timestamps: AnyIterable<number>) {
+		return mapAsyncGenerator(
+			this._videoFrameDrain.framesAtTimestamps(timestamps),
+			async frame => frame && this._videoFrameToWrappedCanvas(frame),
+		);
 	}
 }
 
@@ -1001,15 +1057,17 @@ export class AudioBufferDrain {
 		return data && this._audioDataToWrappedArrayBuffer(data);
 	}
 
-	async* buffers(startTimestamp = 0, endTimestamp = Infinity) {
-		for await (const data of this._audioDataDrain.data(startTimestamp, endTimestamp)) {
-			yield this._audioDataToWrappedArrayBuffer(data);
-		}
+	buffers(startTimestamp = 0, endTimestamp = Infinity) {
+		return mapAsyncGenerator(
+			this._audioDataDrain.data(startTimestamp, endTimestamp),
+			async data => this._audioDataToWrappedArrayBuffer(data),
+		);
 	}
 
-	async* buffersAtTimestamps(timestamps: AnyIterable<number>) {
-		for await (const data of this._audioDataDrain.dataAtTimestamps(timestamps)) {
-			yield data && this._audioDataToWrappedArrayBuffer(data);
-		}
+	buffersAtTimestamps(timestamps: AnyIterable<number>) {
+		return mapAsyncGenerator(
+			this._audioDataDrain.dataAtTimestamps(timestamps),
+			async data => data && this._audioDataToWrappedArrayBuffer(data),
+		);
 	}
 }

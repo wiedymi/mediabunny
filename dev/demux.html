@@ -5,6 +5,7 @@
 	fileInput.type = 'file';
 	document.body.append(fileInput);
 	
+	/*
 	const encoder = new AudioEncoder({
 		output: console.log,
 		error: console.error
@@ -25,6 +26,7 @@
 		numberOfFrames: 48000
 	});
 	encoder.encode(audioData);
+	*/
 
 	fileInput.addEventListener('change', async () => {
 		const file = fileInput.files[0];
@@ -35,11 +37,16 @@
 		});
 
 		const audioTrack = await input.getPrimaryAudioTrack();
-		const drain = new Metamuxer.EncodedAudioChunkDrain(audioTrack);
+		const drain = new Metamuxer.AudioBufferDrain(audioTrack);
 
-		for await (const chunk of drain.chunks()) {
-			console.log(chunk)
-		}
+		const chunks = drain.buffers()
+		const a = chunks.next();
+
+		//chunks.return();
+
+		console.log(await a)
+		
+		//console.log("Done")
 
 		/*
 		const videoTrack = await input.getPrimaryVideoTrack();

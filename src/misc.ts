@@ -268,3 +268,32 @@ export const getInt24 = (view: DataView, byteOffset: number, littleEndian: boole
 	// then correctly interprets the sign bit.
 	return getUint24(view, byteOffset, littleEndian) << 8 >> 8;
 };
+
+/**
+ * Calls a function on each value spat out by an async generator. The reason for writing this manually instead of
+ * using a generator function is that the generator function queues return() calls - here, we forward them immediately.
+ */
+export const mapAsyncGenerator = <T, U>(
+	generator: AsyncGenerator<T, void, unknown>,
+	map: (t: T) => Promise<U>,
+): AsyncGenerator<U, void, unknown> => {
+	return {
+		async next() {
+			const result = await generator.next();
+			if (result.done) {
+				return { value: undefined, done: true };
+			} else {
+				return { value: await map(result.value), done: false };
+			}
+		},
+		return() {
+			return generator.return() as ReturnType<AsyncGenerator<U, void, unknown>['return']>;
+		},
+		throw(error) {
+			return generator.throw(error) as ReturnType<AsyncGenerator<U, void, unknown>['throw']>;
+		},
+		[Symbol.asyncIterator]() {
+			return this;
+		},
+	};
+};

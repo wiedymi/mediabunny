@@ -1021,18 +1021,6 @@ export class IsobmffDemuxer extends Demuxer {
 				const track = this.currentTrack;
 				assert(track && track.info?.type === 'audio');
 
-				// TODO TEMP
-				/*
-				const bytes = this.isobmffReader.readBytes(boxInfo.contentSize);
-				const description2 = new Uint8Array(8 + bytes.byteLength);
-				const view2 = new DataView(description2.buffer);
-				view2.setUint32(0, 0x4f707573, false); // 'Opus'
-				view2.setUint32(4, 0x646f7073, false); // 'dOps'
-				description2.set(bytes, 8);
-				track.info.codecDescription = description2;
-				break;
-				*/
-
 				this.isobmffReader.pos += 1; // Version
 
 				// https://www.opus-codec.org/docs/opus_in_isobmff.html
