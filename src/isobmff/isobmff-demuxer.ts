@@ -2263,7 +2263,7 @@ const getSampleInfo = (sampleTable: SampleTable, sampleIndex: number): SampleInf
 		x => x.startIndex,
 	);
 	const offsetEntry = sampleTable.sampleCompositionTimeOffsets[offsetEntryIndex];
-	if (offsetEntry) {
+	if (offsetEntry && sampleIndex - offsetEntry.startIndex < offsetEntry.count) {
 		presentationTimestamp += offsetEntry.offset;
 	}
 
