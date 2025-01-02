@@ -106,13 +106,12 @@ export class EncodedVideoChunkSource extends VideoSource {
 	}
 }
 
-const KEY_FRAME_INTERVAL = 5;
-
 /** @public */
 export type VideoCodecConfig = {
 	codec: VideoCodec;
 	bitrate: number;
 	latencyMode?: VideoEncoderConfig['latencyMode'];
+	keyFrameInterval?: number;
 	onEncodingError?: (error: Error) => void;
 };
 
@@ -128,6 +127,12 @@ const validateVideoCodecConfig = (config: VideoCodecConfig) => {
 	}
 	if (config.latencyMode !== undefined && !['quality', 'realtime'].includes(config.latencyMode)) {
 		throw new TypeError('config.latencyMode, when provided, must be \'quality\' or \'realtime\'.');
+	}
+	if (
+		config.keyFrameInterval !== undefined
+		&& (!Number.isFinite(config.keyFrameInterval) || config.keyFrameInterval < 0)
+	) {
+		throw new TypeError('config.keyFrameInterval, when provided, must be a non-negative number.');
 	}
 	if (config.onEncodingError !== undefined && typeof config.onEncodingError !== 'function') {
 		throw new TypeError('config.onEncodingError, when provided, must be a function.');
@@ -145,7 +150,7 @@ class VideoEncoderWrapper {
 		validateVideoCodecConfig(codecConfig);
 	}
 
-	async digest(videoFrame: VideoFrame) {
+	async digest(videoFrame: VideoFrame, encodeOptions?: VideoEncoderEncodeOptions) {
 		this.source._ensureValidDigest();
 
 		// Ensure video frame size remains constant
@@ -164,13 +169,15 @@ class VideoEncoderWrapper {
 		this.ensureEncoder(videoFrame);
 		assert(this.encoder);
 
-		const multipleOfKeyFrameInterval = Math.floor((videoFrame.timestamp / 1e6) / KEY_FRAME_INTERVAL);
+		const keyFrameInterval = this.codecConfig.keyFrameInterval ?? 5;
+		const multipleOfKeyFrameInterval = Math.floor((videoFrame.timestamp / 1e6) / keyFrameInterval);
 
 		// Ensure a key frame every KEY_FRAME_INTERVAL seconds. It is important that all video tracks follow the same
 		// "key frame" rhythm, because aligned key frames are required to start new fragments in ISOBMFF or clusters
 		// in Matroska.
 		this.encoder.encode(videoFrame, {
-			keyFrame: multipleOfKeyFrameInterval !== this.lastMultipleOfKeyFrameInterval,
+			...encodeOptions,
+			keyFrame: keyFrameInterval === 0 || multipleOfKeyFrameInterval !== this.lastMultipleOfKeyFrameInterval,
 		});
 
 		this.lastMultipleOfKeyFrameInterval = multipleOfKeyFrameInterval;
@@ -230,12 +237,12 @@ export class VideoFrameSource extends VideoSource {
 		this._encoder = new VideoEncoderWrapper(this, codecConfig);
 	}
 
-	digest(videoFrame: VideoFrame) {
+	digest(videoFrame: VideoFrame, encodeOptions?: VideoEncoderEncodeOptions) {
 		if (!(videoFrame instanceof VideoFrame)) {
 			throw new TypeError('videoFrame must be a VideoFrame.');
 		}
 
-		return this._encoder.digest(videoFrame);
+		return this._encoder.digest(videoFrame, encodeOptions);
 	}
 
 	/** @internal */
@@ -261,7 +268,7 @@ export class CanvasSource extends VideoSource {
 		this._canvas = canvas;
 	}
 
-	digest(timestamp: number, duration = 0) {
+	digest(timestamp: number, duration = 0, encodeOptions?: VideoEncoderEncodeOptions) {
 		if (!Number.isFinite(timestamp) || timestamp < 0) {
 			throw new TypeError('timestamp must be a non-negative number.');
 		}
@@ -275,7 +282,7 @@ export class CanvasSource extends VideoSource {
 			alpha: 'discard',
 		});
 
-		const promise = this._encoder.digest(frame);
+		const promise = this._encoder.digest(frame, encodeOptions);
 		frame.close();
 
 		return promise;
