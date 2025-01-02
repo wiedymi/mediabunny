@@ -41,7 +41,8 @@ type InternalTrack = {
 	demuxer: IsobmffDemuxer;
 	inputTrack: InputTrack | null;
 	timescale: number;
-	durationInTimescale: number;
+	durationInMovieTimescale: number;
+	durationInMediaTimescale: number;
 	rotation: Rotation;
 	sampleTableOffset: number;
 	sampleTable: SampleTable | null;
@@ -458,6 +459,7 @@ export class IsobmffDemuxer extends Demuxer {
 						} else {
 							// We already know this fragment
 							const fragment = this.fragments[index]!;
+							// Even if we already know the fragment, we might not yet know its predecessor
 							if (currentFragment) currentFragment.nextFragment = fragment;
 							currentFragment = fragment;
 						}
@@ -527,7 +529,8 @@ export class IsobmffDemuxer extends Demuxer {
 					inputTrack: null,
 					info: null,
 					timescale: -1,
-					durationInTimescale: -1,
+					durationInMovieTimescale: -1,
+					durationInMediaTimescale: -1,
 					rotation: 0,
 					sampleTableOffset: -1,
 					sampleTable: null,
@@ -582,11 +585,13 @@ export class IsobmffDemuxer extends Demuxer {
 				if (version === 0) {
 					this.isobmffReader.pos += 8;
 					track.id = this.isobmffReader.readU32();
-					this.isobmffReader.pos += 8;
+					this.isobmffReader.pos += 4;
+					track.durationInMovieTimescale = this.isobmffReader.readU32();
 				} else if (version === 1) {
 					this.isobmffReader.pos += 16;
 					track.id = this.isobmffReader.readU32();
-					this.isobmffReader.pos += 12;
+					this.isobmffReader.pos += 4;
+					track.durationInMovieTimescale = this.isobmffReader.readU64();
 				} else {
 					throw new Error(`Incorrect track header version ${version}.`);
 				}
@@ -601,7 +606,7 @@ export class IsobmffDemuxer extends Demuxer {
 					return x[0] === values[0] && x[1] === values[1] && x[3] === values[2] && x[4] === values[3];
 				});
 				if (matrixIndex === -1) {
-					// console.warn(`Wacky rotation matrix ${rotationMatrix}; sticking with no rotation.`);
+					console.warn(`Wacky rotation matrix ${values.join(',')}; sticking with no rotation.`);
 					track.rotation = 0;
 				} else {
 					track.rotation = (90 * matrixIndex) as Rotation;
@@ -618,11 +623,11 @@ export class IsobmffDemuxer extends Demuxer {
 				if (version === 0) {
 					this.isobmffReader.pos += 8;
 					track.timescale = this.isobmffReader.readU32();
-					track.durationInTimescale = this.isobmffReader.readU32();
+					track.durationInMediaTimescale = this.isobmffReader.readU32();
 				} else if (version === 1) {
 					this.isobmffReader.pos += 16;
 					track.timescale = this.isobmffReader.readU32();
-					track.durationInTimescale = this.isobmffReader.readU64();
+					track.durationInMediaTimescale = this.isobmffReader.readU64();
 				}
 			}; break;
 
@@ -2046,10 +2051,11 @@ abstract class IsobmffTrackBacking<Chunk extends EncodedVideoChunk | EncodedAudi
 			} else {
 				const fragment = this.internalTrack.fragments[fragmentIndex]!;
 
-				if (!lookupEntry || fragment.moofOffset >= fragment.moofOffset) {
+				if (!lookupEntry || fragment.moofOffset >= lookupEntry.moofOffset) {
 					isobmffReader.pos = fragment.moofOffset + fragment.moofSize;
 					prevFragment = fragment;
 				} else {
+					// Use the lookup entry
 					isobmffReader.pos = lookupEntry.moofOffset;
 				}
 			}
@@ -2078,28 +2084,30 @@ abstract class IsobmffTrackBacking<Chunk extends EncodedVideoChunk | EncodedAudi
 				if (boxInfo.name === 'moof') {
 					const index = binarySearchExact(demuxer.fragments, startPos, x => x.moofOffset);
 
+					let fragment: Fragment;
 					if (index === -1) {
 						// This is the first time we've seen this fragment
 						isobmffReader.pos = startPos;
 
-						const fragment = await demuxer.readFragment();
+						fragment = await demuxer.readFragment();
 						if (prevFragment) prevFragment.nextFragment = fragment;
 						prevFragment = fragment;
-
-						const { fragmentIndex, sampleIndex, correctSampleFound } = getBestMatch();
-						if (correctSampleFound) {
-							const fragment = this.internalTrack.fragments[fragmentIndex]!;
-							return this.fetchChunkInFragment(fragment, sampleIndex, options);
-						}
-						if (fragmentIndex !== -1) {
-							bestFragmentIndex = fragmentIndex;
-							bestSampleIndex = sampleIndex;
-						}
 					} else {
 						// We already know this fragment
-						const fragment = demuxer.fragments[index]!;
+						fragment = demuxer.fragments[index]!;
+						// Even if we already know the fragment, we might not yet know its predecessor
 						if (prevFragment) prevFragment.nextFragment = fragment;
 						prevFragment = fragment;
+					}
+
+					const { fragmentIndex, sampleIndex, correctSampleFound } = getBestMatch();
+					if (correctSampleFound) {
+						const fragment = this.internalTrack.fragments[fragmentIndex]!;
+						return this.fetchChunkInFragment(fragment, sampleIndex, options);
+					}
+					if (fragmentIndex !== -1) {
+						bestFragmentIndex = fragmentIndex;
+						bestSampleIndex = sampleIndex;
 					}
 				}
 

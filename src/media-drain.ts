@@ -431,7 +431,7 @@ export abstract class BaseMediaFrameDrain<
 			}
 
 			const chunks = chunkDrain.chunks(keyChunk, chunksEndTimestamp);
-			await chunks.next();
+			await chunks.next(); // Skip the start chunk as we already have it
 
 			while (currentChunk && !ended) {
 				if (frameQueue.length + decoder.getDecodeQueueSize() > MAX_QUEUE_SIZE) {

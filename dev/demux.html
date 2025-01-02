@@ -37,14 +37,22 @@
 		});
 
 		const audioTrack = await input.getPrimaryAudioTrack();
+		const drain = new Metamuxer.EncodedAudioChunkDrain(audioTrack);
+
+		for await (const chunk of drain.chunks()) {
+			console.log(chunk);
+		}
+		console.log("Done??")
+
+
+		/*
 		const drain = new Metamuxer.AudioBufferDrain(audioTrack);
 
 		const chunks = drain.buffers()
 		const a = chunks.next();
+		*/
 
 		//chunks.return();
-
-		console.log(await a)
 		
 		//console.log("Done")
 

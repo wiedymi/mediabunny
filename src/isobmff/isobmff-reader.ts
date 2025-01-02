@@ -62,6 +62,12 @@ export class IsobmffReader {
 		return high * 0x100000000 + low;
 	}
 
+	readI64() {
+		const high = this.readI32();
+		const low = this.readU32();
+		return high * 0x100000000 + low;
+	}
+
 	readF64() {
 		const { view, offset } = this.reader.getViewAndOffset(this.pos, this.pos + 8);
 		this.pos += 8;
