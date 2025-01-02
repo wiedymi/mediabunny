@@ -977,7 +977,6 @@ export class IsobmffDemuxer extends Demuxer {
 				} else if (objectTypeIndication === 0x69 || objectTypeIndication === 0x6b) {
 					track.info.codec = 'mp3';
 				} else if (objectTypeIndication === 0xdd) {
-					// TODO
 					track.info.codec = 'vorbis'; // "nonstandard, gpac uses it" - FFmpeg
 				} else {
 					console.warn(
