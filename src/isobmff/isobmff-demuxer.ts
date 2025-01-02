@@ -592,12 +592,14 @@ export class IsobmffDemuxer extends Demuxer {
 				}
 
 				this.isobmffReader.pos += 2 * 4 + 2 + 2 + 2 + 2;
-				const rotationMatrix: number[] = [];
-				rotationMatrix.push(this.isobmffReader.readFixed_16_16(), this.isobmffReader.readFixed_16_16());
+				const values: number[] = [];
+				values.push(this.isobmffReader.readFixed_16_16(), this.isobmffReader.readFixed_16_16());
 				this.isobmffReader.pos += 4;
-				rotationMatrix.push(this.isobmffReader.readFixed_16_16(), this.isobmffReader.readFixed_16_16());
+				values.push(this.isobmffReader.readFixed_16_16(), this.isobmffReader.readFixed_16_16());
 
-				const matrixIndex = knownMatrixes.findIndex(x => x.every((y, i) => y === rotationMatrix[i]));
+				const matrixIndex = knownMatrixes.findIndex((x) => {
+					return x[0] === values[0] && x[1] === values[1] && x[3] === values[2] && x[4] === values[3];
+				});
 				if (matrixIndex === -1) {
 					// console.warn(`Wacky rotation matrix ${rotationMatrix}; sticking with no rotation.`);
 					track.rotation = 0;

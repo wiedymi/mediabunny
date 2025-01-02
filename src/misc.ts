@@ -127,10 +127,10 @@ export class AsyncMutex {
 	}
 }
 
-export const rotationMatrix = (rotationInDegrees: number): TransformationMatrix => {
+export const rotationMatrix = (rotationInDegrees: Rotation): TransformationMatrix => {
 	const theta = rotationInDegrees * (Math.PI / 180);
-	const cosTheta = Math.cos(theta);
-	const sinTheta = Math.sin(theta);
+	const cosTheta = Math.round(Math.cos(theta));
+	const sinTheta = Math.round(Math.sin(theta));
 
 	// Matrices are post-multiplied in ISOBMFF, meaning this is the transpose of your typical rotation matrix
 	return [
