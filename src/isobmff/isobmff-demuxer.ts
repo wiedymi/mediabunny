@@ -1017,6 +1017,56 @@ export class IsobmffDemuxer extends Demuxer {
 				}
 			}; break;
 
+			case 'dOps': { // Used for Opus audio
+				const track = this.currentTrack;
+				assert(track && track.info?.type === 'audio');
+
+				// TODO TEMP
+				/*
+				const bytes = this.isobmffReader.readBytes(boxInfo.contentSize);
+				const description2 = new Uint8Array(8 + bytes.byteLength);
+				const view2 = new DataView(description2.buffer);
+				view2.setUint32(0, 0x4f707573, false); // 'Opus'
+				view2.setUint32(4, 0x646f7073, false); // 'dOps'
+				description2.set(bytes, 8);
+				track.info.codecDescription = description2;
+				break;
+				*/
+
+				this.isobmffReader.pos += 1; // Version
+
+				// https://www.opus-codec.org/docs/opus_in_isobmff.html
+				const outputChannelCount = this.isobmffReader.readU8();
+				const preSkip = this.isobmffReader.readU16();
+				const inputSampleRate = this.isobmffReader.readU32();
+				const outputGain = this.isobmffReader.readI16();
+				const channelMappingFamily = this.isobmffReader.readU8();
+
+				let channelMappingTable: Uint8Array;
+				if (channelMappingFamily !== 0) {
+					channelMappingTable = this.isobmffReader.readBytes(2 + outputChannelCount);
+				} else {
+					channelMappingTable = new Uint8Array(0);
+				}
+
+				// https://datatracker.ietf.org/doc/html/draft-ietf-codec-oggopus-06
+				const description = new Uint8Array(8 + 1 + 1 + 2 + 4 + 2 + 1 + channelMappingTable.byteLength);
+				const view = new DataView(description.buffer);
+				view.setUint32(0, 0x4f707573, false); // 'Opus'
+				view.setUint32(4, 0x48656164, false); // 'Head'
+				view.setUint8(8, 1); // Version
+				view.setUint8(9, outputChannelCount);
+				view.setUint16(10, preSkip, true);
+				view.setUint32(12, inputSampleRate, true);
+				view.setInt16(16, outputGain, true);
+				view.setUint8(18, channelMappingFamily);
+				description.set(channelMappingTable, 19);
+
+				track.info.codecDescription = description;
+				track.info.numberOfChannels = outputChannelCount;
+				track.info.sampleRate = inputSampleRate;
+			}; break;
+
 			case 'dfLa': { // Used for FLAC audio
 				const track = this.currentTrack;
 				assert(track && track.info?.type === 'audio');
@@ -1063,10 +1113,8 @@ export class IsobmffDemuxer extends Demuxer {
 				const bytes = this.isobmffReader.readBytes(endPos - startPos);
 
 				const description = new Uint8Array(4 + bytes.byteLength);
-				description[0] = 0x66; // f
-				description[1] = 0x4C; // L
-				description[2] = 0x61; // a
-				description[3] = 0x43; // C
+				const view = new DataView(description.buffer);
+				view.setUint32(0, 0x664c6143, false); // 'fLaC'
 				description.set(bytes, 4);
 
 				// Set the codec description to be 'fLaC' + all metadata blocks

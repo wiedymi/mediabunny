@@ -26,6 +26,13 @@ export class IsobmffReader {
 		return view.getUint16(offset, false);
 	}
 
+	readI16() {
+		const { view, offset } = this.reader.getViewAndOffset(this.pos, this.pos + 2);
+		this.pos += 2;
+
+		return view.getInt16(offset, false);
+	}
+
 	readU24() {
 		const { view, offset } = this.reader.getViewAndOffset(this.pos, this.pos + 3);
 		this.pos += 3;

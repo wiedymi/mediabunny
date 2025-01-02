@@ -4,6 +4,27 @@
 	const fileInput = document.createElement('input');
 	fileInput.type = 'file';
 	document.body.append(fileInput);
+	
+	const encoder = new AudioEncoder({
+		output: console.log,
+		error: console.error
+	});
+	encoder.configure({
+		codec: 'vorbis',
+		numberOfChannels: 2,
+		sampleRate: 48000,
+		bitrate: 128000
+	});
+
+	let audioData = new AudioData({
+		format: 'f32',
+		numberOfChannels: 2,
+		sampleRate: 48000,
+		timestamp: 0,
+		data: new Float32Array(2 * 48000),
+		numberOfFrames: 48000
+	});
+	encoder.encode(audioData);
 
 	fileInput.addEventListener('change', async () => {
 		const file = fileInput.files[0];
@@ -16,7 +37,9 @@
 		const audioTrack = await input.getPrimaryAudioTrack();
 		const drain = new Metamuxer.EncodedAudioChunkDrain(audioTrack);
 
-		console.log(await drain.getFirstChunk());
+		for await (const chunk of drain.chunks()) {
+			console.log(chunk)
+		}
 
 		/*
 		const videoTrack = await input.getPrimaryVideoTrack();

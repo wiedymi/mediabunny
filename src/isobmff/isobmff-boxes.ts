@@ -751,6 +751,7 @@ export const dOps = (trackData: IsobmffAudioTrackData) => {
 		gain = view.getInt16(14, true);
 	}
 
+	// https://www.opus-codec.org/docs/opus_in_isobmff.html
 	return box('dOps', [
 		u8(0), // Version
 		u8(trackData.info.numberOfChannels), // OutputChannelCount

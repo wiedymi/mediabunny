@@ -882,7 +882,9 @@ class PcmAudioDecoderWrapper extends DecoderWrapper<EncodedAudioChunk, AudioData
 			numberOfFrames,
 			timestamp: chunk.timestamp,
 		});
-		this.onMedia(audioData);
+
+		// Since all other decoders are async, we'll make this one behave async as well
+		queueMicrotask(() => this.onMedia(audioData));
 	}
 
 	async flush() {
