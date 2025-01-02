@@ -1,0 +1,10 @@
+- Manual key frame passing
+- Progress reporting
+- Test tree shaking
+- Throw if edit list detected
+- Audio codec string regex validation
+- Add the new audio codecs to muxers
+- Mov muxer!!! Only mov can hold PCM audio, MP4 cannot
+- Metadata methods for computing average fps and bitrate
+- close method on Output to cancel it (and dispose the encoders). Perhaps abort is a better title
+- lower default key frame interval (3 secs is better I think?) and make it outside-configurable

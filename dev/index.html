@@ -40,6 +40,7 @@
 	format = new Metamuxer.Mp4OutputFormat({ fastStart: false }); // new Metamuxer.MkvOutputFormat();// new Metamuxer.Mp4OutputFormat({ fastStart: false });
 	let target = new Metamuxer.ArrayBufferTarget();
 
+	/*
 	target = new Metamuxer.StreamTarget(new WritableStream({
 		async write(chunk) {
 			console.log(chunk)
@@ -47,6 +48,7 @@
 			await new Promise(resolve => setTimeout(resolve, 250));
 		}
 	}), { chunked: true });
+	*/
 
 	let output = new Metamuxer.Output({ format, target });
 
@@ -170,5 +172,5 @@ Testing... <00:17.350>One... <00:18.125>Two...
 	await output.finalize();
 
 	console.log(target);
-	//download(new Blob([target.buffer]), 'test.mp4');
+	download(new Blob([target.buffer]), 'test.mp4');
 </script>

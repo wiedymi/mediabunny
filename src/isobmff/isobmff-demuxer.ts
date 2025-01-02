@@ -1076,7 +1076,7 @@ export class IsobmffDemuxer extends Demuxer {
 
 				const startPos = this.isobmffReader.pos;
 
-				while (true) {
+				while (this.isobmffReader.pos < boxEndPos) {
 					const flagAndType = this.isobmffReader.readU8();
 					const metadataBlockLength = this.isobmffReader.readU24();
 					const type = flagAndType & BLOCK_TYPE_MASK;

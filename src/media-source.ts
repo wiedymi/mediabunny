@@ -517,32 +517,49 @@ export class AudioBufferSource extends AudioSource {
 			throw new TypeError('audioBuffer must be an AudioBuffer.');
 		}
 
+		const MAX_FLOAT_COUNT = 64 * 1024 * 1024;
+
 		const numberOfChannels = audioBuffer.numberOfChannels;
 		const sampleRate = audioBuffer.sampleRate;
-		const numberOfFrames = audioBuffer.length;
+		const totalFrames = audioBuffer.length;
+		const maxFramesPerChunk = Math.floor(MAX_FLOAT_COUNT / numberOfChannels);
 
-		// Create a planar F32 array containing all channels
-		const data = new Float32Array(numberOfChannels * numberOfFrames);
-		for (let channel = 0; channel < numberOfChannels; channel++) {
-			const channelData = audioBuffer.getChannelData(channel);
-			data.set(channelData, channel * numberOfFrames);
+		let currentRelativeFrame = 0;
+		let remainingFrames = totalFrames;
+
+		const promises: Promise<void>[] = [];
+
+		// Create AudioData in a chunked fashion so we don't create huge Float32Arrays
+		while (remainingFrames > 0) {
+			const framesToCopy = Math.min(maxFramesPerChunk, remainingFrames);
+			const chunkData = new Float32Array(numberOfChannels * framesToCopy);
+
+			for (let channel = 0; channel < numberOfChannels; channel++) {
+				audioBuffer.copyFromChannel(
+					chunkData.subarray(channel * framesToCopy, channel * framesToCopy + framesToCopy),
+					channel,
+					currentRelativeFrame,
+				);
+			}
+
+			const audioData = new AudioData({
+				format: 'f32-planar',
+				sampleRate,
+				numberOfFrames: framesToCopy,
+				numberOfChannels,
+				timestamp: (1e6 * (this._accumulatedFrameCount + currentRelativeFrame)) / sampleRate,
+				data: chunkData,
+			});
+
+			promises.push(this._encoder.digest(audioData));
+			audioData.close();
+
+			currentRelativeFrame += framesToCopy;
+			remainingFrames -= framesToCopy;
 		}
 
-		const audioData = new AudioData({
-			format: 'f32-planar',
-			sampleRate,
-			numberOfFrames,
-			numberOfChannels,
-			timestamp: Math.round(1e6 * this._accumulatedFrameCount / sampleRate),
-			data: data,
-		});
-
-		const promise = this._encoder.digest(audioData);
-		audioData.close();
-
-		this._accumulatedFrameCount += numberOfFrames;
-
-		return promise;
+		this._accumulatedFrameCount += totalFrames;
+		return Promise.all(promises);
 	}
 
 	/** @internal */
