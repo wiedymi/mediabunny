@@ -44,7 +44,7 @@ type InternalTrack = {
 	durationInMovieTimescale: number;
 	durationInMediaTimescale: number;
 	rotation: Rotation;
-	sampleTableOffset: number;
+	sampleTableByteOffset: number;
 	sampleTable: SampleTable | null;
 	fragmentLookupTable: FragmentLookupTableEntry[] | null;
 	currentFragmentState: FragmentTrackState | null;
@@ -274,7 +274,7 @@ export class IsobmffDemuxer extends Demuxer {
 		};
 		internalTrack.sampleTable = sampleTable;
 
-		this.isobmffReader.pos = internalTrack.sampleTableOffset;
+		this.isobmffReader.pos = internalTrack.sampleTableByteOffset;
 		this.currentTrack = internalTrack;
 		this.traverseBox();
 		this.currentTrack = null;
@@ -536,7 +536,7 @@ export class IsobmffDemuxer extends Demuxer {
 					durationInMovieTimescale: -1,
 					durationInMediaTimescale: -1,
 					rotation: 0,
-					sampleTableOffset: -1,
+					sampleTableByteOffset: -1,
 					sampleTable: null,
 					fragmentLookupTable: null,
 					currentFragmentState: null,
@@ -551,7 +551,7 @@ export class IsobmffDemuxer extends Demuxer {
 						const videoTrack = track as InternalVideoTrack;
 						track.inputTrack = new InputVideoTrack(new IsobmffVideoTrackBacking(videoTrack));
 						this.tracks.push(track);
-					} else if (track.info.type === 'audio' && track.info.numberOfChannels !== 1) {
+					} else if (track.info.type === 'audio' && track.info.numberOfChannels !== -1) {
 						const audioTrack = track as InternalAudioTrack;
 						track.inputTrack = new InputAudioTrack(new IsobmffAudioTrackBacking(audioTrack));
 						this.tracks.push(track);
@@ -657,7 +657,7 @@ export class IsobmffDemuxer extends Demuxer {
 				const track = this.currentTrack;
 				assert(track);
 
-				track.sampleTableOffset = startPos;
+				track.sampleTableByteOffset = startPos;
 
 				this.readContiguousBoxes(boxInfo.contentSize);
 			}; break;
