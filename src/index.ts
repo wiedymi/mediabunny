@@ -60,12 +60,18 @@ export {
 export { Input, InputOptions } from './input';
 export { InputTrack, InputVideoTrack, InputAudioTrack } from './input-track';
 export {
-	ChunkRetrievalOptions,
-	BaseChunkDrain,
+	EncodedVideoSample,
+	EncodedAudioSample,
+	SampleType,
+} from './sample';
+export {
+	SampleRetrievalOptions,
+	BaseSampleDrain,
+	WrappedMediaFrame,
 	BaseMediaFrameDrain,
-	EncodedVideoChunkDrain,
+	EncodedVideoSampleDrain,
 	VideoFrameDrain,
-	EncodedAudioChunkDrain,
+	EncodedAudioSampleDrain,
 	CanvasDrain,
 	WrappedCanvas,
 	AudioDataDrain,

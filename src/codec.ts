@@ -842,7 +842,7 @@ export const canEncode = (codec: MediaCodec) => {
 		return canEncodeSubtitles(codec as SubtitleCodec);
 	}
 
-	throw new Error('Unhandled codec.');
+	throw new TypeError(`Unknown codec '${codec}'.`);
 };
 
 /** @public */
@@ -851,6 +851,19 @@ export const canEncodeVideo = async (codec: VideoCodec, { width = 1280, height =
 	height?: number;
 	bitrate?: 1e6;
 } = {}) => {
+	if (!VIDEO_CODECS.includes(codec)) {
+		return false;
+	}
+	if (!Number.isInteger(width) || width <= 0) {
+		throw new TypeError('width must be a positive integer.');
+	}
+	if (!Number.isInteger(height) || height <= 0) {
+		throw new TypeError('height must be a positive integer.');
+	}
+	if (!Number.isInteger(bitrate) || bitrate <= 0) {
+		throw new TypeError('bitrate must be a positive integer.');
+	}
+
 	if (typeof VideoEncoder === 'undefined') {
 		return false;
 	}
@@ -872,12 +885,25 @@ export const canEncodeAudio = async (codec: AudioCodec, { numberOfChannels = 2, 
 	sampleRate?: number;
 	bitrate?: number;
 } = {}) => {
-	if (typeof AudioEncoder === 'undefined') {
+	if (!AUDIO_CODECS.includes(codec)) {
 		return false;
+	}
+	if (!Number.isInteger(numberOfChannels) || numberOfChannels <= 0) {
+		throw new TypeError('numberOfChannels must be a positive integer.');
+	}
+	if (!Number.isInteger(sampleRate) || sampleRate <= 0) {
+		throw new TypeError('sampleRate must be a positive integer.');
+	}
+	if (!Number.isInteger(bitrate) || bitrate <= 0) {
+		throw new TypeError('bitrate must be a positive integer.');
 	}
 
 	if ((PCM_CODECS as readonly string[]).includes(codec)) {
 		return false; // TODO write encoder
+	}
+
+	if (typeof AudioEncoder === 'undefined') {
+		return false;
 	}
 
 	const support = await AudioEncoder.isConfigSupported({
@@ -892,6 +918,16 @@ export const canEncodeAudio = async (codec: AudioCodec, { numberOfChannels = 2, 
 };
 
 /** @public */
+
+export const canEncodeSubtitles = async (codec: SubtitleCodec) => {
+	if (!SUBTITLE_CODECS.includes(codec)) {
+		return false;
+	}
+
+	return true;
+};
+
+/** @public */
 export const getEncodableCodecs = async (): Promise<MediaCodec[]> => {
 	const [videoCodecs, audioCodecs, subtitleCodecs] = await Promise.all([
 		getEncodableVideoCodecs(),
@@ -900,12 +936,6 @@ export const getEncodableCodecs = async (): Promise<MediaCodec[]> => {
 	]);
 
 	return [...videoCodecs, ...audioCodecs, ...subtitleCodecs];
-};
-
-/** @public */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export const canEncodeSubtitles = async (codec: SubtitleCodec) => {
-	return true;
 };
 
 /** @public */

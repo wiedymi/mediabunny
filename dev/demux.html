@@ -1,3 +1,5 @@
+<!DOCTYPE html>
+
 <script src="../dist/metamuxer.js"></script>
 
 <script type="module">
@@ -30,19 +32,72 @@
 
 	fileInput.addEventListener('change', async () => {
 		const file = fileInput.files[0];
-		const source = new Metamuxer.BlobSource(file);
+		const source = new Metamuxer.BufferSource(await file.arrayBuffer()) ?? new Metamuxer.BlobSource(file);
+
+		const start = performance.now();	
 		const input = new Metamuxer.Input({
 			formats: Metamuxer.ALL_FORMATS,
 			source
 		});
 
-		const audioTrack = await input.getPrimaryAudioTrack();
-		const drain = new Metamuxer.EncodedAudioChunkDrain(audioTrack);
+		const videoTrack = await input.getPrimaryVideoTrack();
+		const drain = new Metamuxer.EncodedVideoSampleDrain(videoTrack);
+
+		for await (const sample of drain.samples()) {
+			//console.log(chunk);
+		}
+
+		document.body.textContent = performance.now() - start;
+
+		/*
+		const videoTrack = await input.getPrimaryVideoTrack();
+		const drain = new Metamuxer.VideoFrameDrain(videoTrack);
+
+		async function* timestamps() {
+			const fromTime = 0;
+			const toTime = await videoTrack.computeDuration();
+			const extractDuration = toTime - fromTime;
+			const drain = new Metamuxer.EncodedVideoSampleDrain(videoTrack);
+			const thumbnailsNeeded = 16;
+
+			  for (let i = 0; i < thumbnailsNeeded; i++) {
+				const startTime = (extractDuration * i) / thumbnailsNeeded + fromTime;
+				const endTime = Math.min(
+				  (extractDuration * (i + 1)) / thumbnailsNeeded + fromTime,
+				  toTime + 1,
+				);
+
+				const sample = await drain.getSample(startTime, { onlyMetadata: true });
+
+				let bestTimestamp = sample.timestamp;
+				if (sample.type !== 'key') {
+					const nextKeySample = await drain.getNextKeySample(sample, { onlyMetadata: true });
+					if (nextKeySample.timestamp < endTime) {
+						bestTimestamp = nextKeySample.timestamp;
+					}
+				}
+
+				yield bestTimestamp;
+			  }
+		}
+
+		for await (const { frame, timestamp } of drain.framesAtTimestamps(timestamps())) {
+			console.log(frame.timestamp, timestamp)
+			frame.close();
+		}
+		console.log("done")
+		*/
+
+		/*
+		const audioTrack = await input.getPrimaryVideoTrack();
+		const drain = new Metamuxer.EncodedVideoChunkDrain(audioTrack);
 
 		for await (const chunk of drain.chunks()) {
-			console.log(chunk);
+			//console.log(chunk);
 		}
-		console.log("Done??")
+
+		document.body.textContent = performance.now() - start;
+		*/
 
 
 		/*

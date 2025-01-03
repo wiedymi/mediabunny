@@ -34,10 +34,24 @@ export class Reader {
 			return;
 		}
 
-		const encasingSegmentExists = this.loadedSegments.some(x => x.start <= start && x.end >= end);
-		if (encasingSegmentExists) {
-			// Nothing to load
-			return;
+		const index = binarySearchLessOrEqual(
+			this.loadedSegments,
+			start,
+			x => x.start,
+		);
+		if (index !== -1) {
+			for (let i = index; i < this.loadedSegments.length; i++) {
+				const segment = this.loadedSegments[i]!;
+				if (segment.start > start) {
+					break;
+				}
+
+				const segmentEncasesRequestedRange = segment.end >= end;
+				if (segmentEncasesRequestedRange) {
+					// Nothing to load
+					return;
+				}
+			}
 		}
 
 		const bytesPromise = this.source._read(start, end);

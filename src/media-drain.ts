@@ -3,6 +3,7 @@ import { InputAudioTrack, InputVideoTrack } from './input-track';
 import {
 	AnyIterable,
 	assert,
+	binarySearchLessOrEqual,
 	getInt24,
 	getUint24,
 	mapAsyncGenerator,
@@ -10,13 +11,14 @@ import {
 	toAsyncIterator,
 	validateAnyIterable,
 } from './misc';
+import { EncodedAudioSample, EncodedVideoSample } from './sample';
 
 /** @public */
-export type ChunkRetrievalOptions = {
+export type SampleRetrievalOptions = {
 	metadataOnly?: boolean;
 };
 
-const validateChunkRetrievalOptions = (options: ChunkRetrievalOptions) => {
+const validateSampleRetrievalOptions = (options: SampleRetrievalOptions) => {
 	if (!options || typeof options !== 'object') {
 		throw new TypeError('options must be an object.');
 	}
@@ -32,15 +34,15 @@ const validateTimestamp = (timestamp: number) => {
 };
 
 /** @public */
-export abstract class BaseChunkDrain<Chunk extends EncodedVideoChunk | EncodedAudioChunk> {
-	abstract getFirstChunk(options?: ChunkRetrievalOptions): Promise<Chunk | null>;
-	abstract getChunk(timestamp: number, options?: ChunkRetrievalOptions): Promise<Chunk | null>;
-	abstract getNextChunk(chunk: Chunk, options?: ChunkRetrievalOptions): Promise<Chunk | null>;
-	abstract getKeyChunk(timestamp: number, options?: ChunkRetrievalOptions): Promise<Chunk | null>;
-	abstract getNextKeyChunk(chunk: Chunk, options?: ChunkRetrievalOptions): Promise<Chunk | null>;
+export abstract class BaseSampleDrain<Sample extends EncodedVideoSample | EncodedAudioSample> {
+	abstract getFirstSample(options?: SampleRetrievalOptions): Promise<Sample | null>;
+	abstract getSample(timestamp: number, options?: SampleRetrievalOptions): Promise<Sample | null>;
+	abstract getNextSample(sample: Sample, options?: SampleRetrievalOptions): Promise<Sample | null>;
+	abstract getKeySample(timestamp: number, options?: SampleRetrievalOptions): Promise<Sample | null>;
+	abstract getNextKeySample(sample: Sample, options?: SampleRetrievalOptions): Promise<Sample | null>;
 
-	chunks(startChunk?: Chunk, endTimestamp = Infinity): AsyncGenerator<Chunk, void, unknown> {
-		const chunkQueue: Chunk[] = [];
+	samples(startSample?: Sample, endTimestamp = Infinity): AsyncGenerator<Sample, void, unknown> {
+		const sampleQueue: Sample[] = [];
 
 		let { promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers();
 		let { promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers();
@@ -53,30 +55,30 @@ export abstract class BaseChunkDrain<Chunk extends EncodedVideoChunk | EncodedAu
 		let outOfBandError = null as Error | null;
 
 		const timestamps: number[] = [];
-		// The queue should always be big enough to hold 1 second worth of chunks
+		// The queue should always be big enough to hold 1 second worth of samples
 		const maxQueueSize = () => Math.max(2, timestamps.length);
 
-		// The following is the "pump" process that keeps pumping chunks into the queue
+		// The following is the "pump" process that keeps pumping samples into the queue
 		(async () => {
-			let chunk = startChunk ?? await this.getFirstChunk();
+			let sample = startSample ?? await this.getFirstSample();
 
-			while (chunk && !terminated) {
-				if (chunk.timestamp / 1e6 >= endTimestamp) {
+			while (sample && !terminated) {
+				if (sample.timestamp >= endTimestamp) {
 					break;
 				}
 
-				if (chunkQueue.length > maxQueueSize()) {
+				if (sampleQueue.length > maxQueueSize()) {
 					({ promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers());
 					await queueDequeue;
 					continue;
 				}
 
-				chunkQueue.push(chunk);
+				sampleQueue.push(sample);
 
 				onQueueNotEmpty();
 				({ promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers());
 
-				chunk = await this.getNextChunk(chunk);
+				sample = await this.getNextSample(sample);
 			}
 
 			ended = true;
@@ -95,8 +97,8 @@ export abstract class BaseChunkDrain<Chunk extends EncodedVideoChunk | EncodedAu
 						return { value: undefined, done: true };
 					} else if (outOfBandError) {
 						throw outOfBandError;
-					} else if (chunkQueue.length > 0) {
-						const value = chunkQueue.shift()!;
+					} else if (sampleQueue.length > 0) {
+						const value = sampleQueue.shift()!;
 						const now = performance.now();
 						timestamps.push(now);
 
@@ -131,220 +133,59 @@ export abstract class BaseChunkDrain<Chunk extends EncodedVideoChunk | EncodedAu
 	}
 }
 
+/** @public */
+export type WrappedMediaFrame<T extends VideoFrame | AudioData> = {
+	frame: T;
+	timestamp: number;
+	duration: number;
+};
+
 abstract class DecoderWrapper<
-	Chunk extends EncodedVideoChunk | EncodedAudioChunk,
+	Sample extends EncodedVideoSample | EncodedAudioSample,
 	MediaFrame extends VideoFrame | AudioData,
+	WrappedFrame extends WrappedMediaFrame<MediaFrame> = WrappedMediaFrame<MediaFrame>,
 > {
 	constructor(
-		public onMedia: (media: MediaFrame) => unknown,
+		public onFrame: (frame: WrappedFrame) => unknown,
 		public onError: (error: DOMException) => unknown,
 	) {}
 
 	abstract getDecodeQueueSize(): number;
-	abstract decode(chunk: Chunk): void;
+	abstract decode(sample: Sample): void;
 	abstract flush(): Promise<void>;
 	abstract close(): void;
 }
 
 /** @public */
 export abstract class BaseMediaFrameDrain<
-	Chunk extends EncodedVideoChunk | EncodedAudioChunk,
+	Sample extends EncodedVideoSample | EncodedAudioSample,
 	MediaFrame extends VideoFrame | AudioData,
+	WrappedFrame extends WrappedMediaFrame<MediaFrame> = WrappedMediaFrame<MediaFrame>,
 > {
 	/** @internal */
 	abstract _createDecoder(
-		onMedia: (media: MediaFrame) => unknown,
+		onFrame: (frame: WrappedFrame) => unknown,
 		onError: (error: DOMException) => unknown
-	): Promise<DecoderWrapper<Chunk, MediaFrame>>;
+	): Promise<DecoderWrapper<Sample, MediaFrame>>;
 	/** @internal */
-	abstract _createChunkDrain(): BaseChunkDrain<Chunk>;
+	abstract _createSampleDrain(): BaseSampleDrain<Sample>;
 
 	/** @internal */
-	private _duplicateFrame(frame: MediaFrame) {
+	private _duplicateFrame(frame: WrappedFrame) {
 		return structuredClone(frame);
-	}
-
-	protected mediaFramesAtTimestamps(
-		timestamps: AnyIterable<number>,
-	): AsyncGenerator<MediaFrame | null, void, unknown> {
-		validateAnyIterable(timestamps);
-		const timestampIterator = toAsyncIterator(timestamps);
-		const timestampsOfInterest: number[] = [];
-
-		const MAX_QUEUE_SIZE = 8;
-		const frameQueue: (MediaFrame | null)[] = [];
-		let { promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers();
-		let { promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers();
-		let decoderIsFlushed = false;
-		let terminated = false;
-
-		// This stores errors that are "out of band" in the sense that they didn't occur in the normal flow of this
-		// method but instead in a different context. This error should not go unnoticed and must be bubbled up to
-		// the consumer.
-		let outOfBandError = null as Error | null;
-
-		let lastUsedFrame = null as MediaFrame | null;
-		const pushToQueue = (frame: MediaFrame | null) => {
-			frameQueue.push(frame);
-			onQueueNotEmpty();
-			({ promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers());
-		};
-
-		// The following is the "pump" process that keeps pumping chunks into the decoder
-		(async () => {
-			const decoderError = new Error();
-			const decoder = await this._createDecoder((frame) => {
-				onQueueDequeue();
-
-				if (terminated) {
-					frame.close();
-					return;
-				}
-
-				let frameUsed = false;
-				while (timestampsOfInterest.length > 0 && timestampsOfInterest[0] === frame.timestamp) {
-					pushToQueue(this._duplicateFrame(frame));
-					timestampsOfInterest.shift();
-					frameUsed = true;
-				}
-
-				if (frameUsed) {
-					lastUsedFrame?.close();
-					lastUsedFrame = frame;
-				} else {
-					frame.close();
-				}
-			}, (error) => {
-				if (!outOfBandError) {
-					error.stack = decoderError.stack; // Provide a more useful stack trace
-					outOfBandError = error;
-					onQueueNotEmpty();
-				}
-			});
-
-			const chunkDrain = this._createChunkDrain();
-			let lastKeyChunk: Chunk | null = null;
-			let lastChunk: Chunk | null = null;
-
-			for await (const timestamp of timestampIterator) {
-				validateTimestamp(timestamp);
-
-				while (frameQueue.length + decoder.getDecodeQueueSize() > MAX_QUEUE_SIZE && !terminated) {
-					({ promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers());
-					await queueDequeue;
-				}
-
-				if (terminated) {
-					break;
-				}
-
-				const targetChunk = await chunkDrain.getChunk(timestamp);
-				if (!targetChunk) {
-					pushToQueue(null);
-					continue;
-				}
-
-				const keyChunk = await chunkDrain.getKeyChunk(timestamp);
-				if (!keyChunk) {
-					pushToQueue(null);
-					continue;
-				}
-
-				timestampsOfInterest.push(targetChunk.timestamp);
-
-				if (
-					lastKeyChunk
-					&& keyChunk.timestamp === lastKeyChunk.timestamp
-					&& targetChunk.timestamp >= lastChunk!.timestamp
-				) {
-					assert(lastChunk);
-
-					if (targetChunk.timestamp === lastChunk.timestamp && timestampsOfInterest.length === 1) {
-						// Special case: We have a repeat chunk, but the frame for that chunk has already been decoded.
-						// Therefore, we need to push the frame here instead of in the decoder callback.
-						if (lastUsedFrame) {
-							pushToQueue(this._duplicateFrame(lastUsedFrame));
-						}
-						timestampsOfInterest.shift();
-					}
-				} else {
-					lastKeyChunk = keyChunk;
-					lastChunk = keyChunk;
-					decoder.decode(keyChunk);
-				}
-
-				while (lastChunk.timestamp !== targetChunk.timestamp) {
-					const nextChunk = await chunkDrain.getNextChunk(lastChunk);
-					assert(nextChunk);
-
-					lastChunk = nextChunk;
-					decoder.decode(nextChunk);
-				}
-			}
-
-			if (!terminated) await decoder.flush();
-			decoder.close();
-
-			decoderIsFlushed = true;
-			onQueueNotEmpty(); // To unstuck the generator
-		})().catch((error: Error) => {
-			if (!outOfBandError) {
-				outOfBandError = error;
-				onQueueNotEmpty();
-			}
-		});
-
-		return {
-			async next() {
-				while (true) {
-					if (terminated) {
-						return { value: undefined, done: true };
-					} else if (outOfBandError) {
-						throw outOfBandError;
-					} else if (frameQueue.length > 0) {
-						const value = frameQueue.shift();
-						assert(value !== undefined);
-						onQueueDequeue();
-						return { value, done: false };
-					} else if (!decoderIsFlushed) {
-						await queueNotEmpty;
-					} else {
-						return { value: undefined, done: true };
-					}
-				}
-			},
-			async return() {
-				terminated = true;
-				onQueueDequeue();
-				onQueueNotEmpty();
-
-				for (const frame of frameQueue) {
-					frame?.close();
-				}
-				lastUsedFrame?.close();
-
-				return { value: undefined, done: true };
-			},
-			async throw(error) {
-				throw error;
-			},
-			[Symbol.asyncIterator]() {
-				return this;
-			},
-		};
 	}
 
 	protected mediaFramesInRange(
 		startTimestamp = 0,
 		endTimestamp = Infinity,
-	): AsyncGenerator<MediaFrame, void, unknown> {
+	): AsyncGenerator<WrappedFrame, void, unknown> {
 		validateTimestamp(startTimestamp);
 		validateTimestamp(endTimestamp);
 
 		const MAX_QUEUE_SIZE = 8;
-		const frameQueue: MediaFrame[] = [];
+		const frameQueue: WrappedFrame[] = [];
 		let firstFrameQueued = false;
-		let lastFrame: MediaFrame | null = null;
+		let lastFrame: WrappedFrame | null = null;
 		let { promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers();
 		let { promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers();
 		let decoderIsFlushed = false;
@@ -356,24 +197,22 @@ export abstract class BaseMediaFrameDrain<
 		// the consumer.
 		let outOfBandError = null as Error | null;
 
-		// The following is the "pump" process that keeps pumping chunks into the decoder
+		// The following is the "pump" process that keeps pumping samples into the decoder
 		(async () => {
 			const decoderError = new Error();
-			const decoder = await this._createDecoder((frame) => {
+			const decoder = await this._createDecoder((wrappedFrame) => {
 				onQueueDequeue();
-				const frameTimestamp = frame.timestamp / 1e6;
-
-				if (frameTimestamp >= endTimestamp) {
+				if (wrappedFrame.timestamp >= endTimestamp) {
 					ended = true;
 				}
 
 				if (ended) {
-					frame.close();
+					wrappedFrame.frame.close();
 					return;
 				}
 
 				if (lastFrame) {
-					if (frameTimestamp > startTimestamp) {
+					if (wrappedFrame.timestamp > startTimestamp) {
 						// We don't know ahead of time what the first first is. This is because the first first is the
 						// last first whose timestamp is less than or equal to the start timestamp. Therefore we need to
 						// wait for the first first after the start timestamp, and then we'll know that the previous
@@ -381,16 +220,16 @@ export abstract class BaseMediaFrameDrain<
 						frameQueue.push(lastFrame);
 						firstFrameQueued = true;
 					} else {
-						lastFrame.close();
+						lastFrame.frame.close();
 					}
 				}
 
-				if (frameTimestamp >= startTimestamp) {
-					frameQueue.push(frame);
+				if (wrappedFrame.timestamp >= startTimestamp) {
+					frameQueue.push(wrappedFrame);
 					firstFrameQueued = true;
 				}
 
-				lastFrame = firstFrameQueued ? null : frame;
+				lastFrame = firstFrameQueued ? null : wrappedFrame;
 
 				if (frameQueue.length > 0) {
 					onQueueNotEmpty();
@@ -404,53 +243,53 @@ export abstract class BaseMediaFrameDrain<
 				}
 			});
 
-			const chunkDrain = this._createChunkDrain();
-			const keyChunk = await chunkDrain.getKeyChunk(startTimestamp) ?? await chunkDrain.getFirstChunk();
-			if (!keyChunk) {
+			const sampleDrain = this._createSampleDrain();
+			const keySample = await sampleDrain.getKeySample(startTimestamp) ?? await sampleDrain.getFirstSample();
+			if (!keySample) {
 				return;
 			}
 
-			let currentChunk: Chunk | null = keyChunk;
+			let currentSample: Sample | null = keySample;
 
-			let chunksEndTimestamp = Infinity;
+			let samplesEndTimestamp = Infinity;
 			if (endTimestamp < Infinity) {
-				// When an end timestamp is set, we cannot simply use that for the chunk iterator due to out-of-order
-				// frames (B-frames). Instead, we'll need to keep decoding chunks until we get a frame that exceeds
+				// When an end timestamp is set, we cannot simply use that for the sample iterator due to out-of-order
+				// frames (B-frames). Instead, we'll need to keep decoding samples until we get a frame that exceeds
 				// this end time. However, we can still put a bound on it: Since key frames are by definition never
 				// out of order, we can stop at the first key frame after the end timestamp.
-				const endFrame = await chunkDrain.getChunk(endTimestamp);
-				const endKeyFrame = !endFrame
+				const endSample = await sampleDrain.getSample(endTimestamp);
+				const endKeySample = !endSample
 					? null
-					: endFrame.type === 'key' && endFrame.timestamp / 1e6 === endTimestamp
-						? endFrame
-						: await chunkDrain.getNextKeyChunk(endFrame);
+					: endSample.type === 'key' && endSample.timestamp === endTimestamp
+						? endSample
+						: await sampleDrain.getNextKeySample(endSample);
 
-				if (endKeyFrame) {
-					chunksEndTimestamp = endKeyFrame.timestamp / 1e6;
+				if (endKeySample) {
+					samplesEndTimestamp = endKeySample.timestamp;
 				}
 			}
 
-			const chunks = chunkDrain.chunks(keyChunk, chunksEndTimestamp);
-			await chunks.next(); // Skip the start chunk as we already have it
+			const samples = sampleDrain.samples(keySample, samplesEndTimestamp);
+			await samples.next(); // Skip the start sample as we already have it
 
-			while (currentChunk && !ended) {
+			while (currentSample && !ended) {
 				if (frameQueue.length + decoder.getDecodeQueueSize() > MAX_QUEUE_SIZE) {
 					({ promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers());
 					await queueDequeue;
 					continue;
 				}
 
-				decoder.decode(currentChunk);
+				decoder.decode(currentSample);
 
-				const chunkResult = await chunks.next();
-				if (chunkResult.done) {
+				const sampleResult = await samples.next();
+				if (sampleResult.done) {
 					break;
 				}
 
-				currentChunk = chunkResult.value;
+				currentSample = sampleResult.value;
 			}
 
-			await chunks.return();
+			await samples.return();
 
 			if (!terminated) await decoder.flush();
 			decoder.close();
@@ -493,8 +332,178 @@ export abstract class BaseMediaFrameDrain<
 				onQueueNotEmpty();
 
 				for (const frame of frameQueue) {
-					frame.close();
+					frame.frame.close();
 				}
+
+				return { value: undefined, done: true };
+			},
+			async throw(error) {
+				throw error;
+			},
+			[Symbol.asyncIterator]() {
+				return this;
+			},
+		};
+	}
+
+	protected mediaFramesAtTimestamps(
+		timestamps: AnyIterable<number>,
+	): AsyncGenerator<WrappedFrame | null, void, unknown> {
+		validateAnyIterable(timestamps);
+		const timestampIterator = toAsyncIterator(timestamps);
+		const timestampsOfInterest: number[] = [];
+
+		const MAX_QUEUE_SIZE = 8;
+		const frameQueue: (WrappedFrame | null)[] = [];
+		let { promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers();
+		let { promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers();
+		let decoderIsFlushed = false;
+		let terminated = false;
+
+		// This stores errors that are "out of band" in the sense that they didn't occur in the normal flow of this
+		// method but instead in a different context. This error should not go unnoticed and must be bubbled up to
+		// the consumer.
+		let outOfBandError = null as Error | null;
+
+		let lastUsedFrame = null as WrappedFrame | null;
+		const pushToQueue = (frame: WrappedFrame | null) => {
+			frameQueue.push(frame);
+			onQueueNotEmpty();
+			({ promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers());
+		};
+
+		// The following is the "pump" process that keeps pumping samples into the decoder
+		(async () => {
+			const decoderError = new Error();
+			const decoder = await this._createDecoder((wrappedFrame) => {
+				onQueueDequeue();
+
+				if (terminated) {
+					wrappedFrame.frame.close();
+					return;
+				}
+
+				let frameUsed = false;
+				while (timestampsOfInterest.length > 0 && timestampsOfInterest[0] === wrappedFrame.timestamp) {
+					pushToQueue(this._duplicateFrame(wrappedFrame));
+					timestampsOfInterest.shift();
+					frameUsed = true;
+				}
+
+				if (frameUsed) {
+					lastUsedFrame?.frame.close();
+					lastUsedFrame = wrappedFrame;
+				} else {
+					wrappedFrame.frame.close();
+				}
+			}, (error) => {
+				if (!outOfBandError) {
+					error.stack = decoderError.stack; // Provide a more useful stack trace
+					outOfBandError = error;
+					onQueueNotEmpty();
+				}
+			});
+
+			const sampleDrain = this._createSampleDrain();
+			let lastKeySample: Sample | null = null;
+			let lastSample: Sample | null = null;
+
+			for await (const timestamp of timestampIterator) {
+				validateTimestamp(timestamp);
+
+				while (frameQueue.length + decoder.getDecodeQueueSize() > MAX_QUEUE_SIZE && !terminated) {
+					({ promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers());
+					await queueDequeue;
+				}
+
+				if (terminated) {
+					break;
+				}
+
+				const targetSample = await sampleDrain.getSample(timestamp);
+				if (!targetSample) {
+					pushToQueue(null);
+					continue;
+				}
+
+				const keySample = await sampleDrain.getKeySample(timestamp);
+				if (!keySample) {
+					pushToQueue(null);
+					continue;
+				}
+
+				timestampsOfInterest.push(targetSample.timestamp);
+
+				if (
+					lastKeySample
+					&& keySample.timestamp === lastKeySample.timestamp
+					&& targetSample.timestamp >= lastSample!.timestamp
+				) {
+					assert(lastSample);
+
+					if (targetSample.timestamp === lastSample.timestamp && timestampsOfInterest.length === 1) {
+						// Special case: We have a repeat sample, but the frame for that sample has already been
+						// decoded. Therefore, we need to push the frame here instead of in the decoder callback.
+						if (lastUsedFrame) {
+							pushToQueue(this._duplicateFrame(lastUsedFrame));
+						}
+						timestampsOfInterest.shift();
+					}
+				} else {
+					lastKeySample = keySample;
+					lastSample = keySample;
+					decoder.decode(keySample);
+				}
+
+				while (lastSample.timestamp !== targetSample.timestamp) {
+					const nextSample = await sampleDrain.getNextSample(lastSample);
+					assert(nextSample);
+
+					lastSample = nextSample;
+					decoder.decode(nextSample);
+				}
+			}
+
+			if (!terminated) await decoder.flush();
+			decoder.close();
+
+			decoderIsFlushed = true;
+			onQueueNotEmpty(); // To unstuck the generator
+		})().catch((error: Error) => {
+			if (!outOfBandError) {
+				outOfBandError = error;
+				onQueueNotEmpty();
+			}
+		});
+
+		return {
+			async next() {
+				while (true) {
+					if (terminated) {
+						return { value: undefined, done: true };
+					} else if (outOfBandError) {
+						throw outOfBandError;
+					} else if (frameQueue.length > 0) {
+						const value = frameQueue.shift();
+						assert(value !== undefined);
+						onQueueDequeue();
+						return { value, done: false };
+					} else if (!decoderIsFlushed) {
+						await queueNotEmpty;
+					} else {
+						return { value: undefined, done: true };
+					}
+				}
+			},
+			async return() {
+				terminated = true;
+				onQueueDequeue();
+				onQueueNotEmpty();
+
+				for (const frame of frameQueue) {
+					frame?.frame.close();
+				}
+				lastUsedFrame?.frame.close();
 
 				return { value: undefined, done: true };
 			},
@@ -509,7 +518,7 @@ export abstract class BaseMediaFrameDrain<
 }
 
 /** @public */
-export class EncodedVideoChunkDrain extends BaseChunkDrain<EncodedVideoChunk> {
+export class EncodedVideoSampleDrain extends BaseSampleDrain<EncodedVideoSample> {
 	/** @internal */
 	_videoTrack: InputVideoTrack;
 
@@ -523,51 +532,64 @@ export class EncodedVideoChunkDrain extends BaseChunkDrain<EncodedVideoChunk> {
 		this._videoTrack = videoTrack;
 	}
 
-	getFirstChunk(options: ChunkRetrievalOptions = {}) {
-		validateChunkRetrievalOptions(options);
-		return this._videoTrack._backing.getFirstChunk(options);
+	getFirstSample(options: SampleRetrievalOptions = {}) {
+		validateSampleRetrievalOptions(options);
+		return this._videoTrack._backing.getFirstSample(options);
 	}
 
-	getChunk(timestamp: number, options: ChunkRetrievalOptions = {}) {
+	getSample(timestamp: number, options: SampleRetrievalOptions = {}) {
 		validateTimestamp(timestamp);
-		validateChunkRetrievalOptions(options);
-		return this._videoTrack._backing.getChunk(timestamp, options);
+		validateSampleRetrievalOptions(options);
+		return this._videoTrack._backing.getSample(timestamp, options);
 	}
 
-	getNextChunk(chunk: EncodedVideoChunk, options: ChunkRetrievalOptions = {}) {
-		if (!(chunk instanceof EncodedVideoChunk)) {
-			throw new TypeError('chunk must be an EncodedVideoChunk.');
+	getNextSample(sample: EncodedVideoSample, options: SampleRetrievalOptions = {}) {
+		if (!(sample instanceof EncodedVideoSample)) {
+			throw new TypeError('sample must be an EncodedVideoSample.');
 		}
-		validateChunkRetrievalOptions(options);
-		return this._videoTrack._backing.getNextChunk(chunk, options);
+		validateSampleRetrievalOptions(options);
+		return this._videoTrack._backing.getNextSample(sample, options);
 	}
 
-	getKeyChunk(timestamp: number, options: ChunkRetrievalOptions = {}) {
+	getKeySample(timestamp: number, options: SampleRetrievalOptions = {}) {
 		validateTimestamp(timestamp);
-		validateChunkRetrievalOptions(options);
-		return this._videoTrack._backing.getKeyChunk(timestamp, options);
+		validateSampleRetrievalOptions(options);
+		return this._videoTrack._backing.getKeySample(timestamp, options);
 	}
 
-	getNextKeyChunk(chunk: EncodedVideoChunk, options: ChunkRetrievalOptions = {}) {
-		if (!(chunk instanceof EncodedVideoChunk)) {
-			throw new TypeError('chunk must be an EncodedVideoChunk.');
+	getNextKeySample(sample: EncodedVideoSample, options: SampleRetrievalOptions = {}) {
+		if (!(sample instanceof EncodedVideoSample)) {
+			throw new TypeError('sample must be an EncodedVideoSample.');
 		}
-		validateChunkRetrievalOptions(options);
-		return this._videoTrack._backing.getNextKeyChunk(chunk, options);
+		validateSampleRetrievalOptions(options);
+		return this._videoTrack._backing.getNextKeySample(sample, options);
 	}
 }
 
-class VideoDecoderWrapper extends DecoderWrapper<EncodedVideoChunk, VideoFrame> {
+class VideoDecoderWrapper extends DecoderWrapper<EncodedVideoSample, VideoFrame> {
 	decoder: VideoDecoder;
+	pendingSamples: EncodedVideoSample[] = [];
 
 	constructor(
-		onFrame: (frame: VideoFrame) => unknown,
+		onFrame: (frame: WrappedMediaFrame<VideoFrame>) => unknown,
 		onError: (error: DOMException) => unknown,
 		decoderConfig: VideoDecoderConfig,
 	) {
 		super(onFrame, onError);
 
-		this.decoder = new VideoDecoder({ output: onFrame, error: onError });
+		this.decoder = new VideoDecoder({
+			output: (frame) => {
+				const sample = this.pendingSamples.shift();
+				assert(sample);
+
+				onFrame({
+					frame,
+					timestamp: sample.timestamp,
+					duration: sample.duration,
+				});
+			},
+			error: onError,
+		});
 		this.decoder.configure(decoderConfig);
 	}
 
@@ -575,8 +597,12 @@ class VideoDecoderWrapper extends DecoderWrapper<EncodedVideoChunk, VideoFrame> 
 		return this.decoder.decodeQueueSize;
 	}
 
-	decode(chunk: EncodedVideoChunk) {
-		this.decoder.decode(chunk);
+	decode(sample: EncodedVideoSample) {
+		// We know the decoder spits out frames in sorted order, so we need to insert the sample in the right place
+		const insertionIndex = binarySearchLessOrEqual(this.pendingSamples, sample.timestamp, x => x.timestamp);
+		this.pendingSamples.splice(insertionIndex + 1, 0, sample);
+
+		this.decoder.decode(sample.toEncodedVideoChunk());
 	}
 
 	flush() {
@@ -589,7 +615,7 @@ class VideoDecoderWrapper extends DecoderWrapper<EncodedVideoChunk, VideoFrame> 
 }
 
 /** @public */
-export class VideoFrameDrain extends BaseMediaFrameDrain<EncodedVideoChunk, VideoFrame> {
+export class VideoFrameDrain extends BaseMediaFrameDrain<EncodedVideoSample, VideoFrame> {
 	/** @internal */
 	_videoTrack: InputVideoTrack;
 
@@ -604,7 +630,10 @@ export class VideoFrameDrain extends BaseMediaFrameDrain<EncodedVideoChunk, Vide
 	}
 
 	/** @internal */
-	async _createDecoder(onFrame: (frame: VideoFrame) => unknown, onError: (error: DOMException) => unknown) {
+	async _createDecoder(
+		onFrame: (frame: WrappedMediaFrame<VideoFrame>) => unknown,
+		onError: (error: DOMException) => unknown,
+	) {
 		if (!(await this._videoTrack.canDecode())) {
 			throw new Error(
 				'This video track cannot be decoded by this browser. Make sure to check decodability before using'
@@ -619,8 +648,8 @@ export class VideoFrameDrain extends BaseMediaFrameDrain<EncodedVideoChunk, Vide
 	}
 
 	/** @internal */
-	_createChunkDrain() {
-		return new EncodedVideoChunkDrain(this._videoTrack);
+	_createSampleDrain() {
+		return new EncodedVideoSampleDrain(this._videoTrack);
 	}
 
 	async getFrame(timestamp: number) {
@@ -677,7 +706,9 @@ export class CanvasDrain {
 	}
 
 	/** @internal */
-	async _videoFrameToWrappedCanvas(frame: VideoFrame): Promise<WrappedCanvas> {
+	async _videoFrameToWrappedCanvas(
+		frame: WrappedMediaFrame<VideoFrame>,
+	): Promise<WrappedCanvas> {
 		const width = this._dimensions?.width ?? await this._videoTrack.getDisplayWidth();
 		const height = this._dimensions?.height ?? await this._videoTrack.getDisplayHeight();
 		const rotation = await this._videoTrack.getRotation();
@@ -695,15 +726,15 @@ export class CanvasDrain {
 
 		const [imageWidth, imageHeight] = rotation % 180 === 0 ? [width, height] : [height, width];
 
-		context.drawImage(frame, (width - imageWidth) / 2, (height - imageHeight) / 2, imageWidth, imageHeight);
+		context.drawImage(frame.frame, (width - imageWidth) / 2, (height - imageHeight) / 2, imageWidth, imageHeight);
 
 		const result = {
 			canvas,
-			timestamp: frame.timestamp / 1e6,
-			duration: (frame.duration ?? 0) / 1e6,
+			timestamp: frame.timestamp,
+			duration: frame.duration,
 		};
 
-		frame.close();
+		frame.frame.close();
 		return result;
 	}
 
@@ -730,7 +761,7 @@ export class CanvasDrain {
 }
 
 /** @public */
-export class EncodedAudioChunkDrain extends BaseChunkDrain<EncodedAudioChunk> {
+export class EncodedAudioSampleDrain extends BaseSampleDrain<EncodedAudioSample> {
 	/** @internal */
 	_audioTrack: InputAudioTrack;
 
@@ -744,51 +775,61 @@ export class EncodedAudioChunkDrain extends BaseChunkDrain<EncodedAudioChunk> {
 		this._audioTrack = audioTrack;
 	}
 
-	getFirstChunk(options: ChunkRetrievalOptions = {}) {
-		validateChunkRetrievalOptions(options);
-		return this._audioTrack._backing.getFirstChunk(options);
+	getFirstSample(options: SampleRetrievalOptions = {}) {
+		validateSampleRetrievalOptions(options);
+		return this._audioTrack._backing.getFirstSample(options);
 	}
 
-	getChunk(timestamp: number, options: ChunkRetrievalOptions = {}) {
+	getSample(timestamp: number, options: SampleRetrievalOptions = {}) {
 		validateTimestamp(timestamp);
-		validateChunkRetrievalOptions(options);
-		return this._audioTrack._backing.getChunk(timestamp, options);
+		validateSampleRetrievalOptions(options);
+		return this._audioTrack._backing.getSample(timestamp, options);
 	}
 
-	getNextChunk(chunk: EncodedAudioChunk, options: ChunkRetrievalOptions = {}) {
-		if (!(chunk instanceof EncodedAudioChunk)) {
-			throw new TypeError('chunk must be an EncodedAudioChunk.');
+	getNextSample(sample: EncodedAudioSample, options: SampleRetrievalOptions = {}) {
+		if (!(sample instanceof EncodedAudioSample)) {
+			throw new TypeError('sample must be an EncodedAudioSample.');
 		}
-		validateChunkRetrievalOptions(options);
-		return this._audioTrack._backing.getNextChunk(chunk, options);
+		validateSampleRetrievalOptions(options);
+		return this._audioTrack._backing.getNextSample(sample, options);
 	}
 
-	getKeyChunk(timestamp: number, options: ChunkRetrievalOptions = {}) {
+	getKeySample(timestamp: number, options: SampleRetrievalOptions = {}) {
 		validateTimestamp(timestamp);
-		validateChunkRetrievalOptions(options);
-		return this._audioTrack._backing.getKeyChunk(timestamp, options);
+		validateSampleRetrievalOptions(options);
+		return this._audioTrack._backing.getKeySample(timestamp, options);
 	}
 
-	getNextKeyChunk(chunk: EncodedAudioChunk, options: ChunkRetrievalOptions = {}) {
-		if (!(chunk instanceof EncodedAudioChunk)) {
-			throw new TypeError('chunk must be an EncodedAudioChunk.');
+	getNextKeySample(sample: EncodedAudioSample, options: SampleRetrievalOptions = {}) {
+		if (!(sample instanceof EncodedAudioSample)) {
+			throw new TypeError('sample must be an EncodedAudioSample.');
 		}
-		validateChunkRetrievalOptions(options);
-		return this._audioTrack._backing.getNextKeyChunk(chunk, options);
+		validateSampleRetrievalOptions(options);
+		return this._audioTrack._backing.getNextKeySample(sample, options);
 	}
 }
 
-class AudioDecoderWrapper extends DecoderWrapper<EncodedAudioChunk, AudioData> {
+class AudioDecoderWrapper extends DecoderWrapper<EncodedAudioSample, AudioData> {
 	decoder: AudioDecoder;
+	pendingSamples: EncodedAudioSample[] = [];
 
 	constructor(
-		onData: (data: AudioData) => unknown,
+		onData: (data: WrappedMediaFrame<AudioData>) => unknown,
 		onError: (error: DOMException) => unknown,
 		decoderConfig: AudioDecoderConfig,
 	) {
 		super(onData, onError);
 
-		this.decoder = new AudioDecoder({ output: onData, error: onError });
+		this.decoder = new AudioDecoder({ output: (data) => {
+			const sample = this.pendingSamples.shift();
+			assert(sample);
+
+			onData({
+				frame: data,
+				timestamp: sample.timestamp,
+				duration: sample.duration,
+			});
+		}, error: onError });
 		this.decoder.configure(decoderConfig);
 	}
 
@@ -796,8 +837,12 @@ class AudioDecoderWrapper extends DecoderWrapper<EncodedAudioChunk, AudioData> {
 		return this.decoder.decodeQueueSize;
 	}
 
-	decode(chunk: EncodedAudioChunk) {
-		this.decoder.decode(chunk);
+	decode(sample: EncodedAudioSample) {
+		// We know the decoder spits out data in sorted order, so we need to insert the sample in the right place
+		const insertionIndex = binarySearchLessOrEqual(this.pendingSamples, sample.timestamp, x => x.timestamp);
+		this.pendingSamples.splice(insertionIndex + 1, 0, sample);
+
+		this.decoder.decode(sample.toEncodedAudioChunk());
 	}
 
 	flush() {
@@ -813,7 +858,7 @@ const PCM_CODEC_REGEX = /^pcm-([usf])(\d+)+(be)?$/;
 
 // There are a lot of PCM variants not natively supported by the browser and by AudioData. Therefore we need a simple
 // decoder that maps any input PCM format into a PCM format supported by the browser.
-class PcmAudioDecoderWrapper extends DecoderWrapper<EncodedAudioChunk, AudioData> {
+class PcmAudioDecoderWrapper extends DecoderWrapper<EncodedAudioSample, AudioData> {
 	codec: PcmAudioCodec;
 
 	inputSampleSize: 1 | 2 | 3 | 4;
@@ -824,7 +869,7 @@ class PcmAudioDecoderWrapper extends DecoderWrapper<EncodedAudioChunk, AudioData
 	writeOutputValue: (view: DataView, byteOffset: number, value: number) => void;
 
 	constructor(
-		onData: (data: AudioData) => unknown,
+		onData: (data: WrappedMediaFrame<AudioData>) => unknown,
 		onError: (error: DOMException) => unknown,
 		public decoderConfig: AudioDecoderConfig,
 	) {
@@ -918,12 +963,10 @@ class PcmAudioDecoderWrapper extends DecoderWrapper<EncodedAudioChunk, AudioData
 		return 0;
 	}
 
-	decode(chunk: EncodedAudioChunk) {
-		const inputBuffer = new ArrayBuffer(chunk.byteLength);
-		const inputView = new DataView(inputBuffer);
-		chunk.copyTo(inputBuffer);
+	decode(sample: EncodedAudioSample) {
+		const inputView = new DataView(sample.data.buffer, sample.data.byteOffset, sample.byteLength);
 
-		const numberOfFrames = chunk.byteLength / this.decoderConfig.numberOfChannels / this.inputSampleSize;
+		const numberOfFrames = sample.byteLength / this.decoderConfig.numberOfChannels / this.inputSampleSize;
 
 		const outputBufferSize = numberOfFrames * this.decoderConfig.numberOfChannels * this.outputSampleSize;
 		const outputBuffer = new ArrayBuffer(outputBufferSize);
@@ -943,11 +986,15 @@ class PcmAudioDecoderWrapper extends DecoderWrapper<EncodedAudioChunk, AudioData
 			numberOfChannels: this.decoderConfig.numberOfChannels,
 			sampleRate: this.decoderConfig.sampleRate,
 			numberOfFrames,
-			timestamp: chunk.timestamp,
+			timestamp: sample.timestamp,
 		});
 
 		// Since all other decoders are async, we'll make this one behave async as well
-		queueMicrotask(() => this.onMedia(audioData));
+		queueMicrotask(() => this.onFrame({
+			frame: audioData,
+			timestamp: sample.timestamp,
+			duration: sample.duration,
+		}));
 	}
 
 	async flush() {
@@ -960,7 +1007,7 @@ class PcmAudioDecoderWrapper extends DecoderWrapper<EncodedAudioChunk, AudioData
 }
 
 /** @public */
-export class AudioDataDrain extends BaseMediaFrameDrain<EncodedAudioChunk, AudioData> {
+export class AudioDataDrain extends BaseMediaFrameDrain<EncodedAudioSample, AudioData> {
 	/** @internal */
 	_audioTrack: InputAudioTrack;
 
@@ -975,7 +1022,10 @@ export class AudioDataDrain extends BaseMediaFrameDrain<EncodedAudioChunk, Audio
 	}
 
 	/** @internal */
-	async _createDecoder(onData: (data: AudioData) => unknown, onError: (error: DOMException) => unknown) {
+	async _createDecoder(
+		onData: (data: WrappedMediaFrame<AudioData>) => unknown,
+		onError: (error: DOMException) => unknown,
+	) {
 		if (!(await this._audioTrack.canDecode())) {
 			throw new Error(
 				'This audio track cannot be decoded by this browser. Make sure to check decodability before using'
@@ -994,8 +1044,8 @@ export class AudioDataDrain extends BaseMediaFrameDrain<EncodedAudioChunk, Audio
 	}
 
 	/** @internal */
-	_createChunkDrain() {
-		return new EncodedAudioChunkDrain(this._audioTrack);
+	_createSampleDrain() {
+		return new EncodedAudioSampleDrain(this._audioTrack);
 	}
 
 	async getData(timestamp: number) {
@@ -1020,6 +1070,7 @@ export class AudioDataDrain extends BaseMediaFrameDrain<EncodedAudioChunk, Audio
 export type WrappedAudioBuffer = {
 	buffer: AudioBuffer;
 	timestamp: number;
+	duration: number;
 };
 
 /** @public */
@@ -1036,30 +1087,28 @@ export class AudioBufferDrain {
 	}
 
 	/** @internal */
-	_audioDataToWrappedArrayBuffer(data: AudioData): WrappedAudioBuffer {
+	_audioDataToWrappedArrayBuffer(data: WrappedMediaFrame<AudioData>): WrappedAudioBuffer {
 		const audioBuffer = new AudioBuffer({
-			numberOfChannels: data.numberOfChannels,
-			length: data.numberOfFrames,
-			sampleRate: data.sampleRate,
+			numberOfChannels: data.frame.numberOfChannels,
+			length: data.frame.numberOfFrames,
+			sampleRate: data.frame.sampleRate,
 		});
 
 		// All user agents are required to support conversion to f32-planar
-		const dataBytes = new Float32Array(data.allocationSize({ planeIndex: 0, format: 'f32-planar' }) / 4);
+		const dataBytes = new Float32Array(data.frame.allocationSize({ planeIndex: 0, format: 'f32-planar' }) / 4);
 
-		for (let i = 0; i < data.numberOfChannels; i++) {
-			data.copyTo(dataBytes, { planeIndex: i, format: 'f32-planar' });
+		for (let i = 0; i < data.frame.numberOfChannels; i++) {
+			data.frame.copyTo(dataBytes, { planeIndex: i, format: 'f32-planar' });
 			audioBuffer.copyToChannel(dataBytes, i);
 		}
 
-		const sampleDuration = 1 / data.sampleRate;
-
 		const result = {
 			buffer: audioBuffer,
-			// Rounding the timestamp based on the sample duration removes audio playback artifacts
-			timestamp: Math.round(data.timestamp / 1e6 / sampleDuration) * sampleDuration,
+			timestamp: data.timestamp,
+			duration: data.duration,
 		};
 
-		data.close();
+		data.frame.close();
 		return result;
 	}
 

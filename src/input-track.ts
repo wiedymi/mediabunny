@@ -1,6 +1,7 @@
 import { AudioCodec, MediaCodec, VideoCodec } from './codec';
-import { ChunkRetrievalOptions } from './media-drain';
+import { SampleRetrievalOptions } from './media-drain';
 import { Rotation } from './misc';
+import { EncodedAudioSample, EncodedVideoSample } from './sample';
 
 export interface InputTrackBacking {
 	getCodec(): Promise<MediaCodec | null>;
@@ -40,11 +41,11 @@ export interface InputVideoTrackBacking extends InputTrackBacking {
 	getCodedHeight(): Promise<number>;
 	getRotation(): Promise<Rotation>;
 	getDecoderConfig(): Promise<VideoDecoderConfig | null>;
-	getFirstChunk(options: ChunkRetrievalOptions): Promise<EncodedVideoChunk | null>;
-	getChunk(timestamp: number, options: ChunkRetrievalOptions): Promise<EncodedVideoChunk | null>;
-	getNextChunk(chunk: EncodedVideoChunk, options: ChunkRetrievalOptions): Promise<EncodedVideoChunk | null>;
-	getKeyChunk(timestamp: number, options: ChunkRetrievalOptions): Promise<EncodedVideoChunk | null>;
-	getNextKeyChunk(chunk: EncodedVideoChunk, options: ChunkRetrievalOptions): Promise<EncodedVideoChunk | null>;
+	getFirstSample(options: SampleRetrievalOptions): Promise<EncodedVideoSample | null>;
+	getSample(timestamp: number, options: SampleRetrievalOptions): Promise<EncodedVideoSample | null>;
+	getNextSample(sample: EncodedVideoSample, options: SampleRetrievalOptions): Promise<EncodedVideoSample | null>;
+	getKeySample(timestamp: number, options: SampleRetrievalOptions): Promise<EncodedVideoSample | null>;
+	getNextKeySample(sample: EncodedVideoSample, options: SampleRetrievalOptions): Promise<EncodedVideoSample | null>;
 }
 
 /** @public */
@@ -115,11 +116,11 @@ export interface InputAudioTrackBacking extends InputTrackBacking {
 	getNumberOfChannels(): Promise<number>;
 	getSampleRate(): Promise<number>;
 	getDecoderConfig(): Promise<AudioDecoderConfig | null>;
-	getFirstChunk(options: ChunkRetrievalOptions): Promise<EncodedAudioChunk | null>;
-	getChunk(timestamp: number, options: ChunkRetrievalOptions): Promise<EncodedAudioChunk | null>;
-	getNextChunk(chunk: EncodedAudioChunk, options: ChunkRetrievalOptions): Promise<EncodedAudioChunk | null>;
-	getKeyChunk(timestamp: number, options: ChunkRetrievalOptions): Promise<EncodedAudioChunk | null>;
-	getNextKeyChunk(chunk: EncodedAudioChunk, options: ChunkRetrievalOptions): Promise<EncodedAudioChunk | null>;
+	getFirstSample(options: SampleRetrievalOptions): Promise<EncodedAudioSample | null>;
+	getSample(timestamp: number, options: SampleRetrievalOptions): Promise<EncodedAudioSample | null>;
+	getNextSample(sample: EncodedAudioSample, options: SampleRetrievalOptions): Promise<EncodedAudioSample | null>;
+	getKeySample(timestamp: number, options: SampleRetrievalOptions): Promise<EncodedAudioSample | null>;
+	getNextKeySample(sample: EncodedAudioSample, options: SampleRetrievalOptions): Promise<EncodedAudioSample | null>;
 }
 
 /** @public */

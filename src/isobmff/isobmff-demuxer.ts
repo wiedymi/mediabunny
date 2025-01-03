@@ -19,7 +19,7 @@ import {
 	InputVideoTrack,
 	InputVideoTrackBacking,
 } from '../input-track';
-import { ChunkRetrievalOptions } from '../media-drain';
+import { SampleRetrievalOptions } from '../media-drain';
 import {
 	assert,
 	COLOR_PRIMARIES_MAP_INVERSE,
@@ -34,6 +34,7 @@ import {
 	findLastIndex,
 } from '../misc';
 import { Reader } from '../reader';
+import { EncodedAudioSample, EncodedVideoSample, PLACEHOLDER_DATA, SampleType } from '../sample';
 import { IsobmffReader } from './isobmff-reader';
 
 type InternalTrack = {
@@ -1637,9 +1638,11 @@ export class IsobmffDemuxer extends Demuxer {
 	}
 }
 
-abstract class IsobmffTrackBacking<Chunk extends EncodedVideoChunk | EncodedAudioChunk> implements InputTrackBacking {
-	chunkToSampleIndex = new WeakMap<Chunk, number>();
-	chunkToFragmentLocation = new WeakMap<Chunk, {
+abstract class IsobmffTrackBacking<
+	Sample extends EncodedVideoSample | EncodedAudioSample,
+> implements InputTrackBacking {
+	sampleToSampleIndex = new WeakMap<Sample, number>();
+	sampleToFragmentLocation = new WeakMap<Sample, {
 		fragment: Fragment;
 		sampleIndex: number;
 	}>();
@@ -1651,18 +1654,19 @@ abstract class IsobmffTrackBacking<Chunk extends EncodedVideoChunk | EncodedAudi
 	}
 
 	async computeDuration() {
-		const lastChunk = await this.getChunk(Infinity, { metadataOnly: true });
-		return ((lastChunk?.timestamp ?? 0) + (lastChunk?.duration ?? 0)) / 1e6;
+		const lastSample = await this.getSample(Infinity, { metadataOnly: true });
+		return (lastSample?.timestamp ?? 0) + (lastSample?.duration ?? 0);
 	}
 
-	abstract createChunk(
+	abstract createSample(
 		data: Uint8Array,
+		byteLength: number,
+		type: SampleType,
 		timestamp: number,
 		duration: number,
-		isKeyFrame: boolean,
-	): Chunk;
+	): Sample;
 
-	async getFirstChunk(options: ChunkRetrievalOptions) {
+	async getFirstSample(options: SampleRetrievalOptions) {
 		if (this.internalTrack.demuxer.isFragmented) {
 			return this.performFragmentedLookup(
 				() => {
@@ -1679,24 +1683,24 @@ abstract class IsobmffTrackBacking<Chunk extends EncodedVideoChunk | EncodedAudi
 			);
 		}
 
-		return this.fetchChunkForSampleIndex(0, options);
+		return this.fetchSampleForSampleIndex(0, options);
 	}
 
-	private roundToMicrosecond(timestamp: number) {
-		// We transform the timestamp so that chunk retrieval behaves expectedly: All chunks returned have a timestamp
-		// that's floored to the microseconds, and that timestamp may be before the actual timestamp. But since the
-		// actual timestamp is never communicated to the outside, chunk retrieval should work like the timestamp is
-		// exactly equal to its floored version. This means, when we retrieve the chunk for timestamp 0.333333, but the
-		// chunk's true, unrounded timestamp is 1/3, then we would not retrieve that chunk, despite the chunk having a
-		// floored timestamp of 0.333333. That's why we transform the search timestamp by first flooring it to the
-		// microsecond, and then adding "1-eps" to it to make sure get all chunks whose timestamps will round down to
-		// a value included by the search timestamp.
-		return (Math.floor(timestamp * 1e6) + 0.99999999) / 1e6;
+	private intoTimescale(timestamp: number) {
+		const result = timestamp * this.internalTrack.timescale;
+		const rounded = Math.round(result);
+
+		if (Math.abs(1 - (result / rounded)) < 10 * Number.EPSILON) {
+			// The result is very close to an integer, meaning the number likely originated by an integer being divided
+			// by the timescale. For stability, it's best to return the integer in this case.
+			return rounded;
+		}
+
+		return result;
 	}
 
-	async getChunk(timestamp: number, options: ChunkRetrievalOptions) {
-		timestamp = this.roundToMicrosecond(timestamp);
-		const timestampInTimescale = timestamp * this.internalTrack.timescale;
+	async getSample(timestamp: number, options: SampleRetrievalOptions) {
+		const timestampInTimescale = this.intoTimescale(timestamp);
 
 		if (this.internalTrack.demuxer.isFragmented) {
 			return this.performFragmentedLookup(
@@ -1708,19 +1712,19 @@ abstract class IsobmffTrackBacking<Chunk extends EncodedVideoChunk | EncodedAudi
 		} else {
 			const sampleTable = this.internalTrack.demuxer.getSampleTableForTrack(this.internalTrack);
 			const sampleIndex = getSampleIndexForTimestamp(sampleTable, timestampInTimescale);
-			return this.fetchChunkForSampleIndex(sampleIndex, options);
+			return this.fetchSampleForSampleIndex(sampleIndex, options);
 		}
 	}
 
-	async getNextChunk(chunk: Chunk, options: ChunkRetrievalOptions) {
+	async getNextSample(sample: Sample, options: SampleRetrievalOptions) {
 		if (this.internalTrack.demuxer.isFragmented) {
-			const locationInFragment = this.chunkToFragmentLocation.get(chunk);
+			const locationInFragment = this.sampleToFragmentLocation.get(sample);
 			if (locationInFragment === undefined) {
-				throw new Error('Chunk was not created from this track.');
+				throw new Error('Sample was not created from this track.');
 			}
 
 			const trackData = locationInFragment.fragment.trackData.get(this.internalTrack.id)!;
-			const sample = trackData.samples[locationInFragment.sampleIndex]!;
+			const fragmentSample = trackData.samples[locationInFragment.sampleIndex]!;
 
 			const fragmentIndex = binarySearchExact(
 				this.internalTrack.fragments,
@@ -1767,22 +1771,21 @@ abstract class IsobmffTrackBacking<Chunk extends EncodedVideoChunk | EncodedAudi
 						};
 					}
 				},
-				sample.presentationTimestamp,
+				fragmentSample.presentationTimestamp,
 				Infinity,
 				options,
 			);
 		}
 
-		const sampleIndex = this.chunkToSampleIndex.get(chunk);
+		const sampleIndex = this.sampleToSampleIndex.get(sample);
 		if (sampleIndex === undefined) {
-			throw new Error('Chunk was not created from this track.');
+			throw new Error('Sample was not created from this track.');
 		}
-		return this.fetchChunkForSampleIndex(sampleIndex + 1, options);
+		return this.fetchSampleForSampleIndex(sampleIndex + 1, options);
 	}
 
-	async getKeyChunk(timestamp: number, options: ChunkRetrievalOptions) {
-		timestamp = this.roundToMicrosecond(timestamp);
-		const timestampInTimescale = timestamp * this.internalTrack.timescale;
+	async getKeySample(timestamp: number, options: SampleRetrievalOptions) {
+		const timestampInTimescale = this.intoTimescale(timestamp);
 
 		if (this.internalTrack.demuxer.isFragmented) {
 			return this.performFragmentedLookup(
@@ -1798,18 +1801,18 @@ abstract class IsobmffTrackBacking<Chunk extends EncodedVideoChunk | EncodedAudi
 		const keyFrameSampleIndex = sampleIndex === -1
 			? -1
 			: getRelevantKeyframeIndexForSample(sampleTable, sampleIndex);
-		return this.fetchChunkForSampleIndex(keyFrameSampleIndex, options);
+		return this.fetchSampleForSampleIndex(keyFrameSampleIndex, options);
 	}
 
-	async getNextKeyChunk(chunk: Chunk, options: ChunkRetrievalOptions) {
+	async getNextKeySample(sample: Sample, options: SampleRetrievalOptions) {
 		if (this.internalTrack.demuxer.isFragmented) {
-			const locationInFragment = this.chunkToFragmentLocation.get(chunk);
+			const locationInFragment = this.sampleToFragmentLocation.get(sample);
 			if (locationInFragment === undefined) {
-				throw new Error('Chunk was not created from this track.');
+				throw new Error('Sample was not created from this track.');
 			}
 
 			const trackData = locationInFragment.fragment.trackData.get(this.internalTrack.id)!;
-			const sample = trackData.samples[locationInFragment.sampleIndex]!;
+			const fragmentSample = trackData.samples[locationInFragment.sampleIndex]!;
 
 			const fragmentIndex = binarySearchExact(
 				this.internalTrack.fragments,
@@ -1866,22 +1869,22 @@ abstract class IsobmffTrackBacking<Chunk extends EncodedVideoChunk | EncodedAudi
 						};
 					}
 				},
-				sample.presentationTimestamp,
+				fragmentSample.presentationTimestamp,
 				Infinity,
 				options,
 			);
 		}
 
-		const sampleIndex = this.chunkToSampleIndex.get(chunk);
+		const sampleIndex = this.sampleToSampleIndex.get(sample);
 		if (sampleIndex === undefined) {
-			throw new Error('Chunk was not created from this track.');
+			throw new Error('Sample was not created from this track.');
 		}
 		const sampleTable = this.internalTrack.demuxer.getSampleTableForTrack(this.internalTrack);
 		const nextKeyFrameSampleIndex = getNextKeyframeIndexForSample(sampleTable, sampleIndex);
-		return this.fetchChunkForSampleIndex(nextKeyFrameSampleIndex, options);
+		return this.fetchSampleForSampleIndex(nextKeyFrameSampleIndex, options);
 	}
 
-	private async fetchChunkForSampleIndex(sampleIndex: number, options: ChunkRetrievalOptions) {
+	private async fetchSampleForSampleIndex(sampleIndex: number, options: SampleRetrievalOptions) {
 		if (sampleIndex === -1) {
 			return null;
 		}
@@ -1894,7 +1897,7 @@ abstract class IsobmffTrackBacking<Chunk extends EncodedVideoChunk | EncodedAudi
 
 		let data: Uint8Array;
 		if (options.metadataOnly) {
-			data = new Uint8Array(0); // Placeholder buffer
+			data = PLACEHOLDER_DATA;
 		} else {
 			// Load the entire chunk
 			await this.internalTrack.demuxer.chunkReader.reader.loadRange(
@@ -1906,42 +1909,54 @@ abstract class IsobmffTrackBacking<Chunk extends EncodedVideoChunk | EncodedAudi
 			data = this.internalTrack.demuxer.chunkReader.readBytes(sampleInfo.sampleSize);
 		}
 
-		const timestamp = 1e6 * sampleInfo.presentationTimestamp / this.internalTrack.timescale;
-		const duration = 1e6 * sampleInfo.duration / this.internalTrack.timescale;
-		const chunk = this.createChunk(data, timestamp, duration, sampleInfo.isKeyFrame);
+		const timestamp = sampleInfo.presentationTimestamp / this.internalTrack.timescale;
+		const duration = sampleInfo.duration / this.internalTrack.timescale;
+		const sample = this.createSample(
+			data,
+			sampleInfo.sampleSize,
+			sampleInfo.isKeyFrame ? 'key' : 'delta',
+			timestamp,
+			duration,
+		);
 
-		this.chunkToSampleIndex.set(chunk, sampleIndex);
+		this.sampleToSampleIndex.set(sample, sampleIndex);
 
-		return chunk;
+		return sample;
 	}
 
-	private async fetchChunkInFragment(fragment: Fragment, sampleIndex: number, options: ChunkRetrievalOptions) {
+	private async fetchSampleInFragment(fragment: Fragment, sampleIndex: number, options: SampleRetrievalOptions) {
 		if (sampleIndex === -1) {
 			return null;
 		}
 
 		const trackData = fragment.trackData.get(this.internalTrack.id)!;
-		const sample = trackData.samples[sampleIndex];
-		assert(sample);
+		const fragmentSample = trackData.samples[sampleIndex];
+		assert(fragmentSample);
 
 		let data: Uint8Array;
 		if (options.metadataOnly) {
-			data = new Uint8Array(0); // Placeholder buffer
+			data = PLACEHOLDER_DATA;
 		} else {
 			// Load the entire fragment
 			await this.internalTrack.demuxer.chunkReader.reader.loadRange(fragment.dataStart, fragment.dataEnd);
 
-			this.internalTrack.demuxer.chunkReader.pos = sample.byteOffset;
-			data = this.internalTrack.demuxer.chunkReader.readBytes(sample.byteSize);
+			this.internalTrack.demuxer.chunkReader.pos = fragmentSample.byteOffset;
+			data = this.internalTrack.demuxer.chunkReader.readBytes(fragmentSample.byteSize);
 		}
 
-		const timestamp = 1e6 * sample.presentationTimestamp / this.internalTrack.timescale;
-		const duration = 1e6 * sample.duration / this.internalTrack.timescale;
-		const chunk = this.createChunk(data, timestamp, duration, sample.isKeyFrame);
+		const timestamp = fragmentSample.presentationTimestamp / this.internalTrack.timescale;
+		const duration = fragmentSample.duration / this.internalTrack.timescale;
+		const sample = this.createSample(
+			data,
+			fragmentSample.byteSize,
+			fragmentSample.isKeyFrame ? 'key' : 'delta',
+			timestamp,
+			duration,
+		);
 
-		this.chunkToFragmentLocation.set(chunk, { fragment, sampleIndex });
+		this.sampleToFragmentLocation.set(sample, { fragment, sampleIndex });
 
-		return chunk;
+		return sample;
 	}
 
 	private findSampleInFragmentsForTimestamp(timestampInTimescale: number) {
@@ -2009,7 +2024,7 @@ abstract class IsobmffTrackBacking<Chunk extends EncodedVideoChunk | EncodedAudi
 		searchTimestamp: number,
 		// The timestamp for which we know the correct sample will not come after it
 		latestTimestamp: number,
-		options: ChunkRetrievalOptions,
+		options: SampleRetrievalOptions,
 	) {
 		const demuxer = this.internalTrack.demuxer;
 		const release = await demuxer.fragmentLookupMutex.acquire(); // The algorithm requires exclusivity
@@ -2019,7 +2034,7 @@ abstract class IsobmffTrackBacking<Chunk extends EncodedVideoChunk | EncodedAudi
 			if (correctSampleFound) {
 				// The correct sample already exists, easy path.
 				const fragment = this.internalTrack.fragments[fragmentIndex]!;
-				return this.fetchChunkInFragment(fragment, sampleIndex, options);
+				return this.fetchSampleInFragment(fragment, sampleIndex, options);
 			}
 
 			const isobmffReader = demuxer.isobmffReader;
@@ -2101,7 +2116,7 @@ abstract class IsobmffTrackBacking<Chunk extends EncodedVideoChunk | EncodedAudi
 					const { fragmentIndex, sampleIndex, correctSampleFound } = getBestMatch();
 					if (correctSampleFound) {
 						const fragment = this.internalTrack.fragments[fragmentIndex]!;
-						return this.fetchChunkInFragment(fragment, sampleIndex, options);
+						return this.fetchSampleInFragment(fragment, sampleIndex, options);
 					}
 					if (fragmentIndex !== -1) {
 						bestFragmentIndex = fragmentIndex;
@@ -2115,7 +2130,7 @@ abstract class IsobmffTrackBacking<Chunk extends EncodedVideoChunk | EncodedAudi
 			if (bestFragmentIndex !== -1) {
 				// If we finished looping but didn't find a perfect match, still return the best match we found
 				const fragment = this.internalTrack.fragments[bestFragmentIndex]!;
-				return this.fetchChunkInFragment(fragment, bestSampleIndex, options);
+				return this.fetchSampleInFragment(fragment, bestSampleIndex, options);
 			}
 
 			return null;
@@ -2125,7 +2140,7 @@ abstract class IsobmffTrackBacking<Chunk extends EncodedVideoChunk | EncodedAudi
 	}
 }
 
-class IsobmffVideoTrackBacking extends IsobmffTrackBacking<EncodedVideoChunk> implements InputVideoTrackBacking {
+class IsobmffVideoTrackBacking extends IsobmffTrackBacking<EncodedVideoSample> implements InputVideoTrackBacking {
 	override internalTrack: InternalVideoTrack;
 
 	constructor(internalTrack: InternalVideoTrack) {
@@ -2163,17 +2178,18 @@ class IsobmffVideoTrackBacking extends IsobmffTrackBacking<EncodedVideoChunk> im
 		};
 	}
 
-	createChunk(data: Uint8Array, timestamp: number, duration: number, isKeyFrame: boolean) {
-		return new EncodedVideoChunk({
-			data,
-			timestamp,
-			duration,
-			type: isKeyFrame ? 'key' : 'delta',
-		});
+	createSample(
+		data: Uint8Array,
+		byteLength: number,
+		type: SampleType,
+		timestamp: number,
+		duration: number,
+	) {
+		return new EncodedVideoSample(data, type, timestamp, duration, byteLength);
 	}
 }
 
-class IsobmffAudioTrackBacking extends IsobmffTrackBacking<EncodedAudioChunk> implements InputAudioTrackBacking {
+class IsobmffAudioTrackBacking extends IsobmffTrackBacking<EncodedAudioSample> implements InputAudioTrackBacking {
 	override internalTrack: InternalAudioTrack;
 
 	constructor(internalTrack: InternalAudioTrack) {
@@ -2206,13 +2222,14 @@ class IsobmffAudioTrackBacking extends IsobmffTrackBacking<EncodedAudioChunk> im
 		};
 	}
 
-	createChunk(data: Uint8Array, timestamp: number, duration: number, isKeyFrame: boolean) {
-		return new EncodedAudioChunk({
-			data,
-			timestamp,
-			duration,
-			type: isKeyFrame ? 'key' : 'delta',
-		});
+	createSample(
+		data: Uint8Array,
+		byteLength: number,
+		type: SampleType,
+		timestamp: number,
+		duration: number,
+	) {
+		return new EncodedAudioSample(data, type, timestamp, duration, byteLength);
 	}
 }
 
