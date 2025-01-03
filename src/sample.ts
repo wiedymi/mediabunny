@@ -41,6 +41,22 @@ export class EncodedVideoSample {
 			duration: this.microsecondDuration,
 		});
 	}
+
+	static fromEncodedVideoChunk(chunk: EncodedVideoChunk) {
+		if (typeof EncodedVideoChunk === 'undefined') {
+			throw new Error('Your browser does not support EncodedVideoChunk.');
+		}
+
+		const data = new Uint8Array(chunk.byteLength);
+		chunk.copyTo(data);
+
+		return new EncodedVideoSample(
+			data,
+			chunk.type,
+			chunk.timestamp / 1e6,
+			(chunk.duration ?? 0) / 1e6,
+		);
+	}
 }
 
 /** @public */
@@ -80,5 +96,21 @@ export class EncodedAudioSample {
 			timestamp: this.microsecondTimestamp,
 			duration: this.microsecondDuration,
 		});
+	}
+
+	static fromEncodedAudioChunk(chunk: EncodedAudioChunk) {
+		if (typeof EncodedAudioChunk === 'undefined') {
+			throw new Error('Your browser does not support EncodedAudioChunk.');
+		}
+
+		const data = new Uint8Array(chunk.byteLength);
+		chunk.copyTo(data);
+
+		return new EncodedAudioSample(
+			data,
+			chunk.type as SampleType, // Typing is weird
+			chunk.timestamp / 1e6,
+			(chunk.duration ?? 0) / 1e6,
+		);
 	}
 }

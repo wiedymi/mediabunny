@@ -14,6 +14,7 @@ import { OutputAudioTrack, OutputSubtitleTrack, OutputTrack, OutputVideoTrack } 
 import { assert } from './misc';
 import { Muxer } from './muxer';
 import { SubtitleParser } from './subtitles';
+import { EncodedAudioSample, EncodedVideoSample } from './sample';
 
 /** @public */
 export abstract class MediaSource {
@@ -100,19 +101,18 @@ export abstract class VideoSource extends MediaSource {
 }
 
 /** @public */
-export class EncodedVideoChunkSource extends VideoSource {
+export class EncodedVideoSampleSource extends VideoSource {
 	constructor(codec: VideoCodec) {
 		super(codec);
 	}
 
-	digest(chunk: EncodedVideoChunk, meta?: EncodedVideoChunkMetadata) {
-		if (!(chunk instanceof EncodedVideoChunk)) {
-			// TODO add polyfill for browsers that don't have this
-			throw new TypeError('chunk must be an EncodedVideoChunk.');
+	digest(sample: EncodedVideoSample, meta?: EncodedVideoChunkMetadata) {
+		if (!(sample instanceof EncodedVideoSample)) {
+			throw new TypeError('sample must be an EncodedVideoSample.');
 		}
 
 		this._ensureValidDigest();
-		return this._connectedTrack!.output._muxer.addEncodedVideoChunk(this._connectedTrack!, chunk, meta);
+		return this._connectedTrack!.output._muxer.addEncodedVideoSample(this._connectedTrack!, sample, meta);
 	}
 }
 
@@ -212,7 +212,11 @@ class VideoEncoderWrapper {
 		this.encoder = new VideoEncoder({
 			output: (chunk, meta) => {
 				this.encodingConfig.onEncodedChunk?.(chunk, meta);
-				void this.muxer!.addEncodedVideoChunk(this.source._connectedTrack!, chunk, meta);
+				void this.muxer!.addEncodedVideoSample(
+					this.source._connectedTrack!,
+					EncodedVideoSample.fromEncodedVideoChunk(chunk),
+					meta,
+				);
 			},
 			error: this.encodingConfig.onEncodingError ?? (error => console.error('VideoEncoder error:', error)),
 		});
@@ -391,19 +395,18 @@ export abstract class AudioSource extends MediaSource {
 }
 
 /** @public */
-export class EncodedAudioChunkSource extends AudioSource {
+export class EncodedAudioSampleSource extends AudioSource {
 	constructor(codec: AudioCodec) {
 		super(codec);
 	}
 
-	digest(chunk: EncodedAudioChunk, meta?: EncodedAudioChunkMetadata) {
-		if (!(chunk instanceof EncodedAudioChunk)) {
-			// TODO add polyfill for browsers that don't have this
-			throw new TypeError('chunk must be an EncodedAudioChunk.');
+	digest(sample: EncodedAudioSample, meta?: EncodedAudioChunkMetadata) {
+		if (!(sample instanceof EncodedAudioSample)) {
+			throw new TypeError('chunk must be an EncodedAudioSample.');
 		}
 
 		this._ensureValidDigest();
-		return this._connectedTrack!.output._muxer.addEncodedAudioChunk(this._connectedTrack!, chunk, meta);
+		return this._connectedTrack!.output._muxer.addEncodedAudioSample(this._connectedTrack!, sample, meta);
 	}
 }
 /** @public */
@@ -479,7 +482,11 @@ class AudioEncoderWrapper {
 		this.encoder = new AudioEncoder({
 			output: (chunk, meta) => {
 				this.encodingConfig.onEncodedChunk?.(chunk, meta);
-				void this.muxer!.addEncodedAudioChunk(this.source._connectedTrack!, chunk, meta);
+				void this.muxer!.addEncodedAudioSample(
+					this.source._connectedTrack!,
+					EncodedAudioSample.fromEncodedAudioChunk(chunk),
+					meta,
+				);
 			},
 			error: this.encodingConfig.onEncodingError ?? (error => console.error('AudioEncoder error:', error)),
 		});

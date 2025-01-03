@@ -40,6 +40,7 @@ import {
 } from '../codec';
 import { Muxer } from '../muxer';
 import { Writer } from '../writer';
+import { EncodedAudioSample, EncodedVideoSample } from '../sample';
 
 const MAX_CHUNK_LENGTH_MS = 2 ** 15;
 const APP_NAME = 'https://github.com/Vanilagy/webm-muxer'; // TODO
@@ -610,18 +611,15 @@ export class MatroskaMuxer extends Muxer {
 		return newTrackData;
 	}
 
-	async addEncodedVideoChunk(track: OutputVideoTrack, chunk: EncodedVideoChunk, meta?: EncodedVideoChunkMetadata) {
+	async addEncodedVideoSample(track: OutputVideoTrack, sample: EncodedVideoSample, meta?: EncodedVideoChunkMetadata) {
 		const release = await this.mutex.acquire();
 
 		try {
 			const trackData = this.getVideoTrackData(track, meta);
 
-			const data = new Uint8Array(chunk.byteLength);
-			chunk.copyTo(data);
-
-			const isKeyFrame = chunk.type === 'key';
-			const timestamp = this.validateAndNormalizeTimestamp(trackData.track, chunk.timestamp, isKeyFrame);
-			const videoChunk = this.createInternalChunk(data, timestamp, (chunk.duration ?? 0) / 1e6, chunk.type);
+			const isKeyFrame = sample.type === 'key';
+			const timestamp = this.validateAndNormalizeTimestamp(trackData.track, sample.timestamp, isKeyFrame);
+			const videoChunk = this.createInternalChunk(sample.data, timestamp, sample.duration, sample.type);
 			if (track.source._codec === 'vp9') this.fixVP9ColorSpace(trackData, videoChunk);
 
 			trackData.chunkQueue.push(videoChunk);
@@ -631,19 +629,15 @@ export class MatroskaMuxer extends Muxer {
 		}
 	}
 
-	async addEncodedAudioChunk(track: OutputAudioTrack, chunk: EncodedAudioChunk, meta?: EncodedAudioChunkMetadata) {
+	async addEncodedAudioSample(track: OutputAudioTrack, sample: EncodedAudioSample, meta?: EncodedAudioChunkMetadata) {
 		const release = await this.mutex.acquire();
 
 		try {
 			const trackData = this.getAudioTrackData(track, meta);
 
-			const data = new Uint8Array(chunk.byteLength);
-			chunk.copyTo(data);
-
-			const chunkType = chunk.type as 'key' | 'delta'; // Types are weird for EncodedAudioChunk
-			const isKeyFrame = chunkType === 'key';
-			const timestamp = this.validateAndNormalizeTimestamp(trackData.track, chunk.timestamp, isKeyFrame);
-			const audioChunk = this.createInternalChunk(data, timestamp, (chunk.duration ?? 0) / 1e6, chunkType);
+			const isKeyFrame = sample.type === 'key';
+			const timestamp = this.validateAndNormalizeTimestamp(trackData.track, sample.timestamp, isKeyFrame);
+			const audioChunk = this.createInternalChunk(sample.data, timestamp, sample.duration, sample.type);
 
 			trackData.chunkQueue.push(audioChunk);
 			await this.interleaveChunks();
@@ -658,7 +652,7 @@ export class MatroskaMuxer extends Muxer {
 		try {
 			const trackData = this.getSubtitleTrackData(track, meta);
 
-			const timestamp = this.validateAndNormalizeTimestamp(trackData.track, 1e6 * cue.timestamp, true);
+			const timestamp = this.validateAndNormalizeTimestamp(trackData.track, cue.timestamp, true);
 
 			let bodyText = cue.text;
 			const timestampMs = Math.floor(timestamp * 1000);

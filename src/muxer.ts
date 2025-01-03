@@ -1,5 +1,6 @@
 import { AsyncMutex } from './misc';
 import { Output, OutputAudioTrack, OutputSubtitleTrack, OutputTrack, OutputVideoTrack } from './output';
+import { EncodedAudioSample, EncodedVideoSample } from './sample';
 import { SubtitleCue, SubtitleMetadata } from './subtitles';
 
 export abstract class Muxer {
@@ -11,14 +12,14 @@ export abstract class Muxer {
 	}
 
 	abstract start(): Promise<void>;
-	abstract addEncodedVideoChunk(
+	abstract addEncodedVideoSample(
 		track: OutputVideoTrack,
-		chunk: EncodedVideoChunk,
+		chunk: EncodedVideoSample,
 		meta?: EncodedVideoChunkMetadata
 	): Promise<void>;
-	abstract addEncodedAudioChunk(
+	abstract addEncodedAudioSample(
 		track: OutputAudioTrack,
-		chunk: EncodedAudioChunk,
+		chunk: EncodedAudioSample,
 		meta?: EncodedAudioChunkMetadata
 	): Promise<void>;
 	abstract addSubtitleCue(track: OutputSubtitleTrack, cue: SubtitleCue, meta?: SubtitleMetadata): Promise<void>;
@@ -34,9 +35,7 @@ export abstract class Muxer {
 	}>();
 
 	abstract timestampsMustStartAtZero: boolean;
-	protected validateAndNormalizeTimestamp(track: OutputTrack, rawTimestampInUs: number, isKeyFrame: boolean) {
-		let timestampInSeconds = rawTimestampInUs / 1e6;
-
+	protected validateAndNormalizeTimestamp(track: OutputTrack, timestampInSeconds: number, isKeyFrame: boolean) {
 		let timestampInfo = this.trackTimestampInfo.get(track);
 		if (!timestampInfo) {
 			if (!isKeyFrame) {

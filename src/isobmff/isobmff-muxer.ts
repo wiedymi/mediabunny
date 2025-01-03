@@ -7,6 +7,7 @@ import { Mp4OutputFormat, Mp4OutputFormatOptions } from '../output-format';
 import { inlineTimestampRegex, SubtitleConfig, SubtitleCue, SubtitleMetadata } from '../subtitles';
 import { ArrayBufferTarget } from '../target';
 import { validateAudioChunkMetadata, validateSubtitleMetadata, validateVideoChunkMetadata } from '../codec';
+import { EncodedAudioSample, EncodedVideoSample } from '../sample';
 
 export const GLOBAL_TIMESCALE = 1000;
 const TIMESTAMP_OFFSET = 2_082_844_800; // Seconds between Jan 1 1904 and Jan 1 1970
@@ -269,58 +270,51 @@ export class IsobmffMuxer extends Muxer {
 		return newTrackData;
 	}
 
-	async addEncodedVideoChunk(track: OutputVideoTrack, chunk: EncodedVideoChunk, meta?: EncodedVideoChunkMetadata) {
+	async addEncodedVideoSample(track: OutputVideoTrack, sample: EncodedVideoSample, meta?: EncodedVideoChunkMetadata) {
 		const release = await this.mutex.acquire();
 
 		try {
 			const trackData = this.getVideoTrackData(track, meta);
 
-			const data = new Uint8Array(chunk.byteLength);
-			chunk.copyTo(data);
-
 			const timestamp = this.validateAndNormalizeTimestamp(
 				trackData.track,
-				chunk.timestamp,
-				chunk.type === 'key',
+				sample.timestamp,
+				sample.type === 'key',
 			);
-			const sample = this.createSampleForTrack(
+			const internalSample = this.createSampleForTrack(
 				trackData,
-				data,
+				sample.data,
 				timestamp,
-				(chunk.duration ?? 0) / 1e6,
-				chunk.type,
+				sample.duration,
+				sample.type,
 			);
 
-			await this.registerSample(trackData, sample);
+			await this.registerSample(trackData, internalSample);
 		} finally {
 			release();
 		}
 	}
 
-	async addEncodedAudioChunk(track: OutputAudioTrack, chunk: EncodedAudioChunk, meta?: EncodedAudioChunkMetadata) {
+	async addEncodedAudioSample(track: OutputAudioTrack, sample: EncodedAudioSample, meta?: EncodedAudioChunkMetadata) {
 		const release = await this.mutex.acquire();
 
 		try {
 			const trackData = this.getAudioTrackData(track, meta);
 
-			const data = new Uint8Array(chunk.byteLength);
-			chunk.copyTo(data);
-
-			const chunkType = chunk.type as 'key' | 'delta'; // Types are weird for EncodedAudioChunk
 			const timestamp = this.validateAndNormalizeTimestamp(
 				trackData.track,
-				chunk.timestamp,
-				chunkType === 'key',
+				sample.timestamp,
+				sample.type === 'key',
 			);
-			const sample = this.createSampleForTrack(
+			const internalSample = this.createSampleForTrack(
 				trackData,
-				data,
+				sample.data,
 				timestamp,
-				(chunk.duration ?? 0) / 1e6,
-				chunkType,
+				sample.duration,
+				sample.type,
 			);
 
-			await this.registerSample(trackData, sample);
+			await this.registerSample(trackData, internalSample);
 		} finally {
 			release();
 		}
@@ -332,7 +326,7 @@ export class IsobmffMuxer extends Muxer {
 		try {
 			const trackData = this.getSubtitleTrackData(track, meta);
 
-			this.validateAndNormalizeTimestamp(trackData.track, 1e6 * cue.timestamp, true);
+			this.validateAndNormalizeTimestamp(trackData.track, cue.timestamp, true);
 
 			if (track.source._codec === 'webvtt') {
 				trackData.cueQueue.push(cue);
