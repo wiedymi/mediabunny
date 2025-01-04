@@ -12,6 +12,8 @@ export abstract class Source {
 	_getSize() {
 		return this._sizePromise ??= this._retrieveSize();
 	}
+
+	onread: ((range: { start: number; end: number }) => unknown) | null = null;
 }
 
 /** @public */

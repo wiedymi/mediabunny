@@ -54,6 +54,7 @@ export class Reader {
 			}
 		}
 
+		this.source.onread?.({ start, end });
 		const bytesPromise = this.source._read(start, end);
 		const loadingSegment: LoadingSegment = { start, end, promise: bytesPromise };
 		this.loadingSegments.push(loadingSegment);
