@@ -152,6 +152,12 @@ const u64 = (value: number) => {
 	return [bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7]] as number[];
 };
 
+const i64 = (value: number) => {
+	view.setInt32(0, Math.floor(value / 2 ** 32), false);
+	view.setInt32(4, value, false);
+	return [bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7]] as number[];
+};
+
 const fixed_8_8 = (value: number) => {
 	view.setInt16(0, 2 ** 8 * value, false);
 	return [bytes[0], bytes[1]] as number[];
@@ -499,11 +505,12 @@ export const stbl = (trackData: IsobmffTrackData) => {
 	return box('stbl', undefined, [
 		stsd(trackData),
 		stts(trackData),
-		stss(trackData),
+		needsCtts ? ctts(trackData) : null,
+		needsCtts ? cslg(trackData) : null,
 		stsc(trackData),
 		stsz(trackData),
 		stco(trackData),
-		needsCtts ? ctts(trackData) : null,
+		stss(trackData),
 	]);
 };
 
@@ -851,9 +858,11 @@ export const stco = (trackData: IsobmffTrackData) => {
 	]);
 };
 
-/** Composition Time to Sample Box: Stores composition time offset information (PTS-DTS) for a
+/**
+ * Composition Time to Sample Box: Stores composition time offset information (PTS-DTS) for a
  * media's samples. The table is compact, meaning that consecutive samples with the same time
- * composition time offset will be grouped. */
+ * composition time offset will be grouped.
+ */
 export const ctts = (trackData: IsobmffTrackData) => {
 	return fullBox('ctts', 0, 0, [
 		u32(trackData.compositionTimeOffsetTable.length), // Number of entries
@@ -861,6 +870,41 @@ export const ctts = (trackData: IsobmffTrackData) => {
 			u32(x.sampleCount), // Sample count
 			u32(x.sampleCompositionTimeOffset), // Sample offset
 		]),
+	]);
+};
+
+/**
+ * Composition to Decode Box: Stores information about the composition and display times of the media samples.
+ */
+export const cslg = (trackData: IsobmffTrackData) => {
+	let leastDecodeToDisplayDelta = Infinity;
+	let greatestDecodeToDisplayDelta = -Infinity;
+	let compositionStartTime = Infinity;
+	let compositionEndTime = -Infinity;
+
+	assert(trackData.compositionTimeOffsetTable.length > 0);
+	assert(trackData.samples.length > 0);
+
+	for (let i = 0; i < trackData.compositionTimeOffsetTable.length; i++) {
+		const entry = trackData.compositionTimeOffsetTable[i]!;
+		leastDecodeToDisplayDelta = Math.min(leastDecodeToDisplayDelta, entry.sampleCompositionTimeOffset);
+		greatestDecodeToDisplayDelta = Math.max(greatestDecodeToDisplayDelta, entry.sampleCompositionTimeOffset);
+	}
+
+	for (let i = 0; i < trackData.samples.length; i++) {
+		const sample = trackData.samples[i]!;
+		compositionStartTime = Math.min(compositionStartTime, sample.timestamp);
+		compositionEndTime = Math.max(compositionEndTime, sample.timestamp + sample.duration);
+	}
+
+	const compositionToDtsShift = Math.max(-leastDecodeToDisplayDelta, 0);
+
+	return fullBox('cslg', 1, 0, [
+		i64(compositionToDtsShift), // Composition to DTS shift
+		i64(leastDecodeToDisplayDelta), // Least decode to display delta
+		i64(greatestDecodeToDisplayDelta), // Greatest decode to display delta
+		i64(compositionStartTime), // Composition start time
+		i64(compositionEndTime), // Composition end time
 	]);
 };
 

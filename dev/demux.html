@@ -51,7 +51,6 @@
 
 		console.log(await videoTrack.computeSampleStats())
 		document.body.textContent = performance.now() - start;
-		return;
 
 		const decoderConfig = await videoTrack.getDecoderConfig();
 		const sampleSource = new Metamuxer.EncodedVideoSampleSource(await videoTrack.getCodec());
@@ -81,7 +80,7 @@
 			a.click();
 			URL.revokeObjectURL(url);
 		}
-		//download(new Blob([target.buffer]), 'converted.mp4');
+		download(new Blob([target.buffer]), 'converted.mp4');
 
 		const input2 = new Metamuxer.Input({
 			formats: Metamuxer.ALL_FORMATS,
