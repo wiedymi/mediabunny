@@ -1673,6 +1673,11 @@ abstract class IsobmffTrackBacking<
 		throw new Error('Not implemented on base class.');
 	}
 
+	async getFirstTimestamp() {
+		const firstSample = await this.getFirstSample({ metadataOnly: true });
+		return firstSample?.timestamp ?? 0;
+	}
+
 	async computeDuration() {
 		const lastSample = await this.getSample(Infinity, { metadataOnly: true });
 		return (lastSample?.timestamp ?? 0) + (lastSample?.duration ?? 0);

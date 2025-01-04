@@ -58,7 +58,7 @@ export {
 	WEBM,
 } from './input-format';
 export { Input, InputOptions } from './input';
-export { InputTrack, InputVideoTrack, InputAudioTrack } from './input-track';
+export { InputTrack, InputVideoTrack, InputAudioTrack, SampleStats } from './input-track';
 export {
 	EncodedVideoSample,
 	EncodedAudioSample,

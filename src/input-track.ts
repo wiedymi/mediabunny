@@ -1,10 +1,11 @@
 import { AudioCodec, MediaCodec, VideoCodec } from './codec';
-import { SampleRetrievalOptions } from './media-drain';
+import { EncodedAudioSampleDrain, EncodedVideoSampleDrain, SampleRetrievalOptions } from './media-drain';
 import { Rotation } from './misc';
 import { EncodedAudioSample, EncodedVideoSample } from './sample';
 
 export interface InputTrackBacking {
 	getCodec(): Promise<MediaCodec | null>;
+	getFirstTimestamp(): Promise<number>;
 	computeDuration(): Promise<number>;
 }
 
@@ -28,6 +29,10 @@ export abstract class InputTrack {
 
 	isAudioTrack(): this is InputAudioTrack {
 		return this instanceof InputAudioTrack;
+	}
+
+	getFirstTimestamp() {
+		return this._backing.getFirstTimestamp();
 	}
 
 	computeDuration() {
@@ -109,6 +114,10 @@ export class InputVideoTrack extends InputTrack {
 			return false;
 		}
 	}
+
+	computeSampleStats() {
+		return computeSampleStats(new EncodedVideoSampleDrain(this));
+	}
 }
 
 export interface InputAudioTrackBacking extends InputTrackBacking {
@@ -174,4 +183,36 @@ export class InputAudioTrack extends InputTrack {
 			return false;
 		}
 	}
+
+	computeSampleStats() {
+		return computeSampleStats(new EncodedAudioSampleDrain(this));
+	}
 }
+
+/** @public */
+export type SampleStats = {
+	sampleCount: number;
+	averageSampleRate: number;
+	averageBitrate: number;
+};
+
+const computeSampleStats = async (drain: EncodedVideoSampleDrain | EncodedAudioSampleDrain): Promise<SampleStats> => {
+	let startTimestamp = Infinity;
+	let endTimestamp = -Infinity;
+	let sampleCount = 0;
+	let totalSampleBytes = 0;
+
+	for await (const sample of drain.samples(undefined, undefined, { metadataOnly: true })) {
+		startTimestamp = Math.min(startTimestamp, sample.timestamp);
+		endTimestamp = Math.max(endTimestamp, sample.timestamp + sample.duration);
+
+		sampleCount++;
+		totalSampleBytes += sample.byteLength;
+	}
+
+	return {
+		sampleCount,
+		averageSampleRate: sampleCount ? Math.fround(sampleCount / (endTimestamp - startTimestamp)) : 0,
+		averageBitrate: sampleCount ? Math.fround(8 * totalSampleBytes / (endTimestamp - startTimestamp)) : 0,
+	};
+};

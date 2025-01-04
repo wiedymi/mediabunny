@@ -49,6 +49,10 @@
 		const videoTrack = await input.getPrimaryVideoTrack();
 		const drain = new Metamuxer.EncodedVideoSampleDrain(videoTrack);
 
+		console.log(await videoTrack.computeSampleStats())
+		document.body.textContent = performance.now() - start;
+		return;
+
 		const decoderConfig = await videoTrack.getDecoderConfig();
 		const sampleSource = new Metamuxer.EncodedVideoSampleSource(await videoTrack.getCodec());
 		output.addVideoTrack(sampleSource);
@@ -65,7 +69,7 @@
 		}
 		
 		await output.finalize();
-		document.body.textContent = performance.now() - start;
+		
 
 		console.log(target)
 
