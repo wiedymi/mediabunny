@@ -41,7 +41,11 @@ export abstract class BaseSampleDrain<Sample extends EncodedVideoSample | Encode
 	abstract getKeySample(timestamp: number, options?: SampleRetrievalOptions): Promise<Sample | null>;
 	abstract getNextKeySample(sample: Sample, options?: SampleRetrievalOptions): Promise<Sample | null>;
 
-	samples(startSample?: Sample, endTimestamp = Infinity): AsyncGenerator<Sample, void, unknown> {
+	samples(
+		startSample?: Sample,
+		endTimestamp = Infinity,
+		options?: SampleRetrievalOptions,
+	): AsyncGenerator<Sample, void, unknown> {
 		const sampleQueue: Sample[] = [];
 
 		let { promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers();
@@ -60,7 +64,7 @@ export abstract class BaseSampleDrain<Sample extends EncodedVideoSample | Encode
 
 		// The following is the "pump" process that keeps pumping samples into the queue
 		(async () => {
-			let sample = startSample ?? await this.getFirstSample();
+			let sample = startSample ?? await this.getFirstSample(options);
 
 			while (sample && !terminated) {
 				if (sample.timestamp >= endTimestamp) {
@@ -78,7 +82,7 @@ export abstract class BaseSampleDrain<Sample extends EncodedVideoSample | Encode
 				onQueueNotEmpty();
 				({ promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers());
 
-				sample = await this.getNextSample(sample);
+				sample = await this.getNextSample(sample, options);
 			}
 
 			ended = true;
