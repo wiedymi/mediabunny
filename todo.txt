@@ -5,3 +5,5 @@
 - Metadata methods for computing average fps and bitrate
 - A stream source?? Or like a callback-driven source
 - onRead callback for Source
+- onHeader, etc callbacks for Matroska
+- Add cslg box

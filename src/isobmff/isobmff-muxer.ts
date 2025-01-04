@@ -85,8 +85,6 @@ export const intoTimescale = (timeInSeconds: number, timescale: number, round = 
 };
 
 export class IsobmffMuxer extends Muxer {
-	override timestampsMustStartAtZero = true;
-
 	private writer: Writer;
 	private boxWriter: IsobmffBoxWriter;
 	private fastStart: NonNullable<Mp4OutputFormatOptions['fastStart']>;
@@ -262,10 +260,6 @@ export class IsobmffMuxer extends Muxer {
 
 		this.trackDatas.push(newTrackData);
 		this.trackDatas.sort((a, b) => a.track.id - b.track.id);
-
-		// Subtitle cues don't need to start at 0, so let's register a timestamp at 0 to satisfy the
-		// "timestamps must start a zero" constraint
-		this.validateAndNormalizeTimestamp(track, 0, true);
 
 		return newTrackData;
 	}
@@ -446,8 +440,7 @@ export class IsobmffMuxer extends Muxer {
 			data,
 			size: data.byteLength,
 			type,
-			// Will be refined once the next sample comes in
-			timescaleUnitsToNextSample: intoTimescale(duration, trackData.timescale),
+			timescaleUnitsToNextSample: intoTimescale(duration, trackData.timescale), // Will be refined
 		};
 
 		return sample;
@@ -468,6 +461,12 @@ export class IsobmffMuxer extends Muxer {
 			// (presentation timestamp & decode order are all you need), but it is a concept in ISOBMFF so we need to
 			// model it.
 			sample.decodeTimestamp = sortedTimestamps[i]!;
+
+			if (this.fastStart !== 'fragmented' && trackData.lastTimescaleUnits === null) {
+				// In non-fragmented files, the first decode timestamp is always zero. If the first presentation
+				// timestamp isn't zero, we'll simply use the composition time offset to achieve it.
+				sample.decodeTimestamp = 0;
+			}
 
 			const sampleCompositionTimeOffset
 				= intoTimescale(sample.timestamp - sample.decodeTimestamp, trackData.timescale);
@@ -533,7 +532,8 @@ export class IsobmffMuxer extends Muxer {
 					}
 				}
 			} else {
-				trackData.lastTimescaleUnits = 0;
+				// Decode timestamp of the first sample
+				trackData.lastTimescaleUnits = intoTimescale(sample.decodeTimestamp, trackData.timescale, false);
 
 				if (this.fastStart !== 'fragmented') {
 					trackData.timeToSampleTable.push({
@@ -581,6 +581,10 @@ export class IsobmffMuxer extends Muxer {
 				// We can only finalize this fragment (and begin a new one) if we know that each track will be able to
 				// start the new one with a key frame.
 				const keyFrameQueuedEverywhere = this.trackDatas.every((otherTrackData) => {
+					if (otherTrackData.track.source._closed) {
+						return true;
+					}
+
 					if (trackData === otherTrackData) {
 						return sample.type === 'key';
 					}

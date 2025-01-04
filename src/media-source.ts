@@ -110,6 +110,9 @@ export class EncodedVideoSampleSource extends VideoSource {
 		if (!(sample instanceof EncodedVideoSample)) {
 			throw new TypeError('sample must be an EncodedVideoSample.');
 		}
+		if (sample.isMetadataOnly) {
+			throw new TypeError('Metadata-only samples cannot be digested.');
+		}
 
 		this._ensureValidDigest();
 		return this._connectedTrack!.output._muxer.addEncodedVideoSample(this._connectedTrack!, sample, meta);
@@ -403,6 +406,9 @@ export class EncodedAudioSampleSource extends AudioSource {
 	digest(sample: EncodedAudioSample, meta?: EncodedAudioChunkMetadata) {
 		if (!(sample instanceof EncodedAudioSample)) {
 			throw new TypeError('chunk must be an EncodedAudioSample.');
+		}
+		if (sample.isMetadataOnly) {
+			throw new TypeError('Metadata-only samples cannot be digested.');
 		}
 
 		this._ensureValidDigest();

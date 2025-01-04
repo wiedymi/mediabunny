@@ -88,6 +88,11 @@ type SampleTable = {
 		presentationTimestamp: number;
 		sampleIndex: number;
 	}[] | null;
+	/**
+	 * Provides a fast map from sample index to index in the sorted presentation timestamps array - so, a fast map from
+	 * decode order to presentation order.
+	 */
+	presentationTimestampIndexMap: number[] | null;
 };
 type SampleTimingEntry = {
 	startIndex: number;
@@ -272,6 +277,7 @@ export class IsobmffDemuxer extends Demuxer {
 			chunkOffsets: [],
 			sampleToChunk: [],
 			presentationTimestamps: null,
+			presentationTimestampIndexMap: null,
 		};
 		internalTrack.sampleTable = sampleTable;
 
@@ -389,6 +395,11 @@ export class IsobmffDemuxer extends Demuxer {
 			}
 
 			sampleTable.presentationTimestamps.sort((a, b) => a.presentationTimestamp - b.presentationTimestamp);
+
+			sampleTable.presentationTimestampIndexMap = Array(sampleTable.presentationTimestamps.length).fill(-1);
+			for (let i = 0; i < sampleTable.presentationTimestamps.length; i++) {
+				sampleTable.presentationTimestampIndexMap[sampleTable.presentationTimestamps[i]!.sampleIndex] = i;
+			}
 		} else {
 			// If they're not defined, we can simply use the decode timestamps as presentation timestamps
 		}
@@ -1624,6 +1635,15 @@ export class IsobmffDemuxer extends Demuxer {
 					.map((x, i) => ({ presentationTimestamp: x.presentationTimestamp, sampleIndex: i }))
 					.sort((a, b) => a.presentationTimestamp - b.presentationTimestamp);
 
+				// Update sample durations based on presentation order
+				for (let i = 0; i < trackData.presentationTimestamps.length - 1; i++) {
+					const current = trackData.presentationTimestamps[i]!;
+					const next = trackData.presentationTimestamps[i + 1]!;
+
+					const duration = next.presentationTimestamp - current.presentationTimestamp;
+					trackData.samples[current.sampleIndex]!.duration = duration;
+				}
+
 				const firstSample = trackData.samples[trackData.presentationTimestamps[0]!.sampleIndex]!;
 				const lastSample = trackData.samples[last(trackData.presentationTimestamps)!.sampleIndex]!;
 
@@ -2319,9 +2339,23 @@ const getSampleInfo = (sampleTable: SampleTable, sampleIndex: number): SampleInf
 		}
 	}
 
+	let duration = timingEntry.delta;
+	if (sampleTable.presentationTimestamps) {
+		// In order to accurately compute the duration, we need to take the duration to the next sample in presentation
+		// order, not in decode order
+		const presentationIndex = sampleTable.presentationTimestampIndexMap![sampleIndex];
+		assert(presentationIndex !== undefined);
+
+		if (presentationIndex < sampleTable.presentationTimestamps.length - 1) {
+			const nextEntry = sampleTable.presentationTimestamps[presentationIndex + 1]!;
+			const nextPresentationTimestamp = nextEntry.presentationTimestamp;
+			duration = nextPresentationTimestamp - presentationTimestamp;
+		}
+	}
+
 	return {
 		presentationTimestamp,
-		duration: timingEntry.delta,
+		duration,
 		sampleOffset,
 		sampleSize,
 		chunkOffset,

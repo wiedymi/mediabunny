@@ -34,16 +34,11 @@ export abstract class Muxer {
 		lastKeyFrameTimestamp: number;
 	}>();
 
-	abstract timestampsMustStartAtZero: boolean;
 	protected validateAndNormalizeTimestamp(track: OutputTrack, timestampInSeconds: number, isKeyFrame: boolean) {
 		let timestampInfo = this.trackTimestampInfo.get(track);
 		if (!timestampInfo) {
 			if (!isKeyFrame) {
 				throw new Error('First frame must be a key frame.');
-			}
-
-			if (this.timestampsMustStartAtZero && timestampInSeconds > 0) {
-				throw new Error(`Timestamps must start at zero (got ${timestampInSeconds}s).`);
 			}
 
 			timestampInfo = {

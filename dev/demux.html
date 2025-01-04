@@ -32,7 +32,7 @@
 
 	fileInput.addEventListener('change', async () => {
 		const file = fileInput.files[0];
-		const source = new Metamuxer.BufferSource(await file.arrayBuffer()) ?? new Metamuxer.BlobSource(file);
+		const source = new Metamuxer.BlobSource(file);
 
 		const start = performance.now();	
 		const input = new Metamuxer.Input({
@@ -40,14 +40,62 @@
 			source
 		});
 
+		const target = new Metamuxer.ArrayBufferTarget();
+		const output = new Metamuxer.Output({
+			format: new Metamuxer.Mp4OutputFormat({ fastStart: undefined }),
+			target
+		});
+
 		const videoTrack = await input.getPrimaryVideoTrack();
 		const drain = new Metamuxer.EncodedVideoSampleDrain(videoTrack);
 
-		for await (const sample of drain.samples()) {
-			//console.log(chunk);
+		const decoderConfig = await videoTrack.getDecoderConfig();
+		const sampleSource = new Metamuxer.EncodedVideoSampleSource(await videoTrack.getCodec());
+		output.addVideoTrack(sampleSource);
+
+		output.start();
+
+		let j = 0;
+		for await (const sample of drain.samples(undefined, undefined)) {
+			await sampleSource.digest(sample, { decoderConfig });
+
+			if (j++ < 12) {
+				console.log(sample);	
+			}
+		}
+		
+		await output.finalize();
+		document.body.textContent = performance.now() - start;
+
+		console.log(target)
+
+		function download(blob, filename) {
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = filename;
+			a.click();
+			URL.revokeObjectURL(url);
+		}
+		//download(new Blob([target.buffer]), 'converted.mp4');
+
+		const input2 = new Metamuxer.Input({
+			formats: Metamuxer.ALL_FORMATS,
+			source: new Metamuxer.BufferSource(target.buffer)
+		});
+
+		const videoTrack2 = await input2.getPrimaryVideoTrack();
+		const drain2 = new Metamuxer.EncodedVideoSampleDrain(videoTrack2);
+
+		let i = 0;
+		for await (const sample of drain2.samples(undefined, undefined)) {
+			console.log(sample);
+			if (i++ > 10) {
+				break;
+			}
 		}
 
-		document.body.textContent = performance.now() - start;
+		
 
 		/*
 		const videoTrack = await input.getPrimaryVideoTrack();

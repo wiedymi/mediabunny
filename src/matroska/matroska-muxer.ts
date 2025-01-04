@@ -121,8 +121,6 @@ const TRACK_TYPE_MAP: Record<OutputTrack['type'], number> = {
 };
 
 export class MatroskaMuxer extends Muxer {
-	override timestampsMustStartAtZero = false;
-
 	private writer: Writer;
 	private format: WebMOutputFormat | MkvOutputFormat;
 
