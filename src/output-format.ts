@@ -1,4 +1,4 @@
-import { AUDIO_CODECS, MediaCodec, SUBTITLE_CODECS, VIDEO_CODECS } from './codec';
+import { AUDIO_CODECS, MediaCodec, PCM_CODECS, SUBTITLE_CODECS, VIDEO_CODECS } from './codec';
 import { IsobmffMuxer } from './isobmff/isobmff-muxer';
 import { MatroskaMuxer } from './matroska/matroska-muxer';
 import { Muxer } from './muxer';
@@ -33,16 +33,16 @@ export abstract class OutputFormat {
 }
 
 /** @public */
-export type Mp4OutputFormatOptions = {
+export type IsobmffOutputFormatOptions = {
 	fastStart?: false | 'in-memory' | 'fragmented';
 };
 
 /** @public */
-export class Mp4OutputFormat extends OutputFormat {
+export abstract class IsobmffOutputFormat extends OutputFormat {
 	/** @internal */
-	_options: Mp4OutputFormatOptions;
+	_options: IsobmffOutputFormatOptions;
 
-	constructor(options: Mp4OutputFormatOptions = {}) {
+	constructor(options: IsobmffOutputFormatOptions = {}) {
 		if (!options || typeof options !== 'object') {
 			throw new TypeError('options must be an object.');
 		}
@@ -56,10 +56,13 @@ export class Mp4OutputFormat extends OutputFormat {
 	}
 
 	/** @internal */
-	override _createMuxer(output: Output) {
+	_createMuxer(output: Output) {
 		return new IsobmffMuxer(output, this);
 	}
+}
 
+/** @public */
+export class Mp4OutputFormat extends IsobmffOutputFormat {
 	/** @internal */
 	_getName() {
 		return 'MP4';
@@ -72,9 +75,46 @@ export class Mp4OutputFormat extends OutputFormat {
 	static getSupportedCodecs(): MediaCodec[] {
 		return [
 			'avc', 'hevc', 'vp8', 'vp9', 'av1',
-			'aac', 'opus',
+			'aac', 'mp3', 'opus', 'vorbis', 'flac', // No PCM codecs
 			'webvtt',
 		];
+	}
+
+	/** @internal */
+	override _codecUnsupportedHint(codec: MediaCodec) {
+		if (MovOutputFormat.getSupportedCodecs().includes(codec)) {
+			return ' Switching to MOV will grant support for this codec.';
+		}
+
+		return '';
+	}
+}
+
+/** @public */
+export class MovOutputFormat extends IsobmffOutputFormat {
+	/** @internal */
+	_getName() {
+		return 'MOV';
+	}
+
+	getSupportedCodecs() {
+		return MovOutputFormat.getSupportedCodecs();
+	}
+
+	static getSupportedCodecs(): MediaCodec[] {
+		return [
+			'avc', 'hevc', 'vp8', 'vp9', 'av1',
+			'aac', 'mp3', 'opus', 'vorbis', 'flac', ...PCM_CODECS,
+		];
+	}
+
+	/** @internal */
+	override _codecUnsupportedHint(codec: MediaCodec) {
+		if (Mp4OutputFormat.getSupportedCodecs().includes(codec)) {
+			return ' Switching to MP4 will grant support for this codec.';
+		}
+
+		return '';
 	}
 }
 
@@ -102,7 +142,7 @@ export class MkvOutputFormat extends OutputFormat {
 	}
 
 	/** @internal */
-	override _createMuxer(output: Output) {
+	_createMuxer(output: Output) {
 		return new MatroskaMuxer(output, this);
 	}
 
@@ -150,8 +190,8 @@ export class WebMOutputFormat extends MkvOutputFormat {
 	override _codecUnsupportedHint(codec: MediaCodec) {
 		if (MkvOutputFormat.getSupportedCodecs().includes(codec)) {
 			return ' Switching to MKV will grant support for this codec.';
-		} else {
-			return '';
 		}
+
+		return '';
 	}
 }

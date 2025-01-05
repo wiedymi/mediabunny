@@ -1,8 +1,10 @@
 export { Output, OutputOptions, VideoTrackMetadata, AudioTrackMetadata, SubtitleTrackMetadata } from './output';
 export {
 	OutputFormat,
+	IsobmffOutputFormat,
 	Mp4OutputFormat,
-	Mp4OutputFormatOptions,
+	MovOutputFormat,
+	IsobmffOutputFormatOptions,
 	MkvOutputFormat,
 	MkvOutputFormatOptions,
 	WebMOutputFormat,
@@ -75,6 +77,7 @@ export {
 	CanvasDrain,
 	WrappedCanvas,
 	AudioDataDrain,
+	WrappedAudioData,
 	AudioBufferDrain,
 	WrappedAudioBuffer,
 } from './media-drain';

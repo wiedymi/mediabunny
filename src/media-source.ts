@@ -5,6 +5,7 @@ import {
 	buildVideoCodecString,
 	getAudioEncoderConfigExtension,
 	getVideoEncoderConfigExtension,
+	PCM_CODECS,
 	SUBTITLE_CODECS,
 	SubtitleCodec,
 	VIDEO_CODECS,
@@ -418,7 +419,7 @@ export class EncodedAudioSampleSource extends AudioSource {
 /** @public */
 export type AudioEncodingConfig = {
 	codec: AudioCodec;
-	bitrate: number;
+	bitrate?: number;
 	onEncodedChunk?: (chunk: EncodedAudioChunk, meta: EncodedAudioChunkMetadata | undefined) => unknown;
 	onEncodingError?: (error: Error) => unknown;
 };
@@ -430,7 +431,10 @@ const validateAudioEncodingConfig = (config: AudioEncodingConfig) => {
 	if (!AUDIO_CODECS.includes(config.codec)) {
 		throw new TypeError(`Invalid audio codec '${config.codec}'. Must be one of: ${AUDIO_CODECS.join(', ')}.`);
 	}
-	if (!Number.isInteger(config.bitrate) || config.bitrate <= 0) {
+	if (config.bitrate === undefined && !(PCM_CODECS as readonly string[]).includes(config.codec)) {
+		throw new TypeError('config.bitrate must be provided for compressed audio codecs.');
+	}
+	if (config.bitrate !== undefined && (!Number.isInteger(config.bitrate) || config.bitrate <= 0)) {
 		throw new TypeError('config.bitrate must be a positive integer.');
 	}
 	if (config.onEncodingError !== undefined && typeof config.onEncodingError !== 'function') {

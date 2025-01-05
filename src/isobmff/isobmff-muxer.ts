@@ -3,10 +3,17 @@ import { Muxer } from '../muxer';
 import { Output, OutputAudioTrack, OutputSubtitleTrack, OutputTrack, OutputVideoTrack } from '../output';
 import { ArrayBufferTargetWriter, Writer } from '../writer';
 import { assert, last } from '../misc';
-import { Mp4OutputFormat, Mp4OutputFormatOptions } from '../output-format';
+import { IsobmffOutputFormatOptions, IsobmffOutputFormat, MovOutputFormat } from '../output-format';
 import { inlineTimestampRegex, SubtitleConfig, SubtitleCue, SubtitleMetadata } from '../subtitles';
 import { ArrayBufferTarget } from '../target';
-import { validateAudioChunkMetadata, validateSubtitleMetadata, validateVideoChunkMetadata } from '../codec';
+import {
+	parsePcmCodec,
+	PCM_CODECS,
+	PcmAudioCodec,
+	validateAudioChunkMetadata,
+	validateSubtitleMetadata,
+	validateVideoChunkMetadata,
+} from '../codec';
 import { EncodedAudioSample, EncodedVideoSample } from '../sample';
 
 export const GLOBAL_TIMESCALE = 1000;
@@ -40,6 +47,11 @@ export type IsobmffTrackData = {
 	compositionTimeOffsetTable: { sampleCount: number; sampleCompositionTimeOffset: number }[];
 	lastTimescaleUnits: number | null;
 	lastSample: Sample | null;
+	/**
+	 * The "PCM transformation" is making every sample in the sample table be exactly one PCM audio sample long.
+	 * Some players expect this for PCM audio.
+	 */
+	requiresPcmTransformation: boolean;
 
 	finalizedChunks: Chunk[];
 	currentChunk: Chunk | null;
@@ -87,7 +99,8 @@ export const intoTimescale = (timeInSeconds: number, timescale: number, round = 
 export class IsobmffMuxer extends Muxer {
 	private writer: Writer;
 	private boxWriter: IsobmffBoxWriter;
-	private fastStart: NonNullable<Mp4OutputFormatOptions['fastStart']>;
+	private isMov: boolean;
+	private fastStart: NonNullable<IsobmffOutputFormatOptions['fastStart']>;
 
 	private auxTarget = new ArrayBufferTarget();
 	private auxWriter = this.auxTarget._createWriter();
@@ -103,11 +116,13 @@ export class IsobmffMuxer extends Muxer {
 
 	private nextFragmentNumber = 1;
 
-	constructor(output: Output, format: Mp4OutputFormat) {
+	constructor(output: Output, format: IsobmffOutputFormat) {
 		super(output);
 
 		this.writer = output._writer;
 		this.boxWriter = new IsobmffBoxWriter(this.writer);
+
+		this.isMov = format instanceof MovOutputFormat;
 
 		// If the fastStart option isn't defined, enable in-memory fast start if the target is an ArrayBuffer, as the
 		// memory usage remains identical
@@ -126,6 +141,7 @@ export class IsobmffMuxer extends Muxer {
 
 		// Write the header
 		this.boxWriter.writeBox(ftyp({
+			isMov: this.isMov,
 			holdsAvc: holdsAvc,
 			fragmented: this.fastStart === 'fragmented',
 		}));
@@ -178,6 +194,7 @@ export class IsobmffMuxer extends Muxer {
 			finalizedChunks: [],
 			currentChunk: null,
 			compactlyCodedChunkTable: [],
+			requiresPcmTransformation: false,
 		};
 
 		this.trackDatas.push(newTrackData);
@@ -216,6 +233,9 @@ export class IsobmffMuxer extends Muxer {
 			finalizedChunks: [],
 			currentChunk: null,
 			compactlyCodedChunkTable: [],
+			requiresPcmTransformation:
+				this.fastStart !== 'fragmented'
+				&& (PCM_CODECS as readonly string[]).includes(track.source._codec),
 		};
 
 		this.trackDatas.push(newTrackData);
@@ -252,6 +272,8 @@ export class IsobmffMuxer extends Muxer {
 			finalizedChunks: [],
 			currentChunk: null,
 			compactlyCodedChunkTable: [],
+			requiresPcmTransformation: false,
+
 			lastCueEndTimestamp: 0,
 			cueQueue: [],
 			nextSourceId: 0,
@@ -308,9 +330,44 @@ export class IsobmffMuxer extends Muxer {
 				sample.type,
 			);
 
+			if (trackData.requiresPcmTransformation) {
+				await this.maybePadWithSilence(trackData, timestamp);
+			}
+
 			await this.registerSample(trackData, internalSample);
 		} finally {
 			release();
+		}
+	}
+
+	private async maybePadWithSilence(trackData: IsobmffAudioTrackData, untilTimestamp: number) {
+		// The PCM transformation assumes that all samples are contiguous. This is not something that is enforced, so
+		// we need to pad the "holes" in between samples (and before the first sample) with additional
+		// "silence samples".
+
+		const lastSample = last(trackData.samples);
+		const lastEndTimestamp = lastSample
+			? lastSample.timestamp + lastSample.duration
+			: 0;
+
+		const delta = untilTimestamp - lastEndTimestamp;
+		const deltaInTimescale = intoTimescale(delta, trackData.timescale);
+
+		if (deltaInTimescale > 0) {
+			const { sampleSize, silentValue } = parsePcmCodec(
+				trackData.info.decoderConfig.codec as PcmAudioCodec,
+			);
+			const samplesNeeded = deltaInTimescale * trackData.info.numberOfChannels;
+			const data = new Uint8Array(sampleSize * samplesNeeded).fill(silentValue);
+
+			const paddingSample = this.createSampleForTrack(
+				trackData,
+				new Uint8Array(data.buffer),
+				lastEndTimestamp,
+				delta,
+				'key',
+			);
+			await this.registerSample(trackData, paddingSample);
 		}
 	}
 
@@ -448,6 +505,32 @@ export class IsobmffMuxer extends Muxer {
 
 	private processTimestamps(trackData: IsobmffTrackData) {
 		if (trackData.timestampProcessingQueue.length === 0) {
+			return;
+		}
+
+		if (trackData.requiresPcmTransformation) {
+			let totalDuration = 0;
+
+			// Compute the total duration in the track timescale (which is equal to the amount of PCM audio samples)
+			// and simply say that's how many new samples there are.
+
+			for (let i = 0; i < trackData.timestampProcessingQueue.length; i++) {
+				const sample = trackData.timestampProcessingQueue[i]!;
+				const duration = intoTimescale(sample.duration, trackData.timescale);
+				totalDuration += duration;
+			}
+
+			if (trackData.timeToSampleTable.length === 0) {
+				trackData.timeToSampleTable.push({
+					sampleCount: totalDuration,
+					sampleDelta: 1,
+				});
+			} else {
+				const lastEntry = last(trackData.timeToSampleTable)!;
+				lastEntry.sampleCount += totalDuration;
+			}
+
+			trackData.timestampProcessingQueue.length = 0;
 			return;
 		}
 
@@ -628,13 +711,19 @@ export class IsobmffMuxer extends Muxer {
 		trackData.finalizedChunks.push(trackData.currentChunk);
 		this.finalizedChunks.push(trackData.currentChunk);
 
+		let sampleCount = trackData.currentChunk.samples.length;
+		if (trackData.requiresPcmTransformation) {
+			sampleCount = trackData.currentChunk.samples
+				.reduce((acc, sample) => acc + intoTimescale(sample.duration, trackData.timescale), 0);
+		}
+
 		if (
 			trackData.compactlyCodedChunkTable.length === 0
-			|| last(trackData.compactlyCodedChunkTable)!.samplesPerChunk !== trackData.currentChunk.samples.length
+			|| last(trackData.compactlyCodedChunkTable)!.samplesPerChunk !== sampleCount
 		) {
 			trackData.compactlyCodedChunkTable.push({
 				firstChunk: trackData.finalizedChunks.length, // 1-indexed
-				samplesPerChunk: trackData.currentChunk.samples.length,
+				samplesPerChunk: sampleCount,
 			});
 		}
 

@@ -1,4 +1,4 @@
-import { PCM_CODECS, PcmAudioCodec } from './codec';
+import { parsePcmCodec, PCM_CODECS, PcmAudioCodec } from './codec';
 import { InputAudioTrack, InputVideoTrack } from './input-track';
 import {
 	AnyIterable,
@@ -858,8 +858,6 @@ class AudioDecoderWrapper extends DecoderWrapper<EncodedAudioSample, AudioData> 
 	}
 }
 
-const PCM_CODEC_REGEX = /^pcm-([usf])(\d+)+(be)?$/;
-
 // There are a lot of PCM variants not natively supported by the browser and by AudioData. Therefore we need a simple
 // decoder that maps any input PCM format into a PCM format supported by the browser.
 class PcmAudioDecoderWrapper extends DecoderWrapper<EncodedAudioSample, AudioData> {
@@ -882,41 +880,88 @@ class PcmAudioDecoderWrapper extends DecoderWrapper<EncodedAudioSample, AudioDat
 		assert((PCM_CODECS as readonly string[]).includes(decoderConfig.codec));
 		this.codec = decoderConfig.codec as PcmAudioCodec;
 
-		const match = this.codec.match(PCM_CODEC_REGEX);
-		assert(match);
+		const { dataType, sampleSize, littleEndian } = parsePcmCodec(this.codec);
+		this.inputSampleSize = sampleSize;
 
-		let dataType: 'unsigned' | 'signed' | 'float';
-		if (match[1] === 'u') {
-			dataType = 'unsigned';
-		} else if (match[1] === 's') {
-			dataType = 'signed';
-		} else {
-			dataType = 'float';
-		}
-
-		this.inputSampleSize = (Number(match[2]) / 8) as 1 | 2 | 3 | 4;
-		const littleEndian = match[3] !== 'be';
-
-		switch (this.inputSampleSize) {
+		switch (sampleSize) {
 			case 1: {
 				if (dataType === 'unsigned') {
 					this.readInputValue = (view, byteOffset) => view.getUint8(byteOffset) - 2 ** 7;
-				} else {
+				} else if (dataType === 'signed') {
 					this.readInputValue = (view, byteOffset) => view.getInt8(byteOffset);
+				} else if (dataType === 'ulaw') {
+					// https://github.com/dystopiancode/pcm-g711/blob/master/pcm-g711/g711.c
+					this.readInputValue = (view, byteOffset) => {
+						const MULAW_BIAS = 33;
+						let sign = 0;
+						let position = 0;
+
+						// Get byte and invert
+						let number = ~view.getUint8(byteOffset);
+
+						// Handle sign
+						if (number & 0x80) {
+							number &= ~(1 << 7);
+							sign = -1;
+						}
+
+						// Calculate position
+						position = ((number & 0xF0) >> 4) + 5;
+
+						// Reconstruct linear value
+						const decoded = ((1 << position) | ((number & 0x0F) << (position - 4))
+							| (1 << (position - 5))) - MULAW_BIAS;
+
+						return (sign === 0) ? decoded : -decoded;
+					};
+				} else if (dataType === 'alaw') {
+					this.readInputValue = (view, byteOffset) => {
+						let sign = 0x00;
+						let position = 0;
+
+						// Get byte and XOR with 0x55
+						let number = view.getUint8(byteOffset) ^ 0x55;
+
+						// Handle sign
+						if (number & 0x80) {
+							number &= ~(1 << 7);
+							sign = -1;
+						}
+
+						// Calculate position
+						position = ((number & 0xF0) >> 4) + 4;
+
+						// Reconstruct linear value
+						let decoded = 0;
+						if (position !== 4) {
+							decoded = ((1 << position) | ((number & 0x0F) << (position - 4))
+								| (1 << (position - 5)));
+						} else {
+							decoded = (number << 1) | 1;
+						}
+
+						return (sign === 0) ? decoded : -decoded;
+					};
+				} else {
+					assert(false);
 				}
 			}; break;
 			case 2: {
 				if (dataType === 'unsigned') {
 					this.readInputValue = (view, byteOffset) => view.getUint16(byteOffset, littleEndian) - 2 ** 15;
-				} else {
+				} else if (dataType === 'signed') {
 					this.readInputValue = (view, byteOffset) => view.getInt16(byteOffset, littleEndian);
+				} else {
+					assert(false);
 				}
 			}; break;
 			case 3: {
 				if (dataType === 'unsigned') {
 					this.readInputValue = (view, byteOffset) => getUint24(view, byteOffset, littleEndian) - 2 ** 23;
-				} else {
+				} else if (dataType === 'signed') {
 					this.readInputValue = (view, byteOffset) => getInt24(view, byteOffset, littleEndian);
+				} else {
+					assert(false);
 				}
 			}; break;
 			case 4: {
@@ -924,17 +969,25 @@ class PcmAudioDecoderWrapper extends DecoderWrapper<EncodedAudioSample, AudioDat
 					this.readInputValue = (view, byteOffset) => view.getUint32(byteOffset, littleEndian) - 2 ** 31;
 				} else if (dataType === 'signed') {
 					this.readInputValue = (view, byteOffset) => view.getInt32(byteOffset, littleEndian);
-				} else {
+				} else if (dataType === 'float') {
 					this.readInputValue = (view, byteOffset) => view.getFloat32(byteOffset, littleEndian);
+				} else {
+					assert(false);
 				}
 			}; break;
 		}
 
-		switch (this.inputSampleSize) {
+		switch (sampleSize) {
 			case 1: {
-				this.outputSampleSize = 1;
-				this.outputFormat = 'u8';
-				this.writeOutputValue = (view, byteOffset, value) => view.setUint8(byteOffset, value + 2 ** 7);
+				if (dataType === 'ulaw' || dataType === 'alaw') {
+					this.outputSampleSize = 2;
+					this.outputFormat = 's16';
+					this.writeOutputValue = (view, byteOffset, value) => view.setInt16(byteOffset, value, true);
+				} else {
+					this.outputSampleSize = 1;
+					this.outputFormat = 'u8';
+					this.writeOutputValue = (view, byteOffset, value) => view.setUint8(byteOffset, value + 2 ** 7);
+				}
 			}; break;
 			case 2: {
 				this.outputSampleSize = 2;
@@ -1011,6 +1064,13 @@ class PcmAudioDecoderWrapper extends DecoderWrapper<EncodedAudioSample, AudioDat
 }
 
 /** @public */
+export type WrappedAudioData = {
+	data: AudioData;
+	timestamp: number;
+	duration: number;
+};
+
+/** @public */
 export class AudioDataDrain extends BaseMediaFrameDrain<EncodedAudioSample, AudioData> {
 	/** @internal */
 	_audioTrack: InputAudioTrack;
@@ -1040,11 +1100,20 @@ export class AudioDataDrain extends BaseMediaFrameDrain<EncodedAudioSample, Audi
 		const decoderConfig = await this._audioTrack.getDecoderConfig();
 		assert(decoderConfig);
 
-		if (decoderConfig.codec.startsWith('pcm-')) {
+		if ((PCM_CODECS as readonly string[]).includes(decoderConfig.codec)) {
 			return new PcmAudioDecoderWrapper(onData, onError, decoderConfig);
 		} else {
 			return new AudioDecoderWrapper(onData, onError, decoderConfig);
 		}
+	}
+
+	/** @internal */
+	_wrappedFrameToWrappedAudioData(frame: WrappedMediaFrame<AudioData>): WrappedAudioData {
+		return {
+			data: frame.frame,
+			timestamp: frame.timestamp,
+			duration: frame.duration,
+		};
 	}
 
 	/** @internal */
@@ -1056,17 +1125,23 @@ export class AudioDataDrain extends BaseMediaFrameDrain<EncodedAudioSample, Audi
 		validateTimestamp(timestamp);
 
 		for await (const data of this.mediaFramesAtTimestamps([timestamp])) {
-			return data;
+			return data && this._wrappedFrameToWrappedAudioData(data);
 		}
 		throw new Error('Internal error: Iterator returned nothing.');
 	}
 
 	data(startTimestamp = 0, endTimestamp = Infinity) {
-		return this.mediaFramesInRange(startTimestamp, endTimestamp);
+		return mapAsyncGenerator(
+			this.mediaFramesInRange(startTimestamp, endTimestamp),
+			async data => this._wrappedFrameToWrappedAudioData(data),
+		);
 	}
 
 	dataAtTimestamps(timestamps: AnyIterable<number>) {
-		return this.mediaFramesAtTimestamps(timestamps);
+		return mapAsyncGenerator(
+			this.mediaFramesAtTimestamps(timestamps),
+			async data => data && this._wrappedFrameToWrappedAudioData(data),
+		);
 	}
 }
 
@@ -1091,18 +1166,18 @@ export class AudioBufferDrain {
 	}
 
 	/** @internal */
-	_audioDataToWrappedArrayBuffer(data: WrappedMediaFrame<AudioData>): WrappedAudioBuffer {
+	_audioDataToWrappedArrayBuffer(data: WrappedAudioData): WrappedAudioBuffer {
 		const audioBuffer = new AudioBuffer({
-			numberOfChannels: data.frame.numberOfChannels,
-			length: data.frame.numberOfFrames,
-			sampleRate: data.frame.sampleRate,
+			numberOfChannels: data.data.numberOfChannels,
+			length: data.data.numberOfFrames,
+			sampleRate: data.data.sampleRate,
 		});
 
 		// All user agents are required to support conversion to f32-planar
-		const dataBytes = new Float32Array(data.frame.allocationSize({ planeIndex: 0, format: 'f32-planar' }) / 4);
+		const dataBytes = new Float32Array(data.data.allocationSize({ planeIndex: 0, format: 'f32-planar' }) / 4);
 
-		for (let i = 0; i < data.frame.numberOfChannels; i++) {
-			data.frame.copyTo(dataBytes, { planeIndex: i, format: 'f32-planar' });
+		for (let i = 0; i < data.data.numberOfChannels; i++) {
+			data.data.copyTo(dataBytes, { planeIndex: i, format: 'f32-planar' });
 			audioBuffer.copyToChannel(dataBytes, i);
 		}
 
@@ -1112,7 +1187,7 @@ export class AudioBufferDrain {
 			duration: data.duration,
 		};
 
-		data.frame.close();
+		data.data.close();
 		return result;
 	}
 

@@ -12,7 +12,7 @@ import {
 	IDENTITY_MATRIX,
 	rotationMatrix,
 } from '../misc';
-import { AudioCodec, SubtitleCodec, VideoCodec } from '../codec';
+import { AudioCodec, parsePcmCodec, PCM_CODECS, PcmAudioCodec, SubtitleCodec, VideoCodec } from '../codec';
 import { formatSubtitleTimestamp } from '../subtitles';
 import { Writer } from '../writer';
 import {
@@ -258,6 +258,7 @@ export const fullBox = (
  * reader understands.
  */
 export const ftyp = (details: {
+	isMov: boolean;
 	holdsAvc: boolean;
 	fragmented: boolean;
 }) => {
@@ -266,6 +267,15 @@ export const ftyp = (details: {
 	// Obviously, this lib only needs a small subset of that logic.
 
 	const minorVersion = 0x200;
+
+	if (details.isMov) {
+		return box('ftyp', [
+			ascii('qt  '), // Major brand
+			u32(minorVersion), // Minor version
+			// Compatible brands
+			ascii('qt  '),
+		]);
+	}
 
 	if (details.fragmented) return box('ftyp', [
 		ascii('iso5'), // Major brand
@@ -688,45 +698,101 @@ export const av1C = (trackData: IsobmffVideoTrackData) => {
 export const soundSampleDescription = (
 	compressionType: string,
 	trackData: IsobmffAudioTrackData,
-) => box(compressionType, [
-	Array(6).fill(0), // Reserved
-	u16(1), // Data reference index
-	u16(0), // Version (AudioSampleEntry, not AudioSampleEntryV1)
-	u16(0), // Revision level
-	u32(0), // Vendor
-	u16(trackData.info.numberOfChannels), // Number of channels
-	u16(16), // Sample size (bits)
-	u16(0), // Compression ID
-	u16(0), // Packet size
-	u32(2 ** 16 * trackData.info.sampleRate), // Sample rate
-], [
-	AUDIO_CODEC_TO_CONFIGURATION_BOX[trackData.track.source._codec]!(trackData),
-]);
+) => {
+	let version = 0;
+	let contents: NestedNumberArray;
+
+	let sampleSizeInBits = 16;
+	if ((PCM_CODECS as readonly AudioCodec[]).includes(trackData.track.source._codec)) {
+		const codec = trackData.track.source._codec as PcmAudioCodec;
+		const { sampleSize } = parsePcmCodec(codec);
+		sampleSizeInBits = 8 * sampleSize;
+
+		if (sampleSizeInBits > 16) {
+			version = 1;
+		}
+	}
+
+	if (version === 0) {
+		contents = [
+			Array(6).fill(0), // Reserved
+			u16(1), // Data reference index
+			u16(version), // Version
+			u16(0), // Revision level
+			u32(0), // Vendor
+			u16(trackData.info.numberOfChannels), // Number of channels
+			u16(sampleSizeInBits), // Sample size (bits)
+			u16(0), // Compression ID
+			u16(0), // Packet size
+			u16(trackData.info.sampleRate < 2 ** 16 ? trackData.info.sampleRate : 0), // Sample rate (upper)
+			u16(0), // Sample rate (lower)
+		];
+	} else {
+		contents = [
+			Array(6).fill(0), // Reserved
+			u16(1), // Data reference index
+			u16(version), // Version
+			u16(0), // Revision level
+			u32(0), // Vendor
+			u16(trackData.info.numberOfChannels), // Number of channels
+			u16(Math.min(sampleSizeInBits, 16)), // Sample size (bits)
+			u16(0), // Compression ID
+			u16(0), // Packet size
+			u16(trackData.info.sampleRate < 2 ** 16 ? trackData.info.sampleRate : 0), // Sample rate (upper)
+			u16(0), // Sample rate (lower)
+			u32(1), // Samples per packet (must be 1 for uncompressed formats)
+			u32(sampleSizeInBits / 8), // Bytes per packet
+			u32(trackData.info.numberOfChannels * sampleSizeInBits / 8), // Bytes per frame
+			u32(2), // Bytes per sample (constant in FFmpeg)
+		];
+	}
+
+	return box(compressionType, contents, [
+		AUDIO_CODEC_TO_CONFIGURATION_BOX[trackData.track.source._codec]?.(trackData) ?? null,
+	]);
+};
 
 /** MPEG-4 Elementary Stream Descriptor Box. */
 export const esds = (trackData: IsobmffAudioTrackData) => {
-	const description = toUint8Array(trackData.info.decoderConfig.description ?? new ArrayBuffer(0));
-
-	// Adapted from https://stackoverflow.com/a/54803118
 	// We build up the bytes in a layered way which reflects the nested structure
 
+	let objectTypeIndication: number;
+	switch (trackData.track.source._codec) {
+		case 'aac': {
+			objectTypeIndication = 0x40;
+		}; break;
+		case 'mp3': {
+			objectTypeIndication = 0x6b;
+		}; break;
+		case 'vorbis': {
+			objectTypeIndication = 0xdd;
+		}; break;
+		default: throw new Error(`Unhandled audio codec: ${trackData.track.source._codec}`);
+	}
+
 	let bytes = [
-		...description,
-	];
-	bytes = [
-		...u8(0x40), // MPEG-4 Audio
+		...u8(objectTypeIndication), // Object type indication
 		...u8(0x15), // stream type(6bits)=5 audio, flags(2bits)=1
 		...u24(0), // 24bit buffer size
 		...u32(0), // max bitrate
 		...u32(0), // avg bitrate
-		...u8(0x05), // TAG(5) = ASC ([2],[3]) embedded in above OD
-		...variableUnsignedInt(bytes.length),
-		...bytes,
 	];
+	if (trackData.info.decoderConfig.description) {
+		const description = toUint8Array(trackData.info.decoderConfig.description);
+
+		// Add the decoder description to the end
+		bytes = [
+			...bytes,
+			...u8(0x05), // TAG(5) = DecoderSpecificInfo
+			...variableUnsignedInt(description.byteLength),
+			...description,
+		];
+	}
+
 	bytes = [
 		...u16(1), // ES_ID = 1
 		...u8(0x00), // flags etc = 0
-		...u8(0x04), // TAG(4) = ES Descriptor ([2]) embedded in above OD
+		...u8(0x04), // TAG(4) = ES Descriptor
 		...variableUnsignedInt(bytes.length),
 		...bytes,
 		...u8(0x06), // TAG(6)
@@ -734,7 +800,7 @@ export const esds = (trackData: IsobmffAudioTrackData) => {
 		...u8(0x02), // data
 	];
 	bytes = [
-		...u8(0x03), // TAG(3) = Object Descriptor ([2])
+		...u8(0x03), // TAG(3) = Object Descriptor
 		...variableUnsignedInt(bytes.length),
 		...bytes,
 	];
@@ -742,35 +808,82 @@ export const esds = (trackData: IsobmffAudioTrackData) => {
 	return fullBox('esds', 0, 0, bytes);
 };
 
+export const wave = (trackData: IsobmffAudioTrackData) => {
+	return box('wave', undefined, [
+		frma(trackData),
+		enda(trackData),
+		box('\x00\x00\x00\x00'), // NULL tag at the end
+	]);
+};
+
+export const frma = (trackData: IsobmffAudioTrackData) => {
+	return box('frma', [
+		ascii(AUDIO_CODEC_TO_BOX_NAME[trackData.track.source._codec]!),
+	]);
+};
+
+// This box specifies PCM endianness
+export const enda = (trackData: IsobmffAudioTrackData) => {
+	const { littleEndian } = parsePcmCodec(trackData.track.source._codec as PcmAudioCodec);
+
+	return box('enda', [
+		u16(+littleEndian),
+	]);
+};
+
 /** Opus Specific Box. */
 export const dOps = (trackData: IsobmffAudioTrackData) => {
+	let outputChannelCount = trackData.info.numberOfChannels;
 	// Default PreSkip, should be at least 80 milliseconds worth of playback, measured in 48000 Hz samples
-	let preskip = 3840;
-	let gain = 0;
+	let preSkip = 3840;
+	let inputSampleRate = trackData.info.sampleRate;
+	let outputGain = 0;
+	let channelMappingFamily = 0;
+	let channelMappingTable = new Uint8Array(0);
 
 	// Read preskip and from codec private data from the encoder
 	// https://www.rfc-editor.org/rfc/rfc7845#section-5
 	const description = trackData.info.decoderConfig?.description;
 	if (description) {
-		if (description.byteLength < 18) {
-			throw new Error('Opus decoder description is too short (must be at least 18 bytes).');
-		}
+		assert(description.byteLength >= 18);
 
 		const view = ArrayBuffer.isView(description)
 			? new DataView(description.buffer, description.byteOffset, description.byteLength)
 			: new DataView(description);
-		preskip = view.getUint16(10, true);
-		gain = view.getInt16(14, true);
+
+		outputChannelCount = view.getUint8(9);
+		preSkip = view.getUint16(10, true);
+		inputSampleRate = view.getUint32(12, true);
+		outputGain = view.getInt16(16, true);
+		channelMappingFamily = view.getUint8(18);
+
+		if (channelMappingFamily) {
+			const bytes = toUint8Array(description);
+			channelMappingTable = bytes.subarray(19, 19 + 2 + outputChannelCount);
+		}
 	}
 
 	// https://www.opus-codec.org/docs/opus_in_isobmff.html
 	return box('dOps', [
 		u8(0), // Version
-		u8(trackData.info.numberOfChannels), // OutputChannelCount
-		u16(preskip),
-		u32(trackData.info.sampleRate), // InputSampleRate
-		fixed_8_8(gain), // OutputGain
-		u8(0), // ChannelMappingFamily
+		u8(outputChannelCount), // OutputChannelCount
+		u16(preSkip), // PreSkip
+		u32(inputSampleRate), // InputSampleRate
+		i16(outputGain), // OutputGain
+		u8(channelMappingFamily), // ChannelMappingFamily
+		...channelMappingTable,
+	]);
+};
+
+/** FLAC specific box. */
+export const dfLa = (trackData: IsobmffAudioTrackData) => {
+	const description = trackData.info.decoderConfig?.description;
+	assert(description);
+
+	const bytes = toUint8Array(description);
+
+	return fullBox('dfLa', 0, 0, [
+		...bytes.subarray(4),
 	]);
 };
 
@@ -836,11 +949,24 @@ export const stsc = (trackData: IsobmffTrackData) => {
 };
 
 /** Sample Size Box: Specifies the byte size of each sample in the media. */
-export const stsz = (trackData: IsobmffTrackData) => fullBox('stsz', 0, 0, [
-	u32(0), // Sample size (0 means non-constant size)
-	u32(trackData.samples.length), // Number of entries
-	trackData.samples.map(x => u32(x.size)), // Sample size table
-]);
+export const stsz = (trackData: IsobmffTrackData) => {
+	if (trackData.requiresPcmTransformation) {
+		assert(trackData.type === 'audio');
+		const { sampleSize } = parsePcmCodec(trackData.track.source._codec as PcmAudioCodec);
+
+		// With PCM, every sample has the same size
+		return fullBox('stsz', 0, 0, [
+			u32(sampleSize * trackData.info.numberOfChannels), // Sample size
+			u32(trackData.samples.reduce((acc, x) => acc + intoTimescale(x.duration, trackData.timescale), 0)),
+		]);
+	}
+
+	return fullBox('stsz', 0, 0, [
+		u32(0), // Sample size (0 means non-constant size)
+		u32(trackData.samples.length), // Number of entries
+		trackData.samples.map(x => u32(x.size)), // Sample size table
+	]);
+};
 
 /** Chunk Offset Box: Identifies the location of each chunk of data in the media's data stream, relative to the file. */
 export const stco = (trackData: IsobmffTrackData) => {
@@ -1134,15 +1260,39 @@ const VIDEO_CODEC_TO_CONFIGURATION_BOX: Record<VideoCodec, (trackData: IsobmffVi
 };
 
 const AUDIO_CODEC_TO_BOX_NAME: Partial<Record<AudioCodec, string>> = {
-	aac: 'mp4a',
-	opus: 'Opus',
+	'aac': 'mp4a',
+	'mp3': 'mp4a',
+	'opus': 'Opus',
+	'vorbis': 'mp4a',
+	'flac': 'fLaC',
+	'ulaw': 'ulaw',
+	'alaw': 'alaw',
+	'pcm-u8': 'raw ',
+	'pcm-s8': 'sowt',
+	'pcm-s16': 'sowt',
+	'pcm-s16be': 'twos',
+	'pcm-s24': 'in24',
+	'pcm-s24be': 'in24',
+	'pcm-s32': 'in32',
+	'pcm-s32be': 'in32',
+	'pcm-f32': 'fl32',
+	'pcm-f32be': 'fl32',
 };
 
 const AUDIO_CODEC_TO_CONFIGURATION_BOX: Partial<
 	Record<AudioCodec, (trackData: IsobmffAudioTrackData) => Box | null>
 > = {
-	aac: esds,
-	opus: dOps,
+	'aac': esds,
+	'mp3': esds,
+	'opus': dOps,
+	'vorbis': esds,
+	'flac': dfLa,
+	'pcm-s24': wave,
+	'pcm-s24be': wave,
+	'pcm-s32': wave,
+	'pcm-s32be': wave,
+	'pcm-f32': wave,
+	'pcm-f32be': wave,
 };
 
 const SUBTITLE_CODEC_TO_BOX_NAME: Record<SubtitleCodec, string> = {

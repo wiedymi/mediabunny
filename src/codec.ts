@@ -30,6 +30,8 @@ export const PCM_CODECS = [
 	'pcm-s32be',
 	'pcm-f32',
 	'pcm-f32be',
+	'ulaw',
+	'alaw',
 ] as const;
 /** @public */
 export const AUDIO_CODECS = [
@@ -38,8 +40,6 @@ export const AUDIO_CODECS = [
 	'opus',
 	'vorbis',
 	'flac',
-	'ulaw',
-	'alaw',
 	...PCM_CODECS,
 ] as const; // TODO add the rest
 /** @public */
@@ -495,6 +495,35 @@ export const parseAacAudioSpecificConfig = (bytes: Uint8Array | null) => {
 	};
 };
 
+const PCM_CODEC_REGEX = /^pcm-([usf])(\d+)+(be)?$/;
+export const parsePcmCodec = (codec: PcmAudioCodec) => {
+	assert(PCM_CODECS.includes(codec));
+
+	if (codec === 'ulaw') {
+		return { dataType: 'ulaw' as const, sampleSize: 1 as const, littleEndian: true, silentValue: 255 };
+	} else if (codec === 'alaw') {
+		return { dataType: 'alaw' as const, sampleSize: 1 as const, littleEndian: true, silentValue: 213 };
+	}
+
+	const match = PCM_CODEC_REGEX.exec(codec);
+	assert(match);
+
+	let dataType: 'unsigned' | 'signed' | 'float' | 'ulaw' | 'alaw';
+	if (match[1] === 'u') {
+		dataType = 'unsigned';
+	} else if (match[1] === 's') {
+		dataType = 'signed';
+	} else {
+		dataType = 'float';
+	}
+
+	const sampleSize = (Number(match[2]) / 8) as 1 | 2 | 3 | 4;
+	const littleEndian = match[3] !== 'be';
+	const silentValue = codec === 'pcm-u8' ? 2 ** 7 : 0;
+
+	return { dataType, sampleSize, littleEndian, silentValue };
+};
+
 export const getVideoEncoderConfigExtension = (codec: VideoCodec) => {
 	if (codec === 'avc') {
 		return {
@@ -753,10 +782,11 @@ export const validateAudioChunkMetadata = (metadata: EncodedAudioChunkMetadata |
 			throw new TypeError('Audio chunk metadata decoder configuration codec string for Opus must be "opus".');
 		}
 
-		if (!metadata.decoderConfig.description) {
+		if (metadata.decoderConfig.description && metadata.decoderConfig.description.byteLength < 18) {
+			// Description is optional for Opus per-spec, so we shouldn't enforce it
 			throw new TypeError(
-				'Audio chunk metadata decoder configuration for Opus must include a description, which is expected to'
-				+ ' be an Identification Header as specified in Section 5.1 of RFC 7845.',
+				'Audio chunk metadata decoder configuration description, when specified, is expected to be an'
+				+ ' Identification Header as specified in Section 5.1 of RFC 7845.',
 			);
 		}
 	}
@@ -781,7 +811,8 @@ export const validateAudioChunkMetadata = (metadata: EncodedAudioChunkMetadata |
 			throw new TypeError('Audio chunk metadata decoder configuration codec string for FLAC must be "flac".');
 		}
 
-		if (!metadata.decoderConfig.description) {
+		const minDescriptionSize = 4 + 4 + 34; // 'fLaC' + metadata block header + STREAMINFO block
+		if (!metadata.decoderConfig.description || metadata.decoderConfig.description.byteLength < minDescriptionSize) {
 			throw new TypeError(
 				'Audio chunk metadata decoder configuration for FLAC must include a description, which is expected to'
 				+ ' adhere to the format described in https://www.w3.org/TR/webcodecs-flac-codec-registration/.',
@@ -789,22 +820,12 @@ export const validateAudioChunkMetadata = (metadata: EncodedAudioChunkMetadata |
 		}
 	}
 
-	// ulaw-specific validation
-	if (metadata.decoderConfig.codec === 'ulaw') {
-		if (metadata.decoderConfig.codec !== 'ulaw') {
-			throw new TypeError('Audio chunk metadata decoder configuration codec string for uLaw must be "ulaw".');
-		}
-	}
-
-	// alaw-specific validation
-	if (metadata.decoderConfig.codec === 'alaw') {
-		if (metadata.decoderConfig.codec !== 'alaw') {
-			throw new TypeError('Audio chunk metadata decoder configuration codec string for A-law must be "alaw".');
-		}
-	}
-
 	// PCM-specific validation
-	if (metadata.decoderConfig.codec.startsWith('pcm')) {
+	if (
+		metadata.decoderConfig.codec.startsWith('pcm')
+		|| metadata.decoderConfig.codec.startsWith('ulaw')
+		|| metadata.decoderConfig.codec.startsWith('alaw')
+	) {
 		if (!(PCM_CODECS as readonly string[]).includes(metadata.decoderConfig.codec)) {
 			throw new TypeError(
 				'Audio chunk metadata decoder configuration codec string for PCM must be one of the supported PCM'

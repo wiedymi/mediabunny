@@ -40,35 +40,49 @@
 			source
 		});
 
+		//const videoTrack = await input.getPrimaryVideoTrack();
+		//console.log(await videoTrack.computeSampleStats());
+		//return;
+
 		const target = new Metamuxer.ArrayBufferTarget();
 		const output = new Metamuxer.Output({
-			format: new Metamuxer.Mp4OutputFormat({ fastStart: undefined }),
+			format: new Metamuxer.MovOutputFormat({ fastStart: undefined }),
 			target
 		});
 
+		const audioTrack = await input.getPrimaryAudioTrack();
 		const videoTrack = await input.getPrimaryVideoTrack();
-		const drain = new Metamuxer.EncodedVideoSampleDrain(videoTrack);
+			
+		const drain = new Metamuxer.EncodedAudioSampleDrain(audioTrack);
 
-		console.log(await videoTrack.computeSampleStats())
-		document.body.textContent = performance.now() - start;
-
-		const decoderConfig = await videoTrack.getDecoderConfig();
-		const sampleSource = new Metamuxer.EncodedVideoSampleSource(await videoTrack.getCodec());
-		output.addVideoTrack(sampleSource);
+		const decoderConfig = await audioTrack.getDecoderConfig();
+		const sampleSource = new Metamuxer.EncodedAudioSampleSource(await audioTrack.getCodec());
+		const audioDataSource = new Metamuxer.AudioDataSource({ codec: 'ulaw' });
+		const videoSampleSource = new Metamuxer.EncodedVideoSampleSource(await videoTrack.getCodec());
+		output.addAudioTrack(audioDataSource ?? sampleSource);
+		output.addVideoTrack(videoSampleSource);
 
 		output.start();
 
-		let j = 0;
-		for await (const sample of drain.samples(undefined, undefined)) {
-			await sampleSource.digest(sample, { decoderConfig });
+		const videoDecoderConfig = await videoTrack.getDecoderConfig();
 
-			if (j++ < 12) {
-				console.log(sample);	
-			}
+		/*
+		for await (const sample of drain.samples()) {
+			//sample.timestamp *= 2;
+			//console.log(sample);
+			//console.log(sample)
+			await sampleSource.digest(sample, { decoderConfig });
+		}*/
+		for await (const { data } of new Metamuxer.AudioDataDrain(audioTrack).data()) {
+			//console.log(sample)
+			await audioDataSource.digest(data);
+		}
+		for await (const sample of new Metamuxer.EncodedVideoSampleDrain(videoTrack).samples()) {
+			//console.log(sample)
+			await videoSampleSource.digest(sample, { decoderConfig: videoDecoderConfig });
 		}
 		
 		await output.finalize();
-		
 
 		console.log(target)
 
@@ -80,8 +94,11 @@
 			a.click();
 			URL.revokeObjectURL(url);
 		}
-		download(new Blob([target.buffer]), 'converted.mp4');
+		download(new Blob([target.buffer]), 'converted.mov');
 
+		document.body.textContent = performance.now() - start;
+
+		/*
 		const input2 = new Metamuxer.Input({
 			formats: Metamuxer.ALL_FORMATS,
 			source: new Metamuxer.BufferSource(target.buffer)
@@ -97,6 +114,7 @@
 				break;
 			}
 		}
+		*/
 
 		
 

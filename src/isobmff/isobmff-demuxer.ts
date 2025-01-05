@@ -6,6 +6,7 @@ import {
 	extractVideoCodecString,
 	MediaCodec,
 	parseAacAudioSpecificConfig,
+	PCM_CODECS,
 	VideoCodec,
 	Vp9CodecInfo,
 } from '../codec';
@@ -286,11 +287,9 @@ export class IsobmffDemuxer extends Demuxer {
 		this.traverseBox();
 		this.currentTrack = null;
 
-		const isPcmCodec = internalTrack.info?.type === 'audio' && (
-			internalTrack.info.codec?.startsWith('pcm-')
-			|| internalTrack.info.codec === 'ulaw'
-			|| internalTrack.info.codec === 'alaw'
-		);
+		const isPcmCodec = internalTrack.info?.type === 'audio'
+			&& internalTrack.info.codec
+			&& (PCM_CODECS as readonly string[]).includes(internalTrack.info.codec);
 
 		if (isPcmCodec && sampleTable.sampleCompositionTimeOffsets.length === 0) {
 			// If the audio has PCM samples, the way the samples are defined in the sample table is somewhat
@@ -316,7 +315,7 @@ export class IsobmffDemuxer extends Demuxer {
 
 					const startTimingEntryIndex = binarySearchLessOrEqual(
 						sampleTable.sampleTimingEntries,
-						chunkEntry.startSampleIndex,
+						startSampleIndex,
 						x => x.startIndex,
 					);
 					const startTimingEntry = sampleTable.sampleTimingEntries[startTimingEntryIndex]!;
@@ -339,7 +338,7 @@ export class IsobmffDemuxer extends Demuxer {
 					} else {
 						// One sample for the entire chunk
 						newSampleTimingEntries.push({
-							startIndex: chunkEntry.startChunkIndex,
+							startIndex: chunkEntry.startChunkIndex + j,
 							startDecodeTimestamp: firstSampleTimestamp,
 							count: 1,
 							delta,
@@ -756,12 +755,14 @@ export class IsobmffDemuxer extends Demuxer {
 						if (stsdVersion === 0 && version > 0) {
 							// Additional QuickTime fields
 							if (version === 1) {
-								this.isobmffReader.pos += 4 * 4;
+								this.isobmffReader.pos += 4;
+								sampleSize = 8 * this.isobmffReader.readU32();
+								this.isobmffReader.pos += 2 * 4;
 							} else if (version === 2) {
 								this.isobmffReader.pos += 4;
 								sampleRate = this.isobmffReader.readF64();
 								channelCount = this.isobmffReader.readU32();
-								this.isobmffReader.pos += 4; // Always 0x7F000000
+								this.isobmffReader.pos += 4; // Always 0x7f000000
 
 								sampleSize = this.isobmffReader.readU32();
 
@@ -777,7 +778,7 @@ export class IsobmffDemuxer extends Demuxer {
 
 									if (sampleSize > 0 && sampleSize <= 64) {
 										if (isFloat) {
-											if (sampleSize === 32 && !isBigEndian) {
+											if (sampleSize === 32) {
 												track.info.codec = isBigEndian ? 'pcm-f32be' : 'pcm-f32';
 											}
 										} else {
@@ -800,7 +801,7 @@ export class IsobmffDemuxer extends Demuxer {
 									}
 
 									if (track.info.codec === null) {
-										console.warn('Unsupportedd PCM format.');
+										console.warn('Unsupported PCM format.');
 									}
 								}
 							}

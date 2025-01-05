@@ -212,7 +212,11 @@ const computeSampleStats = async (drain: EncodedVideoSampleDrain | EncodedAudioS
 
 	return {
 		sampleCount,
-		averageSampleRate: sampleCount ? Math.fround(sampleCount / (endTimestamp - startTimestamp)) : 0,
-		averageBitrate: sampleCount ? Math.fround(8 * totalSampleBytes / (endTimestamp - startTimestamp)) : 0,
+		averageSampleRate: sampleCount
+			? Number((sampleCount / (endTimestamp - startTimestamp)).toPrecision(16))
+			: 0,
+		averageBitrate: sampleCount
+			? Number((8 * totalSampleBytes / (endTimestamp - startTimestamp)).toPrecision(16))
+			: 0,
 	};
 };
