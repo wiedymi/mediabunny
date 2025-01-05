@@ -1,4 +1,4 @@
-import { ArrayBufferTargetWriter, ChunkedStreamTargetWriter, StreamTargetWriter, Writer } from './writer';
+import { BufferTargetWriter, ChunkedStreamTargetWriter, StreamTargetWriter, Writer } from './writer';
 import { Output } from './output';
 
 /** @public */
@@ -11,13 +11,12 @@ export abstract class Target {
 }
 
 /** @public */
-// TODO: Switch to Uint8ArrayTarget for efficiency?
-export class ArrayBufferTarget extends Target {
-	buffer: ArrayBuffer | null = null;
+export class BufferTarget extends Target {
+	buffer: Uint8Array | null = null;
 
 	/** @internal */
 	_createWriter() {
-		return new ArrayBufferTargetWriter(this);
+		return new BufferTargetWriter(this);
 	}
 }
 

@@ -390,10 +390,8 @@ export const buildAudioCodecString = (codec: AudioCodec, numberOfChannels: numbe
 		return 'vorbis';
 	} else if (codec === 'flac') {
 		return 'flac';
-	} else if (codec === 'ulaw') {
-		return 'ulaw';
-	} else if (codec === 'alaw') {
-		return 'alaw';
+	} else if ((PCM_CODECS as readonly string[]).includes(codec)) {
+		return codec;
 	}
 
 	throw new TypeError(`Unhandled codec '${codec}'.`);
@@ -427,12 +425,8 @@ export const extractAudioCodecString = (trackInfo: {
 		return 'vorbis';
 	} else if (codec === 'flac') {
 		return 'flac';
-	} else if (codec?.startsWith('pcm-')) {
+	} else if (codec && (PCM_CODECS as readonly string[]).includes(codec)) {
 		return codec;
-	} else if (codec === 'ulaw') {
-		return 'ulaw';
-	} else if (codec === 'alaw') {
-		return 'alaw';
 	}
 
 	throw new TypeError(`Unhandled codec '${codec}'.`);

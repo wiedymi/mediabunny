@@ -1,11 +1,10 @@
 import { Box, free, ftyp, IsobmffBoxWriter, mdat, mfra, moof, moov, vtta, vttc, vtte } from './isobmff-boxes';
 import { Muxer } from '../muxer';
 import { Output, OutputAudioTrack, OutputSubtitleTrack, OutputTrack, OutputVideoTrack } from '../output';
-import { ArrayBufferTargetWriter, Writer } from '../writer';
+import { BufferTargetWriter, Writer } from '../writer';
 import { assert, last } from '../misc';
 import { IsobmffOutputFormatOptions, IsobmffOutputFormat, MovOutputFormat } from '../output-format';
 import { inlineTimestampRegex, SubtitleConfig, SubtitleCue, SubtitleMetadata } from '../subtitles';
-import { ArrayBufferTarget } from '../target';
 import {
 	parsePcmCodec,
 	PCM_CODECS,
@@ -15,6 +14,7 @@ import {
 	validateVideoChunkMetadata,
 } from '../codec';
 import { EncodedAudioSample, EncodedVideoSample } from '../sample';
+import { BufferTarget } from '../target';
 
 export const GLOBAL_TIMESCALE = 1000;
 const TIMESTAMP_OFFSET = 2_082_844_800; // Seconds between Jan 1 1904 and Jan 1 1970
@@ -102,7 +102,7 @@ export class IsobmffMuxer extends Muxer {
 	private isMov: boolean;
 	private fastStart: NonNullable<IsobmffOutputFormatOptions['fastStart']>;
 
-	private auxTarget = new ArrayBufferTarget();
+	private auxTarget = new BufferTarget();
 	private auxWriter = this.auxTarget._createWriter();
 	private auxBoxWriter = new IsobmffBoxWriter(this.auxWriter);
 
@@ -126,7 +126,7 @@ export class IsobmffMuxer extends Muxer {
 
 		// If the fastStart option isn't defined, enable in-memory fast start if the target is an ArrayBuffer, as the
 		// memory usage remains identical
-		const fastStartDefault = this.writer instanceof ArrayBufferTargetWriter ? 'in-memory' : false;
+		const fastStartDefault = this.writer instanceof BufferTargetWriter ? 'in-memory' : false;
 		this.fastStart = format._options.fastStart ?? fastStartDefault;
 
 		if (this.fastStart === 'in-memory' || this.fastStart === 'fragmented') {

@@ -1,4 +1,4 @@
-import { ArrayBufferTarget, StreamTarget, StreamTargetChunk } from './target';
+import { BufferTarget, StreamTarget, StreamTargetChunk } from './target';
 import { assert } from './misc';
 
 export abstract class Writer {
@@ -21,21 +21,36 @@ export abstract class Writer {
 	abstract close(): Promise<void>;
 }
 
-/**
- * Writes to an ArrayBufferTarget. Maintains a growable internal buffer during the muxing process, which will then be
- * written to the ArrayBufferTarget once the muxing finishes.
- */
-export class ArrayBufferTargetWriter extends Writer {
-	private pos = 0;
-	private target: ArrayBufferTarget;
-	private buffer = new ArrayBuffer(2 ** 16);
-	private bytes = new Uint8Array(this.buffer);
-	private maxPos = 0;
+const ARRAY_BUFFER_INITIAL_SIZE = 2 ** 16;
+const ARRAY_BUFFER_MAX_SIZE = 2 ** 32;
 
-	constructor(target: ArrayBufferTarget) {
+export class BufferTargetWriter extends Writer {
+	private pos = 0;
+	private target: BufferTarget;
+	private buffer: ArrayBuffer;
+	private bytes: Uint8Array;
+	private maxPos = 0;
+	private supportsResize: boolean;
+
+	constructor(target: BufferTarget) {
 		super();
 
 		this.target = target;
+
+		this.supportsResize = 'resize' in new ArrayBuffer(0);
+		if (this.supportsResize) {
+			try {
+				// @ts-expect-error Don't want to bump "lib" in tsconfig
+				this.buffer = new ArrayBuffer(ARRAY_BUFFER_INITIAL_SIZE, { maxByteLength: ARRAY_BUFFER_MAX_SIZE });
+			} catch {
+				this.buffer = new ArrayBuffer(ARRAY_BUFFER_INITIAL_SIZE);
+				this.supportsResize = false;
+			}
+		} else {
+			this.buffer = new ArrayBuffer(ARRAY_BUFFER_INITIAL_SIZE);
+		}
+
+		this.bytes = new Uint8Array(this.buffer);
 	}
 
 	private ensureSize(size: number) {
@@ -44,12 +59,27 @@ export class ArrayBufferTargetWriter extends Writer {
 
 		if (newLength === this.buffer.byteLength) return;
 
-		const newBuffer = new ArrayBuffer(newLength);
-		const newBytes = new Uint8Array(newBuffer);
-		newBytes.set(this.bytes, 0);
+		if (newLength > ARRAY_BUFFER_MAX_SIZE) {
+			throw new Error(
+				`ArrayBuffer exceeded maximum size of ${ARRAY_BUFFER_MAX_SIZE} bytes. Please consider using another`
+				+ ` target.`,
+			);
+		}
 
-		this.buffer = newBuffer;
-		this.bytes = newBytes;
+		if (this.supportsResize) {
+			// Use resize if it exists
+			// @ts-expect-error Don't want to bump "lib" in tsconfig
+			// eslint-disable-next-line @typescript-eslint/no-unsafe-call
+			this.buffer.resize(newLength);
+			// The Uint8Array scales automatically
+		} else {
+			const newBuffer = new ArrayBuffer(newLength);
+			const newBytes = new Uint8Array(newBuffer);
+			newBytes.set(this.bytes, 0);
+
+			this.buffer = newBuffer;
+			this.bytes = newBytes;
+		}
 	}
 
 	write(data: Uint8Array) {
@@ -73,7 +103,7 @@ export class ArrayBufferTargetWriter extends Writer {
 
 	async finalize() {
 		this.ensureSize(this.pos);
-		this.target.buffer = this.buffer.slice(0, Math.max(this.maxPos, this.pos));
+		this.target.buffer = this.bytes.subarray(0, Math.max(this.maxPos, this.pos));
 	}
 
 	async close() {}
