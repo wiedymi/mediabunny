@@ -11,6 +11,7 @@ import {
 	toAsyncIterator,
 	validateAnyIterable,
 } from './misc';
+import { fromAlaw, fromUlaw } from './pcm';
 import { EncodedAudioSample, EncodedVideoSample } from './sample';
 
 /** @public */
@@ -890,58 +891,9 @@ class PcmAudioDecoderWrapper extends DecoderWrapper<EncodedAudioSample, AudioDat
 				} else if (dataType === 'signed') {
 					this.readInputValue = (view, byteOffset) => view.getInt8(byteOffset);
 				} else if (dataType === 'ulaw') {
-					// https://github.com/dystopiancode/pcm-g711/blob/master/pcm-g711/g711.c
-					this.readInputValue = (view, byteOffset) => {
-						const MULAW_BIAS = 33;
-						let sign = 0;
-						let position = 0;
-
-						// Get byte and invert
-						let number = ~view.getUint8(byteOffset);
-
-						// Handle sign
-						if (number & 0x80) {
-							number &= ~(1 << 7);
-							sign = -1;
-						}
-
-						// Calculate position
-						position = ((number & 0xF0) >> 4) + 5;
-
-						// Reconstruct linear value
-						const decoded = ((1 << position) | ((number & 0x0F) << (position - 4))
-							| (1 << (position - 5))) - MULAW_BIAS;
-
-						return (sign === 0) ? decoded : -decoded;
-					};
+					this.readInputValue = (view, byteOffset) => fromUlaw(view.getUint8(byteOffset));
 				} else if (dataType === 'alaw') {
-					this.readInputValue = (view, byteOffset) => {
-						let sign = 0x00;
-						let position = 0;
-
-						// Get byte and XOR with 0x55
-						let number = view.getUint8(byteOffset) ^ 0x55;
-
-						// Handle sign
-						if (number & 0x80) {
-							number &= ~(1 << 7);
-							sign = -1;
-						}
-
-						// Calculate position
-						position = ((number & 0xF0) >> 4) + 4;
-
-						// Reconstruct linear value
-						let decoded = 0;
-						if (position !== 4) {
-							decoded = ((1 << position) | ((number & 0x0F) << (position - 4))
-								| (1 << (position - 5)));
-						} else {
-							decoded = (number << 1) | 1;
-						}
-
-						return (sign === 0) ? decoded : -decoded;
-					};
+					this.readInputValue = (view, byteOffset) => fromAlaw(view.getUint8(byteOffset));
 				} else {
 					assert(false);
 				}

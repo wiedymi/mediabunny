@@ -269,6 +269,34 @@ export const getInt24 = (view: DataView, byteOffset: number, littleEndian: boole
 	return getUint24(view, byteOffset, littleEndian) << 8 >> 8;
 };
 
+export const setUint24 = (view: DataView, byteOffset: number, value: number, littleEndian: boolean) => {
+	// Ensure the value is within 24-bit unsigned range (0 to 16777215)
+	value = value >>> 0; // Convert to unsigned 32-bit
+	value = value & 0xFFFFFF; // Mask to 24 bits
+
+	if (littleEndian) {
+		view.setUint8(byteOffset, value & 0xFF);
+		view.setUint8(byteOffset + 1, (value >>> 8) & 0xFF);
+		view.setUint8(byteOffset + 2, (value >>> 16) & 0xFF);
+	} else {
+		view.setUint8(byteOffset, (value >>> 16) & 0xFF);
+		view.setUint8(byteOffset + 1, (value >>> 8) & 0xFF);
+		view.setUint8(byteOffset + 2, value & 0xFF);
+	}
+};
+
+export const setInt24 = (view: DataView, byteOffset: number, value: number, littleEndian: boolean) => {
+	// Ensure the value is within 24-bit signed range (-8388608 to 8388607)
+	value = clamp(value, -8388608, 8388607);
+
+	// Convert negative values to their 24-bit representation
+	if (value < 0) {
+		value = (value + 0x1000000) & 0xFFFFFF;
+	}
+
+	setUint24(view, byteOffset, value, littleEndian);
+};
+
 /**
  * Calls a function on each value spat out by an async generator. The reason for writing this manually instead of
  * using a generator function is that the generator function queues return() calls - here, we forward them immediately.
@@ -296,4 +324,8 @@ export const mapAsyncGenerator = <T, U>(
 			return this;
 		},
 	};
+};
+
+export const clamp = (value: number, min: number, max: number) => {
+	return Math.max(min, Math.min(max, value));
 };

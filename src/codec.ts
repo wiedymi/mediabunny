@@ -914,7 +914,7 @@ export const canEncodeAudio = async (codec: AudioCodec, { numberOfChannels = 2, 
 	}
 
 	if ((PCM_CODECS as readonly string[]).includes(codec)) {
-		return false; // TODO write encoder
+		return true; // Because we encode these ourselves
 	}
 
 	if (typeof AudioEncoder === 'undefined') {

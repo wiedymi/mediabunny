@@ -5,17 +5,20 @@ import {
 	buildVideoCodecString,
 	getAudioEncoderConfigExtension,
 	getVideoEncoderConfigExtension,
+	parsePcmCodec,
 	PCM_CODECS,
+	PcmAudioCodec,
 	SUBTITLE_CODECS,
 	SubtitleCodec,
 	VIDEO_CODECS,
 	VideoCodec,
 } from './codec';
 import { OutputAudioTrack, OutputSubtitleTrack, OutputTrack, OutputVideoTrack } from './output';
-import { assert } from './misc';
+import { assert, clamp, setInt24, setUint24 } from './misc';
 import { Muxer } from './muxer';
 import { SubtitleParser } from './subtitles';
 import { EncodedAudioSample, EncodedVideoSample } from './sample';
+import { toAlaw, toUlaw } from './pcm';
 
 /** @public */
 export abstract class MediaSource {
@@ -31,23 +34,23 @@ export abstract class MediaSource {
 	/** @internal */
 	_ensureValidDigest() {
 		if (!this._connectedTrack) {
-			throw new Error('Cannot call digest without connecting the source to an output track.');
+			throw new Error('Source is not connected to an output track.');
 		}
 
 		if (this._connectedTrack.output._canceled) {
-			throw new Error('Cannot call digest after output has been canceled.');
+			throw new Error('Output has been canceled.');
 		}
 
 		if (!this._connectedTrack.output._started) {
-			throw new Error('Cannot call digest before output has been started.');
+			throw new Error('Output has not started.');
 		}
 
 		if (this._connectedTrack.output._finalizing) {
-			throw new Error('Cannot call digest after output has started finalizing.');
+			throw new Error('Output is finalizing.');
 		}
 
 		if (this._closed) {
-			throw new Error('Cannot call digest after source has been closed.');
+			throw new Error('Source is closed.');
 		}
 	}
 
@@ -126,7 +129,7 @@ export type VideoEncodingConfig = {
 	bitrate: number;
 	latencyMode?: VideoEncoderConfig['latencyMode'];
 	keyFrameInterval?: number;
-	onEncodedChunk?: (chunk: EncodedVideoChunk, meta: EncodedVideoChunkMetadata | undefined) => unknown;
+	onEncodedSample?: (chunk: EncodedVideoSample, meta: EncodedVideoChunkMetadata | undefined) => unknown;
 	onEncodingError?: (error: Error) => unknown;
 };
 
@@ -149,7 +152,7 @@ const validateVideoEncodingConfig = (config: VideoEncodingConfig) => {
 	) {
 		throw new TypeError('config.keyFrameInterval, when provided, must be a non-negative number.');
 	}
-	if (config.onEncodedChunk !== undefined && typeof config.onEncodedChunk !== 'function') {
+	if (config.onEncodedSample !== undefined && typeof config.onEncodedSample !== 'function') {
 		throw new TypeError('config.onEncodedChunk, when provided, must be a function.');
 	}
 	if (config.onEncodingError !== undefined && typeof config.onEncodingError !== 'function') {
@@ -215,12 +218,10 @@ class VideoEncoderWrapper {
 
 		this.encoder = new VideoEncoder({
 			output: (chunk, meta) => {
-				this.encodingConfig.onEncodedChunk?.(chunk, meta);
-				void this.muxer!.addEncodedVideoSample(
-					this.source._connectedTrack!,
-					EncodedVideoSample.fromEncodedVideoChunk(chunk),
-					meta,
-				);
+				const sample = EncodedVideoSample.fromEncodedVideoChunk(chunk);
+
+				this.encodingConfig.onEncodedSample?.(sample, meta);
+				void this.muxer!.addEncodedVideoSample(this.source._connectedTrack!, sample, meta);
 			},
 			error: this.encodingConfig.onEncodingError ?? (error => console.error('VideoEncoder error:', error)),
 		});
@@ -420,7 +421,7 @@ export class EncodedAudioSampleSource extends AudioSource {
 export type AudioEncodingConfig = {
 	codec: AudioCodec;
 	bitrate?: number;
-	onEncodedChunk?: (chunk: EncodedAudioChunk, meta: EncodedAudioChunkMetadata | undefined) => unknown;
+	onEncodedSample?: (chunk: EncodedAudioSample, meta: EncodedAudioChunkMetadata | undefined) => unknown;
 	onEncodingError?: (error: Error) => unknown;
 };
 
@@ -443,10 +444,15 @@ const validateAudioEncodingConfig = (config: AudioEncodingConfig) => {
 };
 
 class AudioEncoderWrapper {
+	private encoderInitialized = false;
 	private encoder: AudioEncoder | null = null;
 	private muxer: Muxer | null = null;
 	private lastNumberOfChannels: number | null = null;
 	private lastSampleRate: number | null = null;
+
+	private isPcmEncoder = false;
+	private outputSampleSize: number | null = null;
+	private writeOutputValue: ((view: DataView, byteOffset: number, value: number) => void) | null = null;
 
 	constructor(private source: AudioSource, private encodingConfig: AudioEncodingConfig) {
 		validateAudioEncodingConfig(encodingConfig);
@@ -473,44 +479,177 @@ class AudioEncoderWrapper {
 		}
 
 		this.ensureEncoder(audioData);
-		assert(this.encoder);
+		assert(this.encoderInitialized);
 
-		this.encoder.encode(audioData);
+		if (this.isPcmEncoder) {
+			await this.doPcmEncoding(audioData);
+		} else {
+			assert(this.encoder);
+			this.encoder.encode(audioData);
 
-		if (this.encoder.encodeQueueSize >= 4) {
-			await new Promise(resolve => this.encoder!.addEventListener('dequeue', resolve, { once: true }));
+			if (this.encoder.encodeQueueSize >= 4) {
+				await new Promise(resolve => this.encoder!.addEventListener('dequeue', resolve, { once: true }));
+			}
+
+			await this.muxer!.mutex.currentPromise; // Allow the writer to apply backpressure
+		}
+	}
+
+	private async doPcmEncoding(audioData: AudioData) {
+		assert(this.outputSampleSize);
+		assert(this.writeOutputValue);
+
+		// All user agents are required to support conversion to f32-planar
+		const allocationSize = audioData.allocationSize(({ planeIndex: 0, format: 'f32-planar' }));
+		const floats = new Float32Array(allocationSize / Float32Array.BYTES_PER_ELEMENT);
+
+		const channelCount = audioData.numberOfChannels;
+		const outputSize = audioData.numberOfFrames * channelCount * this.outputSampleSize;
+		const outputBuffer = new ArrayBuffer(outputSize);
+		const outputView = new DataView(outputBuffer);
+
+		for (let i = 0; i < channelCount; i++) {
+			audioData.copyTo(floats, { planeIndex: i, format: 'f32-planar' });
+			for (let j = 0; j < floats.length; j++) {
+				// Write it interleaved... interleavedly?
+				this.writeOutputValue(outputView, (j * channelCount + i) * this.outputSampleSize, floats[j]!);
+			}
 		}
 
-		await this.muxer!.mutex.currentPromise; // Allow the writer to apply backpressure
+		const sample = new EncodedAudioSample(
+			new Uint8Array(outputBuffer),
+			'key',
+			audioData.timestamp / 1e6,
+			audioData.duration / 1e6,
+		);
+		const meta: EncodedAudioChunkMetadata = {
+			decoderConfig: {
+				codec: this.encodingConfig.codec,
+				numberOfChannels: audioData.numberOfChannels,
+				sampleRate: audioData.sampleRate,
+			},
+		};
+
+		this.encodingConfig.onEncodedSample?.(sample, meta);
+		await this.muxer!.addEncodedAudioSample(this.source._connectedTrack!, sample, meta); // With backpressure
 	}
 
 	private ensureEncoder(audioData: AudioData) {
-		if (this.encoder) {
+		if (this.encoderInitialized) {
 			return;
 		}
 
-		this.encoder = new AudioEncoder({
-			output: (chunk, meta) => {
-				this.encodingConfig.onEncodedChunk?.(chunk, meta);
-				void this.muxer!.addEncodedAudioSample(
-					this.source._connectedTrack!,
-					EncodedAudioSample.fromEncodedAudioChunk(chunk),
-					meta,
-				);
-			},
-			error: this.encodingConfig.onEncodingError ?? (error => console.error('AudioEncoder error:', error)),
-		});
+		if ((PCM_CODECS as readonly string[]).includes(this.encodingConfig.codec)) {
+			this.initPcmEncoder();
+		} else {
+			this.encoder = new AudioEncoder({
+				output: (chunk, meta) => {
+					const sample = EncodedAudioSample.fromEncodedAudioChunk(chunk);
 
-		this.encoder.configure({
-			codec: buildAudioCodecString(this.encodingConfig.codec, audioData.numberOfChannels, audioData.sampleRate),
-			numberOfChannels: audioData.numberOfChannels,
-			sampleRate: audioData.sampleRate,
-			bitrate: this.encodingConfig.bitrate,
-			...getAudioEncoderConfigExtension(this.encodingConfig.codec),
-		});
+					this.encodingConfig.onEncodedSample?.(sample, meta);
+					void this.muxer!.addEncodedAudioSample(this.source._connectedTrack!, sample, meta);
+				},
+				error: this.encodingConfig.onEncodingError ?? (error => console.error('AudioEncoder error:', error)),
+			});
+
+			this.encoder.configure({
+				codec: buildAudioCodecString(
+					this.encodingConfig.codec,
+					audioData.numberOfChannels,
+					audioData.sampleRate,
+				),
+				numberOfChannels: audioData.numberOfChannels,
+				sampleRate: audioData.sampleRate,
+				bitrate: this.encodingConfig.bitrate,
+				...getAudioEncoderConfigExtension(this.encodingConfig.codec),
+			});
+		}
 
 		assert(this.source._connectedTrack);
 		this.muxer = this.source._connectedTrack.output._muxer;
+
+		this.encoderInitialized = true;
+	}
+
+	private initPcmEncoder() {
+		this.isPcmEncoder = true;
+
+		const codec = this.encodingConfig.codec as PcmAudioCodec;
+		const { dataType, sampleSize, littleEndian } = parsePcmCodec(codec);
+
+		this.outputSampleSize = sampleSize;
+
+		// All these functions receive a float sample as input and map it into the desired format
+
+		switch (sampleSize) {
+			case 1: {
+				if (dataType === 'unsigned') {
+					this.writeOutputValue = (view, byteOffset, value) =>
+						view.setUint8(byteOffset, clamp((value + 1) * 127.5, 0, 255));
+				} else if (dataType === 'signed') {
+					this.writeOutputValue = (view, byteOffset, value) => {
+						view.setInt8(byteOffset, clamp(Math.round(value * 128), -128, 127));
+					};
+				} else if (dataType === 'ulaw') {
+					this.writeOutputValue = (view, byteOffset, value) => {
+						const int16 = clamp(Math.floor(value * 32767), -32768, 32767);
+						view.setUint8(byteOffset, toUlaw(int16));
+					};
+				} else if (dataType === 'alaw') {
+					this.writeOutputValue = (view, byteOffset, value) => {
+						const int16 = clamp(Math.floor(value * 32767), -32768, 32767);
+						view.setUint8(byteOffset, toAlaw(int16));
+					};
+				} else {
+					assert(false);
+				}
+			}; break;
+			case 2: {
+				if (dataType === 'unsigned') {
+					this.writeOutputValue = (view, byteOffset, value) =>
+						view.setUint16(byteOffset, clamp((value + 1) * 32767.5, 0, 65535), littleEndian);
+				} else if (dataType === 'signed') {
+					this.writeOutputValue = (view, byteOffset, value) =>
+						view.setInt16(byteOffset, clamp(Math.round(value * 32767), -32768, 32767), littleEndian);
+				} else {
+					assert(false);
+				}
+			}; break;
+			case 3: {
+				if (dataType === 'unsigned') {
+					this.writeOutputValue = (view, byteOffset, value) =>
+						setUint24(view, byteOffset, clamp((value + 1) * 8388607.5, 0, 16777215), littleEndian);
+				} else if (dataType === 'signed') {
+					this.writeOutputValue = (view, byteOffset, value) =>
+						setInt24(
+							view,
+							byteOffset,
+							clamp(Math.round(value * 8388607), -8388608, 8388607),
+							littleEndian,
+						);
+				} else {
+					assert(false);
+				}
+			}; break;
+			case 4: {
+				if (dataType === 'unsigned') {
+					this.writeOutputValue = (view, byteOffset, value) =>
+						view.setUint32(byteOffset, clamp((value + 1) * 2147483647.5, 0, 4294967295), littleEndian);
+				} else if (dataType === 'signed') {
+					this.writeOutputValue = (view, byteOffset, value) =>
+						view.setInt32(
+							byteOffset,
+							clamp(Math.round(value * 2147483647), -2147483648, 2147483647),
+							littleEndian,
+						);
+				} else if (dataType === 'float') {
+					this.writeOutputValue = (view, byteOffset, value) =>
+						view.setFloat32(byteOffset, value, littleEndian);
+				} else {
+					assert(false);
+				}
+			}
+		}
 	}
 
 	async flush() {

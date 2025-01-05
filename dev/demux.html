@@ -57,7 +57,7 @@
 
 		const decoderConfig = await audioTrack.getDecoderConfig();
 		const sampleSource = new Metamuxer.EncodedAudioSampleSource(await audioTrack.getCodec());
-		const audioDataSource = new Metamuxer.AudioDataSource({ codec: 'aac', bitrate: 128e3 });
+		const audioDataSource = new Metamuxer.AudioDataSource({ codec: 'alaw', bitrate: 128e3 });
 		const videoSampleSource = new Metamuxer.EncodedVideoSampleSource(await videoTrack.getCodec());
 		output.addAudioTrack(audioDataSource ?? sampleSource);
 		output.addVideoTrack(videoSampleSource);
@@ -66,13 +66,15 @@
 
 		const videoDecoderConfig = await videoTrack.getDecoderConfig();
 
+		
 		/*
 		for await (const sample of drain.samples()) {
 			//sample.timestamp *= 2;
 			//console.log(sample);
 			//console.log(sample)
 			await sampleSource.digest(sample, { decoderConfig });
-		}*/
+		}
+		*/
 		for await (const { data } of new Metamuxer.AudioDataDrain(audioTrack).data()) {
 			//console.log(sample)
 			await audioDataSource.digest(data);
@@ -94,7 +96,7 @@
 			a.click();
 			URL.revokeObjectURL(url);
 		}
-		//download(new Blob([target.buffer]), 'converted.mov');
+		download(new Blob([target.buffer]), 'converted.mov');
 
 		document.body.textContent = performance.now() - start;
 

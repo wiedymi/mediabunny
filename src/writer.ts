@@ -103,7 +103,7 @@ export class BufferTargetWriter extends Writer {
 
 	async finalize() {
 		this.ensureSize(this.pos);
-		this.target.buffer = this.bytes.subarray(0, Math.max(this.maxPos, this.pos));
+		this.target.buffer = this.buffer.slice(0, Math.max(this.maxPos, this.pos));
 	}
 
 	async close() {}

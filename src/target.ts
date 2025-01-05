@@ -12,7 +12,7 @@ export abstract class Target {
 
 /** @public */
 export class BufferTarget extends Target {
-	buffer: Uint8Array | null = null;
+	buffer: ArrayBuffer | null = null;
 
 	/** @internal */
 	_createWriter() {
