@@ -995,7 +995,7 @@ class PcmAudioDecoderWrapper extends DecoderWrapper<EncodedAudioSample, AudioDat
 			numberOfChannels: this.decoderConfig.numberOfChannels,
 			sampleRate: this.decoderConfig.sampleRate,
 			numberOfFrames,
-			timestamp: sample.timestamp,
+			timestamp: sample.microsecondTimestamp,
 		});
 
 		// Since all other decoders are async, we'll make this one behave async as well

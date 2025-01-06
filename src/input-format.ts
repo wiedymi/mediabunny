@@ -45,7 +45,7 @@ export class Mp4InputFormat extends IsobmffInputFormat {
 	/** @internal */
 	override async _canReadInput(input: Input) {
 		const majorBrand = await this._getMajorBrand(input);
-		return majorBrand !== 'qt  ';
+		return !!majorBrand && majorBrand !== 'qt  ';
 	}
 
 	getName() {

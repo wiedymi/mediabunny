@@ -158,7 +158,9 @@ export class MkvOutputFormat extends OutputFormat {
 	static getSupportedCodecs(): MediaCodec[] {
 		return [
 			'avc', 'hevc', 'vp8', 'vp9', 'av1',
-			'aac', 'opus', 'vorbis',
+			'aac', 'mp3', 'opus', 'vorbis', 'flac',
+			// pcm-s8, pcm-f32be, ulaw and alaw are not supported
+			'pcm-u8', 'pcm-s16', 'pcm-s16be', 'pcm-s24', 'pcm-s24be', 'pcm-s32', 'pcm-s32be', 'pcm-f32',
 			'webvtt',
 		];
 	}

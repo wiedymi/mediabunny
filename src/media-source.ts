@@ -499,39 +499,68 @@ class AudioEncoderWrapper {
 		assert(this.outputSampleSize);
 		assert(this.writeOutputValue);
 
+		// Need to extract data from the audio data before it's closed
+		const { numberOfChannels, numberOfFrames, sampleRate, timestamp } = audioData;
+
+		const CHUNK_SIZE = 2048;
+		const outputs: {
+			frameCount: number;
+			view: DataView;
+		}[] = [];
+
+		// Prepare all of the output buffers, each being bounded by CHUNK_SIZE so we don't generate huge samples
+		for (let frame = 0; frame < numberOfFrames; frame += CHUNK_SIZE) {
+			const frameCount = Math.min(CHUNK_SIZE, audioData.numberOfFrames - frame);
+			const outputSize = frameCount * numberOfChannels * this.outputSampleSize;
+			const outputBuffer = new ArrayBuffer(outputSize);
+			const outputView = new DataView(outputBuffer);
+
+			outputs.push({ frameCount, view: outputView });
+		}
+
 		// All user agents are required to support conversion to f32-planar
 		const allocationSize = audioData.allocationSize(({ planeIndex: 0, format: 'f32-planar' }));
 		const floats = new Float32Array(allocationSize / Float32Array.BYTES_PER_ELEMENT);
 
-		const channelCount = audioData.numberOfChannels;
-		const outputSize = audioData.numberOfFrames * channelCount * this.outputSampleSize;
-		const outputBuffer = new ArrayBuffer(outputSize);
-		const outputView = new DataView(outputBuffer);
-
-		for (let i = 0; i < channelCount; i++) {
+		for (let i = 0; i < numberOfChannels; i++) {
 			audioData.copyTo(floats, { planeIndex: i, format: 'f32-planar' });
-			for (let j = 0; j < floats.length; j++) {
-				// Write it interleaved... interleavedly?
-				this.writeOutputValue(outputView, (j * channelCount + i) * this.outputSampleSize, floats[j]!);
+
+			for (let j = 0; j < outputs.length; j++) {
+				const { frameCount, view } = outputs[j]!;
+
+				for (let k = 0; k < frameCount; k++) {
+					this.writeOutputValue(
+						view,
+						(k * numberOfChannels + i) * this.outputSampleSize,
+						floats[j * CHUNK_SIZE + k]!,
+					);
+				}
 			}
 		}
 
-		const sample = new EncodedAudioSample(
-			new Uint8Array(outputBuffer),
-			'key',
-			audioData.timestamp / 1e6,
-			audioData.duration / 1e6,
-		);
 		const meta: EncodedAudioChunkMetadata = {
 			decoderConfig: {
 				codec: this.encodingConfig.codec,
-				numberOfChannels: audioData.numberOfChannels,
-				sampleRate: audioData.sampleRate,
+				numberOfChannels,
+				sampleRate,
 			},
 		};
 
-		this.encodingConfig.onEncodedSample?.(sample, meta);
-		await this.muxer!.addEncodedAudioSample(this.source._connectedTrack!, sample, meta); // With backpressure
+		for (let i = 0; i < outputs.length; i++) {
+			const { frameCount, view } = outputs[i]!;
+			const outputBuffer = view.buffer;
+			const startFrame = i * CHUNK_SIZE;
+
+			const sample = new EncodedAudioSample(
+				new Uint8Array(outputBuffer),
+				'key',
+				timestamp / 1e6 + startFrame / sampleRate,
+				frameCount / sampleRate,
+			);
+
+			this.encodingConfig.onEncodedSample?.(sample, meta);
+			await this.muxer!.addEncodedAudioSample(this.source._connectedTrack!, sample, meta); // With backpressure
+		}
 	}
 
 	private ensureEncoder(audioData: AudioData) {

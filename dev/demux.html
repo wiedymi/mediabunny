@@ -46,9 +46,11 @@
 
 		const target = new Metamuxer.BufferTarget();
 		const output = new Metamuxer.Output({
-			format: new Metamuxer.MovOutputFormat({ fastStart: undefined }),
+			format: new Metamuxer.MkvOutputFormat(),
 			target
 		});
+
+		console.log(await input.getFormat());
 
 		const audioTrack = await input.getPrimaryAudioTrack();
 		const videoTrack = await input.getPrimaryVideoTrack();
@@ -57,9 +59,9 @@
 
 		const decoderConfig = await audioTrack.getDecoderConfig();
 		const sampleSource = new Metamuxer.EncodedAudioSampleSource(await audioTrack.getCodec());
-		const audioDataSource = new Metamuxer.AudioDataSource({ codec: 'alaw', bitrate: 128e3 });
+		const audioDataSource = new Metamuxer.AudioDataSource({ codec: 'pcm-s16', bitrate: 128e3 });
 		const videoSampleSource = new Metamuxer.EncodedVideoSampleSource(await videoTrack.getCodec());
-		output.addAudioTrack(audioDataSource ?? sampleSource);
+		output.addAudioTrack(sampleSource);
 		output.addVideoTrack(videoSampleSource);
 
 		output.start();
@@ -67,18 +69,22 @@
 		const videoDecoderConfig = await videoTrack.getDecoderConfig();
 
 		
-		/*
+		
+		
 		for await (const sample of drain.samples()) {
+			//console.log(sample.timestamp);	
 			//sample.timestamp *= 2;
 			//console.log(sample);
 			//console.log(sample)
 			await sampleSource.digest(sample, { decoderConfig });
 		}
-		*/
-		for await (const { data } of new Metamuxer.AudioDataDrain(audioTrack).data()) {
+		/*
+		for await (const { data, timestamp } of new Metamuxer.AudioDataDrain(audioTrack).data()) {
+			//console.log("wow", data.timestamp);
 			//console.log(sample)
 			await audioDataSource.digest(data);
 		}
+			*/
 		for await (const sample of new Metamuxer.EncodedVideoSampleDrain(videoTrack).samples()) {
 			//console.log(sample)
 			await videoSampleSource.digest(sample, { decoderConfig: videoDecoderConfig });
@@ -96,7 +102,7 @@
 			a.click();
 			URL.revokeObjectURL(url);
 		}
-		download(new Blob([target.buffer]), 'converted.mov');
+		download(new Blob([target.buffer]), 'converted.mkv');
 
 		document.body.textContent = performance.now() - start;
 

@@ -32,8 +32,11 @@ import {
 } from '../subtitles';
 import {
 	AudioCodec,
+	PCM_CODECS,
+	PcmAudioCodec,
 	SubtitleCodec,
 	VideoCodec,
+	parsePcmCodec,
 	validateAudioChunkMetadata,
 	validateSubtitleMetadata,
 	validateVideoChunkMetadata,
@@ -103,15 +106,27 @@ type MatroskaAudioTrackData = MatroskaTrackData & { type: 'audio' };
 type MatroskaSubtitleTrackData = MatroskaTrackData & { type: 'subtitle' };
 
 const CODEC_STRING_MAP: Partial<Record<VideoCodec | AudioCodec | SubtitleCodec, string>> = {
-	avc: 'V_MPEG4/ISO/AVC',
-	hevc: 'V_MPEGH/ISO/HEVC',
-	vp8: 'V_VP8',
-	vp9: 'V_VP9',
-	av1: 'V_AV1',
-	aac: 'A_AAC', // TODO is this even correct
-	opus: 'A_OPUS',
-	vorbis: 'A_VORBIS',
-	webvtt: 'S_TEXT/WEBVTT',
+	'avc': 'V_MPEG4/ISO/AVC',
+	'hevc': 'V_MPEGH/ISO/HEVC',
+	'vp8': 'V_VP8',
+	'vp9': 'V_VP9',
+	'av1': 'V_AV1',
+
+	'aac': 'A_AAC',
+	'mp3': 'A_MPEG/L3',
+	'opus': 'A_OPUS',
+	'vorbis': 'A_VORBIS',
+	'flac': 'A_FLAC',
+	'pcm-u8': 'A_PCM/INT/LIT',
+	'pcm-s16': 'A_PCM/INT/LIT',
+	'pcm-s16be': 'A_PCM/INT/BIG',
+	'pcm-s24': 'A_PCM/INT/LIT',
+	'pcm-s24be': 'A_PCM/INT/BIG',
+	'pcm-s32': 'A_PCM/INT/LIT',
+	'pcm-s32be': 'A_PCM/INT/BIG',
+	'pcm-f32': 'A_PCM/FLOAT/IEEE',
+
+	'webvtt': 'S_TEXT/WEBVTT',
 };
 
 const TRACK_TYPE_MAP: Record<OutputTrack['type'], number> = {
@@ -470,6 +485,10 @@ export class MatroskaMuxer extends Muxer {
 	}
 
 	private audioSpecificTrackInfo(trackData: MatroskaAudioTrackData) {
+		const pcmInfo = (PCM_CODECS as readonly string[]).includes(trackData.track.source._codec)
+			? parsePcmCodec(trackData.track.source._codec as PcmAudioCodec)
+			: null;
+
 		return [
 			(trackData.info.decoderConfig.description
 				? {
@@ -480,7 +499,7 @@ export class MatroskaMuxer extends Muxer {
 			{ id: EBMLId.Audio, data: [
 				{ id: EBMLId.SamplingFrequency, data: new EBMLFloat32(trackData.info.sampleRate) },
 				{ id: EBMLId.Channels, data: trackData.info.numberOfChannels },
-				// TODO Bit depth for when PCM is a thing
+				pcmInfo ? { id: EBMLId.BitDepth, data: 8 * pcmInfo.sampleSize } : null,
 			] },
 		];
 	}
