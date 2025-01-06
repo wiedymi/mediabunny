@@ -50,13 +50,13 @@ export { Source, BufferSource, BlobSource, UrlSource } from './source';
 export {
 	InputFormat,
 	IsobmffInputFormat,
+	Mp4InputFormat,
+	QuickTimeInputFormat as MovInputFormat,
 	MatroskaInputFormat,
 	ALL_FORMATS,
-	ISOBMFF,
 	MP4,
-	MOV,
+	QTFF,
 	MATROSKA,
-	MKV,
 	WEBM,
 } from './input-format';
 export { Input, InputOptions } from './input';
