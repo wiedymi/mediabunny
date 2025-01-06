@@ -59,9 +59,9 @@
 
 		const decoderConfig = await audioTrack.getDecoderConfig();
 		const sampleSource = new Metamuxer.EncodedAudioSampleSource(await audioTrack.getCodec());
-		const audioDataSource = new Metamuxer.AudioDataSource({ codec: 'pcm-s16', bitrate: 128e3 });
+		const audioDataSource = new Metamuxer.AudioDataSource({ codec: 'vorbis', bitrate: 128e3 });
 		const videoSampleSource = new Metamuxer.EncodedVideoSampleSource(await videoTrack.getCodec());
-		output.addAudioTrack(sampleSource);
+		output.addAudioTrack(audioDataSource ?? sampleSource);
 		output.addVideoTrack(videoSampleSource);
 
 		output.start();
@@ -71,6 +71,7 @@
 		
 		
 		
+		/*
 		for await (const sample of drain.samples()) {
 			//console.log(sample.timestamp);	
 			//sample.timestamp *= 2;
@@ -78,13 +79,12 @@
 			//console.log(sample)
 			await sampleSource.digest(sample, { decoderConfig });
 		}
-		/*
+			*/
 		for await (const { data, timestamp } of new Metamuxer.AudioDataDrain(audioTrack).data()) {
 			//console.log("wow", data.timestamp);
 			//console.log(sample)
 			await audioDataSource.digest(data);
 		}
-			*/
 		for await (const sample of new Metamuxer.EncodedVideoSampleDrain(videoTrack).samples()) {
 			//console.log(sample)
 			await videoSampleSource.digest(sample, { decoderConfig: videoDecoderConfig });

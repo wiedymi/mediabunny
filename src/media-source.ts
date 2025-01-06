@@ -171,7 +171,7 @@ class VideoEncoderWrapper {
 		validateVideoEncodingConfig(encodingConfig);
 	}
 
-	async digest(videoFrame: VideoFrame, encodeOptions?: VideoEncoderEncodeOptions) {
+	async digest(videoFrame: VideoFrame, shouldClose: boolean, encodeOptions?: VideoEncoderEncodeOptions) {
 		this.source._ensureValidDigest();
 
 		// Ensure video frame size remains constant
@@ -187,7 +187,9 @@ class VideoEncoderWrapper {
 			this.lastHeight = videoFrame.codedHeight;
 		}
 
-		this.ensureEncoder(videoFrame);
+		if (!this.encoder) {
+			await this.ensureEncoder(videoFrame);
+		}
 		assert(this.encoder);
 
 		const keyFrameInterval = this.encodingConfig.keyFrameInterval ?? 5;
@@ -201,6 +203,10 @@ class VideoEncoderWrapper {
 			keyFrame: keyFrameInterval === 0 || multipleOfKeyFrameInterval !== this.lastMultipleOfKeyFrameInterval,
 		});
 
+		if (shouldClose) {
+			videoFrame.close();
+		}
+
 		this.lastMultipleOfKeyFrameInterval = multipleOfKeyFrameInterval;
 
 		// We need to do this after sending the frame to the encoder as the frame otherwise might be closed
@@ -211,22 +217,16 @@ class VideoEncoderWrapper {
 		await this.muxer!.mutex.currentPromise; // Allow the writer to apply backpressure
 	}
 
-	private ensureEncoder(videoFrame: VideoFrame) {
+	private async ensureEncoder(videoFrame: VideoFrame) {
 		if (this.encoder) {
 			return;
 		}
 
-		this.encoder = new VideoEncoder({
-			output: (chunk, meta) => {
-				const sample = EncodedVideoSample.fromEncodedVideoChunk(chunk);
+		if (typeof VideoEncoder === 'undefined') {
+			throw new Error('VideoEncoder is not supported by this browser.');
+		}
 
-				this.encodingConfig.onEncodedSample?.(sample, meta);
-				void this.muxer!.addEncodedVideoSample(this.source._connectedTrack!, sample, meta);
-			},
-			error: this.encodingConfig.onEncodingError ?? (error => console.error('VideoEncoder error:', error)),
-		});
-
-		this.encoder.configure({
+		const encoderConfig: VideoEncoderConfig = {
 			codec: buildVideoCodecString(
 				this.encodingConfig.codec,
 				videoFrame.codedWidth,
@@ -239,7 +239,25 @@ class VideoEncoderWrapper {
 			framerate: this.source._connectedTrack?.metadata.frameRate,
 			latencyMode: this.encodingConfig.latencyMode,
 			...getVideoEncoderConfigExtension(this.encodingConfig.codec),
+		};
+		const support = await VideoEncoder.isConfigSupported(encoderConfig);
+		if (!support.supported) {
+			throw new Error(
+				'This specific encoder configuration is not supported by this browser. Consider using another codec or'
+				+ ' changing your video parameters.',
+			);
+		}
+
+		this.encoder = new VideoEncoder({
+			output: (chunk, meta) => {
+				const sample = EncodedVideoSample.fromEncodedVideoChunk(chunk);
+
+				this.encodingConfig.onEncodedSample?.(sample, meta);
+				void this.muxer!.addEncodedVideoSample(this.source._connectedTrack!, sample, meta);
+			},
+			error: this.encodingConfig.onEncodingError ?? (error => console.error('VideoEncoder error:', error)),
 		});
+		this.encoder.configure(encoderConfig);
 
 		assert(this.source._connectedTrack);
 		this.muxer = this.source._connectedTrack.output._muxer;
@@ -268,7 +286,7 @@ export class VideoFrameSource extends VideoSource {
 			throw new TypeError('videoFrame must be a VideoFrame.');
 		}
 
-		return this._encoder.digest(videoFrame, encodeOptions);
+		return this._encoder.digest(videoFrame, false, encodeOptions);
 	}
 
 	/** @internal */
@@ -308,10 +326,7 @@ export class CanvasSource extends VideoSource {
 			alpha: 'discard',
 		});
 
-		const promise = this._encoder.digest(frame, encodeOptions);
-		frame.close();
-
-		return promise;
+		return this._encoder.digest(frame, true, encodeOptions);
 	}
 
 	/** @internal */
@@ -355,8 +370,7 @@ export class MediaStreamVideoTrackSource extends VideoSource {
 		const consumer = new WritableStream<VideoFrame>({
 			write: (videoFrame) => {
 				// TODO: Drop frames if encoder overloaded
-				void this._encoder.digest(videoFrame);
-				videoFrame.close();
+				void this._encoder.digest(videoFrame, true);
 			},
 		});
 
@@ -458,7 +472,7 @@ class AudioEncoderWrapper {
 		validateAudioEncodingConfig(encodingConfig);
 	}
 
-	async digest(audioData: AudioData) {
+	async digest(audioData: AudioData, shouldClose: boolean) {
 		this.source._ensureValidDigest();
 
 		// Ensure audio parameters remain constant
@@ -478,14 +492,20 @@ class AudioEncoderWrapper {
 			this.lastSampleRate = audioData.sampleRate;
 		}
 
-		this.ensureEncoder(audioData);
+		if (!this.encoderInitialized) {
+			await this.ensureEncoder(audioData);
+		}
 		assert(this.encoderInitialized);
 
 		if (this.isPcmEncoder) {
-			await this.doPcmEncoding(audioData);
+			await this.doPcmEncoding(audioData, shouldClose);
 		} else {
 			assert(this.encoder);
 			this.encoder.encode(audioData);
+
+			if (shouldClose) {
+				audioData.close();
+			}
 
 			if (this.encoder.encodeQueueSize >= 4) {
 				await new Promise(resolve => this.encoder!.addEventListener('dequeue', resolve, { once: true }));
@@ -495,11 +515,11 @@ class AudioEncoderWrapper {
 		}
 	}
 
-	private async doPcmEncoding(audioData: AudioData) {
+	private async doPcmEncoding(audioData: AudioData, shouldClose: boolean) {
 		assert(this.outputSampleSize);
 		assert(this.writeOutputValue);
 
-		// Need to extract data from the audio data before it's closed
+		// Need to extract data from the audio data before we close it
 		const { numberOfChannels, numberOfFrames, sampleRate, timestamp } = audioData;
 
 		const CHUNK_SIZE = 2048;
@@ -538,6 +558,10 @@ class AudioEncoderWrapper {
 			}
 		}
 
+		if (shouldClose) {
+			audioData.close();
+		}
+
 		const meta: EncodedAudioChunkMetadata = {
 			decoderConfig: {
 				codec: this.encodingConfig.codec,
@@ -563,7 +587,7 @@ class AudioEncoderWrapper {
 		}
 	}
 
-	private ensureEncoder(audioData: AudioData) {
+	private async ensureEncoder(audioData: AudioData) {
 		if (this.encoderInitialized) {
 			return;
 		}
@@ -571,17 +595,11 @@ class AudioEncoderWrapper {
 		if ((PCM_CODECS as readonly string[]).includes(this.encodingConfig.codec)) {
 			this.initPcmEncoder();
 		} else {
-			this.encoder = new AudioEncoder({
-				output: (chunk, meta) => {
-					const sample = EncodedAudioSample.fromEncodedAudioChunk(chunk);
+			if (typeof AudioEncoder === 'undefined') {
+				throw new Error('AudioEncoder is not supported by this browser.');
+			}
 
-					this.encodingConfig.onEncodedSample?.(sample, meta);
-					void this.muxer!.addEncodedAudioSample(this.source._connectedTrack!, sample, meta);
-				},
-				error: this.encodingConfig.onEncodingError ?? (error => console.error('AudioEncoder error:', error)),
-			});
-
-			this.encoder.configure({
+			const encoderConfig: AudioEncoderConfig = {
 				codec: buildAudioCodecString(
 					this.encodingConfig.codec,
 					audioData.numberOfChannels,
@@ -591,7 +609,25 @@ class AudioEncoderWrapper {
 				sampleRate: audioData.sampleRate,
 				bitrate: this.encodingConfig.bitrate,
 				...getAudioEncoderConfigExtension(this.encodingConfig.codec),
+			};
+			const support = await AudioEncoder.isConfigSupported(encoderConfig);
+			if (!support.supported) {
+				throw new Error(
+					'This specific encoder configuration not supported by this browser. Consider using another codec or'
+					+ ' changing your audio parameters.',
+				);
+			}
+
+			this.encoder = new AudioEncoder({
+				output: (chunk, meta) => {
+					const sample = EncodedAudioSample.fromEncodedAudioChunk(chunk);
+
+					this.encodingConfig.onEncodedSample?.(sample, meta);
+					void this.muxer!.addEncodedAudioSample(this.source._connectedTrack!, sample, meta);
+				},
+				error: this.encodingConfig.onEncodingError ?? (error => console.error('AudioEncoder error:', error)),
 			});
+			this.encoder.configure(encoderConfig);
 		}
 
 		assert(this.source._connectedTrack);
@@ -704,7 +740,7 @@ export class AudioDataSource extends AudioSource {
 			throw new TypeError('audioData must be an AudioData.');
 		}
 
-		return this._encoder.digest(audioData);
+		return this._encoder.digest(audioData, false);
 	}
 
 	/** @internal */
@@ -764,8 +800,7 @@ export class AudioBufferSource extends AudioSource {
 				data: chunkData,
 			});
 
-			promises.push(this._encoder.digest(audioData));
-			audioData.close();
+			promises.push(this._encoder.digest(audioData, true));
 
 			currentRelativeFrame += framesToCopy;
 			remainingFrames -= framesToCopy;
@@ -811,8 +846,7 @@ export class MediaStreamAudioTrackSource extends AudioSource {
 		const consumer = new WritableStream<AudioData>({
 			write: (audioData) => {
 				// TODO: Drop frames if encoder overloaded
-				void this._encoder.digest(audioData);
-				audioData.close();
+				void this._encoder.digest(audioData, true);
 			},
 		});
 
