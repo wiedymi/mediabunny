@@ -26,7 +26,8 @@ export default tseslint.config(
 			}],
 			'@typescript-eslint/no-empty-object-type': 'off',
 			'@typescript-eslint/require-await': 'off',
-			'@stylistic/yield-star-spacing': ['error', { before: false, after: true }]
+			'@stylistic/yield-star-spacing': ['error', { before: false, after: true }],
+			'@typescript-eslint/no-unsafe-enum-comparison': 'off',	
 		},
 	},
 	{

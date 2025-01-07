@@ -2,6 +2,8 @@ import { Demuxer } from './demuxer';
 import { Input } from './input';
 import { IsobmffDemuxer } from './isobmff/isobmff-demuxer';
 import { IsobmffReader } from './isobmff/isobmff-reader';
+import { RiffReader } from './wave/riff-reader';
+import { WaveDemuxer } from './wave/wave-demuxer';
 
 /** @public */
 export abstract class InputFormat {
@@ -35,7 +37,7 @@ export abstract class IsobmffInputFormat extends InputFormat {
 	}
 
 	/** @internal */
-	override _createDemuxer(input: Input) {
+	_createDemuxer(input: Input) {
 		return new IsobmffDemuxer(input);
 	}
 }
@@ -43,7 +45,7 @@ export abstract class IsobmffInputFormat extends InputFormat {
 /** @public */
 export class Mp4InputFormat extends IsobmffInputFormat {
 	/** @internal */
-	override async _canReadInput(input: Input) {
+	async _canReadInput(input: Input) {
 		const majorBrand = await this._getMajorBrand(input);
 		return !!majorBrand && majorBrand !== 'qt  ';
 	}
@@ -60,7 +62,7 @@ export class Mp4InputFormat extends IsobmffInputFormat {
 /** @public */
 export class QuickTimeInputFormat extends IsobmffInputFormat {
 	/** @internal */
-	override async _canReadInput(input: Input) {
+	async _canReadInput(input: Input) {
 		const majorBrand = await this._getMajorBrand(input);
 		return majorBrand === 'qt  ';
 	}
@@ -77,12 +79,12 @@ export class QuickTimeInputFormat extends IsobmffInputFormat {
 /** @public */
 export class MatroskaInputFormat extends InputFormat {
 	/** @internal */
-	override async _canReadInput() {
+	async _canReadInput() {
 		return false; // TODO
 	}
 
 	/** @internal */
-	override _createDemuxer(): never {
+	_createDemuxer(): never {
 		throw new Error('Not implemented');
 	}
 
@@ -96,6 +98,39 @@ export class MatroskaInputFormat extends InputFormat {
 }
 
 /** @public */
+export class WaveInputFormat extends InputFormat {
+	async _canReadInput(input: Input) {
+		const sourceSize = await input._mainReader.source._getSize();
+		if (sourceSize < 12) {
+			return false;
+		}
+
+		const riffReader = new RiffReader(input._mainReader);
+		const riffType = riffReader.readAscii(4);
+		if (riffType !== 'RIFF' && riffType !== 'RIFX') {
+			return false;
+		}
+
+		riffReader.pos = 8;
+		const format = riffReader.readAscii(4);
+		return format === 'WAVE';
+	}
+
+	/** @internal */
+	_createDemuxer(input: Input) {
+		return new WaveDemuxer(input);
+	}
+
+	getName() {
+		return 'WAVE';
+	}
+
+	getMimeType() {
+		return 'audio/wav';
+	}
+}
+
+/** @public */
 export const MP4 = new Mp4InputFormat();
 /** @public */
 export const QTFF = new QuickTimeInputFormat();
@@ -103,6 +138,8 @@ export const QTFF = new QuickTimeInputFormat();
 export const MATROSKA = new MatroskaInputFormat();
 /** @public */
 export const WEBM = MATROSKA;
+/** @public */
+export const WAVE = new WaveInputFormat();
 
 /** @public */
-export const ALL_FORMATS: InputFormat[] = [MP4, QTFF, MATROSKA];
+export const ALL_FORMATS: InputFormat[] = [MP4, QTFF, MATROSKA, WAVE];
