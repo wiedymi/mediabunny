@@ -46,7 +46,7 @@
 
 		const target = new Metamuxer.BufferTarget();
 		const output = new Metamuxer.Output({
-			format: new Metamuxer.MkvOutputFormat(),
+			format: new Metamuxer.WaveOutputFormat(),
 			target
 		});
 
@@ -59,10 +59,10 @@
 
 		const decoderConfig = await audioTrack.getDecoderConfig();
 		const sampleSource = new Metamuxer.EncodedAudioSampleSource(await audioTrack.getCodec());
-		const audioDataSource = new Metamuxer.AudioDataSource({ codec: 'vorbis', bitrate: 128e3 });
+		const audioDataSource = new Metamuxer.AudioDataSource({ codec: 'pcm-s16', bitrate: 128e3 });
 		const videoSampleSource = new Metamuxer.EncodedVideoSampleSource(await videoTrack.getCodec());
 		output.addAudioTrack(audioDataSource ?? sampleSource);
-		output.addVideoTrack(videoSampleSource);
+		//output.addVideoTrack(videoSampleSource);
 
 		output.start();
 
@@ -85,10 +85,12 @@
 			//console.log(sample)
 			await audioDataSource.digest(data);
 		}
+		/*
 		for await (const sample of new Metamuxer.EncodedVideoSampleDrain(videoTrack).samples()) {
 			//console.log(sample)
 			await videoSampleSource.digest(sample, { decoderConfig: videoDecoderConfig });
 		}
+			*/
 		
 		await output.finalize();
 
@@ -102,7 +104,7 @@
 			a.click();
 			URL.revokeObjectURL(url);
 		}
-		download(new Blob([target.buffer]), 'converted.mkv');
+		download(new Blob([target.buffer]), 'converted.wav');
 
 		document.body.textContent = performance.now() - start;
 

@@ -3,6 +3,7 @@ import { IsobmffMuxer } from './isobmff/isobmff-muxer';
 import { MatroskaMuxer } from './matroska/matroska-muxer';
 import { Muxer } from './muxer';
 import { Output } from './output';
+import { WaveMuxer } from './wave/wave-muxer';
 
 /** @public */
 export abstract class OutputFormat {
@@ -195,5 +196,28 @@ export class WebMOutputFormat extends MkvOutputFormat {
 		}
 
 		return '';
+	}
+}
+
+/** @public */
+export class WaveOutputFormat extends OutputFormat {
+	/** @internal */
+	_createMuxer(output: Output) {
+		return new WaveMuxer(output);
+	}
+
+	/** @internal */
+	_getName() {
+		return 'WAVE';
+	}
+
+	getSupportedCodecs() {
+		return WaveOutputFormat.getSupportedCodecs();
+	}
+
+	static getSupportedCodecs(): MediaCodec[] {
+		return [
+			'pcm-u8', 'pcm-s16', 'pcm-s24', 'pcm-s32', 'pcm-f32', 'ulaw', 'alaw',
+		];
 	}
 }

@@ -9,6 +9,7 @@ export {
 	MkvOutputFormatOptions,
 	WebMOutputFormat,
 	WebMOutputFormatOptions,
+	WaveOutputFormat,
 } from './output-format';
 export {
 	VideoEncodingConfig,
@@ -53,11 +54,13 @@ export {
 	Mp4InputFormat,
 	QuickTimeInputFormat as MovInputFormat,
 	MatroskaInputFormat,
+	WaveInputFormat,
 	ALL_FORMATS,
 	MP4,
 	QTFF,
 	MATROSKA,
 	WEBM,
+	WAVE,
 } from './input-format';
 export { Input, InputOptions } from './input';
 export { InputTrack, InputVideoTrack, InputAudioTrack, SampleStats } from './input-track';
