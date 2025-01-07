@@ -20,7 +20,6 @@ export class WaveDemuxer extends Demuxer {
 	riffReader: RiffReader;
 	chunkReader: RiffReader;
 
-	littleEndian = true;
 	metadataPromise: Promise<void> | null = null;
 	dataStart = -1;
 	dataSize = -1;
@@ -44,7 +43,7 @@ export class WaveDemuxer extends Demuxer {
 	async readMetadata() {
 		return this.metadataPromise ??= (async () => {
 			const riffType = this.riffReader.readAscii(4);
-			this.littleEndian = this.riffReader.littleEndian = riffType === 'RIFF';
+			this.riffReader.littleEndian = riffType === 'RIFF';
 
 			const totalFileSize = this.riffReader.readU32() + 8;
 			const format = this.riffReader.readAscii(4);
@@ -141,19 +140,20 @@ export class WaveDemuxer extends Demuxer {
 			return 'alaw';
 		}
 		if (this.audioInfo.format === WaveFormat.PCM) {
+			// All formats are little-endian
 			if (this.audioInfo.sampleSizeInBytes === 1) {
 				return 'pcm-u8';
 			} else if (this.audioInfo.sampleSizeInBytes === 2) {
-				return this.littleEndian ? 'pcm-s16' : 'pcm-s16be';
+				return 'pcm-s16';
 			} else if (this.audioInfo.sampleSizeInBytes === 3) {
-				return this.littleEndian ? 'pcm-s24' : 'pcm-s24be';
+				return 'pcm-s24';
 			} else if (this.audioInfo.sampleSizeInBytes === 4) {
-				return this.littleEndian ? 'pcm-s32' : 'pcm-s32be';
+				return 'pcm-s32';
 			}
 		}
 		if (this.audioInfo.format === WaveFormat.IEEE_FLOAT) {
 			if (this.audioInfo.sampleSizeInBytes === 4) {
-				return this.littleEndian ? 'pcm-f32' : 'pcm-f32be';
+				return 'pcm-f32';
 			}
 		}
 
