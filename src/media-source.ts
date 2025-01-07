@@ -14,7 +14,7 @@ import {
 	VideoCodec,
 } from './codec';
 import { OutputAudioTrack, OutputSubtitleTrack, OutputTrack, OutputVideoTrack } from './output';
-import { assert, clamp, setInt24, setUint24 } from './misc';
+import { assert, clamp, promiseWithResolvers, setInt24, setUint24 } from './misc';
 import { Muxer } from './muxer';
 import { SubtitleParser } from './subtitles';
 import { EncodedAudioSample, EncodedVideoSample } from './sample';
@@ -161,6 +161,7 @@ const validateVideoEncodingConfig = (config: VideoEncodingConfig) => {
 };
 
 class VideoEncoderWrapper {
+	private ensureEncoderPromise: Promise<void> | null = null;
 	private encoder: VideoEncoder | null = null;
 	private muxer: Muxer | null = null;
 	private lastMultipleOfKeyFrameInterval = -1;
@@ -188,7 +189,11 @@ class VideoEncoderWrapper {
 		}
 
 		if (!this.encoder) {
-			await this.ensureEncoder(videoFrame);
+			if (this.ensureEncoderPromise) {
+				await this.ensureEncoderPromise;
+			} else {
+				await this.ensureEncoder(videoFrame);
+			}
 		}
 		assert(this.encoder);
 
@@ -226,6 +231,9 @@ class VideoEncoderWrapper {
 			throw new Error('VideoEncoder is not supported by this browser.');
 		}
 
+		const { promise, resolve } = promiseWithResolvers();
+		this.ensureEncoderPromise = promise;
+
 		const encoderConfig: VideoEncoderConfig = {
 			codec: buildVideoCodecString(
 				this.encodingConfig.codec,
@@ -261,6 +269,8 @@ class VideoEncoderWrapper {
 
 		assert(this.source._connectedTrack);
 		this.muxer = this.source._connectedTrack.output._muxer;
+
+		resolve();
 	}
 
 	async flush() {
@@ -458,6 +468,7 @@ const validateAudioEncodingConfig = (config: AudioEncodingConfig) => {
 };
 
 class AudioEncoderWrapper {
+	private ensureEncoderPromise: Promise<void> | null = null;
 	private encoderInitialized = false;
 	private encoder: AudioEncoder | null = null;
 	private muxer: Muxer | null = null;
@@ -493,7 +504,11 @@ class AudioEncoderWrapper {
 		}
 
 		if (!this.encoderInitialized) {
-			await this.ensureEncoder(audioData);
+			if (this.ensureEncoderPromise) {
+				await this.ensureEncoderPromise;
+			} else {
+				await this.ensureEncoder(audioData);
+			}
 		}
 		assert(this.encoderInitialized);
 
@@ -592,6 +607,9 @@ class AudioEncoderWrapper {
 			return;
 		}
 
+		const { promise, resolve } = promiseWithResolvers();
+		this.ensureEncoderPromise = promise;
+
 		if ((PCM_CODECS as readonly string[]).includes(this.encodingConfig.codec)) {
 			this.initPcmEncoder();
 		} else {
@@ -634,6 +652,7 @@ class AudioEncoderWrapper {
 		this.muxer = this.source._connectedTrack.output._muxer;
 
 		this.encoderInitialized = true;
+		resolve();
 	}
 
 	private initPcmEncoder() {
