@@ -3,15 +3,19 @@ import { Output, OutputAudioTrack } from '../output';
 import { EncodedAudioSample } from '../sample';
 import { parsePcmCodec, PcmAudioCodec } from '../codec';
 import { WaveFormat } from './wave-demuxer';
+import { RiffWriter } from './riff-writer';
 import { Writer } from '../writer';
 
 export class WaveMuxer extends Muxer {
+	private writer: Writer;
 	private riffWriter: RiffWriter;
 	private headerWritten = false;
 	private dataSize = 0;
 
 	constructor(output: Output) {
 		super(output);
+
+		this.writer = output._writer;
 		this.riffWriter = new RiffWriter(output._writer);
 	}
 
@@ -79,65 +83,36 @@ export class WaveMuxer extends Muxer {
 		const sampleRate = config.sampleRate;
 		const blockSize = sampleSize * channels;
 
-		this.riffWriter.writeHeader(format, channels, sampleRate, blockSize, sampleSize);
+		// RIFF header
+		this.riffWriter.writeAscii('RIFF');
+		this.riffWriter.writeU32(0); // File size placeholder
+		this.riffWriter.writeAscii('WAVE');
+
+		// fmt chunk
+		this.riffWriter.writeAscii('fmt ');
+		this.riffWriter.writeU32(16); // Chunk size
+		this.riffWriter.writeU16(format);
+		this.riffWriter.writeU16(channels);
+		this.riffWriter.writeU32(sampleRate);
+		this.riffWriter.writeU32(sampleRate * blockSize); // Bytes per second
+		this.riffWriter.writeU16(blockSize);
+		this.riffWriter.writeU16(8 * sampleSize);
+
+		// data chunk
+		this.riffWriter.writeAscii('data');
+		this.riffWriter.writeU32(0); // Data size placeholder
 	}
 
 	async finalize() {
-		this.riffWriter.patchSizes(this.dataSize);
-	}
-}
-
-class RiffWriter {
-	private helper = new Uint8Array(8);
-	private helperView = new DataView(this.helper.buffer);
-
-	constructor(private writer: Writer) {}
-
-	writeU32(value: number) {
-		this.helperView.setUint32(0, value, true);
-		this.writer.write(this.helper.subarray(0, 4));
-	}
-
-	writeU16(value: number) {
-		this.helperView.setUint16(0, value, true);
-		this.writer.write(this.helper.subarray(0, 2));
-	}
-
-	writeAscii(text: string) {
-		this.writer.write(new TextEncoder().encode(text));
-	}
-
-	writeHeader(format: WaveFormat, channels: number, sampleRate: number, blockSize: number, bytesPerSample: number) {
-		// RIFF header
-		this.writeAscii('RIFF');
-		this.writeU32(0); // File size placeholder
-		this.writeAscii('WAVE');
-
-		// fmt chunk
-		this.writeAscii('fmt ');
-		this.writeU32(16); // Chunk size
-		this.writeU16(format);
-		this.writeU16(channels);
-		this.writeU32(sampleRate);
-		this.writeU32(sampleRate * blockSize); // Bytes per second
-		this.writeU16(blockSize);
-		this.writeU16(8 * bytesPerSample);
-
-		// data chunk
-		this.writeAscii('data');
-		this.writeU32(0); // Data size placeholder
-	}
-
-	patchSizes(dataSize: number) {
 		const currentPos = this.writer.getPos();
 
 		// Write file size
 		this.writer.seek(4);
-		this.writeU32(dataSize + 36); // File size - 8
+		this.riffWriter.writeU32(this.dataSize + 36); // File size - 8
 
 		// Write data chunk size
 		this.writer.seek(40);
-		this.writeU32(dataSize);
+		this.riffWriter.writeU32(this.dataSize);
 
 		this.writer.seek(currentPos);
 	}
