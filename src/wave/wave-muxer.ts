@@ -62,26 +62,24 @@ export class WaveMuxer extends Muxer {
 	}
 
 	private writeHeader(track: OutputAudioTrack, config: AudioDecoderConfig) {
-		const codec = track.source._codec;
 		let format: WaveFormat;
-		let sampleSize: number;
 
+		const codec = track.source._codec;
 		const pcmInfo = parsePcmCodec(codec as PcmAudioCodec);
 
 		if (pcmInfo.dataType === 'ulaw') {
 			format = WaveFormat.MULAW;
-			sampleSize = 1;
 		} else if (pcmInfo.dataType === 'alaw') {
 			format = WaveFormat.ALAW;
-			sampleSize = 1;
+		} else if (pcmInfo.dataType === 'float') {
+			format = WaveFormat.IEEE_FLOAT;
 		} else {
-			format = pcmInfo.dataType === 'float' ? WaveFormat.IEEE_FLOAT : WaveFormat.PCM;
-			sampleSize = pcmInfo.sampleSize;
+			format = WaveFormat.PCM;
 		}
 
 		const channels = config.numberOfChannels;
 		const sampleRate = config.sampleRate;
-		const blockSize = sampleSize * channels;
+		const blockSize = pcmInfo.sampleSize * channels;
 
 		// RIFF header
 		this.riffWriter.writeAscii('RIFF');
@@ -96,7 +94,7 @@ export class WaveMuxer extends Muxer {
 		this.riffWriter.writeU32(sampleRate);
 		this.riffWriter.writeU32(sampleRate * blockSize); // Bytes per second
 		this.riffWriter.writeU16(blockSize);
-		this.riffWriter.writeU16(8 * sampleSize);
+		this.riffWriter.writeU16(8 * pcmInfo.sampleSize);
 
 		// data chunk
 		this.riffWriter.writeAscii('data');
