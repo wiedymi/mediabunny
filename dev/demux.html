@@ -55,7 +55,7 @@
 		const audioTrack = await input.getPrimaryAudioTrack();
 		const videoTrack = await input.getPrimaryVideoTrack();
 			
-		const drain = new Metamuxer.EncodedAudioSampleDrain(audioTrack);
+		const sink = new Metamuxer.EncodedAudioSampleSink(audioTrack);
 
 		const decoderConfig = await audioTrack.getDecoderConfig();
 		const sampleSource = new Metamuxer.EncodedAudioSampleSource(await audioTrack.getCodec());
@@ -72,7 +72,7 @@
 		
 		
 		/*
-		for await (const sample of drain.samples()) {
+		for await (const sample of sink.samples()) {
 			//console.log(sample.timestamp);	
 			//sample.timestamp *= 2;
 			//console.log(sample);
@@ -80,13 +80,13 @@
 			await sampleSource.digest(sample, { decoderConfig });
 		}
 			*/
-		for await (const { data, timestamp } of new Metamuxer.AudioDataDrain(audioTrack).data()) {
+		for await (const { data, timestamp } of new Metamuxer.AudioDataSink(audioTrack).data()) {
 			//console.log("wow", data.timestamp);
 			//console.log(sample)
 			await audioDataSource.digest(data);
 		}
 		/*
-		for await (const sample of new Metamuxer.EncodedVideoSampleDrain(videoTrack).samples()) {
+		for await (const sample of new Metamuxer.EncodedVideoSampleSink(videoTrack).samples()) {
 			//console.log(sample)
 			await videoSampleSource.digest(sample, { decoderConfig: videoDecoderConfig });
 		}

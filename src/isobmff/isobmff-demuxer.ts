@@ -20,7 +20,7 @@ import {
 	InputVideoTrack,
 	InputVideoTrackBacking,
 } from '../input-track';
-import { SampleRetrievalOptions } from '../media-drain';
+import { SampleRetrievalOptions } from '../media-sink';
 import {
 	assert,
 	COLOR_PRIMARIES_MAP_INVERSE,

@@ -68,8 +68,8 @@ durationElement.textContent = formatSeconds(totalDuration);
 
 playerDiv.style.display = 'flex';
 
-const videoDrain = videoTrack && new Metamuxer.CanvasDrain(videoTrack);
-const audioDrain = audioTrack && new Metamuxer.AudioBufferDrain(audioTrack);
+const videoSink = videoTrack && new Metamuxer.CanvasSink(videoTrack);
+const audioSink = audioTrack && new Metamuxer.AudioBufferSink(audioTrack);
 
 let startTime = null;
 let playing = false;
@@ -92,7 +92,7 @@ function getPlaybackTime() {
 
 function play() {
 	audioBufferIterator?.return();
-	audioBufferIterator = audioDrain?.buffers(getPlaybackTime());
+	audioBufferIterator = audioSink?.buffers(getPlaybackTime());
 	startTime = audioContext.currentTime;
 	playing = true;
 	runAudioIterator();
@@ -135,7 +135,7 @@ async function seek() {
 
 	await videoFrameIterator?.return();
 
-	videoFrameIterator = videoDrain.canvases(getPlaybackTime());
+	videoFrameIterator = videoSink.canvases(getPlaybackTime());
 	
 	const newCurrentFrame = (await videoFrameIterator.next()).value;
 	const newNextFrame = (await videoFrameIterator.next()).value;

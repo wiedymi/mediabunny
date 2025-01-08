@@ -71,18 +71,18 @@ export {
 } from './sample';
 export {
 	SampleRetrievalOptions,
-	BaseSampleDrain,
+	BaseSampleSink,
 	WrappedMediaFrame,
-	BaseMediaFrameDrain,
-	EncodedVideoSampleDrain,
-	VideoFrameDrain,
-	EncodedAudioSampleDrain,
-	CanvasDrain,
+	BaseMediaFrameSink,
+	EncodedVideoSampleSink,
+	VideoFrameSink,
+	EncodedAudioSampleSink,
+	CanvasSink,
 	WrappedCanvas,
-	AudioDataDrain,
+	AudioDataSink,
 	WrappedAudioData,
-	AudioBufferDrain,
+	AudioBufferSink,
 	WrappedAudioBuffer,
-} from './media-drain';
+} from './media-sink';
 
 // 🐡🦔

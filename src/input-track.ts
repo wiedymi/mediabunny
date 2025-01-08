@@ -1,5 +1,5 @@
 import { AudioCodec, MediaCodec, VideoCodec } from './codec';
-import { EncodedAudioSampleDrain, EncodedVideoSampleDrain, SampleRetrievalOptions } from './media-drain';
+import { EncodedAudioSampleSink, EncodedVideoSampleSink, SampleRetrievalOptions } from './media-sink';
 import { Rotation } from './misc';
 import { EncodedAudioSample, EncodedVideoSample } from './sample';
 
@@ -116,7 +116,7 @@ export class InputVideoTrack extends InputTrack {
 	}
 
 	computeSampleStats() {
-		return computeSampleStats(new EncodedVideoSampleDrain(this));
+		return computeSampleStats(new EncodedVideoSampleSink(this));
 	}
 }
 
@@ -185,7 +185,7 @@ export class InputAudioTrack extends InputTrack {
 	}
 
 	computeSampleStats() {
-		return computeSampleStats(new EncodedAudioSampleDrain(this));
+		return computeSampleStats(new EncodedAudioSampleSink(this));
 	}
 }
 
@@ -196,13 +196,13 @@ export type SampleStats = {
 	averageBitrate: number;
 };
 
-const computeSampleStats = async (drain: EncodedVideoSampleDrain | EncodedAudioSampleDrain): Promise<SampleStats> => {
+const computeSampleStats = async (sink: EncodedVideoSampleSink | EncodedAudioSampleSink): Promise<SampleStats> => {
 	let startTimestamp = Infinity;
 	let endTimestamp = -Infinity;
 	let sampleCount = 0;
 	let totalSampleBytes = 0;
 
-	for await (const sample of drain.samples(undefined, undefined, { metadataOnly: true })) {
+	for await (const sample of sink.samples(undefined, undefined, { metadataOnly: true })) {
 		startTimestamp = Math.min(startTimestamp, sample.timestamp);
 		endTimestamp = Math.max(endTimestamp, sample.timestamp + sample.duration);
 

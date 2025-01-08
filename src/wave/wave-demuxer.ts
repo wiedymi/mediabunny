@@ -2,7 +2,7 @@ import { AudioCodec } from '../codec';
 import { Demuxer } from '../demuxer';
 import { Input } from '../input';
 import { InputAudioTrack, InputAudioTrackBacking } from '../input-track';
-import { SampleRetrievalOptions } from '../media-drain';
+import { SampleRetrievalOptions } from '../media-sink';
 import { assert } from '../misc';
 import { Reader } from '../reader';
 import { EncodedAudioSample, PLACEHOLDER_DATA } from '../sample';

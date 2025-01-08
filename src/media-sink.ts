@@ -35,7 +35,7 @@ const validateTimestamp = (timestamp: number) => {
 };
 
 /** @public */
-export abstract class BaseSampleDrain<Sample extends EncodedVideoSample | EncodedAudioSample> {
+export abstract class BaseSampleSink<Sample extends EncodedVideoSample | EncodedAudioSample> {
 	abstract getFirstSample(options?: SampleRetrievalOptions): Promise<Sample | null>;
 	abstract getSample(timestamp: number, options?: SampleRetrievalOptions): Promise<Sample | null>;
 	abstract getNextSample(sample: Sample, options?: SampleRetrievalOptions): Promise<Sample | null>;
@@ -162,7 +162,7 @@ abstract class DecoderWrapper<
 }
 
 /** @public */
-export abstract class BaseMediaFrameDrain<
+export abstract class BaseMediaFrameSink<
 	Sample extends EncodedVideoSample | EncodedAudioSample,
 	MediaFrame extends VideoFrame | AudioData,
 	WrappedFrame extends WrappedMediaFrame<MediaFrame> = WrappedMediaFrame<MediaFrame>,
@@ -173,7 +173,7 @@ export abstract class BaseMediaFrameDrain<
 		onError: (error: DOMException) => unknown
 	): Promise<DecoderWrapper<Sample, MediaFrame>>;
 	/** @internal */
-	abstract _createSampleDrain(): BaseSampleDrain<Sample>;
+	abstract _createSampleSink(): BaseSampleSink<Sample>;
 
 	/** @internal */
 	private _duplicateFrame(frame: WrappedFrame) {
@@ -248,8 +248,8 @@ export abstract class BaseMediaFrameDrain<
 				}
 			});
 
-			const sampleDrain = this._createSampleDrain();
-			const keySample = await sampleDrain.getKeySample(startTimestamp) ?? await sampleDrain.getFirstSample();
+			const sampleSink = this._createSampleSink();
+			const keySample = await sampleSink.getKeySample(startTimestamp) ?? await sampleSink.getFirstSample();
 			if (!keySample) {
 				return;
 			}
@@ -262,19 +262,19 @@ export abstract class BaseMediaFrameDrain<
 				// frames (B-frames). Instead, we'll need to keep decoding samples until we get a frame that exceeds
 				// this end time. However, we can still put a bound on it: Since key frames are by definition never
 				// out of order, we can stop at the first key frame after the end timestamp.
-				const endSample = await sampleDrain.getSample(endTimestamp);
+				const endSample = await sampleSink.getSample(endTimestamp);
 				const endKeySample = !endSample
 					? null
 					: endSample.type === 'key' && endSample.timestamp === endTimestamp
 						? endSample
-						: await sampleDrain.getNextKeySample(endSample);
+						: await sampleSink.getNextKeySample(endSample);
 
 				if (endKeySample) {
 					samplesEndTimestamp = endKeySample.timestamp;
 				}
 			}
 
-			const samples = sampleDrain.samples(keySample, samplesEndTimestamp);
+			const samples = sampleSink.samples(keySample, samplesEndTimestamp);
 			await samples.next(); // Skip the start sample as we already have it
 
 			while (currentSample && !ended) {
@@ -409,7 +409,7 @@ export abstract class BaseMediaFrameDrain<
 				}
 			});
 
-			const sampleDrain = this._createSampleDrain();
+			const sampleSink = this._createSampleSink();
 			let lastKeySample: Sample | null = null;
 			let lastSample: Sample | null = null;
 
@@ -425,13 +425,13 @@ export abstract class BaseMediaFrameDrain<
 					break;
 				}
 
-				const targetSample = await sampleDrain.getSample(timestamp);
+				const targetSample = await sampleSink.getSample(timestamp);
 				if (!targetSample) {
 					pushToQueue(null);
 					continue;
 				}
 
-				const keySample = await sampleDrain.getKeySample(timestamp);
+				const keySample = await sampleSink.getKeySample(timestamp);
 				if (!keySample) {
 					pushToQueue(null);
 					continue;
@@ -461,7 +461,7 @@ export abstract class BaseMediaFrameDrain<
 				}
 
 				while (lastSample.timestamp !== targetSample.timestamp) {
-					const nextSample = await sampleDrain.getNextSample(lastSample);
+					const nextSample = await sampleSink.getNextSample(lastSample);
 					assert(nextSample);
 
 					lastSample = nextSample;
@@ -523,7 +523,7 @@ export abstract class BaseMediaFrameDrain<
 }
 
 /** @public */
-export class EncodedVideoSampleDrain extends BaseSampleDrain<EncodedVideoSample> {
+export class EncodedVideoSampleSink extends BaseSampleSink<EncodedVideoSample> {
 	/** @internal */
 	_videoTrack: InputVideoTrack;
 
@@ -620,7 +620,7 @@ class VideoDecoderWrapper extends DecoderWrapper<EncodedVideoSample, VideoFrame>
 }
 
 /** @public */
-export class VideoFrameDrain extends BaseMediaFrameDrain<EncodedVideoSample, VideoFrame> {
+export class VideoFrameSink extends BaseMediaFrameSink<EncodedVideoSample, VideoFrame> {
 	/** @internal */
 	_videoTrack: InputVideoTrack;
 
@@ -653,8 +653,8 @@ export class VideoFrameDrain extends BaseMediaFrameDrain<EncodedVideoSample, Vid
 	}
 
 	/** @internal */
-	_createSampleDrain() {
-		return new EncodedVideoSampleDrain(this._videoTrack);
+	_createSampleSink() {
+		return new EncodedVideoSampleSink(this._videoTrack);
 	}
 
 	async getFrame(timestamp: number) {
@@ -683,13 +683,13 @@ export type WrappedCanvas = {
 };
 
 /** @public */
-export class CanvasDrain {
+export class CanvasSink {
 	/** @internal */
 	_videoTrack: InputVideoTrack;
 	/** @internal */
 	_dimensions?: { width: number; height: number };
 	/** @internal */
-	_videoFrameDrain: VideoFrameDrain;
+	_videoFrameSink: VideoFrameSink;
 
 	constructor(videoTrack: InputVideoTrack, dimensions?: { width: number; height: number }) {
 		if (!(videoTrack instanceof InputVideoTrack)) {
@@ -707,7 +707,7 @@ export class CanvasDrain {
 
 		this._videoTrack = videoTrack;
 		this._dimensions = dimensions;
-		this._videoFrameDrain = new VideoFrameDrain(videoTrack);
+		this._videoFrameSink = new VideoFrameSink(videoTrack);
 	}
 
 	/** @internal */
@@ -746,27 +746,27 @@ export class CanvasDrain {
 	async getCanvas(timestamp: number) {
 		validateTimestamp(timestamp);
 
-		const frame = await this._videoFrameDrain.getFrame(timestamp);
+		const frame = await this._videoFrameSink.getFrame(timestamp);
 		return frame && this._videoFrameToWrappedCanvas(frame);
 	}
 
 	canvases(startTimestamp = 0, endTimestamp = Infinity) {
 		return mapAsyncGenerator(
-			this._videoFrameDrain.frames(startTimestamp, endTimestamp),
+			this._videoFrameSink.frames(startTimestamp, endTimestamp),
 			frame => this._videoFrameToWrappedCanvas(frame),
 		);
 	}
 
 	canvasesAtTimestamps(timestamps: AnyIterable<number>) {
 		return mapAsyncGenerator(
-			this._videoFrameDrain.framesAtTimestamps(timestamps),
+			this._videoFrameSink.framesAtTimestamps(timestamps),
 			async frame => frame && this._videoFrameToWrappedCanvas(frame),
 		);
 	}
 }
 
 /** @public */
-export class EncodedAudioSampleDrain extends BaseSampleDrain<EncodedAudioSample> {
+export class EncodedAudioSampleSink extends BaseSampleSink<EncodedAudioSample> {
 	/** @internal */
 	_audioTrack: InputAudioTrack;
 
@@ -1023,7 +1023,7 @@ export type WrappedAudioData = {
 };
 
 /** @public */
-export class AudioDataDrain extends BaseMediaFrameDrain<EncodedAudioSample, AudioData> {
+export class AudioDataSink extends BaseMediaFrameSink<EncodedAudioSample, AudioData> {
 	/** @internal */
 	_audioTrack: InputAudioTrack;
 
@@ -1069,8 +1069,8 @@ export class AudioDataDrain extends BaseMediaFrameDrain<EncodedAudioSample, Audi
 	}
 
 	/** @internal */
-	_createSampleDrain() {
-		return new EncodedAudioSampleDrain(this._audioTrack);
+	_createSampleSink() {
+		return new EncodedAudioSampleSink(this._audioTrack);
 	}
 
 	async getData(timestamp: number) {
@@ -1105,16 +1105,16 @@ export type WrappedAudioBuffer = {
 };
 
 /** @public */
-export class AudioBufferDrain {
+export class AudioBufferSink {
 	/** @internal */
-	_audioDataDrain: AudioDataDrain;
+	_audioDataSink: AudioDataSink;
 
 	constructor(audioTrack: InputAudioTrack) {
 		if (!(audioTrack instanceof InputAudioTrack)) {
 			throw new TypeError('audioTrack must be an InputAudioTrack.');
 		}
 
-		this._audioDataDrain = new AudioDataDrain(audioTrack);
+		this._audioDataSink = new AudioDataSink(audioTrack);
 	}
 
 	/** @internal */
@@ -1146,20 +1146,20 @@ export class AudioBufferDrain {
 	async getBuffer(timestamp: number) {
 		validateTimestamp(timestamp);
 
-		const data = await this._audioDataDrain.getData(timestamp);
+		const data = await this._audioDataSink.getData(timestamp);
 		return data && this._audioDataToWrappedArrayBuffer(data);
 	}
 
 	buffers(startTimestamp = 0, endTimestamp = Infinity) {
 		return mapAsyncGenerator(
-			this._audioDataDrain.data(startTimestamp, endTimestamp),
+			this._audioDataSink.data(startTimestamp, endTimestamp),
 			async data => this._audioDataToWrappedArrayBuffer(data),
 		);
 	}
 
 	buffersAtTimestamps(timestamps: AnyIterable<number>) {
 		return mapAsyncGenerator(
-			this._audioDataDrain.dataAtTimestamps(timestamps),
+			this._audioDataSink.dataAtTimestamps(timestamps),
 			async data => data && this._audioDataToWrappedArrayBuffer(data),
 		);
 	}
