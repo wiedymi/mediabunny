@@ -743,12 +743,14 @@ export class IsobmffMuxer extends Muxer {
 		await this.writer.flush();
 	}
 
-	private async interleaveSamples() {
+	private async interleaveSamples(isFinalCall = false) {
 		assert(this.fastStart === 'fragmented');
 
-		for (const track of this.output._tracks) {
-			if (!track.source._closed && !this.trackDatas.some(x => x.track === track)) {
-				return; // We haven't seen a sample from this open track yet
+		if (!isFinalCall) {
+			for (const track of this.output._tracks) {
+				if (!track.source._closed && !this.trackDatas.some(x => x.track === track)) {
+					return; // We haven't seen a sample from this open track yet
+				}
 			}
 		}
 
@@ -758,7 +760,7 @@ export class IsobmffMuxer extends Muxer {
 			let minTimestamp = Infinity;
 
 			for (const trackData of this.trackDatas) {
-				if (trackData.sampleQueue.length === 0 && !trackData.track.source._closed) {
+				if (!isFinalCall && trackData.sampleQueue.length === 0 && !trackData.track.source._closed) {
 					break outer;
 				}
 
@@ -878,14 +880,7 @@ export class IsobmffMuxer extends Muxer {
 		}
 
 		if (this.fastStart === 'fragmented') {
-			for (const trackData of this.trackDatas) {
-				for (const sample of trackData.sampleQueue) {
-					await this.addSampleToTrack(trackData, sample);
-				}
-
-				this.processTimestamps(trackData);
-			}
-
+			await this.interleaveSamples(true);
 			await this.finalizeFragment(false); // Don't flush the last fragment as we will flush it with the mfra box
 		} else {
 			for (const trackData of this.trackDatas) {

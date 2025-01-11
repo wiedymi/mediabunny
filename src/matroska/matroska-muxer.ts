@@ -496,10 +496,12 @@ export class MatroskaMuxer extends Muxer {
 		}
 	}
 
-	private async interleaveChunks() {
-		for (const track of this.output._tracks) {
-			if (!track.source._closed && !this.trackDatas.some(x => x.track === track)) {
-				return; // We haven't seen a sample from this open track yet
+	private async interleaveChunks(isFinalCall = false) {
+		if (!isFinalCall) {
+			for (const track of this.output._tracks) {
+				if (!track.source._closed && !this.trackDatas.some(x => x.track === track)) {
+					return; // We haven't seen a sample from this open track yet
+				}
 			}
 		}
 
@@ -509,7 +511,7 @@ export class MatroskaMuxer extends Muxer {
 			let minTimestamp = Infinity;
 
 			for (const trackData of this.trackDatas) {
-				if (trackData.chunkQueue.length === 0 && !trackData.track.source._closed) {
+				if (!isFinalCall && trackData.chunkQueue.length === 0 && !trackData.track.source._closed) {
 					break outer;
 				}
 
@@ -527,7 +529,9 @@ export class MatroskaMuxer extends Muxer {
 			this.writeBlock(trackWithMinTimestamp, chunk);
 		}
 
-		await this.writer.flush();
+		if (!isFinalCall) {
+			await this.writer.flush();
+		}
 	}
 
 	/** Due to [a bug in Chromium](https://bugs.chromium.org/p/chromium/issues/detail?id=1377842), VP9 streams often
@@ -764,11 +768,7 @@ export class MatroskaMuxer extends Muxer {
 		}
 
 		// Flush any remaining queued chunks to the file
-		for (const trackData of this.trackDatas) {
-			while (trackData.chunkQueue.length > 0) {
-				this.writeBlock(trackData, trackData.chunkQueue.shift()!);
-			}
-		}
+		await this.interleaveChunks(true);
 
 		if (!this.format._options.streamable && this.currentCluster) {
 			this.finalizeCurrentCluster();
