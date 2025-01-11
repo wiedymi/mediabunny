@@ -10,15 +10,14 @@ import {
 	writeBits,
 } from '../misc';
 import {
+	CODEC_STRING_MAP,
 	EBML,
 	EBMLElement,
 	EBMLFloat32,
 	EBMLFloat64,
 	EBMLId,
 	EBMLSignedInt,
-	measureEBMLVarInt,
-	measureSignedInt,
-	measureUnsignedInt,
+	EBMLWriter,
 } from './ebml';
 import { MkvOutputFormat, WebMOutputFormat } from '../output-format';
 import { Output, OutputAudioTrack, OutputSubtitleTrack, OutputTrack, OutputVideoTrack } from '../output';
@@ -31,11 +30,8 @@ import {
 	parseSubtitleTimestamp,
 } from '../subtitles';
 import {
-	AudioCodec,
 	PCM_CODECS,
 	PcmAudioCodec,
-	SubtitleCodec,
-	VideoCodec,
 	parsePcmCodec,
 	validateAudioChunkMetadata,
 	validateSubtitleMetadata,
@@ -105,30 +101,6 @@ type MatroskaVideoTrackData = MatroskaTrackData & { type: 'video' };
 type MatroskaAudioTrackData = MatroskaTrackData & { type: 'audio' };
 type MatroskaSubtitleTrackData = MatroskaTrackData & { type: 'subtitle' };
 
-const CODEC_STRING_MAP: Partial<Record<VideoCodec | AudioCodec | SubtitleCodec, string>> = {
-	'avc': 'V_MPEG4/ISO/AVC',
-	'hevc': 'V_MPEGH/ISO/HEVC',
-	'vp8': 'V_VP8',
-	'vp9': 'V_VP9',
-	'av1': 'V_AV1',
-
-	'aac': 'A_AAC',
-	'mp3': 'A_MPEG/L3',
-	'opus': 'A_OPUS',
-	'vorbis': 'A_VORBIS',
-	'flac': 'A_FLAC',
-	'pcm-u8': 'A_PCM/INT/LIT',
-	'pcm-s16': 'A_PCM/INT/LIT',
-	'pcm-s16be': 'A_PCM/INT/BIG',
-	'pcm-s24': 'A_PCM/INT/LIT',
-	'pcm-s24be': 'A_PCM/INT/BIG',
-	'pcm-s32': 'A_PCM/INT/LIT',
-	'pcm-s32be': 'A_PCM/INT/BIG',
-	'pcm-f32': 'A_PCM/FLOAT/IEEE',
-
-	'webvtt': 'S_TEXT/WEBVTT',
-};
-
 const TRACK_TYPE_MAP: Record<OutputTrack['type'], number> = {
 	video: 1,
 	audio: 2,
@@ -137,18 +109,8 @@ const TRACK_TYPE_MAP: Record<OutputTrack['type'], number> = {
 
 export class MatroskaMuxer extends Muxer {
 	private writer: Writer;
+	private ebmlWriter: EBMLWriter;
 	private format: WebMOutputFormat | MkvOutputFormat;
-
-	private helper = new Uint8Array(8);
-	private helperView = new DataView(this.helper.buffer);
-
-	/**
-	 * Stores the position from the start of the file to where EBML elements have been written. This is used to
-	 * rewrite/edit elements that were already added before, and to measure sizes of things.
-	 */
-	private offsets = new WeakMap<EBML, number>();
-	/** Same as offsets, but stores position where the element's data starts (after ID and size fields). */
-	private dataOffsets = new WeakMap<EBML, number>();
 
 	private trackDatas: MatroskaTrackData[] = [];
 
@@ -171,177 +133,10 @@ export class MatroskaMuxer extends Muxer {
 		this.writer = output._writer;
 		this.format = format;
 
+		this.ebmlWriter = new EBMLWriter(this.writer);
+
 		if (this.format._options.streamable) {
 			this.writer.ensureMonotonicity = true;
-		}
-	}
-
-	private writeByte(value: number) {
-		this.helperView.setUint8(0, value);
-		this.writer.write(this.helper.subarray(0, 1));
-	}
-
-	private writeFloat32(value: number) {
-		this.helperView.setFloat32(0, value, false);
-		this.writer.write(this.helper.subarray(0, 4));
-	}
-
-	private writeFloat64(value: number) {
-		this.helperView.setFloat64(0, value, false);
-		this.writer.write(this.helper);
-	}
-
-	private writeUnsignedInt(value: number, width = measureUnsignedInt(value)) {
-		let pos = 0;
-
-		// Each case falls through:
-		switch (width) {
-			case 6:
-				// Need to use division to access >32 bits of floating point var
-				this.helperView.setUint8(pos++, (value / 2 ** 40) | 0);
-			// eslint-disable-next-line no-fallthrough
-			case 5:
-				this.helperView.setUint8(pos++, (value / 2 ** 32) | 0);
-				// eslint-disable-next-line no-fallthrough
-			case 4:
-				this.helperView.setUint8(pos++, value >> 24);
-				// eslint-disable-next-line no-fallthrough
-			case 3:
-				this.helperView.setUint8(pos++, value >> 16);
-				// eslint-disable-next-line no-fallthrough
-			case 2:
-				this.helperView.setUint8(pos++, value >> 8);
-				// eslint-disable-next-line no-fallthrough
-			case 1:
-				this.helperView.setUint8(pos++, value);
-				break;
-			default:
-				throw new Error('Bad UINT size ' + width);
-		}
-
-		this.writer.write(this.helper.subarray(0, pos));
-	}
-
-	private writeSignedInt(value: number, width = measureSignedInt(value)) {
-		if (value < 0) {
-			// Two's complement stuff
-			value += 2 ** (width * 8);
-		}
-
-		this.writeUnsignedInt(value, width);
-	}
-
-	writeEBMLVarInt(value: number, width = measureEBMLVarInt(value)) {
-		let pos = 0;
-
-		switch (width) {
-			case 1:
-				this.helperView.setUint8(pos++, (1 << 7) | value);
-				break;
-			case 2:
-				this.helperView.setUint8(pos++, (1 << 6) | (value >> 8));
-				this.helperView.setUint8(pos++, value);
-				break;
-			case 3:
-				this.helperView.setUint8(pos++, (1 << 5) | (value >> 16));
-				this.helperView.setUint8(pos++, value >> 8);
-				this.helperView.setUint8(pos++, value);
-				break;
-			case 4:
-				this.helperView.setUint8(pos++, (1 << 4) | (value >> 24));
-				this.helperView.setUint8(pos++, value >> 16);
-				this.helperView.setUint8(pos++, value >> 8);
-				this.helperView.setUint8(pos++, value);
-				break;
-			case 5:
-				/**
-				 * JavaScript converts its doubles to 32-bit integers for bitwise
-				 * operations, so we need to do a division by 2^32 instead of a
-				 * right-shift of 32 to retain those top 3 bits
-				 */
-				this.helperView.setUint8(pos++, (1 << 3) | ((value / 2 ** 32) & 0x7));
-				this.helperView.setUint8(pos++, value >> 24);
-				this.helperView.setUint8(pos++, value >> 16);
-				this.helperView.setUint8(pos++, value >> 8);
-				this.helperView.setUint8(pos++, value);
-				break;
-			case 6:
-				this.helperView.setUint8(pos++, (1 << 2) | ((value / 2 ** 40) & 0x3));
-				this.helperView.setUint8(pos++, (value / 2 ** 32) | 0);
-				this.helperView.setUint8(pos++, value >> 24);
-				this.helperView.setUint8(pos++, value >> 16);
-				this.helperView.setUint8(pos++, value >> 8);
-				this.helperView.setUint8(pos++, value);
-				break;
-			default:
-				throw new Error('Bad EBML VINT size ' + width);
-		}
-
-		this.writer.write(this.helper.subarray(0, pos));
-	}
-
-	// Assumes the string is ASCII
-	private writeString(str: string) {
-		this.writer.write(new Uint8Array(str.split('').map(x => x.charCodeAt(0))));
-	}
-
-	private writeEBML(data: EBML | null) {
-		if (data === null) return;
-
-		if (data instanceof Uint8Array) {
-			this.writer.write(data);
-		} else if (Array.isArray(data)) {
-			for (const elem of data) {
-				this.writeEBML(elem);
-			}
-		} else {
-			this.offsets.set(data, this.writer.getPos());
-
-			this.writeUnsignedInt(data.id); // ID field
-
-			if (Array.isArray(data.data)) {
-				const sizePos = this.writer.getPos();
-				const sizeSize = data.size === -1 ? 1 : (data.size ?? 4);
-
-				if (data.size === -1) {
-					// Write the reserved all-one-bits marker for unknown/unbounded size.
-					this.writeByte(0xff);
-				} else {
-					this.writer.seek(this.writer.getPos() + sizeSize);
-				}
-
-				const startPos = this.writer.getPos();
-				this.dataOffsets.set(data, startPos);
-				this.writeEBML(data.data);
-
-				if (data.size !== -1) {
-					const size = this.writer.getPos() - startPos;
-					const endPos = this.writer.getPos();
-					this.writer.seek(sizePos);
-					this.writeEBMLVarInt(size, sizeSize);
-					this.writer.seek(endPos);
-				}
-			} else if (typeof data.data === 'number') {
-				const size = data.size ?? measureUnsignedInt(data.data);
-				this.writeEBMLVarInt(size);
-				this.writeUnsignedInt(data.data, size);
-			} else if (typeof data.data === 'string') {
-				this.writeEBMLVarInt(data.data.length);
-				this.writeString(data.data);
-			} else if (data.data instanceof Uint8Array) {
-				this.writeEBMLVarInt(data.data.byteLength, data.size);
-				this.writer.write(data.data);
-			} else if (data.data instanceof EBMLFloat32) {
-				this.writeEBMLVarInt(4);
-				this.writeFloat32(data.data.value);
-			} else if (data.data instanceof EBMLFloat64) {
-				this.writeEBMLVarInt(8);
-				this.writeFloat64(data.data.value);
-			} else if (data.data instanceof EBMLSignedInt) {
-				const size = data.size ?? measureSignedInt(data.data.value);
-				this.writeEBMLVarInt(size);
-				this.writeSignedInt(data.data.value, size);
-			}
 		}
 	}
 
@@ -372,7 +167,7 @@ export class MatroskaMuxer extends Muxer {
 			{ id: EBMLId.DocTypeVersion, data: 2 },
 			{ id: EBMLId.DocTypeReadVersion, data: 2 },
 		] };
-		this.writeEBML(ebmlHeader);
+		this.ebmlWriter.writeEBML(ebmlHeader);
 	}
 
 	/**
@@ -522,7 +317,7 @@ export class MatroskaMuxer extends Muxer {
 		};
 		this.segment = segment;
 
-		this.writeEBML(segment);
+		this.ebmlWriter.writeEBML(segment);
 
 		/*
 		if (this.#writer instanceof BaseStreamTargetWriter && this.#writer.target.options.onHeader) {
@@ -538,7 +333,7 @@ export class MatroskaMuxer extends Muxer {
 
 	private get segmentDataOffset() {
 		assert(this.segment);
-		return this.dataOffsets.get(this.segment)!;
+		return this.ebmlWriter.dataOffsets.get(this.segment)!;
 	}
 
 	private getVideoTrackData(track: OutputVideoTrack, meta?: EncodedVideoChunkMetadata) {
@@ -857,7 +652,7 @@ export class MatroskaMuxer extends Muxer {
 				prelude,
 				chunk.data,
 			] };
-			this.writeEBML(simpleBlock);
+			this.ebmlWriter.writeEBML(simpleBlock);
 		} else {
 			const blockGroup = { id: EBMLId.BlockGroup, data: [
 				{ id: EBMLId.Block, data: [
@@ -880,7 +675,7 @@ export class MatroskaMuxer extends Muxer {
 					: null,
 				msDuration > 0 ? { id: EBMLId.BlockDuration, data: msDuration } : null,
 			] };
-			this.writeEBML(blockGroup);
+			this.ebmlWriter.writeEBML(blockGroup);
 		}
 
 		this.duration = Math.max(this.duration, msTimestamp + msDuration);
@@ -908,7 +703,7 @@ export class MatroskaMuxer extends Muxer {
 				{ id: EBMLId.Timestamp, data: msTimestamp },
 			],
 		};
-		this.writeEBML(this.currentCluster);
+		this.ebmlWriter.writeEBML(this.currentCluster);
 
 		this.currentClusterMsTimestamp = msTimestamp;
 		this.trackDatasInCurrentCluster.clear();
@@ -916,12 +711,12 @@ export class MatroskaMuxer extends Muxer {
 
 	private finalizeCurrentCluster() {
 		assert(this.currentCluster);
-		const clusterSize = this.writer.getPos() - this.dataOffsets.get(this.currentCluster)!;
+		const clusterSize = this.writer.getPos() - this.ebmlWriter.dataOffsets.get(this.currentCluster)!;
 		const endPos = this.writer.getPos();
 
 		// Write the size now that we know it
-		this.writer.seek(this.offsets.get(this.currentCluster)! + 4);
-		this.writeEBMLVarInt(clusterSize, CLUSTER_SIZE_BYTES);
+		this.writer.seek(this.ebmlWriter.offsets.get(this.currentCluster)! + 4);
+		this.ebmlWriter.writeVarInt(clusterSize, CLUSTER_SIZE_BYTES);
 		this.writer.seek(endPos);
 
 		/*
@@ -932,7 +727,7 @@ export class MatroskaMuxer extends Muxer {
 		*/
 
 		const clusterOffsetFromSegment
-			= this.offsets.get(this.currentCluster)! - this.segmentDataOffset;
+			= this.ebmlWriter.offsets.get(this.currentCluster)! - this.segmentDataOffset;
 
 		assert(this.cues);
 
@@ -980,31 +775,31 @@ export class MatroskaMuxer extends Muxer {
 		}
 
 		assert(this.cues);
-		this.writeEBML(this.cues);
+		this.ebmlWriter.writeEBML(this.cues);
 
 		if (!this.format._options.streamable) {
 			const endPos = this.writer.getPos();
 
 			// Write the Segment size
 			const segmentSize = this.writer.getPos() - this.segmentDataOffset;
-			this.writer.seek(this.offsets.get(this.segment!)! + 4);
-			this.writeEBMLVarInt(segmentSize, SEGMENT_SIZE_BYTES);
+			this.writer.seek(this.ebmlWriter.offsets.get(this.segment!)! + 4);
+			this.ebmlWriter.writeVarInt(segmentSize, SEGMENT_SIZE_BYTES);
 
 			// Write the duration of the media to the Segment
 			this.segmentDuration!.data = new EBMLFloat64(this.duration);
-			this.writer.seek(this.offsets.get(this.segmentDuration!)!);
-			this.writeEBML(this.segmentDuration);
+			this.writer.seek(this.ebmlWriter.offsets.get(this.segmentDuration!)!);
+			this.ebmlWriter.writeEBML(this.segmentDuration);
 
 			// Fill in SeekHead position data and write it again
 			this.seekHead!.data[0]!.data[1]!.data
-				= this.offsets.get(this.cues)! - this.segmentDataOffset;
+				= this.ebmlWriter.offsets.get(this.cues)! - this.segmentDataOffset;
 			this.seekHead!.data[1]!.data[1]!.data
-				= this.offsets.get(this.segmentInfo!)! - this.segmentDataOffset;
+				= this.ebmlWriter.offsets.get(this.segmentInfo!)! - this.segmentDataOffset;
 			this.seekHead!.data[2]!.data[1]!.data
-				= this.offsets.get(this.tracksElement!)! - this.segmentDataOffset;
+				= this.ebmlWriter.offsets.get(this.tracksElement!)! - this.segmentDataOffset;
 
-			this.writer.seek(this.offsets.get(this.seekHead!)!);
-			this.writeEBML(this.seekHead);
+			this.writer.seek(this.ebmlWriter.offsets.get(this.seekHead!)!);
+			this.ebmlWriter.writeEBML(this.seekHead);
 
 			this.writer.seek(endPos);
 		}

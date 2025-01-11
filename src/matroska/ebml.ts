@@ -1,3 +1,7 @@
+import { MediaCodec } from '../codec';
+import { Reader } from '../reader';
+import { Writer } from '../writer';
+
 export interface EBMLElement {
 	id: number;
 	size?: number;
@@ -57,6 +61,10 @@ export enum EBMLId {
 	TrackNumber = 0xd7,
 	TrackUID = 0x73c5,
 	TrackType = 0x83,
+	FlagEnabled = 0xb9,
+	FlagDefault = 0x88,
+	FlagForced = 0x55aa,
+	FlagLacing = 0x9c,
 	CodecID = 0x86,
 	CodecPrivate = 0x63a2,
 	DefaultDuration = 0x23e383,
@@ -90,6 +98,8 @@ export enum EBMLId {
 	TransferCharacteristics = 0x55ba,
 	Primaries = 0x55bb,
 	Range = 0x55b9,
+	Projection = 0x7670,
+	ProjectionPoseRoll = 0x7675,
 }
 
 export const measureUnsignedInt = (value: number) => {
@@ -124,7 +134,7 @@ export const measureSignedInt = (value: number) => {
 	}
 };
 
-export const measureEBMLVarInt = (value: number) => {
+export const measureVarInt = (value: number) => {
 	if (value < (1 << 7) - 1) {
 		/** Top bit is set, leaving 7 bits to hold the integer, but we can't store
 		 * 127 because "all bits set to one" is a reserved value. Same thing for the
@@ -142,6 +152,365 @@ export const measureEBMLVarInt = (value: number) => {
 	} else if (value < 2 ** 42 - 1) {
 		return 6;
 	} else {
-		throw new Error('EBML VINT size not supported ' + value);
+		throw new Error('EBML varint size not supported ' + value);
 	}
+};
+
+export class EBMLWriter {
+	helper = new Uint8Array(8);
+	helperView = new DataView(this.helper.buffer);
+
+	/**
+	 * Stores the position from the start of the file to where EBML elements have been written. This is used to
+	 * rewrite/edit elements that were already added before, and to measure sizes of things.
+	 */
+	offsets = new WeakMap<EBML, number>();
+	/** Same as offsets, but stores position where the element's data starts (after ID and size fields). */
+	dataOffsets = new WeakMap<EBML, number>();
+
+	constructor(private writer: Writer) {}
+
+	writeByte(value: number) {
+		this.helperView.setUint8(0, value);
+		this.writer.write(this.helper.subarray(0, 1));
+	}
+
+	writeFloat32(value: number) {
+		this.helperView.setFloat32(0, value, false);
+		this.writer.write(this.helper.subarray(0, 4));
+	}
+
+	writeFloat64(value: number) {
+		this.helperView.setFloat64(0, value, false);
+		this.writer.write(this.helper);
+	}
+
+	writeUnsignedInt(value: number, width = measureUnsignedInt(value)) {
+		let pos = 0;
+
+		// Each case falls through:
+		switch (width) {
+			case 6:
+				// Need to use division to access >32 bits of floating point var
+				this.helperView.setUint8(pos++, (value / 2 ** 40) | 0);
+			// eslint-disable-next-line no-fallthrough
+			case 5:
+				this.helperView.setUint8(pos++, (value / 2 ** 32) | 0);
+				// eslint-disable-next-line no-fallthrough
+			case 4:
+				this.helperView.setUint8(pos++, value >> 24);
+				// eslint-disable-next-line no-fallthrough
+			case 3:
+				this.helperView.setUint8(pos++, value >> 16);
+				// eslint-disable-next-line no-fallthrough
+			case 2:
+				this.helperView.setUint8(pos++, value >> 8);
+				// eslint-disable-next-line no-fallthrough
+			case 1:
+				this.helperView.setUint8(pos++, value);
+				break;
+			default:
+				throw new Error('Bad unsigned int size ' + width);
+		}
+
+		this.writer.write(this.helper.subarray(0, pos));
+	}
+
+	writeSignedInt(value: number, width = measureSignedInt(value)) {
+		if (value < 0) {
+			// Two's complement stuff
+			value += 2 ** (width * 8);
+		}
+
+		this.writeUnsignedInt(value, width);
+	}
+
+	writeVarInt(value: number, width = measureVarInt(value)) {
+		let pos = 0;
+
+		switch (width) {
+			case 1:
+				this.helperView.setUint8(pos++, (1 << 7) | value);
+				break;
+			case 2:
+				this.helperView.setUint8(pos++, (1 << 6) | (value >> 8));
+				this.helperView.setUint8(pos++, value);
+				break;
+			case 3:
+				this.helperView.setUint8(pos++, (1 << 5) | (value >> 16));
+				this.helperView.setUint8(pos++, value >> 8);
+				this.helperView.setUint8(pos++, value);
+				break;
+			case 4:
+				this.helperView.setUint8(pos++, (1 << 4) | (value >> 24));
+				this.helperView.setUint8(pos++, value >> 16);
+				this.helperView.setUint8(pos++, value >> 8);
+				this.helperView.setUint8(pos++, value);
+				break;
+			case 5:
+				/**
+				 * JavaScript converts its doubles to 32-bit integers for bitwise
+				 * operations, so we need to do a division by 2^32 instead of a
+				 * right-shift of 32 to retain those top 3 bits
+				 */
+				this.helperView.setUint8(pos++, (1 << 3) | ((value / 2 ** 32) & 0x7));
+				this.helperView.setUint8(pos++, value >> 24);
+				this.helperView.setUint8(pos++, value >> 16);
+				this.helperView.setUint8(pos++, value >> 8);
+				this.helperView.setUint8(pos++, value);
+				break;
+			case 6:
+				this.helperView.setUint8(pos++, (1 << 2) | ((value / 2 ** 40) & 0x3));
+				this.helperView.setUint8(pos++, (value / 2 ** 32) | 0);
+				this.helperView.setUint8(pos++, value >> 24);
+				this.helperView.setUint8(pos++, value >> 16);
+				this.helperView.setUint8(pos++, value >> 8);
+				this.helperView.setUint8(pos++, value);
+				break;
+			default:
+				throw new Error('Bad EBML varint size ' + width);
+		}
+
+		this.writer.write(this.helper.subarray(0, pos));
+	}
+
+	// Assumes the string is ASCII
+	writeString(str: string) {
+		this.writer.write(new Uint8Array(str.split('').map(x => x.charCodeAt(0))));
+	}
+
+	writeEBML(data: EBML | null) {
+		if (data === null) return;
+
+		if (data instanceof Uint8Array) {
+			this.writer.write(data);
+		} else if (Array.isArray(data)) {
+			for (const elem of data) {
+				this.writeEBML(elem);
+			}
+		} else {
+			this.offsets.set(data, this.writer.getPos());
+
+			this.writeUnsignedInt(data.id); // ID field
+
+			if (Array.isArray(data.data)) {
+				const sizePos = this.writer.getPos();
+				const sizeSize = data.size === -1 ? 1 : (data.size ?? 4);
+
+				if (data.size === -1) {
+					// Write the reserved all-one-bits marker for unknown/unbounded size.
+					this.writeByte(0xff);
+				} else {
+					this.writer.seek(this.writer.getPos() + sizeSize);
+				}
+
+				const startPos = this.writer.getPos();
+				this.dataOffsets.set(data, startPos);
+				this.writeEBML(data.data);
+
+				if (data.size !== -1) {
+					const size = this.writer.getPos() - startPos;
+					const endPos = this.writer.getPos();
+					this.writer.seek(sizePos);
+					this.writeVarInt(size, sizeSize);
+					this.writer.seek(endPos);
+				}
+			} else if (typeof data.data === 'number') {
+				const size = data.size ?? measureUnsignedInt(data.data);
+				this.writeVarInt(size);
+				this.writeUnsignedInt(data.data, size);
+			} else if (typeof data.data === 'string') {
+				this.writeVarInt(data.data.length);
+				this.writeString(data.data);
+			} else if (data.data instanceof Uint8Array) {
+				this.writeVarInt(data.data.byteLength, data.size);
+				this.writer.write(data.data);
+			} else if (data.data instanceof EBMLFloat32) {
+				this.writeVarInt(4);
+				this.writeFloat32(data.data.value);
+			} else if (data.data instanceof EBMLFloat64) {
+				this.writeVarInt(8);
+				this.writeFloat64(data.data.value);
+			} else if (data.data instanceof EBMLSignedInt) {
+				const size = data.size ?? measureSignedInt(data.data.value);
+				this.writeVarInt(size);
+				this.writeSignedInt(data.data.value, size);
+			}
+		}
+	}
+}
+
+const MAX_VAR_INT_SIZE = 8;
+export const MIN_HEADER_SIZE = 2; // 1-byte ID and 1-byte size
+export const MAX_HEADER_SIZE = 4 + MAX_VAR_INT_SIZE; // 4-byte ID and 8-byte size
+
+export class EBMLReader {
+	pos = 0;
+
+	constructor(public reader: Reader) {}
+
+	readBytes(length: number) {
+		const { view, offset } = this.reader.getViewAndOffset(this.pos, this.pos + length);
+		this.pos += length;
+
+		return new Uint8Array(view.buffer, offset, length);
+	}
+
+	readU8() {
+		const { view, offset } = this.reader.getViewAndOffset(this.pos, this.pos + 1);
+		this.pos++;
+
+		return view.getUint8(offset);
+	}
+
+	readS16() {
+		const { view, offset } = this.reader.getViewAndOffset(this.pos, this.pos + 2);
+		this.pos += 2;
+
+		return view.getInt16(offset, false);
+	}
+
+	readVarIntSize() {
+		const { view, offset } = this.reader.getViewAndOffset(this.pos, this.pos + 1);
+		const firstByte = view.getUint8(offset);
+
+		let width = 1;
+		let mask = 0x80;
+		while ((firstByte & mask) === 0 && width < 8) {
+			width++;
+			mask >>= 1;
+		}
+
+		return width;
+	}
+
+	readVarInt() {
+		// Read the first byte to determine the width of the variable-length integer
+		const { view, offset } = this.reader.getViewAndOffset(this.pos, this.pos + 1);
+		const firstByte = view.getUint8(offset);
+
+		// Find the position of the first set bit, which determines the width
+		let width = 1;
+		let mask = 0x80;
+		while ((firstByte & mask) === 0 && width < MAX_VAR_INT_SIZE) {
+			width++;
+			mask >>= 1;
+		}
+
+		// Read all bytes
+		const { view: fullView, offset: fullOffset } = this.reader.getViewAndOffset(this.pos, this.pos + width);
+
+		// First byte's value needs the marker bit cleared
+		let value = firstByte & (mask - 1);
+
+		// Read remaining bytes
+		for (let i = 1; i < width; i++) {
+			value = (value << 8) | fullView.getUint8(fullOffset + i);
+		}
+
+		this.pos += width;
+		return value;
+	}
+
+	readUnsignedInt(width: number) {
+		if (width < 1 || width > 8) {
+			throw new Error('Bad unsigned int size ' + width);
+		}
+
+		const { view, offset } = this.reader.getViewAndOffset(this.pos, this.pos + width);
+		let value = 0;
+
+		// Read bytes from most significant to least significant
+		for (let i = 0; i < width; i++) {
+			value = (value << 8) | view.getUint8(offset + i);
+		}
+
+		this.pos += width;
+		return value;
+	}
+
+	readSignedInt(width: number) {
+		let value = this.readUnsignedInt(width);
+
+		// If the highest bit is set, convert from two's complement
+		if (value & (1 << (width * 8 - 1))) {
+			value -= 2 ** (width * 8);
+		}
+
+		return value;
+	}
+
+	readFloat(width: number) {
+		if (width === 0) {
+			return 0;
+		}
+
+		if (width !== 4 && width !== 8) {
+			throw new Error('Bad FLOAT size ' + width);
+		}
+
+		const { view, offset } = this.reader.getViewAndOffset(this.pos, this.pos + width);
+		const value = width === 4 ? view.getFloat32(offset, false) : view.getFloat64(offset, false);
+
+		this.pos += width;
+		return value;
+	}
+
+	readString(length: number) {
+		const { view, offset } = this.reader.getViewAndOffset(this.pos, this.pos + length);
+		this.pos += length;
+
+		return String.fromCharCode(...new Uint8Array(view.buffer, offset, length));
+	}
+
+	readElementId() {
+		const size = this.readVarIntSize();
+		const id = this.readUnsignedInt(size);
+
+		return id;
+	}
+
+	readElementSize() {
+		let size = this.readU8();
+
+		if (size === 0xff) {
+			size = -1;
+		} else {
+			this.pos--;
+			size = this.readVarInt();
+		}
+
+		return size;
+	}
+
+	readElementHeader() {
+		const id = this.readElementId();
+		const size = this.readElementSize();
+
+		return { id, size };
+	}
+}
+
+export const CODEC_STRING_MAP: Partial<Record<MediaCodec, string>> = {
+	'avc': 'V_MPEG4/ISO/AVC',
+	'hevc': 'V_MPEGH/ISO/HEVC',
+	'vp8': 'V_VP8',
+	'vp9': 'V_VP9',
+	'av1': 'V_AV1',
+
+	'aac': 'A_AAC',
+	'mp3': 'A_MPEG/L3',
+	'opus': 'A_OPUS',
+	'vorbis': 'A_VORBIS',
+	'flac': 'A_FLAC',
+	'pcm-u8': 'A_PCM/INT/LIT',
+	'pcm-s16': 'A_PCM/INT/LIT',
+	'pcm-s16be': 'A_PCM/INT/BIG',
+	'pcm-s24': 'A_PCM/INT/LIT',
+	'pcm-s24be': 'A_PCM/INT/BIG',
+	'pcm-s32': 'A_PCM/INT/LIT',
+	'pcm-s32be': 'A_PCM/INT/BIG',
+	'pcm-f32': 'A_PCM/FLOAT/IEEE',
+
+	'webvtt': 'S_TEXT/WEBVTT',
 };

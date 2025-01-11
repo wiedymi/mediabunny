@@ -36,7 +36,7 @@ import {
 } from '../misc';
 import { Reader } from '../reader';
 import { EncodedAudioSample, EncodedVideoSample, PLACEHOLDER_DATA, SampleType } from '../sample';
-import { IsobmffReader } from './isobmff-reader';
+import { IsobmffReader, MAX_BOX_HEADER_SIZE } from './isobmff-reader';
 
 type InternalTrack = {
 	id: number;
@@ -221,7 +221,10 @@ export class IsobmffDemuxer extends Demuxer {
 			const sourceSize = await this.isobmffReader.reader.source._getSize();
 
 			while (this.isobmffReader.pos < sourceSize) {
-				await this.isobmffReader.reader.loadRange(this.isobmffReader.pos, this.isobmffReader.pos + 16);
+				await this.isobmffReader.reader.loadRange(
+					this.isobmffReader.pos,
+					this.isobmffReader.pos + MAX_BOX_HEADER_SIZE,
+				);
 				const startPos = this.isobmffReader.pos;
 				const boxInfo = this.isobmffReader.readBoxHeader();
 
@@ -409,7 +412,10 @@ export class IsobmffDemuxer extends Demuxer {
 	async readFragment(): Promise<Fragment> {
 		const startPos = this.isobmffReader.pos;
 
-		await this.isobmffReader.reader.loadRange(this.isobmffReader.pos, this.isobmffReader.pos + 16);
+		await this.isobmffReader.reader.loadRange(
+			this.isobmffReader.pos,
+			this.isobmffReader.pos + MAX_BOX_HEADER_SIZE,
+		);
 
 		const moofBoxInfo = this.isobmffReader.readBoxHeader();
 		assert(moofBoxInfo.name === 'moof');
@@ -458,7 +464,10 @@ export class IsobmffDemuxer extends Demuxer {
 					currentFragment = currentFragment.nextFragment;
 					this.isobmffReader.pos = currentFragment.moofOffset + currentFragment.moofSize;
 				} else {
-					await this.isobmffReader.reader.loadRange(this.isobmffReader.pos, this.isobmffReader.pos + 16);
+					await this.isobmffReader.reader.loadRange(
+						this.isobmffReader.pos,
+						this.isobmffReader.pos + MAX_BOX_HEADER_SIZE,
+					);
 					const startPos = this.isobmffReader.pos;
 					const boxInfo = this.isobmffReader.readBoxHeader();
 
@@ -1674,14 +1683,14 @@ abstract class IsobmffTrackBacking<
 		throw new Error('Not implemented on base class.');
 	}
 
-	async getFirstTimestamp() {
-		const firstSample = await this.getFirstSample({ metadataOnly: true });
-		return firstSample?.timestamp ?? 0;
-	}
-
 	async computeDuration() {
 		const lastSample = await this.getSample(Infinity, { metadataOnly: true });
 		return (lastSample?.timestamp ?? 0) + (lastSample?.duration ?? 0);
+	}
+
+	async getFirstTimestamp() {
+		const firstSample = await this.getFirstSample({ metadataOnly: true });
+		return firstSample?.timestamp ?? 0;
 	}
 
 	abstract createSample(
@@ -2116,7 +2125,7 @@ abstract class IsobmffTrackBacking<
 				}
 
 				// Load the header
-				await isobmffReader.reader.loadRange(isobmffReader.pos, isobmffReader.pos + 16);
+				await isobmffReader.reader.loadRange(isobmffReader.pos, isobmffReader.pos + MAX_BOX_HEADER_SIZE);
 				const startPos = isobmffReader.pos;
 				const boxInfo = isobmffReader.readBoxHeader();
 

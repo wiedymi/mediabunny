@@ -38,9 +38,9 @@
 	canvas.height = 720;
 	const context = canvas.getContext('2d');
 
-	let format = new Metamuxer.WebMOutputFormat({ streamable: true });
-	format = new Metamuxer.Mp4OutputFormat({ fastStart: false }); // new Metamuxer.MkvOutputFormat();// new Metamuxer.Mp4OutputFormat({ fastStart: false });
-	let target = new Metamuxer.ArrayBufferTarget();
+	let format = new Metamuxer.WebMOutputFormat({ streamable: false });
+	//format = new Metamuxer.Mp4OutputFormat({ fastStart: false }); // new Metamuxer.MkvOutputFormat();// new Metamuxer.Mp4OutputFormat({ fastStart: false });
+	let target = new Metamuxer.BufferTarget();
 
 	/*
 	target = new Metamuxer.StreamTarget(new WritableStream({
@@ -84,7 +84,7 @@
 	*/
 
 	let videoSource = new Metamuxer.CanvasSource(canvas, {
-		codec: 'avc',
+		codec: 'vp9',
 		bitrate: 1e6
 	});
 	let audioSource = new Metamuxer.AudioBufferSource({
@@ -95,7 +95,7 @@
 
 	output.addVideoTrack(videoSource);
 	output.addAudioTrack(audioSource);
-	output.addSubtitleTrack(subtitleSource);
+	//output.addSubtitleTrack(subtitleSource);
 
 	output.start();
 
@@ -174,5 +174,5 @@ Testing... <00:17.350>One... <00:18.125>Two...
 	await output.finalize();
 
 	console.log(target);
-	download(new Blob([target.buffer]), 'test.mp4');
+	download(new Blob([target.buffer]), 'test.webm');
 </script>

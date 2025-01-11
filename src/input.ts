@@ -52,7 +52,7 @@ export class Input {
 				}
 			}
 
-			throw new Error('Input has an unrecognizable format.');
+			throw new Error('Input has an unsupported or unrecognizable format.');
 		})();
 	}
 

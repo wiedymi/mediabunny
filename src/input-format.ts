@@ -2,6 +2,8 @@ import { Demuxer } from './demuxer';
 import { Input } from './input';
 import { IsobmffDemuxer } from './isobmff/isobmff-demuxer';
 import { IsobmffReader } from './isobmff/isobmff-reader';
+import { EBMLId, EBMLReader } from './matroska/ebml';
+import { MatroskaDemuxer } from './matroska/matroska-demuxer';
 import { RiffReader } from './wave/riff-reader';
 import { WaveDemuxer } from './wave/wave-demuxer';
 
@@ -79,13 +81,70 @@ export class QuickTimeInputFormat extends IsobmffInputFormat {
 /** @public */
 export class MatroskaInputFormat extends InputFormat {
 	/** @internal */
-	async _canReadInput() {
-		return false; // TODO
+	async _canReadInput(input: Input) {
+		const sourceSize = await input._mainReader.source._getSize();
+		if (sourceSize < 8) {
+			return false;
+		}
+
+		const ebmlReader = new EBMLReader(input._mainReader);
+		const varIntSize = ebmlReader.readVarIntSize();
+		if (varIntSize < 1 || varIntSize > 6) {
+			return false;
+		}
+
+		const id = ebmlReader.readUnsignedInt(varIntSize);
+		if (id !== EBMLId.EBML) {
+			return false;
+		}
+
+		const dataSize = ebmlReader.readElementSize();
+		if (dataSize === -1) {
+			return false; // Miss me with that shit
+		}
+
+		const startPos = ebmlReader.pos;
+		while (ebmlReader.pos < startPos + dataSize) {
+			const { id, size } = ebmlReader.readElementHeader();
+			const dataStartPos = ebmlReader.pos;
+			if (size === -1) return false;
+
+			switch (id) {
+				case EBMLId.EBMLVersion: {
+					const ebmlVersion = ebmlReader.readUnsignedInt(size);
+					if (ebmlVersion !== 1) {
+						return false;
+					}
+				}; break;
+				case EBMLId.EBMLReadVersion: {
+					const ebmlReadVersion = ebmlReader.readUnsignedInt(size);
+					if (ebmlReadVersion !== 1) {
+						return false;
+					}
+				}; break;
+				case EBMLId.DocType: {
+					const docType = ebmlReader.readString(size);
+					if (docType !== 'matroska' && docType !== 'webm') {
+						return false;
+					}
+				}; break;
+				case EBMLId.DocTypeVersion: {
+					const docTypeVersion = ebmlReader.readUnsignedInt(size);
+					if (docTypeVersion > 4) { // Support up to Matroska v4
+						return false;
+					}
+				}; break;
+			}
+
+			ebmlReader.pos = dataStartPos + size;
+		}
+
+		return true;
 	}
 
 	/** @internal */
-	_createDemuxer(): never {
-		throw new Error('Not implemented');
+	_createDemuxer(input: Input) {
+		return new MatroskaDemuxer(input);
 	}
 
 	getName() {
