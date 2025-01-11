@@ -4,6 +4,7 @@ import {
 	Av1CodecInfo,
 	extractAudioCodecString,
 	extractVideoCodecString,
+	extractVp9CodecInfoFromFrame,
 	MediaCodec,
 	parseAacAudioSpecificConfig,
 	PCM_CODECS,
@@ -2177,6 +2178,7 @@ abstract class IsobmffTrackBacking<
 
 class IsobmffVideoTrackBacking extends IsobmffTrackBacking<EncodedVideoSample> implements InputVideoTrackBacking {
 	override internalTrack: InternalVideoTrack;
+	decoderConfigPromise: Promise<VideoDecoderConfig> | null = null;
 
 	constructor(internalTrack: InternalVideoTrack) {
 		super(internalTrack);
@@ -2204,13 +2206,20 @@ class IsobmffVideoTrackBacking extends IsobmffTrackBacking<EncodedVideoSample> i
 			return null;
 		}
 
-		return {
-			codec: extractVideoCodecString(this.internalTrack.info),
-			codedWidth: this.internalTrack.info.width,
-			codedHeight: this.internalTrack.info.height,
-			description: this.internalTrack.info.codecDescription ?? undefined,
-			colorSpace: this.internalTrack.info.colorSpace ?? undefined,
-		};
+		if (this.internalTrack.info.codec === 'vp9' && !this.internalTrack.info.vp9CodecInfo) {
+			const firstSample = await this.getFirstSample({});
+			this.internalTrack.info.vp9CodecInfo = firstSample && extractVp9CodecInfoFromFrame(firstSample.data);
+		}
+
+		return this.decoderConfigPromise ??= (async (): Promise<VideoDecoderConfig> => {
+			return {
+				codec: extractVideoCodecString(this.internalTrack.info),
+				codedWidth: this.internalTrack.info.width,
+				codedHeight: this.internalTrack.info.height,
+				description: this.internalTrack.info.codecDescription ?? undefined,
+				colorSpace: this.internalTrack.info.colorSpace ?? undefined,
+			};
+		})();
 	}
 
 	createSample(
@@ -2226,6 +2235,7 @@ class IsobmffVideoTrackBacking extends IsobmffTrackBacking<EncodedVideoSample> i
 
 class IsobmffAudioTrackBacking extends IsobmffTrackBacking<EncodedAudioSample> implements InputAudioTrackBacking {
 	override internalTrack: InternalAudioTrack;
+	decoderConfigPromise: Promise<AudioDecoderConfig> | null = null;
 
 	constructor(internalTrack: InternalAudioTrack) {
 		super(internalTrack);
@@ -2249,12 +2259,14 @@ class IsobmffAudioTrackBacking extends IsobmffTrackBacking<EncodedAudioSample> i
 			return null;
 		}
 
-		return {
-			codec: extractAudioCodecString(this.internalTrack.info),
-			numberOfChannels: this.internalTrack.info.numberOfChannels,
-			sampleRate: this.internalTrack.info.sampleRate,
-			description: this.internalTrack.info.codecDescription ?? undefined,
-		};
+		return this.decoderConfigPromise ??= (async (): Promise<AudioDecoderConfig> => {
+			return {
+				codec: extractAudioCodecString(this.internalTrack.info),
+				numberOfChannels: this.internalTrack.info.numberOfChannels,
+				sampleRate: this.internalTrack.info.sampleRate,
+				description: this.internalTrack.info.codecDescription ?? undefined,
+			};
+		})();
 	}
 
 	createSample(

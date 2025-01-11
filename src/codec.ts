@@ -240,6 +240,8 @@ export type Av1CodecInfo = {
 };
 
 export const extractVideoCodecString = (trackInfo: {
+	width: number;
+	height: number;
 	codec: VideoCodec | null;
 	codecDescription: Uint8Array | null;
 	colorSpace: VideoColorSpaceInit | null;
@@ -252,8 +254,6 @@ export const extractVideoCodecString = (trackInfo: {
 		if (!description || description.byteLength < 4) {
 			throw new TypeError('AVC description must be at least 4 bytes long.');
 		}
-
-		// TODO: The "temp hack". Something is amiss with the second byte in the hex string, check the specification
 
 		return `avc1.${bytesToHexString(description.subarray(1, 4))}`;
 	} else if (codec === 'hevc') {
@@ -303,7 +303,18 @@ export const extractVideoCodecString = (trackInfo: {
 		return 'vp8'; // Easy, this one
 	} else if (codec === 'vp9') {
 		if (!vp9CodecInfo) {
-			throw new Error('Missing VP9 codec info - unable to construct codec string.');
+			// Calculate level based on dimensions
+			const pictureSize = trackInfo.width * trackInfo.height;
+			let level = last(VP9_LEVEL_TABLE)!.level; // Default to highest level
+			for (const entry of VP9_LEVEL_TABLE) {
+				if (pictureSize <= entry.maxPictureSize) {
+					level = entry.level;
+					break;
+				}
+			}
+
+			// We don't really know better, so let's return a general-purpose, common codec string and hope for the best
+			return `vp09.00.${level.toString().padStart(2, '0')}.08`;
 		}
 
 		const profile = vp9CodecInfo.profile.toString().padStart(2, '0');
@@ -326,7 +337,18 @@ export const extractVideoCodecString = (trackInfo: {
 		return string;
 	} else if (codec === 'av1') {
 		if (!av1CodecInfo) {
-			throw new Error('Missing AV1 codec info - unable to construct codec string.');
+			// Calculate level based on dimensions
+			const pictureSize = trackInfo.width * trackInfo.height;
+			let level = last(VP9_LEVEL_TABLE)!.level; // Default to highest level
+			for (const entry of VP9_LEVEL_TABLE) {
+				if (pictureSize <= entry.maxPictureSize) {
+					level = entry.level;
+					break;
+				}
+			}
+
+			// We don't really know better, so let's return a general-purpose, common codec string and hope for the best
+			return `av01.0.${level.toString().padStart(2, '0')}M.08`;
 		}
 
 		// https://aomediacodec.github.io/av1-isobmff/#codecsparam
@@ -366,6 +388,413 @@ export const extractVideoCodecString = (trackInfo: {
 	}
 
 	throw new TypeError(`Unhandled codec '${codec}'.`);
+};
+
+/**
+ * When VP9 codec information is not provided by the container, we can still try to extract the information by digging
+ * into the VP9 bitstream.
+ */
+export const extractVp9CodecInfoFromFrame = (frame: Uint8Array): Vp9CodecInfo | null => {
+	// eslint-disable-next-line @stylistic/max-len
+	// https://storage.googleapis.com/downloads.webmproject.org/docs/vp9/vp9-bitstream-specification-v0.7-20170222-draft.pdf
+	// http://downloads.webmproject.org/docs/vp9/vp9-bitstream_superframe-and-uncompressed-header_v1.0.pdf
+
+	// Handle superframe
+	const lastByte = frame[frame.length - 1];
+	if (lastByte && (lastByte & 0xe0) === 0xc0) { // Is superframe
+		const bytesPerFrameSize = ((lastByte & 0x18) >> 3) + 1;
+		const numFrames = (lastByte & 0x07) + 1;
+		const indexSize = 2 + numFrames * bytesPerFrameSize;
+
+		// Verify matching marker bytes
+		if (frame[frame.length - indexSize] !== lastByte) {
+			return null;
+		}
+
+		// Get first frame size
+		let frameSize = 0;
+		const offset = frame.length - indexSize + 1;
+
+		for (let i = 0; i < bytesPerFrameSize; i++) {
+			if (!frame[offset + i]) return null;
+			frameSize |= frame[offset + i]! << (8 * i);
+		}
+
+		frame = frame.subarray(0, frameSize);
+	}
+
+	let bitPos = 0;
+
+	// Frame marker (0b10)
+	const frameMarker = readBits(frame, bitPos, bitPos + 2);
+	if (frameMarker !== 2) {
+		return null;
+	}
+	bitPos += 2;
+
+	// Profile
+	const profileLowBit = readBits(frame, bitPos, bitPos + 1);
+	bitPos += 1;
+	const profileHighBit = readBits(frame, bitPos, bitPos + 1);
+	bitPos += 1;
+	const profile = (profileHighBit << 1) + profileLowBit;
+
+	// Skip reserved bit for profile 3
+	if (profile === 3) {
+		bitPos += 1;
+	}
+
+	// show_existing_frame
+	const showExistingFrame = readBits(frame, bitPos, bitPos + 1);
+	bitPos += 1;
+
+	if (showExistingFrame === 1) {
+		return null;
+	}
+
+	// frame_type (0 = key frame)
+	const frameType = readBits(frame, bitPos, bitPos + 1);
+	bitPos += 1;
+
+	if (frameType !== 0) {
+		return null;
+	}
+
+	// Skip show_frame and error_resilient_mode
+	bitPos += 2;
+
+	// Sync code (0x498342)
+	const syncCode = readBits(frame, bitPos, bitPos + 24);
+	if (syncCode !== 0x498342) {
+		return null;
+	}
+	bitPos += 24;
+
+	// Color config
+	let bitDepth = 8;
+	if (profile >= 2) {
+		const tenOrTwelveBit = readBits(frame, bitPos, bitPos + 1);
+		bitPos += 1;
+		bitDepth = tenOrTwelveBit ? 12 : 10;
+	}
+
+	// Color space
+	const colorSpace = readBits(frame, bitPos, bitPos + 3);
+	bitPos += 3;
+
+	let chromaSubsampling = 0;
+	let videoFullRangeFlag = 0;
+
+	if (colorSpace !== 7) { // 7 is CS_RGB
+		const colorRange = readBits(frame, bitPos, bitPos + 1);
+		bitPos += 1;
+		videoFullRangeFlag = colorRange;
+
+		if (profile === 1 || profile === 3) {
+			const subsamplingX = readBits(frame, bitPos, bitPos + 1);
+			bitPos += 1;
+			const subsamplingY = readBits(frame, bitPos, bitPos + 1);
+			bitPos += 1;
+
+			// 0 = 4:2:0 vertical
+			// 1 = 4:2:0 colocated
+			// 2 = 4:2:2
+			// 3 = 4:4:4
+			chromaSubsampling = (!subsamplingX && !subsamplingY)
+				? 3 // 0,0 = 4:4:4
+				: (subsamplingX && !subsamplingY)
+						? 2 // 1,0 = 4:2:2
+						: 1; // 1,1 = 4:2:0 colocated (default)
+
+			// Skip reserved bit
+			bitPos += 1;
+		} else {
+			// For profile 0 and 2, always 4:2:0
+			chromaSubsampling = 1; // Using colocated as default
+		}
+	} else {
+		// RGB is always 4:4:4
+		chromaSubsampling = 3;
+		videoFullRangeFlag = 1;
+	}
+
+	// Parse frame size
+	const widthMinusOne = readBits(frame, bitPos, bitPos + 16);
+	bitPos += 16;
+	const heightMinusOne = readBits(frame, bitPos, bitPos + 16);
+	bitPos += 16;
+
+	const width = widthMinusOne + 1;
+	const height = heightMinusOne + 1;
+
+	// Calculate level based on dimensions
+	const pictureSize = width * height;
+	let level = last(VP9_LEVEL_TABLE)!.level; // Default to highest level
+	for (const entry of VP9_LEVEL_TABLE) {
+		if (pictureSize <= entry.maxPictureSize) {
+			level = entry.level;
+			break;
+		}
+	}
+
+	// Map color_space to standard values
+	const matrixCoefficients = colorSpace === 7
+		? 0
+		: colorSpace === 2
+			? 1
+			: colorSpace === 1 ? 6 : 2;
+
+	const colourPrimaries = colorSpace === 2
+		? 1
+		: colorSpace === 1 ? 6 : 2;
+
+	const transferCharacteristics = colorSpace === 2
+		? 1
+		: colorSpace === 1 ? 6 : 2;
+
+	return {
+		profile,
+		level,
+		bitDepth,
+		chromaSubsampling,
+		videoFullRangeFlag,
+		colourPrimaries,
+		transferCharacteristics,
+		matrixCoefficients,
+	};
+};
+
+/**
+ * When AV1 codec information is not provided by the container, we can still try to extract the information by digging
+ * into the AV1 bitstream.
+ */
+export const extractAv1CodecInfoFromFrame = (data: Uint8Array): Av1CodecInfo | null => {
+	// https://aomediacodec.github.io/av1-spec/av1-spec.pdf
+
+	let offset = 0;
+
+	const readLeb128 = (data: Uint8Array): number | null => {
+		let value = 0;
+
+		for (let i = 0; i < 8; i++) {
+			const byte = data[offset++];
+			if (byte === undefined) return 0;
+
+			value |= ((byte & 0x7f) << (i * 7));
+
+			if (!(byte & 0x80)) {
+				break;
+			}
+
+			// Spec requirement
+			if (i === 7 && (byte & 0x80)) {
+				return null;
+			}
+		}
+
+		// Spec requirement
+		if (value >= 2 ** 32 - 1) {
+			return null;
+		}
+
+		return value;
+	};
+
+	while (offset < data.length) {
+		// Parse OBU header
+		const obuHeader = readBits(data, offset * 8, offset * 8 + 8);
+		offset += 1;
+
+		const obuType = (obuHeader >> 3) & 0xf;
+		const obuExtension = (obuHeader >> 2) & 0x1;
+		const obuHasSizeField = (obuHeader >> 1) & 0x1;
+
+		// Skip extension header if present
+		if (obuExtension) {
+			offset += 1;
+		}
+
+		// Read OBU size if present
+		let obuSize: number;
+		if (obuHasSizeField) {
+			const obuSizeValue = readLeb128(data);
+			if (obuSizeValue === null) return null; // It was invalid
+			obuSize = obuSizeValue;
+		} else {
+			obuSize = data.length - offset;
+		}
+
+		// We're only interested in Sequence Header OBU (type 1)
+		if (obuType === 1) {
+			const startBit = offset * 8;
+			let bitOffset = 0;
+
+			// Read sequence header fields
+			const seqProfile = readBits(data, startBit + bitOffset, startBit + bitOffset + 3);
+			bitOffset += 3;
+
+			// eslint-disable-next-line @typescript-eslint/no-unused-vars
+			const stillPicture = readBits(data, startBit + bitOffset, startBit + bitOffset + 1);
+			bitOffset += 1;
+
+			const reducedStillPictureHeader = readBits(data, startBit + bitOffset, startBit + bitOffset + 1);
+			bitOffset += 1;
+
+			let seqLevel = 0;
+			let seqTier = 0;
+			let bufferDelayLengthMinus1 = 0;
+
+			if (reducedStillPictureHeader) {
+				seqLevel = readBits(data, startBit + bitOffset, startBit + bitOffset + 5);
+				bitOffset += 5;
+			} else {
+				// Parse timing_info_present_flag
+				const timingInfoPresentFlag = readBits(data, startBit + bitOffset, startBit + bitOffset + 1);
+				bitOffset += 1;
+
+				if (timingInfoPresentFlag) {
+					// Skip timing info (num_units_in_display_tick, time_scale, equal_picture_interval)
+					bitOffset += 32; // num_units_in_display_tick
+					bitOffset += 32; // time_scale
+					const equalPictureInterval = readBits(data, startBit + bitOffset, startBit + bitOffset + 1);
+					bitOffset += 1;
+
+					if (equalPictureInterval) {
+						// Skip num_ticks_per_picture_minus_1 (uvlc)
+						// Since this is variable length, we'd need to implement uvlc reading
+						// For now, we'll return null as this is rare
+						return null;
+					}
+				}
+
+				// Parse decoder_model_info_present_flag
+				const decoderModelInfoPresentFlag = readBits(data, startBit + bitOffset, startBit + bitOffset + 1);
+				bitOffset += 1;
+
+				if (decoderModelInfoPresentFlag) {
+					// Store buffer_delay_length_minus_1 instead of just skipping
+					bufferDelayLengthMinus1 = readBits(data, startBit + bitOffset, startBit + bitOffset + 5);
+					bitOffset += 5;
+					bitOffset += 32; // num_units_in_decoding_tick
+					bitOffset += 5; // buffer_removal_time_length_minus_1
+					bitOffset += 5; // frame_presentation_time_length_minus_1
+				}
+
+				// Parse operating_points_cnt_minus_1
+				const operatingPointsCntMinus1 = readBits(data, startBit + bitOffset, startBit + bitOffset + 5);
+				bitOffset += 5;
+
+				// For each operating point
+				for (let i = 0; i <= operatingPointsCntMinus1; i++) {
+					// operating_point_idc[i]
+					bitOffset += 12;
+
+					// seq_level_idx[i]
+					const seqLevelIdx = readBits(data, startBit + bitOffset, startBit + bitOffset + 5);
+					bitOffset += 5;
+
+					if (i === 0) {
+						seqLevel = seqLevelIdx;
+					}
+
+					if (seqLevelIdx > 7) {
+						// seq_tier[i]
+						const seqTierTemp = readBits(data, startBit + bitOffset, startBit + bitOffset + 1);
+						bitOffset += 1;
+						if (i === 0) {
+							seqTier = seqTierTemp;
+						}
+					}
+
+					if (decoderModelInfoPresentFlag) {
+						// decoder_model_present_for_this_op[i]
+						const decoderModelPresentForThisOp
+							= readBits(data, startBit + bitOffset, startBit + bitOffset + 1);
+						bitOffset += 1;
+
+						if (decoderModelPresentForThisOp) {
+							const n = bufferDelayLengthMinus1 + 1;
+							bitOffset += n; // decoder_buffer_delay[op]
+							bitOffset += n; // encoder_buffer_delay[op]
+							bitOffset += 1; // low_delay_mode_flag[op]
+						}
+					}
+
+					// initial_display_delay_present_flag
+					const initialDisplayDelayPresentFlag
+						= readBits(data, startBit + bitOffset, startBit + bitOffset + 1);
+					bitOffset += 1;
+
+					if (initialDisplayDelayPresentFlag) {
+						// initial_display_delay_minus_1[i]
+						bitOffset += 4;
+					}
+				}
+			}
+
+			const highBitdepth = readBits(data, startBit + bitOffset, startBit + bitOffset + 1);
+			bitOffset += 1;
+
+			let bitDepth = 8;
+			if (seqProfile === 2 && highBitdepth) {
+				const twelveBit = readBits(data, startBit + bitOffset, startBit + bitOffset + 1);
+				bitOffset += 1;
+				bitDepth = twelveBit ? 12 : 10;
+			} else if (seqProfile <= 2) {
+				bitDepth = highBitdepth ? 10 : 8;
+			}
+
+			let monochrome = 0;
+			if (seqProfile !== 1) {
+				monochrome = readBits(data, startBit + bitOffset, startBit + bitOffset + 1);
+				bitOffset += 1;
+			}
+
+			let chromaSubsamplingX = 1;
+			let chromaSubsamplingY = 1;
+			let chromaSamplePosition = 0;
+
+			if (!monochrome) {
+				if (seqProfile === 0) {
+					chromaSubsamplingX = 1;
+					chromaSubsamplingY = 1;
+				} else if (seqProfile === 1) {
+					chromaSubsamplingX = 0;
+					chromaSubsamplingY = 0;
+				} else {
+					if (bitDepth === 12) {
+						chromaSubsamplingX = readBits(data, startBit + bitOffset, startBit + bitOffset + 1);
+						bitOffset += 1;
+						if (chromaSubsamplingX) {
+							chromaSubsamplingY = readBits(data, startBit + bitOffset, startBit + bitOffset + 1);
+							bitOffset += 1;
+						}
+					}
+				}
+
+				if (chromaSubsamplingX && chromaSubsamplingY) {
+					chromaSamplePosition = readBits(data, startBit + bitOffset, startBit + bitOffset + 2);
+					bitOffset += 2;
+				}
+			}
+
+			return {
+				profile: seqProfile,
+				level: seqLevel,
+				tier: seqTier,
+				bitDepth,
+				monochrome,
+				chromaSubsamplingX,
+				chromaSubsamplingY,
+				chromaSamplePosition,
+			};
+		}
+
+		// Move to next OBU
+		offset += obuSize;
+	}
+
+	return null;
 };
 
 export const buildAudioCodecString = (codec: AudioCodec, numberOfChannels: number, sampleRate: number) => {

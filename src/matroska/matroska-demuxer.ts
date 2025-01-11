@@ -1,4 +1,12 @@
-import { AudioCodec, extractAudioCodecString, extractVideoCodecString, MediaCodec, VideoCodec } from '../codec';
+import {
+	AudioCodec,
+	extractAudioCodecString,
+	extractAv1CodecInfoFromFrame,
+	extractVideoCodecString,
+	extractVp9CodecInfoFromFrame,
+	MediaCodec,
+	VideoCodec,
+} from '../codec';
 import { Demuxer } from '../demuxer';
 import { Input } from '../input';
 import {
@@ -1306,6 +1314,7 @@ abstract class MatroskaTrackBacking<
 
 class MatroskaVideoTrackBacking extends MatroskaTrackBacking<EncodedVideoSample> implements InputVideoTrackBacking {
 	override internalTrack: InternalVideoTrack;
+	decoderConfigPromise: Promise<VideoDecoderConfig> | null = null;
 
 	constructor(internalTrack: InternalVideoTrack) {
 		super(internalTrack);
@@ -1333,19 +1342,35 @@ class MatroskaVideoTrackBacking extends MatroskaTrackBacking<EncodedVideoSample>
 			return null;
 		}
 
-		return {
-			codec: 'vp09.00.31.08' ?? extractVideoCodecString({
-				codec: this.internalTrack.info.codec,
-				codecDescription: this.internalTrack.codecPrivate,
-				colorSpace: this.internalTrack.info.colorSpace,
-				vp9CodecInfo: null,
-				av1CodecInfo: null,
-			}),
-			codedWidth: this.internalTrack.info.width,
-			codedHeight: this.internalTrack.info.height,
-			description: this.internalTrack.codecPrivate ?? undefined,
-			colorSpace: this.internalTrack.info.colorSpace ?? undefined,
-		};
+		return this.decoderConfigPromise ??= (async (): Promise<VideoDecoderConfig> => {
+			let firstSample: EncodedVideoSample | null = null;
+			const needsSampleForAdditionalInfo
+				= this.internalTrack.info.codec === 'vp9' || this.internalTrack.info.codec === 'av1';
+
+			if (needsSampleForAdditionalInfo) {
+				firstSample = await this.getFirstSample({});
+			}
+
+			return {
+				codec: extractVideoCodecString({
+					width: this.internalTrack.info.width,
+					height: this.internalTrack.info.height,
+					codec: this.internalTrack.info.codec,
+					codecDescription: this.internalTrack.codecPrivate,
+					colorSpace: this.internalTrack.info.colorSpace,
+					vp9CodecInfo: this.internalTrack.info.codec === 'vp9' && firstSample
+						? extractVp9CodecInfoFromFrame(firstSample.data)
+						: null,
+					av1CodecInfo: this.internalTrack.info.codec === 'av1' && firstSample
+						? extractAv1CodecInfoFromFrame(firstSample.data)
+						: null,
+				}),
+				codedWidth: this.internalTrack.info.width,
+				codedHeight: this.internalTrack.info.height,
+				description: this.internalTrack.codecPrivate ?? undefined,
+				colorSpace: this.internalTrack.info.colorSpace ?? undefined,
+			};
+		})();
 	}
 
 	createSample(
@@ -1361,6 +1386,7 @@ class MatroskaVideoTrackBacking extends MatroskaTrackBacking<EncodedVideoSample>
 
 class MatroskaAudioTrackBacking extends MatroskaTrackBacking<EncodedAudioSample> implements InputAudioTrackBacking {
 	override internalTrack: InternalAudioTrack;
+	decoderConfigPromise: Promise<AudioDecoderConfig> | null = null;
 
 	constructor(internalTrack: InternalAudioTrack) {
 		super(internalTrack);
@@ -1384,16 +1410,18 @@ class MatroskaAudioTrackBacking extends MatroskaTrackBacking<EncodedAudioSample>
 			return null;
 		}
 
-		return {
-			codec: extractAudioCodecString({
-				codec: this.internalTrack.info.codec,
-				codecDescription: this.internalTrack.codecPrivate,
-				aacCodecInfo: null,
-			}),
-			numberOfChannels: this.internalTrack.info.numberOfChannels,
-			sampleRate: this.internalTrack.info.sampleRate,
-			description: this.internalTrack.codecPrivate ?? undefined,
-		};
+		return this.decoderConfigPromise ??= (async (): Promise<AudioDecoderConfig> => {
+			return {
+				codec: extractAudioCodecString({
+					codec: this.internalTrack.info.codec,
+					codecDescription: this.internalTrack.codecPrivate,
+					aacCodecInfo: null,
+				}),
+				numberOfChannels: this.internalTrack.info.numberOfChannels,
+				sampleRate: this.internalTrack.info.sampleRate,
+				description: this.internalTrack.codecPrivate ?? undefined,
+			};
+		})();
 	}
 
 	createSample(
