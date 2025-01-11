@@ -1,8 +1,4 @@
-- Test tree shaking
 - Throw if edit list detected
-- Add the new audio codecs to muxers
-- Mov muxer!!! Only mov can hold PCM audio, MP4 cannot
 - A stream source?? Or like a callback-driven source
 - onHeader, etc callbacks for Matroska
 - https://github.com/Vanilagy/mp4-muxer/issues/83 tell him it's possible now
-- Matroska projection for video rotation in muxer

@@ -99,6 +99,7 @@ export enum EBMLId {
 	Primaries = 0x55bb,
 	Range = 0x55b9,
 	Projection = 0x7670,
+	ProjectionType = 0x7671,
 	ProjectionPoseRoll = 0x7675,
 }
 

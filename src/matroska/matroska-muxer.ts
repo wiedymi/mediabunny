@@ -230,6 +230,8 @@ export class MatroskaMuxer extends Muxer {
 	}
 
 	private videoSpecificTrackInfo(trackData: MatroskaVideoTrackData) {
+		const { frameRate, rotation } = trackData.track.metadata;
+
 		const elements: EBMLElement['data'] = [
 			(trackData.info.decoderConfig.description
 				? {
@@ -237,10 +239,10 @@ export class MatroskaMuxer extends Muxer {
 						data: toUint8Array(trackData.info.decoderConfig.description),
 					}
 				: null),
-			(trackData.track.metadata.frameRate
+			(frameRate
 				? {
 						id: EBMLId.DefaultDuration,
-						data: 1e9 / trackData.track.metadata.frameRate,
+						data: 1e9 / frameRate,
 					}
 				: null),
 		];
@@ -268,6 +270,21 @@ export class MatroskaMuxer extends Muxer {
 							{
 								id: EBMLId.Range,
 								data: colorSpace.fullRange ? 2 : 1,
+							},
+						],
+					}
+				: null),
+			(typeof rotation === 'number' && rotation !== 0
+				? {
+						id: EBMLId.Projection,
+						data: [
+							{
+								id: EBMLId.ProjectionType,
+								data: 0, // rectangular
+							},
+							{
+								id: EBMLId.ProjectionPoseRoll,
+								data: (rotation + 180) % 360 - 180, // [0, 270] -> [-180, 90]
 							},
 						],
 					}
