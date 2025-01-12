@@ -1030,6 +1030,7 @@ class PcmAudioDecoderWrapper extends DecoderWrapper<EncodedAudioSample, AudioDat
 
 		const preciseDuration = numberOfFrames / this.decoderConfig.sampleRate;
 		if (this.currentTimestamp === null || Math.abs(sample.timestamp - this.currentTimestamp) >= preciseDuration) {
+			// We need to sync with the sample timestamp again
 			this.currentTimestamp = sample.timestamp;
 		}
 
