@@ -72,10 +72,10 @@ export {
 export {
 	SampleRetrievalOptions,
 	BaseSampleSink,
-	WrappedMediaFrame,
 	BaseMediaFrameSink,
 	EncodedVideoSampleSink,
 	VideoFrameSink,
+	WrappedVideoFrame,
 	EncodedAudioSampleSink,
 	CanvasSink,
 	WrappedCanvas,

@@ -487,7 +487,7 @@ export class MatroskaMuxer extends Muxer {
 			const timestamp = this.validateAndNormalizeTimestamp(trackData.track, cue.timestamp, true);
 
 			let bodyText = cue.text;
-			const timestampMs = Math.floor(timestamp * 1000);
+			const timestampMs = Math.round(timestamp * 1000);
 
 			// Replace in-body timestamps so that they're relative to the cue start time
 			inlineTimestampRegex.lastIndex = 0;
@@ -622,7 +622,7 @@ export class MatroskaMuxer extends Muxer {
 			this.createSegment();
 		}
 
-		const msTimestamp = Math.floor(1000 * chunk.timestamp);
+		const msTimestamp = Math.round(1000 * chunk.timestamp);
 		// We can only finalize this cluster (and begin a new one) if we know that each track will be able to
 		// start the new one with a key frame.
 		const keyFrameQueuedEverywhere = this.trackDatas.every((otherTrackData) => {
@@ -673,7 +673,7 @@ export class MatroskaMuxer extends Muxer {
 		view.setUint8(0, 0x80 | trackData.track.id);
 		view.setInt16(1, relativeTimestamp, false);
 
-		const msDuration = Math.floor(1000 * chunk.duration);
+		const msDuration = Math.round(1000 * chunk.duration);
 
 		if (msDuration === 0 && !chunk.additions) {
 			// No duration or additions, we can write out a SimpleBlock

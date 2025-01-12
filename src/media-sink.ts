@@ -138,9 +138,9 @@ export abstract class BaseSampleSink<Sample extends EncodedVideoSample | Encoded
 	}
 }
 
-/** @public */
-export type WrappedMediaFrame<T extends VideoFrame | AudioData> = {
+export type WrappedMediaFrame<T extends VideoFrame | AudioData, S extends EncodedVideoSample | EncodedAudioSample> = {
 	frame: T;
+	sample: S;
 	timestamp: number;
 	duration: number;
 };
@@ -148,7 +148,7 @@ export type WrappedMediaFrame<T extends VideoFrame | AudioData> = {
 abstract class DecoderWrapper<
 	Sample extends EncodedVideoSample | EncodedAudioSample,
 	MediaFrame extends VideoFrame | AudioData,
-	WrappedFrame extends WrappedMediaFrame<MediaFrame> = WrappedMediaFrame<MediaFrame>,
+	WrappedFrame extends WrappedMediaFrame<MediaFrame, Sample> = WrappedMediaFrame<MediaFrame, Sample>,
 > {
 	constructor(
 		public onFrame: (frame: WrappedFrame) => unknown,
@@ -165,7 +165,8 @@ abstract class DecoderWrapper<
 export abstract class BaseMediaFrameSink<
 	Sample extends EncodedVideoSample | EncodedAudioSample,
 	MediaFrame extends VideoFrame | AudioData,
-	WrappedFrame extends WrappedMediaFrame<MediaFrame> = WrappedMediaFrame<MediaFrame>,
+	/** @internal */
+	WrappedFrame extends WrappedMediaFrame<MediaFrame, Sample> = WrappedMediaFrame<MediaFrame, Sample>,
 > {
 	/** @internal */
 	abstract _createDecoder(
@@ -180,6 +181,7 @@ export abstract class BaseMediaFrameSink<
 		return structuredClone(frame);
 	}
 
+	/** @internal */
 	protected mediaFramesInRange(
 		startTimestamp = 0,
 		endTimestamp = Infinity,
@@ -351,12 +353,13 @@ export abstract class BaseMediaFrameSink<
 		};
 	}
 
+	/** @internal */
 	protected mediaFramesAtTimestamps(
 		timestamps: AnyIterable<number>,
 	): AsyncGenerator<WrappedFrame | null, void, unknown> {
 		validateAnyIterable(timestamps);
 		const timestampIterator = toAsyncIterator(timestamps);
-		const timestampsOfInterest: number[] = [];
+		const samplesOfInterest: Sample[] = [];
 
 		const MAX_QUEUE_SIZE = 8;
 		const frameQueue: (WrappedFrame | null)[] = [];
@@ -389,9 +392,9 @@ export abstract class BaseMediaFrameSink<
 				}
 
 				let frameUsed = false;
-				while (timestampsOfInterest.length > 0 && timestampsOfInterest[0] === wrappedFrame.timestamp) {
+				while (samplesOfInterest.length > 0 && samplesOfInterest[0] === wrappedFrame.sample) {
 					pushToQueue(this._duplicateFrame(wrappedFrame));
-					timestampsOfInterest.shift();
+					samplesOfInterest.shift();
 					frameUsed = true;
 				}
 
@@ -437,7 +440,7 @@ export abstract class BaseMediaFrameSink<
 					continue;
 				}
 
-				timestampsOfInterest.push(targetSample.timestamp);
+				samplesOfInterest.push(targetSample);
 
 				if (
 					lastKeySample
@@ -446,13 +449,13 @@ export abstract class BaseMediaFrameSink<
 				) {
 					assert(lastSample);
 
-					if (targetSample.timestamp === lastSample.timestamp && timestampsOfInterest.length === 1) {
+					if (targetSample.timestamp === lastSample.timestamp && samplesOfInterest.length === 1) {
 						// Special case: We have a repeat sample, but the frame for that sample has already been
 						// decoded. Therefore, we need to push the frame here instead of in the decoder callback.
 						if (lastUsedFrame) {
 							pushToQueue(this._duplicateFrame(lastUsedFrame));
 						}
-						timestampsOfInterest.shift();
+						samplesOfInterest.shift();
 					}
 				} else {
 					lastKeySample = keySample;
@@ -576,7 +579,7 @@ class VideoDecoderWrapper extends DecoderWrapper<EncodedVideoSample, VideoFrame>
 	pendingSamples: EncodedVideoSample[] = [];
 
 	constructor(
-		onFrame: (frame: WrappedMediaFrame<VideoFrame>) => unknown,
+		onFrame: (frame: WrappedMediaFrame<VideoFrame, EncodedVideoSample>) => unknown,
 		onError: (error: DOMException) => unknown,
 		decoderConfig: VideoDecoderConfig,
 	) {
@@ -587,10 +590,16 @@ class VideoDecoderWrapper extends DecoderWrapper<EncodedVideoSample, VideoFrame>
 				const sample = this.pendingSamples.shift();
 				assert(sample);
 
+				// Let's get these from the sample instead of the frame, as the frame has no innate timing info
+				// (unlike AudioData), so the sample will always be more accurate.
+				const timestamp = sample.timestamp;
+				const duration = sample.duration;
+
 				onFrame({
 					frame,
-					timestamp: sample.timestamp,
-					duration: sample.duration,
+					sample,
+					timestamp,
+					duration,
 				});
 			},
 			error: onError,
@@ -620,6 +629,13 @@ class VideoDecoderWrapper extends DecoderWrapper<EncodedVideoSample, VideoFrame>
 }
 
 /** @public */
+export type WrappedVideoFrame = {
+	frame: VideoFrame;
+	timestamp: number;
+	duration: number;
+};
+
+/** @public */
 export class VideoFrameSink extends BaseMediaFrameSink<EncodedVideoSample, VideoFrame> {
 	/** @internal */
 	_videoTrack: InputVideoTrack;
@@ -636,7 +652,7 @@ export class VideoFrameSink extends BaseMediaFrameSink<EncodedVideoSample, Video
 
 	/** @internal */
 	async _createDecoder(
-		onFrame: (frame: WrappedMediaFrame<VideoFrame>) => unknown,
+		onFrame: (frame: WrappedMediaFrame<VideoFrame, EncodedVideoSample>) => unknown,
 		onError: (error: DOMException) => unknown,
 	) {
 		if (!(await this._videoTrack.canDecode())) {
@@ -657,21 +673,36 @@ export class VideoFrameSink extends BaseMediaFrameSink<EncodedVideoSample, Video
 		return new EncodedVideoSampleSink(this._videoTrack);
 	}
 
+	/** @internal */
+	_wrappedFrameToWrappedVideoFrame(frame: WrappedMediaFrame<VideoFrame, EncodedVideoSample>): WrappedVideoFrame {
+		return {
+			frame: frame.frame,
+			timestamp: frame.timestamp,
+			duration: frame.duration,
+		};
+	}
+
 	async getFrame(timestamp: number) {
 		validateTimestamp(timestamp);
 
 		for await (const frame of this.mediaFramesAtTimestamps([timestamp])) {
-			return frame;
+			return frame && this._wrappedFrameToWrappedVideoFrame(frame);
 		}
 		throw new Error('Internal error: Iterator returned nothing.');
 	}
 
 	frames(startTimestamp = 0, endTimestamp = Infinity) {
-		return this.mediaFramesInRange(startTimestamp, endTimestamp);
+		return mapAsyncGenerator(
+			this.mediaFramesInRange(startTimestamp, endTimestamp),
+			async frame => this._wrappedFrameToWrappedVideoFrame(frame),
+		);
 	}
 
 	framesAtTimestamps(timestamps: AnyIterable<number>) {
-		return this.mediaFramesAtTimestamps(timestamps);
+		return mapAsyncGenerator(
+			this.mediaFramesAtTimestamps(timestamps),
+			async frame => frame && this._wrappedFrameToWrappedVideoFrame(frame),
+		);
 	}
 }
 
@@ -711,9 +742,7 @@ export class CanvasSink {
 	}
 
 	/** @internal */
-	async _videoFrameToWrappedCanvas(
-		frame: WrappedMediaFrame<VideoFrame>,
-	): Promise<WrappedCanvas> {
+	async _videoFrameToWrappedCanvas(frame: WrappedVideoFrame): Promise<WrappedCanvas> {
 		const width = this._dimensions?.width ?? await this._videoTrack.getDisplayWidth();
 		const height = this._dimensions?.height ?? await this._videoTrack.getDisplayHeight();
 		const rotation = await this._videoTrack.getRotation();
@@ -819,7 +848,7 @@ class AudioDecoderWrapper extends DecoderWrapper<EncodedAudioSample, AudioData> 
 	pendingSamples: EncodedAudioSample[] = [];
 
 	constructor(
-		onData: (data: WrappedMediaFrame<AudioData>) => unknown,
+		onData: (data: WrappedMediaFrame<AudioData, EncodedAudioSample>) => unknown,
 		onError: (error: DOMException) => unknown,
 		decoderConfig: AudioDecoderConfig,
 	) {
@@ -829,10 +858,16 @@ class AudioDecoderWrapper extends DecoderWrapper<EncodedAudioSample, AudioData> 
 			const sample = this.pendingSamples.shift();
 			assert(sample);
 
+			// We use the timing information from the data instead of sample as it will be more accurate. However,
+			// we also know these need to be multiple of the sample length, so let's round:
+			const timestamp = Math.round(data.timestamp / 1e6 * decoderConfig.sampleRate) / decoderConfig.sampleRate;
+			const duration = Math.round(data.duration / 1e6 * decoderConfig.sampleRate) / decoderConfig.sampleRate;
+
 			onData({
 				frame: data,
-				timestamp: sample.timestamp,
-				duration: sample.duration,
+				sample,
+				timestamp,
+				duration,
 			});
 		}, error: onError });
 		this.decoder.configure(decoderConfig);
@@ -871,8 +906,12 @@ class PcmAudioDecoderWrapper extends DecoderWrapper<EncodedAudioSample, AudioDat
 	outputFormat: 'u8' | 's16' | 's32' | 'f32';
 	writeOutputValue: (view: DataView, byteOffset: number, value: number) => void;
 
+	// Internal state to accumulate a precise current timestamp based on audio durations, not the (potentially
+	// inaccurate) sample timestamps.
+	currentTimestamp: number | null = null;
+
 	constructor(
-		onData: (data: WrappedMediaFrame<AudioData>) => unknown,
+		onData: (data: WrappedMediaFrame<AudioData, EncodedAudioSample>) => unknown,
 		onError: (error: DOMException) => unknown,
 		public decoderConfig: AudioDecoderConfig,
 	) {
@@ -989,20 +1028,29 @@ class PcmAudioDecoderWrapper extends DecoderWrapper<EncodedAudioSample, AudioDat
 			this.writeOutputValue(outputView, outputIndex, value);
 		}
 
+		const preciseDuration = numberOfFrames / this.decoderConfig.sampleRate;
+		if (this.currentTimestamp === null || Math.abs(sample.timestamp - this.currentTimestamp) >= preciseDuration) {
+			this.currentTimestamp = sample.timestamp;
+		}
+
+		const preciseTimestamp = this.currentTimestamp;
+		this.currentTimestamp += preciseDuration;
+
 		const audioData = new AudioData({
 			format: this.outputFormat,
 			data: outputBuffer,
 			numberOfChannels: this.decoderConfig.numberOfChannels,
 			sampleRate: this.decoderConfig.sampleRate,
 			numberOfFrames,
-			timestamp: sample.microsecondTimestamp,
+			timestamp: 1e6 * preciseTimestamp,
 		});
 
 		// Since all other decoders are async, we'll make this one behave async as well
 		queueMicrotask(() => this.onFrame({
 			frame: audioData,
-			timestamp: sample.timestamp,
-			duration: sample.duration,
+			sample,
+			timestamp: preciseTimestamp,
+			duration: preciseDuration,
 		}));
 	}
 
@@ -1039,7 +1087,7 @@ export class AudioDataSink extends BaseMediaFrameSink<EncodedAudioSample, AudioD
 
 	/** @internal */
 	async _createDecoder(
-		onData: (data: WrappedMediaFrame<AudioData>) => unknown,
+		onData: (data: WrappedMediaFrame<AudioData, EncodedAudioSample>) => unknown,
 		onError: (error: DOMException) => unknown,
 	) {
 		if (!(await this._audioTrack.canDecode())) {
@@ -1060,7 +1108,7 @@ export class AudioDataSink extends BaseMediaFrameSink<EncodedAudioSample, AudioD
 	}
 
 	/** @internal */
-	_wrappedFrameToWrappedAudioData(frame: WrappedMediaFrame<AudioData>): WrappedAudioData {
+	_wrappedFrameToWrappedAudioData(frame: WrappedMediaFrame<AudioData, EncodedAudioSample>): WrappedAudioData {
 		return {
 			data: frame.frame,
 			timestamp: frame.timestamp,

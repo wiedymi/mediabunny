@@ -1,4 +1,5 @@
 import {
+	AacCodecInfo,
 	AudioCodec,
 	extractAudioCodecString,
 	extractAv1CodecInfoFromFrame,
@@ -122,6 +123,7 @@ type InternalTrack = {
 			sampleRate: number;
 			bitDepth: number;
 			codec: AudioCodec | null;
+			aacCodecInfo: AacCodecInfo | null;
 		};
 };
 type InternalVideoTrack = InternalTrack & { info: { type: 'video' } };
@@ -625,6 +627,9 @@ export class MatroskaDemuxer extends Demuxer {
 					) {
 						if (codecIdWithoutSuffix === CODEC_STRING_MAP.aac) {
 							this.currentTrack.info.codec = 'aac';
+							this.currentTrack.info.aacCodecInfo = {
+								isMpeg2: this.currentTrack.codecId.includes('MPEG2'),
+							};
 						} else if (this.currentTrack.codecId === CODEC_STRING_MAP.mp3) {
 							this.currentTrack.info.codec = 'mp3';
 						} else if (codecIdWithoutSuffix === CODEC_STRING_MAP.opus) {
@@ -695,6 +700,7 @@ export class MatroskaDemuxer extends Demuxer {
 						sampleRate: -1,
 						bitDepth: -1,
 						codec: null,
+						aacCodecInfo: null,
 					};
 				}
 			}; break;
@@ -1476,7 +1482,7 @@ class MatroskaAudioTrackBacking extends MatroskaTrackBacking<EncodedAudioSample>
 				codec: extractAudioCodecString({
 					codec: this.internalTrack.info.codec,
 					codecDescription: this.internalTrack.codecPrivate,
-					aacCodecInfo: null,
+					aacCodecInfo: this.internalTrack.info.aacCodecInfo,
 				}),
 				numberOfChannels: this.internalTrack.info.numberOfChannels,
 				sampleRate: this.internalTrack.info.sampleRate,
