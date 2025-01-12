@@ -429,7 +429,7 @@ export class MatroskaDemuxer extends Demuxer {
 			}
 
 			if (blockReferencesExist) {
-				trackData.blocks = sortBlocksTopologically(trackData.blocks);
+				trackData.blocks = sortBlocksByReferences(trackData.blocks);
 			}
 
 			trackData.presentationTimestamps = trackData.blocks
@@ -1496,119 +1496,42 @@ class MatroskaAudioTrackBacking extends MatroskaTrackBacking<EncodedAudioSample>
 	}
 }
 
-/**
- * This function sorts blocks to satisfy block references: If block A is referenced by block B, then block A should
- * come before block B. The resulting array is one that is in decode order.
- */
-const sortBlocksTopologically = (blocks: ClusterBlock[]) => {
-	return blocks; // temp
-	// Based on "A fast and effective heuristic for the feedback arc set problem" by Peter Eades et al.
+/** Sorts blocks such that referenced blocks come before the blocks that reference them. */
+const sortBlocksByReferences = (blocks: ClusterBlock[]) => {
+	const timestampToBlock = new Map<number, ClusterBlock>();
 
-	const n = blocks.length;
-
-	// Build timestamp -> index mapping
-	const timestampToIndex = new Map<number, number>();
-	for (let i = 0; i < n; i++) {
-		timestampToIndex.set(blocks[i]!.timestamp, i);
+	for (let i = 0; i < blocks.length; i++) {
+		const block = blocks[i]!;
+		timestampToBlock.set(block.timestamp, block);
 	}
 
-	const outgoing = new Array<Set<number>>(n);
-	const incoming = new Array<Set<number>>(n);
-	const remaining = new Set<number>();
+	const processedBlocks = new Set<ClusterBlock>();
+	const result: ClusterBlock[] = [];
 
-	for (let i = 0; i < n; i++) {
-		outgoing[i] = new Set();
-		incoming[i] = new Set();
-		remaining.add(i);
-	}
-
-	// Build the graph
-	for (let i = 0; i < n; i++) {
-		const refs = blocks[i]!.referencedTimestamps;
-		for (let j = 0; j < refs.length; j++) {
-			const referencedIndex = timestampToIndex.get(refs[j]!);
-			if (referencedIndex !== undefined) {
-				outgoing[referencedIndex]!.add(i);
-				incoming[i]!.add(referencedIndex);
-			}
-		}
-	}
-
-	// Pre-allocate arrays with known size
-	const prefix = new Array<number>(n).fill(-1);
-	const suffix = new Array<number>(n).fill(-1);
-	let prefixSize = 0;
-	let suffixSize = 0;
-
-	while (remaining.size > 0) {
-		let progress = false;
-
-		const currentVertices = Array.from(remaining);
-
-		// Remove sinks
-		for (let i = 0; i < currentVertices.length; i++) {
-			const index = currentVertices[i]!;
-			if (outgoing[index]!.size === 0) {
-				suffix[suffixSize++] = index;
-				// Remove this vertex
-				for (const fromIndex of incoming[index]!) {
-					outgoing[fromIndex]!.delete(index);
-				}
-				remaining.delete(index);
-				progress = true;
-			}
+	const processBlock = (block: ClusterBlock) => {
+		if (processedBlocks.has(block)) {
+			return;
 		}
 
-		// Remove sources
-		for (let i = 0; i < currentVertices.length; i++) {
-			const index = currentVertices[i]!;
-			if (remaining.has(index) && incoming[index]!.size === 0) {
-				prefix[prefixSize++] = index;
-				// Remove this vertex
-				for (const toIndex of outgoing[index]!) {
-					incoming[toIndex]!.delete(index);
-				}
-				remaining.delete(index);
-				progress = true;
+		// Marking the block as processed here already; prevents this algorithm from dying on cycles
+		processedBlocks.add(block);
+
+		for (let j = 0; j < block.referencedTimestamps.length; j++) {
+			const timestamp = block.referencedTimestamps[j]!;
+			const otherBlock = timestampToBlock.get(timestamp);
+			if (!otherBlock) {
+				continue;
 			}
+
+			processBlock(otherBlock);
 		}
 
-		// If no sinks or sources, remove vertex with maximum Δ
-		if (!progress && remaining.size > 0) {
-			let maxDelta = -Infinity;
-			let maxDeltaIndex = -1;
+		result.push(block);
+	};
 
-			for (const index of remaining) {
-				const delta = outgoing[index]!.size - incoming[index]!.size;
-				if (delta > maxDelta) {
-					maxDelta = delta;
-					maxDeltaIndex = index;
-				}
-			}
-
-			prefix[prefixSize++] = maxDeltaIndex;
-			// Remove this vertex
-			for (const toIndex of outgoing[maxDeltaIndex]!) {
-				incoming[toIndex]!.delete(maxDeltaIndex);
-			}
-			for (const fromIndex of incoming[maxDeltaIndex]!) {
-				outgoing[fromIndex]!.delete(maxDeltaIndex);
-			}
-			remaining.delete(maxDeltaIndex);
-		}
+	for (let i = 0; i < blocks.length; i++) {
+		processBlock(blocks[i]!);
 	}
 
-	const result = new Array<ClusterBlock | null>(n).fill(null);
-
-	// Copy prefix
-	for (let i = 0; i < prefixSize; i++) {
-		result[i] = blocks[prefix[i]!]!;
-	}
-
-	// Copy suffix in reverse
-	for (let i = 0; i < suffixSize; i++) {
-		result[prefixSize + i] = blocks[suffix[suffixSize - 1 - i]!]!;
-	}
-
-	return result as ClusterBlock[];
+	return result;
 };
