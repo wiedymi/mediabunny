@@ -12,6 +12,7 @@ export abstract class OutputFormat {
 
 	/** @internal */
 	abstract _getName(): string;
+	abstract getFileExtension(): string;
 	abstract getSupportedCodecs(): MediaCodec[];
 
 	getSupportedVideoCodecs() {
@@ -69,6 +70,10 @@ export class Mp4OutputFormat extends IsobmffOutputFormat {
 		return 'MP4';
 	}
 
+	getFileExtension() {
+		return '.mp4';
+	}
+
 	getSupportedCodecs() {
 		return Mp4OutputFormat.getSupportedCodecs();
 	}
@@ -96,6 +101,10 @@ export class MovOutputFormat extends IsobmffOutputFormat {
 	/** @internal */
 	_getName() {
 		return 'MOV';
+	}
+
+	getFileExtension() {
+		return '.mov';
 	}
 
 	getSupportedCodecs() {
@@ -152,6 +161,10 @@ export class MkvOutputFormat extends OutputFormat {
 		return 'Matroska';
 	}
 
+	getFileExtension() {
+		return '.mkv';
+	}
+
 	getSupportedCodecs() {
 		return MkvOutputFormat.getSupportedCodecs();
 	}
@@ -179,6 +192,10 @@ export class WebMOutputFormat extends MkvOutputFormat {
 	/** @internal */
 	override _getName() {
 		return 'WebM';
+	}
+
+	override getFileExtension() {
+		return '.webm';
 	}
 
 	static override getSupportedCodecs(): MediaCodec[] {
@@ -209,6 +226,10 @@ export class WaveOutputFormat extends OutputFormat {
 	/** @internal */
 	_getName() {
 		return 'WAVE';
+	}
+
+	getFileExtension() {
+		return '.wav';
 	}
 
 	getSupportedCodecs() {

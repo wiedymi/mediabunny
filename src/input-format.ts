@@ -81,7 +81,7 @@ export class QuickTimeInputFormat extends IsobmffInputFormat {
 /** @public */
 export class MatroskaInputFormat extends InputFormat {
 	/** @internal */
-	async _canReadInput(input: Input) {
+	protected async isSupportedEBMLOfDocType(input: Input, desiredDocType: string) {
 		const sourceSize = await input._mainReader.source._getSize();
 		if (sourceSize < 8) {
 			return false;
@@ -89,7 +89,7 @@ export class MatroskaInputFormat extends InputFormat {
 
 		const ebmlReader = new EBMLReader(input._mainReader);
 		const varIntSize = ebmlReader.readVarIntSize();
-		if (varIntSize < 1 || varIntSize > 6) {
+		if (varIntSize < 1 || varIntSize > 8) {
 			return false;
 		}
 
@@ -124,7 +124,7 @@ export class MatroskaInputFormat extends InputFormat {
 				}; break;
 				case EBMLId.DocType: {
 					const docType = ebmlReader.readString(size);
-					if (docType !== 'matroska' && docType !== 'webm') {
+					if (docType !== desiredDocType) {
 						return false;
 					}
 				}; break;
@@ -143,6 +143,11 @@ export class MatroskaInputFormat extends InputFormat {
 	}
 
 	/** @internal */
+	_canReadInput(input: Input) {
+		return this.isSupportedEBMLOfDocType(input, 'matroska');
+	}
+
+	/** @internal */
 	_createDemuxer(input: Input) {
 		return new MatroskaDemuxer(input);
 	}
@@ -153,6 +158,22 @@ export class MatroskaInputFormat extends InputFormat {
 
 	getMimeType() {
 		return 'video/x-matroska';
+	}
+}
+
+/** @public */
+export class WebMInputFormat extends MatroskaInputFormat {
+	/** @internal */
+	override _canReadInput(input: Input) {
+		return this.isSupportedEBMLOfDocType(input, 'webm');
+	}
+
+	override getName() {
+		return 'WebM';
+	}
+
+	override getMimeType() {
+		return 'video/webm';
 	}
 }
 
@@ -196,9 +217,9 @@ export const QTFF = new QuickTimeInputFormat();
 /** @public */
 export const MATROSKA = new MatroskaInputFormat();
 /** @public */
-export const WEBM = MATROSKA;
+export const WEBM = new WebMInputFormat();
 /** @public */
 export const WAVE = new WaveInputFormat();
 
 /** @public */
-export const ALL_FORMATS: InputFormat[] = [MP4, QTFF, MATROSKA, WAVE];
+export const ALL_FORMATS: InputFormat[] = [MP4, QTFF, MATROSKA, WEBM, WAVE];
