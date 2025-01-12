@@ -122,8 +122,11 @@ export class MatroskaMuxer extends Muxer {
 	private cues: EBMLElement | null = null;
 
 	private currentCluster: EBMLElement | null = null;
-	private currentClusterMsTimestamp: number | null = null;
-	private trackDatasInCurrentCluster = new Set<MatroskaTrackData>();
+	private currentClusterStartMsTimestamp: number | null = null;
+	private currentClusterMaxMsTimestamp: number | null = null;
+	private trackDatasInCurrentCluster = new Map<MatroskaTrackData, {
+		firstMsTimestamp: number;
+	}>();
 
 	private duration = 0;
 
@@ -620,7 +623,7 @@ export class MatroskaMuxer extends Muxer {
 		}
 
 		const msTimestamp = Math.floor(1000 * chunk.timestamp);
-		// We can only finalize this fragment (and begin a new one) if we know that each track will be able to
+		// We can only finalize this cluster (and begin a new one) if we know that each track will be able to
 		// start the new one with a key frame.
 		const keyFrameQueuedEverywhere = this.trackDatas.every((otherTrackData) => {
 			if (otherTrackData.track.source._closed) {
@@ -637,12 +640,19 @@ export class MatroskaMuxer extends Muxer {
 
 		if (
 			!this.currentCluster
-			|| (keyFrameQueuedEverywhere && msTimestamp - this.currentClusterMsTimestamp! >= 1000)
+			|| (
+				keyFrameQueuedEverywhere
+				// This check is required because that means there is already a block with this timestamp in the
+				// CURRENT chunk, meaning that starting the next cluster at the same timestamp is forbidden (since the
+				// already-written block would belong into it instead).
+				&& msTimestamp > this.currentClusterMaxMsTimestamp!
+				&& msTimestamp - this.currentClusterStartMsTimestamp! >= 1000
+			)
 		) {
 			this.createNewCluster(msTimestamp);
 		}
 
-		const relativeTimestamp = msTimestamp - this.currentClusterMsTimestamp!;
+		const relativeTimestamp = msTimestamp - this.currentClusterStartMsTimestamp!;
 		if (relativeTimestamp < 0) {
 			// The chunk lies outside of the current cluster
 			return;
@@ -702,7 +712,12 @@ export class MatroskaMuxer extends Muxer {
 		this.duration = Math.max(this.duration, msTimestamp + msDuration);
 		trackData.lastWrittenMsTimestamp = msTimestamp;
 
-		this.trackDatasInCurrentCluster.add(trackData);
+		if (!this.trackDatasInCurrentCluster.has(trackData)) {
+			this.trackDatasInCurrentCluster.set(trackData, {
+				firstMsTimestamp: msTimestamp,
+			});
+		}
+		this.currentClusterMaxMsTimestamp = Math.max(this.currentClusterMaxMsTimestamp!, msTimestamp);
 	}
 
 	/** Creates a new Cluster element to contain media chunks. */
@@ -726,7 +741,8 @@ export class MatroskaMuxer extends Muxer {
 		};
 		this.ebmlWriter.writeEBML(this.currentCluster);
 
-		this.currentClusterMsTimestamp = msTimestamp;
+		this.currentClusterStartMsTimestamp = msTimestamp;
+		this.currentClusterMaxMsTimestamp = msTimestamp;
 		this.trackDatasInCurrentCluster.clear();
 	}
 
@@ -750,19 +766,31 @@ export class MatroskaMuxer extends Muxer {
 		const clusterOffsetFromSegment
 			= this.ebmlWriter.offsets.get(this.currentCluster)! - this.segmentDataOffset;
 
-		assert(this.cues);
+		// Group tracks by their first timestamp and create a CuePoint for each unique timestamp
+		const groupedByTimestamp = new Map<number, MatroskaTrackData[]>();
+		for (const [trackData, { firstMsTimestamp }] of this.trackDatasInCurrentCluster) {
+			if (!groupedByTimestamp.has(firstMsTimestamp)) {
+				groupedByTimestamp.set(firstMsTimestamp, []);
+			}
+			groupedByTimestamp.get(firstMsTimestamp)!.push(trackData);
+		}
 
-		// Add a CuePoint to the Cues element for better seeking
-		(this.cues.data as EBML[]).push({ id: EBMLId.CuePoint, data: [
-			{ id: EBMLId.CueTime, data: this.currentClusterMsTimestamp! },
-			// We only write out cues for tracks that have at least one chunk in this cluster
-			...[...this.trackDatasInCurrentCluster].map((trackData) => {
-				return { id: EBMLId.CueTrackPositions, data: [
-					{ id: EBMLId.CueTrack, data: trackData.track.id },
-					{ id: EBMLId.CueClusterPosition, data: clusterOffsetFromSegment },
-				] };
-			}),
-		] });
+		const groupedAndSortedByTimestamp = [...groupedByTimestamp.entries()].sort((a, b) => a[0] - b[0]);
+
+		// Add CuePoints to the Cues element for better seeking
+		for (const [msTimestamp, trackDatas] of groupedAndSortedByTimestamp) {
+			assert(this.cues);
+			(this.cues.data as EBML[]).push({ id: EBMLId.CuePoint, data: [
+				{ id: EBMLId.CueTime, data: msTimestamp },
+				// Create CueTrackPositions for each track that starts at this timestamp
+				...trackDatas.map((trackData) => {
+					return { id: EBMLId.CueTrackPositions, data: [
+						{ id: EBMLId.CueTrack, data: trackData.track.id },
+						{ id: EBMLId.CueClusterPosition, data: clusterOffsetFromSegment },
+					] };
+				}),
+			] });
+		}
 	}
 
 	// eslint-disable-next-line @typescript-eslint/no-misused-promises

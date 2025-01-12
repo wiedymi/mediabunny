@@ -1792,6 +1792,7 @@ abstract class IsobmffTrackBacking<
 									x => x.moofOffset,
 								);
 								assert(fragmentIndex !== -1);
+
 								return {
 									fragmentIndex,
 									sampleIndex: 0,
@@ -2053,15 +2054,11 @@ abstract class IsobmffTrackBacking<
 
 	/** Looks for a sample in the fragments while trying to load as few fragments as possible to retrieve it. */
 	private async performFragmentedLookup(
-		// This function returns the best-matching sample that is currently loaded. Based on this information, we know
-		// which fragments we need to load to find the actual match.
 		getBestMatch: () => { fragmentIndex: number; sampleIndex: number; correctSampleFound: boolean },
-		// The timestamp with which we can search the lookup table
 		searchTimestamp: number,
-		// The timestamp for which we know the correct sample will not come after it
 		latestTimestamp: number,
 		options: SampleRetrievalOptions,
-	) {
+	): Promise<Sample | null> {
 		const demuxer = this.internalTrack.demuxer;
 		const release = await demuxer.fragmentLookupMutex.acquire(); // The algorithm requires exclusivity
 
@@ -2080,20 +2077,18 @@ abstract class IsobmffTrackBacking<
 			let bestFragmentIndex = fragmentIndex;
 			let bestSampleIndex = sampleIndex;
 
-			let lookupEntry: FragmentLookupTableEntry | null = null;
-			if (this.internalTrack.fragmentLookupTable) {
-				// Search for a lookup entry; this way, we won't need to start searching from the start of the file
-				// but can jump right into the correct fragment (or at least nearby).
-				const index = binarySearchLessOrEqual(
+			// Search for a lookup entry; this way, we won't need to start searching from the start of the file
+			// but can jump right into the correct fragment (or at least nearby).
+			const lookupEntryIndex = this.internalTrack.fragmentLookupTable
+				? binarySearchLessOrEqual(
 					this.internalTrack.fragmentLookupTable,
 					searchTimestamp,
 					x => x.timestamp,
-				);
-
-				if (index !== -1) {
-					lookupEntry = this.internalTrack.fragmentLookupTable[index]!;
-				}
-			}
+				)
+				: -1;
+			const lookupEntry = lookupEntryIndex !== -1
+				? this.internalTrack.fragmentLookupTable![lookupEntryIndex]!
+				: null;
 
 			if (fragmentIndex === -1) {
 				isobmffReader.pos = lookupEntry?.moofOffset ?? 0;
@@ -2163,13 +2158,23 @@ abstract class IsobmffTrackBacking<
 				isobmffReader.pos = startPos + boxInfo.totalSize;
 			}
 
-			if (bestFragmentIndex !== -1) {
+			let result: Sample | null = null;
+			const bestFragment = bestFragmentIndex !== -1 ? this.internalTrack.fragments[bestFragmentIndex]! : null;
+			if (bestFragment) {
 				// If we finished looping but didn't find a perfect match, still return the best match we found
-				const fragment = this.internalTrack.fragments[bestFragmentIndex]!;
-				return this.fetchSampleInFragment(fragment, bestSampleIndex, options);
+				result = await this.fetchSampleInFragment(bestFragment, bestSampleIndex, options);
 			}
 
-			return null;
+			// Catch faulty lookup table entries
+			if (!result && lookupEntry && (!bestFragment || bestFragment.moofOffset < lookupEntry.moofOffset)) {
+				// The lookup table entry lied to us! We found a lookup entry but no fragment there that satisfied
+				// the match. In this case, let's search again but using the lookup entry before that.
+				const previousLookupEntry = this.internalTrack.fragmentLookupTable![lookupEntryIndex - 1];
+				const newSearchTimestamp = previousLookupEntry?.timestamp ?? -Infinity;
+				return this.performFragmentedLookup(getBestMatch, newSearchTimestamp, latestTimestamp, options);
+			}
+
+			return result;
 		} finally {
 			release();
 		}

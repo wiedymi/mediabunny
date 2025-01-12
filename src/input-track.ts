@@ -22,6 +22,7 @@ export abstract class InputTrack {
 	abstract getCodec(): Promise<MediaCodec | null>;
 	abstract getCodecMimeType(): Promise<string | null>;
 	abstract canDecode(): Promise<boolean>;
+	abstract computeSampleStats(): Promise<SampleStats>;
 
 	isVideoTrack(): this is InputVideoTrack {
 		return this instanceof InputVideoTrack;

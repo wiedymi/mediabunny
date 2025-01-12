@@ -41,10 +41,23 @@ const input = new Metamuxer.Input({
 	source
 });
 
-console.log(await input.getMimeType())
+//console.log(await input.getMimeType())
 
 let videoTrack = await input.getPrimaryVideoTrack(); 
-let audioTrack = await input.getPrimaryAudioTrack();
+let audioTrack = null && await input.getPrimaryAudioTrack();
+
+
+const sink = new Metamuxer.EncodedVideoSampleSink(videoTrack);
+console.log(await sink.getSample(4.93))
+await new Promise(() => {});
+
+for await (const sample of sink.samples()) {
+	console.log(sample);
+	await new Promise(resolve => setTimeout(resolve, 100));
+}
+
+
+
 
 //console.log(await videoTrack.computeDuration());
 //await new Promise(() => {});

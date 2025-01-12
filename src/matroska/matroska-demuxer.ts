@@ -90,6 +90,7 @@ type ClusterBlock = {
 
 type CuePoint = {
 	time: number;
+	trackId: number;
 	clusterPosition: number;
 };
 
@@ -99,6 +100,7 @@ type InternalTrack = {
 	segment: Segment;
 	clusters: Cluster[];
 	clustersWithKeyFrame: Cluster[];
+	cuePoints: CuePoint[];
 
 	isDefault: boolean;
 	inputTrack: InputTrack | null;
@@ -143,6 +145,7 @@ export class MatroskaDemuxer extends Demuxer {
 	currentTrack: InternalTrack | null = null;
 	currentCluster: Cluster | null = null;
 	currentBlock: ClusterBlock | null = null;
+	currentCueTime: number | null = null;
 
 	isWebM = false;
 
@@ -336,8 +339,54 @@ export class MatroskaDemuxer extends Demuxer {
 		// Put default tracks first
 		this.currentSegment.tracks.sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
 
-		// Sort cue points by time
-		this.currentSegment.cuePoints.sort((a, b) => a.time - b.time);
+		// Sort cue points by cluster position (required for the next algorithm)
+		this.currentSegment.cuePoints.sort((a, b) => a.clusterPosition - b.clusterPosition);
+
+		// Now, let's distribute the cue points to each track. Ideally, each track has their own cue point, but some
+		// Matroska files may only specify cue points for a single track. In this case, we still wanna use those cue
+		// points for all tracks.
+		const allTrackIds = this.currentSegment.tracks.map(x => x.id);
+		const remainingTrackIds = new Set<number>();
+		let lastClusterPosition: number | null = null;
+		let lastCuePoint: CuePoint | null = null;
+
+		for (const cuePoint of this.currentSegment.cuePoints) {
+			if (cuePoint.clusterPosition !== lastClusterPosition) {
+				for (const id of remainingTrackIds) {
+					// These tracks didn't receive a cue point for the last cluster, so let's give them one
+					assert(lastCuePoint);
+					const track = this.currentSegment.tracks.find(x => x.id === id)!;
+					track.cuePoints.push(lastCuePoint);
+				}
+
+				for (const id of allTrackIds) {
+					remainingTrackIds.add(id);
+				}
+			}
+
+			lastCuePoint = cuePoint;
+
+			if (!remainingTrackIds.has(cuePoint.trackId)) {
+				continue;
+			}
+
+			const track = this.currentSegment.tracks.find(x => x.id === cuePoint.trackId)!;
+			track.cuePoints.push(cuePoint);
+
+			remainingTrackIds.delete(cuePoint.trackId);
+			lastClusterPosition = cuePoint.clusterPosition;
+		}
+
+		for (const id of remainingTrackIds) {
+			assert(lastCuePoint);
+			const track = this.currentSegment.tracks.find(x => x.id === id)!;
+			track.cuePoints.push(lastCuePoint);
+		}
+
+		for (const track of this.currentSegment.tracks) {
+			// Sort cue points by time
+			track.cuePoints.sort((a, b) => a.time - b.time);
+		}
 
 		this.currentSegment = null;
 	}
@@ -526,6 +575,8 @@ export class MatroskaDemuxer extends Demuxer {
 					demuxer: this,
 					clusters: [],
 					clustersWithKeyFrame: [],
+					cuePoints: [],
+
 					isDefault: false,
 					inputTrack: null,
 					codecId: null,
@@ -773,27 +824,32 @@ export class MatroskaDemuxer extends Demuxer {
 			case EBMLId.CuePoint: {
 				if (!this.currentSegment) break;
 
-				const cuePoint: CuePoint = { time: -1, clusterPosition: -1 };
+				this.readContiguousElements(reader, size);
+				this.currentCueTime = null;
+			}; break;
+
+			case EBMLId.CueTime: {
+				this.currentCueTime = reader.readUnsignedInt(size);
+			}; break;
+
+			case EBMLId.CueTrackPositions: {
+				if (this.currentCueTime === null) break;
+				assert(this.currentSegment);
+
+				const cuePoint: CuePoint = { time: this.currentCueTime, trackId: -1, clusterPosition: -1 };
 				this.currentSegment.cuePoints.push(cuePoint);
 				this.readContiguousElements(reader, size);
 
-				if (cuePoint.time === -1 || cuePoint.clusterPosition === -1) {
+				if (cuePoint.trackId === -1 || cuePoint.clusterPosition === -1) {
 					this.currentSegment.cuePoints.pop();
 				}
 			}; break;
 
-			case EBMLId.CueTime: {
+			case EBMLId.CueTrack: {
 				const lastCuePoint = this.currentSegment?.cuePoints[this.currentSegment.cuePoints.length - 1];
 				if (!lastCuePoint) break;
 
-				lastCuePoint.time = reader.readUnsignedInt(size);
-			}; break;
-
-			case EBMLId.CueTrackPositions: {
-				const lastCuePoint = this.currentSegment?.cuePoints[this.currentSegment.cuePoints.length - 1];
-				if (!lastCuePoint) break;
-
-				this.readContiguousElements(reader, size);
+				lastCuePoint.trackId = reader.readUnsignedInt(size);
 			}; break;
 
 			case EBMLId.CueClusterPosition: {
@@ -997,6 +1053,7 @@ abstract class MatroskaTrackBacking<
 								x => x.elementStartPos,
 							);
 							assert(clusterIndex !== -1);
+
 							return {
 								clusterIndex,
 								blockIndex: 0,
@@ -1196,7 +1253,7 @@ abstract class MatroskaTrackBacking<
 		// The timestamp for which we know the correct block will not come after it
 		latestTimestamp: number,
 		options: SampleRetrievalOptions,
-	) {
+	): Promise<Sample | null> {
 		const { demuxer, segment } = this.internalTrack;
 		const release = await segment.clusterLookupMutex.acquire(); // The algorithm requires exclusivity
 
@@ -1215,20 +1272,14 @@ abstract class MatroskaTrackBacking<
 			let bestClusterIndex = clusterIndex;
 			let bestBlockIndex = blockIndex;
 
-			let cuePoint: CuePoint | null = null;
-			if (segment.cuePoints.length > 0) {
-				// Search for a cue point; this way, we won't need to start searching from the start of the file
-				// but can jump right into the correct cluster (or at least nearby).
-				const index = binarySearchLessOrEqual(
-					segment.cuePoints,
-					searchTimestamp,
-					x => x.time,
-				);
-
-				if (index !== -1) {
-					cuePoint = segment.cuePoints[index]!;
-				}
-			}
+			// Search for a cue point; this way, we won't need to start searching from the start of the file
+			// but can jump right into the correct cluster (or at least nearby).
+			const cuePointIndex = binarySearchLessOrEqual(
+				this.internalTrack.cuePoints,
+				searchTimestamp,
+				x => x.time,
+			);
+			const cuePoint = cuePointIndex !== -1 ? this.internalTrack.cuePoints[cuePointIndex]! : null;
 
 			if (clusterIndex === -1) {
 				metadataReader.pos = cuePoint?.clusterPosition ?? segment.clusterSeekStartPos;
@@ -1299,13 +1350,23 @@ abstract class MatroskaTrackBacking<
 				metadataReader.pos = dataStartPos + size;
 			}
 
-			if (bestClusterIndex !== -1) {
+			let result: Sample | null = null;
+			const bestCluster = bestClusterIndex !== -1 ? this.internalTrack.clusters[bestClusterIndex]! : null;
+			if (bestCluster) {
 				// If we finished looping but didn't find a perfect match, still return the best match we found
-				const cluster = this.internalTrack.clusters[bestClusterIndex]!;
-				return this.fetchSampleInCluster(cluster, bestBlockIndex, options);
+				result = await this.fetchSampleInCluster(bestCluster, bestBlockIndex, options);
 			}
 
-			return null;
+			// Catch faulty cue points
+			if (!result && cuePoint && (!bestCluster || bestCluster.elementStartPos < cuePoint.clusterPosition)) {
+				// The cue point lied to us! We found a cue point but no cluster there that satisfied the match. In this
+				// case, let's search again but using the cue point before that.
+				const previousCuePoint = this.internalTrack.cuePoints[cuePointIndex - 1];
+				const newSearchTimestamp = previousCuePoint?.time ?? -Infinity;
+				return this.performClusterLookup(getBestMatch, newSearchTimestamp, latestTimestamp, options);
+			}
+
+			return result;
 		} finally {
 			release();
 		}
@@ -1440,6 +1501,7 @@ class MatroskaAudioTrackBacking extends MatroskaTrackBacking<EncodedAudioSample>
  * come before block B. The resulting array is one that is in decode order.
  */
 const sortBlocksTopologically = (blocks: ClusterBlock[]) => {
+	return blocks; // temp
 	// Based on "A fast and effective heuristic for the feedback arc set problem" by Peter Eades et al.
 
 	const n = blocks.length;

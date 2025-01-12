@@ -101,6 +101,7 @@ export class IsobmffMuxer extends Muxer {
 	private boxWriter: IsobmffBoxWriter;
 	private isMov: boolean;
 	private fastStart: NonNullable<IsobmffOutputFormatOptions['fastStart']>;
+	private isFragmented: boolean;
 
 	private auxTarget = new BufferTarget();
 	private auxWriter = this.auxTarget._createWriter();
@@ -115,6 +116,8 @@ export class IsobmffMuxer extends Muxer {
 	private finalizedChunks: Chunk[] = [];
 
 	private nextFragmentNumber = 1;
+	// Only relevant for fragmented files, to make sure new fragments start with the highest timestamp seen so far
+	private maxWrittenTimestamp = -Infinity;
 
 	constructor(output: Output, format: IsobmffOutputFormat) {
 		super(output);
@@ -128,8 +131,9 @@ export class IsobmffMuxer extends Muxer {
 		// memory usage remains identical
 		const fastStartDefault = this.writer instanceof BufferTargetWriter ? 'in-memory' : false;
 		this.fastStart = format._options.fastStart ?? fastStartDefault;
+		this.isFragmented = this.fastStart === 'fragmented';
 
-		if (this.fastStart === 'in-memory' || this.fastStart === 'fragmented') {
+		if (this.fastStart === 'in-memory' || this.isFragmented) {
 			this.writer.ensureMonotonicity = true;
 		}
 	}
@@ -143,14 +147,14 @@ export class IsobmffMuxer extends Muxer {
 		this.boxWriter.writeBox(ftyp({
 			isMov: this.isMov,
 			holdsAvc: holdsAvc,
-			fragmented: this.fastStart === 'fragmented',
+			fragmented: this.isFragmented,
 		}));
 
 		this.ftypSize = this.writer.getPos();
 
 		if (this.fastStart === 'in-memory') {
 			this.mdat = mdat(false);
-		} else if (this.fastStart === 'fragmented') {
+		} else if (this.isFragmented) {
 			// We write the moov box once we write out the first fragment to make sure we get the decoder configs
 		} else {
 			this.mdat = mdat(true); // Reserve large size by default, can refine this when finalizing.
@@ -234,7 +238,7 @@ export class IsobmffMuxer extends Muxer {
 			currentChunk: null,
 			compactlyCodedChunkTable: [],
 			requiresPcmTransformation:
-				this.fastStart !== 'fragmented'
+				!this.isFragmented
 				&& (PCM_CODECS as readonly string[]).includes(track.source._codec),
 		};
 
@@ -545,7 +549,7 @@ export class IsobmffMuxer extends Muxer {
 			// model it.
 			sample.decodeTimestamp = sortedTimestamps[i]!;
 
-			if (this.fastStart !== 'fragmented' && trackData.lastTimescaleUnits === null) {
+			if (!this.isFragmented && trackData.lastTimescaleUnits === null) {
 				// In non-fragmented files, the first decode timestamp is always zero. If the first presentation
 				// timestamp isn't zero, we'll simply use the composition time offset to achieve it.
 				sample.decodeTimestamp = 0;
@@ -563,7 +567,7 @@ export class IsobmffMuxer extends Muxer {
 				trackData.lastTimescaleUnits += delta;
 				trackData.lastSample.timescaleUnitsToNextSample = delta;
 
-				if (this.fastStart !== 'fragmented') {
+				if (!this.isFragmented) {
 					let lastTableEntry = last(trackData.timeToSampleTable);
 					assert(lastTableEntry);
 
@@ -618,7 +622,7 @@ export class IsobmffMuxer extends Muxer {
 				// Decode timestamp of the first sample
 				trackData.lastTimescaleUnits = intoTimescale(sample.decodeTimestamp, trackData.timescale, false);
 
-				if (this.fastStart !== 'fragmented') {
+				if (!this.isFragmented) {
 					trackData.timeToSampleTable.push({
 						sampleCount: 1,
 						sampleDelta: durationInTimescale,
@@ -637,7 +641,7 @@ export class IsobmffMuxer extends Muxer {
 	}
 
 	private async registerSample(trackData: IsobmffTrackData, sample: Sample) {
-		if (this.fastStart === 'fragmented') {
+		if (this.isFragmented) {
 			trackData.sampleQueue.push(sample);
 			await this.interleaveSamples();
 		} else {
@@ -650,7 +654,7 @@ export class IsobmffMuxer extends Muxer {
 			this.processTimestamps(trackData);
 		}
 
-		if (this.fastStart !== 'fragmented') {
+		if (!this.isFragmented) {
 			trackData.samples.push(sample);
 		}
 
@@ -660,7 +664,7 @@ export class IsobmffMuxer extends Muxer {
 		} else {
 			const currentChunkDuration = sample.timestamp - trackData.currentChunk.startTimestamp;
 
-			if (this.fastStart === 'fragmented') {
+			if (this.isFragmented) {
 				// We can only finalize this fragment (and begin a new one) if we know that each track will be able to
 				// start the new one with a key frame.
 				const keyFrameQueuedEverywhere = this.trackDatas.every((otherTrackData) => {
@@ -676,7 +680,11 @@ export class IsobmffMuxer extends Muxer {
 					return firstQueuedSample && firstQueuedSample.type === 'key';
 				});
 
-				if (currentChunkDuration >= 1.0 && keyFrameQueuedEverywhere) {
+				if (
+					currentChunkDuration >= 1.0
+					&& keyFrameQueuedEverywhere
+					&& sample.timestamp > this.maxWrittenTimestamp
+				) {
 					beginNewChunk = true;
 					await this.finalizeFragment();
 				}
@@ -701,10 +709,14 @@ export class IsobmffMuxer extends Muxer {
 		assert(trackData.currentChunk);
 		trackData.currentChunk.samples.push(sample);
 		trackData.timestampProcessingQueue.push(sample);
+
+		if (this.isFragmented) {
+			this.maxWrittenTimestamp = Math.max(this.maxWrittenTimestamp, sample.timestamp);
+		}
 	}
 
 	private async finalizeCurrentChunk(trackData: IsobmffTrackData) {
-		assert(this.fastStart !== 'fragmented');
+		assert(!this.isFragmented);
 
 		if (!trackData.currentChunk) return;
 
@@ -744,7 +756,7 @@ export class IsobmffMuxer extends Muxer {
 	}
 
 	private async interleaveSamples(isFinalCall = false) {
-		assert(this.fastStart === 'fragmented');
+		assert(this.isFragmented);
 
 		if (!isFinalCall) {
 			for (const track of this.output._tracks) {
@@ -780,7 +792,7 @@ export class IsobmffMuxer extends Muxer {
 	}
 
 	private async finalizeFragment(flushWriter = true) {
-		assert(this.fastStart === 'fragmented');
+		assert(this.isFragmented);
 
 		const fragmentNumber = this.nextFragmentNumber++;
 
@@ -861,7 +873,7 @@ export class IsobmffMuxer extends Muxer {
 			}
 		}
 
-		if (this.fastStart === 'fragmented') {
+		if (this.isFragmented) {
 			// Since a track is now closed, we may be able to write out chunks that were previously waiting
 			await this.interleaveSamples();
 		}
@@ -879,7 +891,7 @@ export class IsobmffMuxer extends Muxer {
 			}
 		}
 
-		if (this.fastStart === 'fragmented') {
+		if (this.isFragmented) {
 			await this.interleaveSamples(true);
 			await this.finalizeFragment(false); // Don't flush the last fragment as we will flush it with the mfra box
 		} else {
@@ -933,7 +945,7 @@ export class IsobmffMuxer extends Muxer {
 					sample.data = null;
 				}
 			}
-		} else if (this.fastStart === 'fragmented') {
+		} else if (this.isFragmented) {
 			// Append the mfra box to the end of the file for better random access
 			const startPos = this.writer.getPos();
 			const mfraBox = mfra(this.trackDatas);

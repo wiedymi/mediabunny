@@ -573,7 +573,7 @@ export const extractAv1CodecInfoFromFrame = (data: Uint8Array): Av1CodecInfo | n
 
 	let offset = 0;
 
-	const readLeb128 = (data: Uint8Array): number | null => {
+	const readLeb128 = () => {
 		let value = 0;
 
 		for (let i = 0; i < 8; i++) {
@@ -617,7 +617,7 @@ export const extractAv1CodecInfoFromFrame = (data: Uint8Array): Av1CodecInfo | n
 		// Read OBU size if present
 		let obuSize: number;
 		if (obuHasSizeField) {
-			const obuSizeValue = readLeb128(data);
+			const obuSizeValue = readLeb128();
 			if (obuSizeValue === null) return null; // It was invalid
 			obuSize = obuSizeValue;
 		} else {
@@ -838,7 +838,9 @@ export const extractAudioCodecString = (trackInfo: {
 	const { codec, codecDescription, aacCodecInfo } = trackInfo;
 
 	if (codec === 'aac') {
-		assert(aacCodecInfo);
+		if (!aacCodecInfo) {
+			throw new TypeError('AAC codec info must be provided.');
+		}
 
 		if (aacCodecInfo.isMpeg2) {
 			return 'mp4a.67';
