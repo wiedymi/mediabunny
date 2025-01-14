@@ -42,6 +42,15 @@ export class EncodedVideoSample {
 		});
 	}
 
+	is(otherSample: EncodedVideoSample) {
+		return (
+			this.type === otherSample.type
+			&& this.timestamp === otherSample.timestamp
+			&& this.duration === otherSample.duration
+			&& this.byteLength === otherSample.byteLength
+		);
+	}
+
 	static fromEncodedVideoChunk(chunk: EncodedVideoChunk) {
 		if (typeof EncodedVideoChunk === 'undefined') {
 			throw new Error('Your browser does not support EncodedVideoChunk.');
@@ -96,6 +105,15 @@ export class EncodedAudioSample {
 			timestamp: this.microsecondTimestamp,
 			duration: this.microsecondDuration,
 		});
+	}
+
+	is(otherSample: EncodedAudioSample) {
+		return (
+			this.type === otherSample.type
+			&& this.timestamp === otherSample.timestamp
+			&& this.duration === otherSample.duration
+			&& this.byteLength === otherSample.byteLength
+		);
 	}
 
 	static fromEncodedAudioChunk(chunk: EncodedAudioChunk) {

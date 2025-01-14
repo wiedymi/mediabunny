@@ -41,7 +41,7 @@ export const AUDIO_CODECS = [
 	'vorbis',
 	'flac',
 	...PCM_CODECS,
-] as const; // TODO add the rest
+] as const;
 /** @public */
 export const SUBTITLE_CODECS = ['webvtt'] as const; // TODO add the rest
 

@@ -392,7 +392,10 @@ export abstract class BaseMediaFrameSink<
 				}
 
 				let frameUsed = false;
-				while (samplesOfInterest.length > 0 && samplesOfInterest[0] === wrappedFrame.sample) {
+				while (
+					samplesOfInterest.length > 0
+					&& samplesOfInterest[0]!.is(wrappedFrame.sample as EncodedVideoSample & EncodedAudioSample)
+				) {
 					pushToQueue(this._duplicateFrame(wrappedFrame));
 					samplesOfInterest.shift();
 					frameUsed = true;
