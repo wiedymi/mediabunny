@@ -7,6 +7,7 @@ export interface InputTrackBacking {
 	getCodec(): Promise<MediaCodec | null>;
 	getFirstTimestamp(): Promise<number>;
 	computeDuration(): Promise<number>;
+	getLanguageCode(): Promise<string>;
 }
 
 /** @public */
@@ -38,6 +39,10 @@ export abstract class InputTrack {
 
 	computeDuration() {
 		return this._backing.computeDuration();
+	}
+
+	getLanguageCode() {
+		return this._backing.getLanguageCode();
 	}
 }
 

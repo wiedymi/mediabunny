@@ -11,6 +11,7 @@ import {
 	colorSpaceIsComplete,
 	IDENTITY_MATRIX,
 	rotationMatrix,
+	UNDETERMINED_LANGUAGE,
 } from '../misc';
 import {
 	AudioCodec,
@@ -429,7 +430,7 @@ export const mdhd = (
 	const u32OrU64 = needsU64 ? u64 : u32;
 
 	let language = 0;
-	for (const character of (trackData.track.metadata.languageCode ?? 'und')) {
+	for (const character of (trackData.track.metadata.languageCode ?? UNDETERMINED_LANGUAGE)) {
 		language <<= 5;
 		language += character.charCodeAt(0) - 0x60;
 	}

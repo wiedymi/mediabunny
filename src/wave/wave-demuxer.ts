@@ -3,7 +3,7 @@ import { Demuxer } from '../demuxer';
 import { Input } from '../input';
 import { InputAudioTrack, InputAudioTrackBacking } from '../input-track';
 import { SampleRetrievalOptions } from '../media-sink';
-import { assert } from '../misc';
+import { assert, UNDETERMINED_LANGUAGE } from '../misc';
 import { Reader } from '../reader';
 import { EncodedAudioSample, PLACEHOLDER_DATA } from '../sample';
 import { RiffReader } from './riff-reader';
@@ -213,6 +213,10 @@ class WaveAudioTrackBacking implements InputAudioTrackBacking {
 	async getSampleRate() {
 		assert(this.demuxer.audioInfo);
 		return this.demuxer.audioInfo.sampleRate;
+	}
+
+	async getLanguageCode() {
+		return UNDETERMINED_LANGUAGE;
 	}
 
 	async getFirstTimestamp() {

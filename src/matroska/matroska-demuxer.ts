@@ -30,6 +30,7 @@ import {
 	MATRIX_COEFFICIENTS_MAP_INVERSE,
 	Rotation,
 	TRANSFER_CHARACTERISTICS_MAP_INVERSE,
+	UNDETERMINED_LANGUAGE,
 } from '../misc';
 import { Reader } from '../reader';
 import { EncodedAudioSample, EncodedVideoSample, PLACEHOLDER_DATA, SampleType } from '../sample';
@@ -107,6 +108,7 @@ type InternalTrack = {
 	inputTrack: InputTrack | null;
 	codecId: string | null;
 	codecPrivate: Uint8Array | null;
+	languageCode: string;
 	info:
 		| null
 		| {
@@ -583,6 +585,7 @@ export class MatroskaDemuxer extends Demuxer {
 					inputTrack: null,
 					codecId: null,
 					codecPrivate: null,
+					languageCode: UNDETERMINED_LANGUAGE,
 					info: null,
 				};
 
@@ -731,6 +734,12 @@ export class MatroskaDemuxer extends Demuxer {
 				if (!this.currentTrack) break;
 
 				this.currentTrack.codecPrivate = reader.readBytes(size);
+			}; break;
+
+			case EBMLId.Language: {
+				if (!this.currentTrack) break;
+
+				this.currentTrack.languageCode = reader.readString(size);
 			}; break;
 
 			case EBMLId.Video: {
@@ -965,6 +974,10 @@ abstract class MatroskaTrackBacking<
 	async computeDuration() {
 		const lastSample = await this.getSample(Infinity, { metadataOnly: true });
 		return (lastSample?.timestamp ?? 0) + (lastSample?.duration ?? 0);
+	}
+
+	async getLanguageCode() {
+		return this.internalTrack.languageCode;
 	}
 
 	async getFirstTimestamp() {

@@ -43,6 +43,8 @@
 		const videoTrack = await input.getPrimaryVideoTrack();
 		const sink = new Metamuxer.VideoFrameSink(videoTrack);
 
+		console.log(await videoTrack.getLanguageCode());
+
 		for await (const thing of sink.framesAtTimestamps([0.2, 1, 2, 423])) {
 			console.log(thing)
 		}

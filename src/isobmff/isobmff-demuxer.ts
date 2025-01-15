@@ -34,6 +34,7 @@ import {
 	last,
 	AsyncMutex,
 	findLastIndex,
+	UNDETERMINED_LANGUAGE,
 } from '../misc';
 import { Reader } from '../reader';
 import { EncodedAudioSample, EncodedVideoSample, PLACEHOLDER_DATA, SampleType } from '../sample';
@@ -47,6 +48,7 @@ type InternalTrack = {
 	durationInMovieTimescale: number;
 	durationInMediaTimescale: number;
 	rotation: Rotation;
+	languageCode: string;
 	sampleTableByteOffset: number;
 	sampleTable: SampleTable | null;
 	fragmentLookupTable: FragmentLookupTableEntry[] | null;
@@ -557,6 +559,7 @@ export class IsobmffDemuxer extends Demuxer {
 					durationInMovieTimescale: -1,
 					durationInMediaTimescale: -1,
 					rotation: 0,
+					languageCode: UNDETERMINED_LANGUAGE,
 					sampleTableByteOffset: -1,
 					sampleTable: null,
 					fragmentLookupTable: null,
@@ -641,6 +644,17 @@ export class IsobmffDemuxer extends Demuxer {
 					this.isobmffReader.pos += 16;
 					track.timescale = this.isobmffReader.readU32();
 					track.durationInMediaTimescale = this.isobmffReader.readU64();
+				}
+
+				let language = this.isobmffReader.readU16();
+
+				if (language > 0) {
+					track.languageCode = '';
+
+					for (let i = 0; i < 3; i++) {
+						track.languageCode = String.fromCharCode(0x60 + (language & 0b11111)) + track.languageCode;
+						language >>= 5;
+					}
 				}
 			}; break;
 
@@ -1687,6 +1701,10 @@ abstract class IsobmffTrackBacking<
 	async computeDuration() {
 		const lastSample = await this.getSample(Infinity, { metadataOnly: true });
 		return (lastSample?.timestamp ?? 0) + (lastSample?.duration ?? 0);
+	}
+
+	async getLanguageCode() {
+		return this.internalTrack.languageCode;
 	}
 
 	async getFirstTimestamp() {
