@@ -217,6 +217,42 @@ export const buildVideoCodecString = (codec: VideoCodec, width: number, height: 
 	throw new TypeError(`Unhandled codec '${codec}'.`);
 };
 
+export const generateAv1CodecConfigurationFromCodecString = (codecString: string) => {
+	// Reference: https://aomediacodec.github.io/av1-isobmff/
+
+	const parts = codecString.split('.'); // We can derive the required values from the codec string
+
+	const marker = 1;
+	const version = 1;
+	const firstByte = (marker << 7) + version;
+
+	const profile = Number(parts[1]);
+	const levelAndTier = parts[2]!;
+	const level = Number(levelAndTier.slice(0, -1));
+	const secondByte = (profile << 5) + level;
+
+	const tier = levelAndTier.slice(-1) === 'H' ? 1 : 0;
+	const bitDepth = Number(parts[3]);
+	const highBitDepth = bitDepth === 8 ? 0 : 1;
+	const twelveBit = 0;
+	const monochrome = parts[4] ? Number(parts[4]) : 0;
+	const chromaSubsamplingX = parts[5] ? Number(parts[5][0]) : 1;
+	const chromaSubsamplingY = parts[5] ? Number(parts[5][1]) : 1;
+	const chromaSamplePosition = parts[5] ? Number(parts[5][2]) : 0; // CSP_UNKNOWN
+	const thirdByte = (tier << 7)
+		+ (highBitDepth << 6)
+		+ (twelveBit << 5)
+		+ (monochrome << 4)
+		+ (chromaSubsamplingX << 3)
+		+ (chromaSubsamplingY << 2)
+		+ chromaSamplePosition;
+
+	const initialPresentationDelayPresent = 0; // Should be fine
+	const fourthByte = initialPresentationDelayPresent;
+
+	return [firstByte, secondByte, thirdByte, fourthByte];
+};
+
 export type Vp9CodecInfo = {
 	profile: number;
 	level: number;
@@ -1364,7 +1400,6 @@ export const canEncodeAudio = async (codec: AudioCodec, { numberOfChannels = 2, 
 };
 
 /** @public */
-
 export const canEncodeSubtitles = async (codec: SubtitleCodec) => {
 	if (!SUBTITLE_CODECS.includes(codec)) {
 		return false;

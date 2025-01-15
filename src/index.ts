@@ -1,4 +1,11 @@
-export { Output, OutputOptions, VideoTrackMetadata, AudioTrackMetadata, SubtitleTrackMetadata } from './output';
+export {
+	Output,
+	OutputOptions,
+	BaseTrackMetadata,
+	VideoTrackMetadata,
+	AudioTrackMetadata,
+	SubtitleTrackMetadata,
+} from './output';
 export {
 	OutputFormat,
 	IsobmffOutputFormat,

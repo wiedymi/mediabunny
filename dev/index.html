@@ -39,7 +39,7 @@
 	const context = canvas.getContext('2d');
 
 	let format = new Metamuxer.MkvOutputFormat({ streamable: false });
-	//format = new Metamuxer.Mp4OutputFormat({ fastStart: 'fragmented' }); // new Metamuxer.MkvOutputFormat();// new Metamuxer.Mp4OutputFormat({ fastStart: false });
+	format = new Metamuxer.Mp4OutputFormat({ fastStart: 'fragmented' }); // new Metamuxer.MkvOutputFormat();// new Metamuxer.Mp4OutputFormat({ fastStart: false });
 	let target = new Metamuxer.BufferTarget();
 
 	/*
@@ -88,12 +88,12 @@
 		bitrate: 1e6
 	});
 	let audioSource = new Metamuxer.AudioBufferSource({
-		codec: 'pcm-s16',
+		codec: 'opus',
 		bitrate: 128e3,
 	});
 	let subtitleSource = new Metamuxer.TextSubtitleSource('webvtt');
 
-	output.addVideoTrack(videoSource);
+	output.addVideoTrack(videoSource, { languageCode: 'eng' });
 	output.addAudioTrack(audioSource);
 	output.addSubtitleTrack(subtitleSource);
 

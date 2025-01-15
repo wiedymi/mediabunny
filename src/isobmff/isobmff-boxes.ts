@@ -12,7 +12,15 @@ import {
 	IDENTITY_MATRIX,
 	rotationMatrix,
 } from '../misc';
-import { AudioCodec, parsePcmCodec, PCM_CODECS, PcmAudioCodec, SubtitleCodec, VideoCodec } from '../codec';
+import {
+	AudioCodec,
+	generateAv1CodecConfigurationFromCodecString,
+	parsePcmCodec,
+	PCM_CODECS,
+	PcmAudioCodec,
+	SubtitleCodec,
+	VideoCodec,
+} from '../codec';
 import { formatSubtitleTimestamp } from '../subtitles';
 import { Writer } from '../writer';
 import {
@@ -420,12 +428,18 @@ export const mdhd = (
 	const needsU64 = !isU32(creationTime) || !isU32(localDuration);
 	const u32OrU64 = needsU64 ? u64 : u32;
 
+	let language = 0;
+	for (const character of (trackData.track.metadata.languageCode ?? 'und')) {
+		language <<= 5;
+		language += character.charCodeAt(0) - 0x60;
+	}
+
 	return fullBox('mdhd', +needsU64, 0, [
 		u32OrU64(creationTime), // Creation time
 		u32OrU64(creationTime), // Modification time
 		u32(trackData.timescale), // Timescale
 		u32OrU64(localDuration), // Duration
-		u16(0b01010101_11000100), // Language ("und", undetermined)
+		u16(language), // Language
 		u16(0), // Quality
 	]);
 };
@@ -653,45 +667,7 @@ export const vpcC = (trackData: IsobmffVideoTrackData) => {
 
 /** AV1 Configuration Box: Provides additional information to the decoder. */
 export const av1C = (trackData: IsobmffVideoTrackData) => {
-	// Reference: https://aomediacodec.github.io/av1-isobmff/
-
-	const decoderConfig = trackData.info.decoderConfig;
-	const parts = decoderConfig.codec.split('.'); // We can derive the required values from the codec string
-
-	const marker = 1;
-	const version = 1;
-	const firstByte = (marker << 7) + version;
-
-	const profile = Number(parts[1]);
-	const levelAndTier = parts[2]!;
-	const level = Number(levelAndTier.slice(0, -1));
-	const secondByte = (profile << 5) + level;
-
-	const tier = levelAndTier.slice(-1) === 'H' ? 1 : 0;
-	const bitDepth = Number(parts[3]);
-	const highBitDepth = bitDepth === 8 ? 0 : 1;
-	const twelveBit = 0;
-	const monochrome = parts[4] ? Number(parts[4]) : 0;
-	const chromaSubsamplingX = parts[5] ? Number(parts[5][0]) : 1;
-	const chromaSubsamplingY = parts[5] ? Number(parts[5][1]) : 1;
-	const chromaSamplePosition = parts[5] ? Number(parts[5][2]) : 0; // CSP_UNKNOWN
-	const thirdByte = (tier << 7)
-		+ (highBitDepth << 6)
-		+ (twelveBit << 5)
-		+ (monochrome << 4)
-		+ (chromaSubsamplingX << 3)
-		+ (chromaSubsamplingY << 2)
-		+ chromaSamplePosition;
-
-	const initialPresentationDelayPresent = 0; // Should be fine
-	const fourthByte = initialPresentationDelayPresent;
-
-	return box('av1C', [
-		firstByte,
-		secondByte,
-		thirdByte,
-		fourthByte,
-	]);
+	return box('av1C', generateAv1CodecConfigurationFromCodecString(trackData.info.decoderConfig.codec));
 };
 
 /** Sound Sample Description Box: Contains information that defines how to interpret sound media data. */

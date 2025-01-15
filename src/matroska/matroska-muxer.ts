@@ -32,6 +32,7 @@ import {
 import {
 	PCM_CODECS,
 	PcmAudioCodec,
+	generateAv1CodecConfigurationFromCodecString,
 	parsePcmCodec,
 	validateAudioChunkMetadata,
 	validateSubtitleMetadata,
@@ -220,11 +221,30 @@ export class MatroskaMuxer extends Muxer {
 			const codecId = CODEC_STRING_MAP[trackData.track.source._codec];
 			assert(codecId);
 
+			let seekPreRollNs = 0;
+			if (trackData.type === 'audio' && trackData.track.source._codec === 'opus') {
+				seekPreRollNs = 1e6 * 80; // In "Matroska ticks" (nanoseconds)
+
+				const description = trackData.info.decoderConfig.description;
+				if (description) {
+					const view = ArrayBuffer.isView(description)
+						? new DataView(description.buffer, description.byteOffset, description.byteLength)
+						: new DataView(description);
+
+					// Read the value from the Opus Identification Header
+					seekPreRollNs = Math.round(1e9 * (view.getUint16(10, true) / 48000));
+				}
+			}
+
 			tracksElement.data.push({ id: EBMLId.TrackEntry, data: [
 				{ id: EBMLId.TrackNumber, data: trackData.track.id },
 				{ id: EBMLId.TrackUID, data: trackData.track.id },
 				{ id: EBMLId.TrackType, data: TRACK_TYPE_MAP[trackData.type] },
+				{ id: EBMLId.FlagLacing, data: 0 },
+				{ id: EBMLId.Language, data: trackData.track.metadata.languageCode ?? 'und' },
 				{ id: EBMLId.CodecID, data: codecId },
+				{ id: EBMLId.CodecDelay, data: 0 },
+				{ id: EBMLId.SeekPreRoll, data: seekPreRollNs },
 				(trackData.type === 'video' ? this.videoSpecificTrackInfo(trackData) : null),
 				(trackData.type === 'audio' ? this.audioSpecificTrackInfo(trackData) : null),
 				(trackData.type === 'subtitle' ? this.subtitleSpecificTrackInfo(trackData) : null),
@@ -380,6 +400,18 @@ export class MatroskaMuxer extends Muxer {
 			chunkQueue: [],
 			lastWrittenMsTimestamp: null,
 		};
+
+		if (track.source._codec === 'av1') {
+			// Per https://github.com/ietf-wg-cellar/matroska-specification/blob/master/codec/av1.md, AV1 requires
+			// CodecPrivate to be set, but WebCodecs makes no use of the description field for AV1. Thus, let's derive
+			// it ourselves:
+			newTrackData.info.decoderConfig = {
+				...newTrackData.info.decoderConfig,
+				description: new Uint8Array(
+					generateAv1CodecConfigurationFromCodecString(newTrackData.info.decoderConfig.codec),
+				),
+			};
+		}
 
 		this.trackDatas.push(newTrackData);
 		this.trackDatas.sort((a, b) => a.track.id - b.track.id);

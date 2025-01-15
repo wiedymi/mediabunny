@@ -33,14 +33,28 @@ export type OutputAudioTrack = OutputTrack & { type: 'audio' };
 export type OutputSubtitleTrack = OutputTrack & { type: 'subtitle' };
 
 /** @public */
-export type VideoTrackMetadata = {
-	rotation?: 0 | 90 | 180 | 270 | TransformationMatrix; // TODO respect this field for Matroska
+export type BaseTrackMetadata = {
+	languageCode?: string;
+};
+
+/** @public */
+export type VideoTrackMetadata = BaseTrackMetadata & {
+	rotation?: 0 | 90 | 180 | 270 | TransformationMatrix;
 	frameRate?: number;
 };
 /** @public */
-export type AudioTrackMetadata = {};
+export type AudioTrackMetadata = BaseTrackMetadata & {};
 /** @public */
-export type SubtitleTrackMetadata = {};
+export type SubtitleTrackMetadata = BaseTrackMetadata & {};
+
+const validateBaseTrackMetadata = (metadata: BaseTrackMetadata) => {
+	if (!metadata || typeof metadata !== 'object') {
+		throw new TypeError('metadata must be an object.');
+	}
+	if (metadata.languageCode !== undefined && !/^[a-z]{3}$/.test(metadata.languageCode)) {
+		throw new TypeError('metadata.languageCode must be a three-letter, ISO 639-2 language code.');
+	}
+};
 
 /** @public */
 export class Output {
@@ -90,9 +104,7 @@ export class Output {
 		if (!(source instanceof VideoSource)) {
 			throw new TypeError('source must be a VideoSource.');
 		}
-		if (!metadata || typeof metadata !== 'object') {
-			throw new TypeError('metadata must be an object.');
-		}
+		validateBaseTrackMetadata(metadata);
 		if (typeof metadata.rotation === 'number' && ![0, 90, 180, 270].includes(metadata.rotation)) {
 			throw new TypeError(`Invalid video rotation: ${metadata.rotation}. Has to be 0, 90, 180 or 270.`);
 		} else if (
@@ -117,9 +129,7 @@ export class Output {
 		if (!(source instanceof AudioSource)) {
 			throw new TypeError('source must be an AudioSource.');
 		}
-		if (!metadata || typeof metadata !== 'object') {
-			throw new TypeError('metadata must be an object.');
-		}
+		validateBaseTrackMetadata(metadata);
 
 		this._addTrack('audio', source, metadata);
 	}
@@ -128,9 +138,7 @@ export class Output {
 		if (!(source instanceof SubtitleSource)) {
 			throw new TypeError('source must be a SubtitleSource.');
 		}
-		if (!metadata || typeof metadata !== 'object') {
-			throw new TypeError('metadata must be an object.');
-		}
+		validateBaseTrackMetadata(metadata);
 
 		this._addTrack('subtitle', source, metadata);
 	}
