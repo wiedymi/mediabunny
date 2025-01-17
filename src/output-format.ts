@@ -2,18 +2,28 @@ import { AUDIO_CODECS, MediaCodec, PCM_CODECS, SUBTITLE_CODECS, VIDEO_CODECS } f
 import { IsobmffMuxer } from './isobmff/isobmff-muxer';
 import { MatroskaMuxer } from './matroska/matroska-muxer';
 import { Muxer } from './muxer';
-import { Output } from './output';
+import { Output, TrackType } from './output';
 import { WaveMuxer } from './wave/wave-muxer';
+
+/** @public */
+export type InclusiveRange = { min: number; max: number };
+/** @public */
+export type TrackCountLimits = {
+	[K in TrackType]: InclusiveRange;
+} & {
+	total: InclusiveRange;
+};
 
 /** @public */
 export abstract class OutputFormat {
 	/** @internal */
 	abstract _createMuxer(output: Output): Muxer;
-
 	/** @internal */
 	abstract _getName(): string;
+
 	abstract getFileExtension(): string;
 	abstract getSupportedCodecs(): MediaCodec[];
+	abstract getSupportedTrackCounts(): TrackCountLimits;
 
 	getSupportedVideoCodecs() {
 		return this.getSupportedCodecs().filter(codec => (VIDEO_CODECS as readonly string[]).includes(codec));
@@ -55,6 +65,15 @@ export abstract class IsobmffOutputFormat extends OutputFormat {
 		super();
 
 		this._options = options;
+	}
+
+	getSupportedTrackCounts(): TrackCountLimits {
+		return {
+			video: { min: 0, max: Infinity },
+			audio: { min: 0, max: Infinity },
+			subtitle: { min: 0, max: Infinity },
+			total: { min: 1, max: 2 ** 32 - 1 }, // Have fun reaching this one
+		};
 	}
 
 	/** @internal */
@@ -161,6 +180,15 @@ export class MkvOutputFormat extends OutputFormat {
 		return 'Matroska';
 	}
 
+	getSupportedTrackCounts(): TrackCountLimits {
+		return {
+			video: { min: 0, max: Infinity },
+			audio: { min: 0, max: Infinity },
+			subtitle: { min: 0, max: Infinity },
+			total: { min: 1, max: 127 },
+		};
+	}
+
 	getFileExtension() {
 		return '.mkv';
 	}
@@ -226,6 +254,15 @@ export class WaveOutputFormat extends OutputFormat {
 	/** @internal */
 	_getName() {
 		return 'WAVE';
+	}
+
+	getSupportedTrackCounts(): TrackCountLimits {
+		return {
+			video: { min: 0, max: 0 },
+			audio: { min: 1, max: 1 },
+			subtitle: { min: 0, max: 0 },
+			total: { min: 1, max: 1 },
+		};
 	}
 
 	getFileExtension() {

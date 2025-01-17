@@ -5,6 +5,8 @@ export {
 	VideoTrackMetadata,
 	AudioTrackMetadata,
 	SubtitleTrackMetadata,
+	TrackType,
+	ALL_TRACK_TYPES,
 } from './output';
 export {
 	OutputFormat,
@@ -17,6 +19,8 @@ export {
 	WebMOutputFormat,
 	WebMOutputFormatOptions,
 	WaveOutputFormat,
+	TrackCountLimits,
+	InclusiveRange,
 } from './output-format';
 export {
 	VideoEncodingConfig,

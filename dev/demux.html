@@ -32,7 +32,7 @@
 
 	fileInput.addEventListener('change', async () => {
 		const file = fileInput.files[0];
-		const source = new Metamuxer.BlobSource(file);
+		const source = new Metamuxer.BufferSource(await file.arrayBuffer()) ?? new Metamuxer.BlobSource(file);
 
 		const start = performance.now();	
 		const input = new Metamuxer.Input({
@@ -40,7 +40,27 @@
 			source
 		});
 
-		const videoTrack = await input.getPrimaryVideoTrack();
+		const output = new Metamuxer.Output({
+			format: new Metamuxer.WaveOutputFormat(),
+			target: new Metamuxer.BufferTarget()
+		});
+		output.start();
+
+		/*
+		const audioTrack = await input.getPrimaryAudioTrack();
+		const sink = new Metamuxer.EncodedAudioSampleSink(audioTrack);
+
+		let total = 0;
+		for await (const sample of sink.samples(undefined, undefined, { metadataOnly: true })) {
+			total++;
+			if (performance.now() > 10000) {
+				break;
+			}
+		}
+		console.log("Done", total);
+		*/
+
+		/*
 		const sink = new Metamuxer.VideoFrameSink(videoTrack);
 
 		console.log(await videoTrack.getLanguageCode());
@@ -49,6 +69,7 @@
 			console.log(thing)
 		}
 		console.log("Done")
+		*/
 
 		/*
 		//const videoTrack = await input.getPrimaryVideoTrack();

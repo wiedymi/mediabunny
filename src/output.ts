@@ -11,9 +11,15 @@ export type OutputOptions = {
 	target: Target;
 };
 
+/** @public */
+export const ALL_TRACK_TYPES = ['video', 'audio', 'subtitle'] as const;
+/** @public */
+export type TrackType = typeof ALL_TRACK_TYPES[number];
+
 export type OutputTrack = {
 	id: number;
 	output: Output;
+	type: TrackType;
 } & ({
 	type: 'video';
 	source: VideoSource;
@@ -152,6 +158,29 @@ export class Output {
 			throw new Error('Source is already used for a track.');
 		}
 
+		// Verify maximum track count constraints
+		const supportedTrackCounts = this._format.getSupportedTrackCounts();
+		const presentTracksOfThisType = this._tracks.reduce(
+			(count, track) => count + (track.type === type ? 1 : 0),
+			0,
+		);
+		const maxCount = supportedTrackCounts[type].max;
+		if (presentTracksOfThisType === maxCount) {
+			throw new Error(
+				maxCount === 0
+					? `${this._format._getName()} does not support ${type} tracks.`
+					: (`${this._format._getName()} does not support more than ${maxCount} ${type} track`
+						+ `${maxCount === 1 ? '' : 's'}.`),
+			);
+		}
+		const maxTotalCount = supportedTrackCounts.total.max;
+		if (this._tracks.length === maxTotalCount) {
+			throw new Error(
+				`${this._format._getName()} does not support more than ${maxTotalCount} tracks`
+				+ `${maxTotalCount === 1 ? '' : 's'} in total.`,
+			);
+		}
+
 		const track = {
 			id: this._tracks.length + 1,
 			output: this,
@@ -217,6 +246,35 @@ export class Output {
 		}
 		if (this._started) {
 			throw new Error('Output already started.');
+		}
+
+		// Verify minimum track count constraints
+		const supportedTrackCounts = this._format.getSupportedTrackCounts();
+		for (const trackType of ALL_TRACK_TYPES) {
+			const presentTracksOfThisType = this._tracks.reduce(
+				(count, track) => count + (track.type === trackType ? 1 : 0),
+				0,
+			);
+			const minCount = supportedTrackCounts[trackType].min;
+			if (presentTracksOfThisType < minCount) {
+				throw new Error(
+					minCount === supportedTrackCounts[trackType].max
+						? (`${this._format._getName()} requires exactly ${minCount} ${trackType}`
+							+ ` track${minCount === 1 ? '' : 's'}.`)
+						: (`${this._format._getName()} requires at least ${minCount} ${trackType}`
+							+ ` track${minCount === 1 ? '' : 's'}.`),
+				);
+			}
+		}
+		const totalMinCount = supportedTrackCounts.total.min;
+		if (this._tracks.length < totalMinCount) {
+			throw new Error(
+				totalMinCount === supportedTrackCounts.total.max
+					? (`${this._format._getName()} requires exactly ${totalMinCount} track`
+						+ `${totalMinCount === 1 ? '' : 's'}.`)
+					: (`${this._format._getName()} requires at least ${totalMinCount} track`
+						+ `${totalMinCount === 1 ? '' : 's'}.`),
+			);
 		}
 
 		this._started = true;
