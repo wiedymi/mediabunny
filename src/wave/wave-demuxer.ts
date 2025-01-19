@@ -183,6 +183,10 @@ const SAMPLE_SIZE_IN_FRAMES = 2048;
 class WaveAudioTrackBacking implements InputAudioTrackBacking {
 	constructor(public demuxer: WaveDemuxer) {}
 
+	getId() {
+		return 1;
+	}
+
 	async getCodec() {
 		return this.demuxer.getCodec();
 	}

@@ -43,6 +43,10 @@ export class EncodedVideoSample {
 	}
 
 	is(otherSample: EncodedVideoSample) {
+		if (!(otherSample instanceof EncodedVideoSample)) {
+			throw new TypeError('otherSample must be an EncodedVideoSample.');
+		}
+
 		return (
 			this.type === otherSample.type
 			&& this.timestamp === otherSample.timestamp
@@ -51,9 +55,32 @@ export class EncodedVideoSample {
 		);
 	}
 
+	clone(options?: {
+		timestamp?: number;
+		duration?: number;
+	}) {
+		if (options !== undefined && (!options || typeof options !== 'object')) {
+			throw new TypeError('options, when provided, must be an object.');
+		}
+		if (options?.timestamp !== undefined && !Number.isFinite(options.timestamp)) {
+			throw new TypeError('options.timestamp, when provided, must be a number.');
+		}
+		if (options?.duration !== undefined && !Number.isFinite(options.duration)) {
+			throw new TypeError('options.duration, when provided, must be a number.');
+		}
+
+		return new EncodedVideoSample(
+			this.data,
+			this.type,
+			options?.timestamp ?? this.timestamp,
+			options?.duration ?? this.duration,
+			this.byteLength,
+		);
+	}
+
 	static fromEncodedVideoChunk(chunk: EncodedVideoChunk) {
-		if (typeof EncodedVideoChunk === 'undefined') {
-			throw new Error('Your browser does not support EncodedVideoChunk.');
+		if (!(chunk instanceof EncodedVideoChunk)) {
+			throw new TypeError('chunk must be an EncodedVideoChunk.');
 		}
 
 		const data = new Uint8Array(chunk.byteLength);
@@ -108,6 +135,10 @@ export class EncodedAudioSample {
 	}
 
 	is(otherSample: EncodedAudioSample) {
+		if (!(otherSample instanceof EncodedAudioSample)) {
+			throw new TypeError('otherSample must be an EncodedAudioSample.');
+		}
+
 		return (
 			this.type === otherSample.type
 			&& this.timestamp === otherSample.timestamp
@@ -116,9 +147,32 @@ export class EncodedAudioSample {
 		);
 	}
 
+	clone(options?: {
+		timestamp?: number;
+		duration?: number;
+	}) {
+		if (options !== undefined && (!options || typeof options !== 'object')) {
+			throw new TypeError('options, when provided, must be an object.');
+		}
+		if (options?.timestamp !== undefined && !Number.isFinite(options.timestamp)) {
+			throw new TypeError('options.timestamp, when provided, must be a number.');
+		}
+		if (options?.duration !== undefined && !Number.isFinite(options.duration)) {
+			throw new TypeError('options.duration, when provided, must be a number.');
+		}
+
+		return new EncodedAudioSample(
+			this.data,
+			this.type,
+			options?.timestamp ?? this.timestamp,
+			options?.duration ?? this.duration,
+			this.byteLength,
+		);
+	}
+
 	static fromEncodedAudioChunk(chunk: EncodedAudioChunk) {
-		if (typeof EncodedAudioChunk === 'undefined') {
-			throw new Error('Your browser does not support EncodedAudioChunk.');
+		if (!(chunk instanceof EncodedAudioChunk)) {
+			throw new TypeError('chunk must be an EncodedAudioChunk.');
 		}
 
 		const data = new Uint8Array(chunk.byteLength);

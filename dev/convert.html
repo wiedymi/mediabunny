@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+
+<script src="../dist/metamuxer.js"></script>
+
+<script type="module">
+	const fileInput = document.createElement('input');
+	fileInput.type = 'file';
+	document.body.append(fileInput);
+
+	const progress = document.createElement('progress');	
+	progress.max = 1;
+	document.body.append(progress);
+
+	fileInput.addEventListener('change', async () => {
+		const file = fileInput.files[0];
+
+		const source = new Metamuxer.BlobSource(file);
+		const target = new Metamuxer.BufferTarget();
+		const outputFormat = new Metamuxer.Mp4OutputFormat()
+
+		console.time()
+		const res = await Metamuxer.convert({
+			input: new Metamuxer.Input({
+				formats: Metamuxer.ALL_FORMATS,	
+				source
+			}),
+			output: new Metamuxer.Output({
+				format: outputFormat,
+				target
+			}),
+			/*
+			video: {
+				discard: true,
+				bitrate: Metamuxer.QUALITY_VERY_HIGH,
+				//bitrate: Metamuxer.QUALITY_VERY_HIGH
+				codec: 'av1',
+				//width: 800,
+				//fit: 'fill',
+				//rotate: 90,
+			},
+			audio: {
+				bitrate: Metamuxer.QUALITY_HIGH,
+				codec: 'aac',
+			},
+			*/
+			audio: {
+				discard: true
+			},
+			trim: {
+				start: 0,
+				end: 60
+			},
+			onProgress: (event) => {
+				progress.value = event.completion;
+			}
+		});
+		console.timeEnd()
+		console.log(res)
+
+		console.log("Done", target.buffer);
+		download(new Blob([target.buffer]), 'converted' + outputFormat.getFileExtension());
+
+		function download(blob, filename) {
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = filename;
+			a.click();
+			URL.revokeObjectURL(url);
+		}
+	});
+</script>

@@ -69,6 +69,7 @@ type Cluster = {
 	timestamp: number;
 	trackData: Map<number, ClusterTrackData>;
 	nextCluster: Cluster | null;
+	isKnownToBeFirstCluster: boolean;
 };
 
 type ClusterTrackData = {
@@ -415,6 +416,7 @@ export class MatroskaDemuxer extends Demuxer {
 			timestamp: -1,
 			trackData: new Map(),
 			nextCluster: null,
+			isKnownToBeFirstCluster: false,
 		};
 		this.currentCluster = cluster;
 		this.readContiguousElements(this.clusterReader, size);
@@ -772,7 +774,7 @@ export class MatroskaDemuxer extends Demuxer {
 
 				const matrixCoefficients = reader.readUnsignedInt(size);
 				const mapped = MATRIX_COEFFICIENTS_MAP_INVERSE[matrixCoefficients] ?? null;
-				this.currentTrack.info.colorSpace.matrix = mapped;
+				this.currentTrack.info.colorSpace.matrix = mapped as VideoColorSpaceInit['matrix'];
 			}; break;
 
 			case EBMLId.Range: {
@@ -786,7 +788,7 @@ export class MatroskaDemuxer extends Demuxer {
 
 				const transferCharacteristics = reader.readUnsignedInt(size);
 				const mapped = TRANSFER_CHARACTERISTICS_MAP_INVERSE[transferCharacteristics] ?? null;
-				this.currentTrack.info.colorSpace.transfer = mapped;
+				this.currentTrack.info.colorSpace.transfer = mapped as VideoColorSpaceInit['transfer'];
 			}; break;
 
 			case EBMLId.Primaries: {
@@ -794,7 +796,7 @@ export class MatroskaDemuxer extends Demuxer {
 
 				const primaries = reader.readUnsignedInt(size);
 				const mapped = COLOR_PRIMARIES_MAP_INVERSE[primaries] ?? null;
-				this.currentTrack.info.colorSpace.primaries = mapped;
+				this.currentTrack.info.colorSpace.primaries = mapped as VideoColorSpaceInit['primaries'];
 			}; break;
 
 			case EBMLId.Projection: {
@@ -967,6 +969,10 @@ abstract class MatroskaTrackBacking<
 
 	constructor(public internalTrack: InternalTrack) {}
 
+	getId() {
+		return this.internalTrack.id;
+	}
+
 	getCodec(): Promise<MediaCodec | null> {
 		throw new Error('Not implemented on base class.');
 	}
@@ -996,14 +1002,35 @@ abstract class MatroskaTrackBacking<
 	async getFirstSample(options: SampleRetrievalOptions) {
 		return this.performClusterLookup(
 			() => {
-				const cluster = this.internalTrack.clusters[0];
+				const startCluster = this.internalTrack.segment.clusters[0] ?? null;
+				if (startCluster?.isKnownToBeFirstCluster) {
+					// Walk from the very first cluster in the file until we find one with our track in it
+					let currentCluster: Cluster | null = startCluster;
+					while (currentCluster) {
+						const trackData = currentCluster.trackData.get(this.internalTrack.id);
+						if (trackData) {
+							return {
+								clusterIndex: binarySearchExact(
+									this.internalTrack.clusters,
+									currentCluster.elementStartPos,
+									x => x.elementStartPos,
+								),
+								blockIndex: 0,
+								correctBlockFound: true,
+							};
+						}
+
+						currentCluster = currentCluster.nextCluster;
+					}
+				}
+
 				return {
-					clusterIndex: cluster ? 0 : -1,
-					blockIndex: cluster ? 0 : -1,
-					correctBlockFound: !!cluster,
+					clusterIndex: -1,
+					blockIndex: -1,
+					correctBlockFound: false,
 				};
 			},
-			0,
+			-Infinity, // Use -Infinity as a search timestamp to avoid using the cues
 			Infinity,
 			options,
 		);
@@ -1300,8 +1327,11 @@ abstract class MatroskaTrackBacking<
 			);
 			const cuePoint = cuePointIndex !== -1 ? this.internalTrack.cuePoints[cuePointIndex]! : null;
 
+			let nextClusterIsFirstCluster = false;
+
 			if (clusterIndex === -1) {
 				metadataReader.pos = cuePoint?.clusterPosition ?? segment.clusterSeekStartPos;
+				nextClusterIsFirstCluster = metadataReader.pos === segment.clusterSeekStartPos;
 			} else {
 				const cluster = this.internalTrack.clusters[clusterIndex]!;
 
@@ -1344,15 +1374,18 @@ abstract class MatroskaTrackBacking<
 						// This is the first time we've seen this cluster
 						metadataReader.pos = elementStartPos;
 						cluster = await demuxer.readCluster(segment);
-
-						if (prevCluster) prevCluster.nextCluster = cluster;
-						prevCluster = cluster;
 					} else {
 						// We already know this cluster
 						cluster = segment.clusters[index]!;
-						// Even if we already know the cluster, we might not yet know its predecessor
-						if (prevCluster) prevCluster.nextCluster = cluster;
-						prevCluster = cluster;
+					}
+
+					// Even if we already know the cluster, we might not yet know its predecessor, so always do this
+					if (prevCluster) prevCluster.nextCluster = cluster;
+					prevCluster = cluster;
+
+					if (nextClusterIsFirstCluster) {
+						cluster.isKnownToBeFirstCluster = true;
+						nextClusterIsFirstCluster = false;
 					}
 
 					const { clusterIndex, blockIndex, correctBlockFound } = getBestMatch();
@@ -1415,6 +1448,15 @@ class MatroskaVideoTrackBacking extends MatroskaTrackBacking<EncodedVideoSample>
 
 	async getRotation() {
 		return this.internalTrack.info.rotation;
+	}
+
+	async getColorSpace(): Promise<VideoColorSpaceInit> {
+		return {
+			primaries: this.internalTrack.info.colorSpace?.primaries,
+			transfer: this.internalTrack.info.colorSpace?.transfer,
+			matrix: this.internalTrack.info.colorSpace?.matrix,
+			fullRange: this.internalTrack.info.colorSpace?.fullRange,
+		};
 	}
 
 	async getDecoderConfig(): Promise<VideoDecoderConfig | null> {

@@ -1,9 +1,11 @@
 import { AudioCodec, MediaCodec, VideoCodec } from './codec';
 import { EncodedAudioSampleSink, EncodedVideoSampleSink, SampleRetrievalOptions } from './media-sink';
 import { Rotation } from './misc';
+import { TrackType } from './output';
 import { EncodedAudioSample, EncodedVideoSample } from './sample';
 
 export interface InputTrackBacking {
+	getId(): number;
 	getCodec(): Promise<MediaCodec | null>;
 	getFirstTimestamp(): Promise<number>;
 	computeDuration(): Promise<number>;
@@ -20,6 +22,7 @@ export abstract class InputTrack {
 		this._backing = backing;
 	}
 
+	abstract getType(): TrackType;
 	abstract getCodec(): Promise<MediaCodec | null>;
 	abstract getCodecMimeType(): Promise<string | null>;
 	abstract canDecode(): Promise<boolean>;
@@ -31,6 +34,10 @@ export abstract class InputTrack {
 
 	isAudioTrack(): this is InputAudioTrack {
 		return this instanceof InputAudioTrack;
+	}
+
+	getId() {
+		return this._backing.getId();
 	}
 
 	getFirstTimestamp() {
@@ -51,6 +58,7 @@ export interface InputVideoTrackBacking extends InputTrackBacking {
 	getCodedWidth(): Promise<number>;
 	getCodedHeight(): Promise<number>;
 	getRotation(): Promise<Rotation>;
+	getColorSpace(): Promise<VideoColorSpaceInit>;
 	getDecoderConfig(): Promise<VideoDecoderConfig | null>;
 	getFirstSample(options: SampleRetrievalOptions): Promise<EncodedVideoSample | null>;
 	getSample(timestamp: number, options: SampleRetrievalOptions): Promise<EncodedVideoSample | null>;
@@ -69,6 +77,10 @@ export class InputVideoTrack extends InputTrack {
 		super(backing);
 
 		this._backing = backing;
+	}
+
+	getType(): TrackType {
+		return 'video';
 	}
 
 	getCodec(): Promise<VideoCodec | null> {
@@ -95,6 +107,18 @@ export class InputVideoTrack extends InputTrack {
 	async getDisplayHeight() {
 		const rotation = await this._backing.getRotation();
 		return rotation % 180 === 0 ? this._backing.getCodedHeight() : this._backing.getCodedWidth();
+	}
+
+	getColorSpace() {
+		return this._backing.getColorSpace();
+	}
+
+	async hasHighDynamicRange() {
+		const colorSpace = await this._backing.getColorSpace();
+
+		return (colorSpace.primaries as string) === 'bt2020' || (colorSpace.primaries as string) === 'smpte432'
+			|| (colorSpace.transfer as string) === 'pg' || (colorSpace.transfer as string) === 'hlg'
+			|| (colorSpace.matrix as string) === 'bt2020-ncl';
 	}
 
 	getDecoderConfig() {
@@ -148,6 +172,10 @@ export class InputAudioTrack extends InputTrack {
 		super(backing);
 
 		this._backing = backing;
+	}
+
+	getType(): TrackType {
+		return 'audio';
 	}
 
 	getCodec(): Promise<AudioCodec | null> {

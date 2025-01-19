@@ -1,4 +1,4 @@
-import { parsePcmCodec, PCM_CODECS, PcmAudioCodec } from './codec';
+import { parsePcmCodec, PCM_AUDIO_CODECS, PcmAudioCodec } from './codec';
 import { InputAudioTrack, InputVideoTrack } from './input-track';
 import {
 	AnyIterable,
@@ -920,7 +920,7 @@ class PcmAudioDecoderWrapper extends DecoderWrapper<EncodedAudioSample, AudioDat
 	) {
 		super(onData, onError);
 
-		assert((PCM_CODECS as readonly string[]).includes(decoderConfig.codec));
+		assert((PCM_AUDIO_CODECS as readonly string[]).includes(decoderConfig.codec));
 		this.codec = decoderConfig.codec as PcmAudioCodec;
 
 		const { dataType, sampleSize, littleEndian } = parsePcmCodec(this.codec);
@@ -1104,7 +1104,7 @@ export class AudioDataSink extends BaseMediaFrameSink<EncodedAudioSample, AudioD
 		const decoderConfig = await this._audioTrack.getDecoderConfig();
 		assert(decoderConfig);
 
-		if ((PCM_CODECS as readonly string[]).includes(decoderConfig.codec)) {
+		if ((PCM_AUDIO_CODECS as readonly string[]).includes(decoderConfig.codec)) {
 			return new PcmAudioDecoderWrapper(onData, onError, decoderConfig);
 		} else {
 			return new AudioDecoderWrapper(onData, onError, decoderConfig);

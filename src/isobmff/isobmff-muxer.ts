@@ -7,7 +7,7 @@ import { IsobmffOutputFormatOptions, IsobmffOutputFormat, MovOutputFormat } from
 import { inlineTimestampRegex, SubtitleConfig, SubtitleCue, SubtitleMetadata } from '../subtitles';
 import {
 	parsePcmCodec,
-	PCM_CODECS,
+	PCM_AUDIO_CODECS,
 	PcmAudioCodec,
 	validateAudioChunkMetadata,
 	validateSubtitleMetadata,
@@ -239,7 +239,7 @@ export class IsobmffMuxer extends Muxer {
 			compactlyCodedChunkTable: [],
 			requiresPcmTransformation:
 				!this.isFragmented
-				&& (PCM_CODECS as readonly string[]).includes(track.source._codec),
+				&& (PCM_AUDIO_CODECS as readonly string[]).includes(track.source._codec),
 		};
 
 		this.trackDatas.push(newTrackData);
@@ -668,16 +668,16 @@ export class IsobmffMuxer extends Muxer {
 				// We can only finalize this fragment (and begin a new one) if we know that each track will be able to
 				// start the new one with a key frame.
 				const keyFrameQueuedEverywhere = this.trackDatas.every((otherTrackData) => {
-					if (otherTrackData.track.source._closed) {
-						return true;
-					}
-
 					if (trackData === otherTrackData) {
 						return sample.type === 'key';
 					}
 
 					const firstQueuedSample = otherTrackData.sampleQueue[0];
-					return firstQueuedSample && firstQueuedSample.type === 'key';
+					if (firstQueuedSample) {
+						return firstQueuedSample.type === 'key';
+					}
+
+					return otherTrackData.track.source._closed;
 				});
 
 				if (

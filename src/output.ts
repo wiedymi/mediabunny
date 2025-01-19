@@ -6,9 +6,12 @@ import { Target } from './target';
 import { Writer } from './writer';
 
 /** @public */
-export type OutputOptions = {
-	format: OutputFormat;
-	target: Target;
+export type OutputOptions<
+	F extends OutputFormat = OutputFormat,
+	T extends Target = Target,
+> = {
+	format: F;
+	target: T;
 };
 
 /** @public */
@@ -63,11 +66,13 @@ const validateBaseTrackMetadata = (metadata: BaseTrackMetadata) => {
 };
 
 /** @public */
-export class Output {
-	/** @internal */
-	_format: OutputFormat;
-	/** @internal */
-	_target: Target;
+export class Output<
+	F extends OutputFormat = OutputFormat,
+	T extends Target = Target,
+> {
+	format: F;
+	target: T;
+
 	/** @internal */
 	_muxer: Muxer;
 	/** @internal */
@@ -83,7 +88,7 @@ export class Output {
 	/** @internal */
 	_mutex = new AsyncMutex();
 
-	constructor(options: OutputOptions) {
+	constructor(options: OutputOptions<F, T>) {
 		if (!options || typeof options !== 'object') {
 			throw new TypeError('options must be an object.');
 		}
@@ -99,8 +104,8 @@ export class Output {
 		}
 		options.target._output = this;
 
-		this._format = options.format;
-		this._target = options.target;
+		this.format = options.format;
+		this.target = options.target;
 
 		this._writer = options.target._createWriter();
 		this._muxer = options.format._createMuxer(this);
@@ -159,7 +164,7 @@ export class Output {
 		}
 
 		// Verify maximum track count constraints
-		const supportedTrackCounts = this._format.getSupportedTrackCounts();
+		const supportedTrackCounts = this.format.getSupportedTrackCounts();
 		const presentTracksOfThisType = this._tracks.reduce(
 			(count, track) => count + (track.type === type ? 1 : 0),
 			0,
@@ -168,15 +173,15 @@ export class Output {
 		if (presentTracksOfThisType === maxCount) {
 			throw new Error(
 				maxCount === 0
-					? `${this._format._getName()} does not support ${type} tracks.`
-					: (`${this._format._getName()} does not support more than ${maxCount} ${type} track`
+					? `${this.format._getName()} does not support ${type} tracks.`
+					: (`${this.format._getName()} does not support more than ${maxCount} ${type} track`
 						+ `${maxCount === 1 ? '' : 's'}.`),
 			);
 		}
 		const maxTotalCount = supportedTrackCounts.total.max;
 		if (this._tracks.length === maxTotalCount) {
 			throw new Error(
-				`${this._format._getName()} does not support more than ${maxTotalCount} tracks`
+				`${this.format._getName()} does not support more than ${maxTotalCount} tracks`
 				+ `${maxTotalCount === 1 ? '' : 's'} in total.`,
 			);
 		}
@@ -190,48 +195,48 @@ export class Output {
 		} as OutputTrack;
 
 		if (track.type === 'video') {
-			const supportedVideoCodecs = this._format.getSupportedVideoCodecs();
+			const supportedVideoCodecs = this.format.getSupportedVideoCodecs();
 
 			if (supportedVideoCodecs.length === 0) {
 				throw new Error(
-					`${this._format._getName()} does not support video tracks.`
-					+ this._format._codecUnsupportedHint(track.source._codec),
+					`${this.format._getName()} does not support video tracks.`
+					+ this.format._codecUnsupportedHint(track.source._codec),
 				);
 			} else if (!supportedVideoCodecs.includes(track.source._codec)) {
 				throw new Error(
-					`Codec '${track.source._codec}' cannot be contained within ${this._format._getName()}. Supported`
+					`Codec '${track.source._codec}' cannot be contained within ${this.format._getName()}. Supported`
 					+ ` video codecs are: ${supportedVideoCodecs.map(codec => `'${codec}'`).join(', ')}.`
-					+ this._format._codecUnsupportedHint(track.source._codec),
+					+ this.format._codecUnsupportedHint(track.source._codec),
 				);
 			}
 		} else if (track.type === 'audio') {
-			const supportedAudioCodecs = this._format.getSupportedAudioCodecs();
+			const supportedAudioCodecs = this.format.getSupportedAudioCodecs();
 
 			if (supportedAudioCodecs.length === 0) {
 				throw new Error(
-					`${this._format._getName()} does not support audio tracks.`
-					+ this._format._codecUnsupportedHint(track.source._codec),
+					`${this.format._getName()} does not support audio tracks.`
+					+ this.format._codecUnsupportedHint(track.source._codec),
 				);
 			} else if (!supportedAudioCodecs.includes(track.source._codec)) {
 				throw new Error(
-					`Codec '${track.source._codec}' cannot be contained within ${this._format._getName()}. Supported`
+					`Codec '${track.source._codec}' cannot be contained within ${this.format._getName()}. Supported`
 					+ ` audio codecs are: ${supportedAudioCodecs.map(codec => `'${codec}'`).join(', ')}.`
-					+ this._format._codecUnsupportedHint(track.source._codec),
+					+ this.format._codecUnsupportedHint(track.source._codec),
 				);
 			}
 		} else if (track.type === 'subtitle') {
-			const supportedSubtitleCodecs = this._format.getSupportedSubtitleCodecs();
+			const supportedSubtitleCodecs = this.format.getSupportedSubtitleCodecs();
 
 			if (supportedSubtitleCodecs.length === 0) {
 				throw new Error(
-					`${this._format._getName()} does not support subtitle tracks.`
-					+ this._format._codecUnsupportedHint(track.source._codec),
+					`${this.format._getName()} does not support subtitle tracks.`
+					+ this.format._codecUnsupportedHint(track.source._codec),
 				);
 			} else if (!supportedSubtitleCodecs.includes(track.source._codec)) {
 				throw new Error(
-					`Codec '${track.source._codec}' cannot be contained within ${this._format._getName()}. Supported`
+					`Codec '${track.source._codec}' cannot be contained within ${this.format._getName()}. Supported`
 					+ ` subtitle codecs are: ${supportedSubtitleCodecs.map(codec => `'${codec}'`).join(', ')}.`
-					+ this._format._codecUnsupportedHint(track.source._codec),
+					+ this.format._codecUnsupportedHint(track.source._codec),
 				);
 			}
 		}
@@ -249,7 +254,7 @@ export class Output {
 		}
 
 		// Verify minimum track count constraints
-		const supportedTrackCounts = this._format.getSupportedTrackCounts();
+		const supportedTrackCounts = this.format.getSupportedTrackCounts();
 		for (const trackType of ALL_TRACK_TYPES) {
 			const presentTracksOfThisType = this._tracks.reduce(
 				(count, track) => count + (track.type === trackType ? 1 : 0),
@@ -259,9 +264,9 @@ export class Output {
 			if (presentTracksOfThisType < minCount) {
 				throw new Error(
 					minCount === supportedTrackCounts[trackType].max
-						? (`${this._format._getName()} requires exactly ${minCount} ${trackType}`
+						? (`${this.format._getName()} requires exactly ${minCount} ${trackType}`
 							+ ` track${minCount === 1 ? '' : 's'}.`)
-						: (`${this._format._getName()} requires at least ${minCount} ${trackType}`
+						: (`${this.format._getName()} requires at least ${minCount} ${trackType}`
 							+ ` track${minCount === 1 ? '' : 's'}.`),
 				);
 			}
@@ -270,9 +275,9 @@ export class Output {
 		if (this._tracks.length < totalMinCount) {
 			throw new Error(
 				totalMinCount === supportedTrackCounts.total.max
-					? (`${this._format._getName()} requires exactly ${totalMinCount} track`
+					? (`${this.format._getName()} requires exactly ${totalMinCount} track`
 						+ `${totalMinCount === 1 ? '' : 's'}.`)
-					: (`${this._format._getName()} requires at least ${totalMinCount} track`
+					: (`${this.format._getName()} requires at least ${totalMinCount} track`
 						+ `${totalMinCount === 1 ? '' : 's'}.`),
 			);
 		}
@@ -302,7 +307,7 @@ export class Output {
 
 		const release = await this._mutex.acquire();
 
-		const promises = this._tracks.map(x => x.source._flush());
+		const promises = this._tracks.map(x => x.source._flushOrWaitForClose());
 		await Promise.all(promises);
 
 		await this._writer.close();
@@ -321,7 +326,7 @@ export class Output {
 
 		const release = await this._mutex.acquire();
 
-		const promises = this._tracks.map(x => x.source._flush());
+		const promises = this._tracks.map(x => x.source._flushOrWaitForClose());
 		await Promise.all(promises);
 
 		await this._muxer.finalize();

@@ -7,7 +7,7 @@ import {
 	extractVp9CodecInfoFromFrame,
 	MediaCodec,
 	parseAacAudioSpecificConfig,
-	PCM_CODECS,
+	PCM_AUDIO_CODECS,
 	VideoCodec,
 	Vp9CodecInfo,
 } from '../codec';
@@ -35,6 +35,8 @@ import {
 	AsyncMutex,
 	findLastIndex,
 	UNDETERMINED_LANGUAGE,
+	TransformationMatrix,
+	extractRotationFromMatrix,
 } from '../misc';
 import { Reader } from '../reader';
 import { EncodedAudioSample, EncodedVideoSample, PLACEHOLDER_DATA, SampleType } from '../sample';
@@ -165,6 +167,7 @@ type Fragment = {
 	dataStart: number;
 	dataEnd: number;
 	nextFragment: Fragment | null;
+	isKnownToBeFirstFragment: boolean;
 };
 
 const knownMatrixes = [rotationMatrix(0), rotationMatrix(90), rotationMatrix(180), rotationMatrix(270)];
@@ -295,7 +298,7 @@ export class IsobmffDemuxer extends Demuxer {
 
 		const isPcmCodec = internalTrack.info?.type === 'audio'
 			&& internalTrack.info.codec
-			&& (PCM_CODECS as readonly string[]).includes(internalTrack.info.codec);
+			&& (PCM_AUDIO_CODECS as readonly string[]).includes(internalTrack.info.codec);
 
 		if (isPcmCodec && sampleTable.sampleCompositionTimeOffsets.length === 0) {
 			// If the audio has PCM samples, the way the samples are defined in the sample table is somewhat
@@ -462,6 +465,8 @@ export class IsobmffDemuxer extends Demuxer {
 				this.isobmffReader.pos = currentFragment.moofOffset + currentFragment.moofSize;
 			}
 
+			let nextFragmentIsFirstFragment = this.isobmffReader.pos === 0;
+
 			while (this.isobmffReader.pos < startPos) {
 				if (currentFragment?.nextFragment) {
 					currentFragment = currentFragment.nextFragment;
@@ -477,18 +482,23 @@ export class IsobmffDemuxer extends Demuxer {
 					if (boxInfo.name === 'moof') {
 						const index = binarySearchExact(this.fragments, startPos, x => x.moofOffset);
 
+						let fragment: Fragment;
 						if (index === -1) {
 							this.isobmffReader.pos = startPos;
 
-							const fragment = await this.readFragment(); // Recursive call
-							if (currentFragment) currentFragment.nextFragment = fragment;
-							currentFragment = fragment;
+							fragment = await this.readFragment(); // Recursive call
 						} else {
 							// We already know this fragment
-							const fragment = this.fragments[index]!;
-							// Even if we already know the fragment, we might not yet know its predecessor
-							if (currentFragment) currentFragment.nextFragment = fragment;
-							currentFragment = fragment;
+							fragment = this.fragments[index]!;
+						}
+
+						// Even if we already know the fragment, we might not yet know its predecessor; always do this
+						if (currentFragment) currentFragment.nextFragment = fragment;
+						currentFragment = fragment;
+
+						if (nextFragmentIsFirstFragment) {
+							fragment.isKnownToBeFirstFragment = true;
+							nextFragmentIsFirstFragment = false;
 						}
 					}
 
@@ -613,16 +623,24 @@ export class IsobmffDemuxer extends Demuxer {
 				}
 
 				this.isobmffReader.pos += 2 * 4 + 2 + 2 + 2 + 2;
-				const values: number[] = [];
-				values.push(this.isobmffReader.readFixed_16_16(), this.isobmffReader.readFixed_16_16());
-				this.isobmffReader.pos += 4;
-				values.push(this.isobmffReader.readFixed_16_16(), this.isobmffReader.readFixed_16_16());
+				const matrix: TransformationMatrix = [
+					this.isobmffReader.readFixed_16_16(),
+					this.isobmffReader.readFixed_16_16(),
+					this.isobmffReader.readFixed_2_30(),
+					this.isobmffReader.readFixed_16_16(),
+					this.isobmffReader.readFixed_16_16(),
+					this.isobmffReader.readFixed_2_30(),
+					this.isobmffReader.readFixed_16_16(),
+					this.isobmffReader.readFixed_16_16(),
+					this.isobmffReader.readFixed_2_30(),
+				];
 
-				const matrixIndex = knownMatrixes.findIndex((x) => {
-					return x[0] === values[0] && x[1] === values[1] && x[3] === values[2] && x[4] === values[3];
-				});
+				const rotation = extractRotationFromMatrix(matrix);
+				const comparisonMatrix = rotationMatrix(rotation);
+
+				const matrixIndex = knownMatrixes.findIndex(mat => mat.every((y, i) => y === comparisonMatrix[i]));
 				if (matrixIndex === -1) {
-					console.warn(`Wacky rotation matrix ${values.join(',')}; sticking with no rotation.`);
+					console.warn(`Wacky rotation matrix ${comparisonMatrix.join(',')}; sticking with no rotation.`);
 					track.rotation = 0;
 				} else {
 					track.rotation = (90 * matrixIndex) as Rotation;
@@ -960,7 +978,7 @@ export class IsobmffDemuxer extends Demuxer {
 					transfer: TRANSFER_CHARACTERISTICS_MAP_INVERSE[transferCharacteristics],
 					matrix: MATRIX_COEFFICIENTS_MAP_INVERSE[matrixCoefficients],
 					fullRange: fullRangeFlag,
-				};
+				} as VideoColorSpaceInit;
 			}; break;
 
 			case 'wave': {
@@ -1418,6 +1436,7 @@ export class IsobmffDemuxer extends Demuxer {
 					dataStart: Infinity,
 					dataEnd: 0,
 					nextFragment: null,
+					isKnownToBeFirstFragment: false,
 				};
 
 				this.readContiguousBoxes(boxInfo.contentSize);
@@ -1694,6 +1713,10 @@ abstract class IsobmffTrackBacking<
 
 	constructor(public internalTrack: InternalTrack) {}
 
+	getId() {
+		return this.internalTrack.id;
+	}
+
 	getCodec(): Promise<MediaCodec | null> {
 		throw new Error('Not implemented on base class.');
 	}
@@ -1724,14 +1747,35 @@ abstract class IsobmffTrackBacking<
 		if (this.internalTrack.demuxer.isFragmented) {
 			return this.performFragmentedLookup(
 				() => {
-					const fragment = this.internalTrack.fragments[0];
+					const startFragment = this.internalTrack.demuxer.fragments[0] ?? null;
+					if (startFragment?.isKnownToBeFirstFragment) {
+						// Walk from the very first fragment in the file until we find one with our track in it
+						let currentFragment: Fragment | null = startFragment;
+						while (currentFragment) {
+							const trackData = currentFragment.trackData.get(this.internalTrack.id);
+							if (trackData) {
+								return {
+									fragmentIndex: binarySearchExact(
+										this.internalTrack.fragments,
+										currentFragment.moofOffset,
+										x => x.moofOffset,
+									),
+									sampleIndex: 0,
+									correctSampleFound: true,
+								};
+							}
+
+							currentFragment = currentFragment.nextFragment;
+						}
+					}
+
 					return {
-						fragmentIndex: fragment ? 0 : -1,
-						sampleIndex: fragment ? 0 : -1,
-						correctSampleFound: !!fragment,
+						fragmentIndex: -1,
+						sampleIndex: -1,
+						correctSampleFound: false,
 					};
 				},
-				0,
+				-Infinity, // Use -Infinity as a search timestamp to avoid using the lookup entries
 				Infinity,
 				options,
 			);
@@ -2108,8 +2152,11 @@ abstract class IsobmffTrackBacking<
 				? this.internalTrack.fragmentLookupTable![lookupEntryIndex]!
 				: null;
 
+			let nextFragmentIsFirstFragment = false;
+
 			if (fragmentIndex === -1) {
 				isobmffReader.pos = lookupEntry?.moofOffset ?? 0;
+				nextFragmentIsFirstFragment = isobmffReader.pos === 0;
 			} else {
 				const fragment = this.internalTrack.fragments[fragmentIndex]!;
 
@@ -2150,16 +2197,19 @@ abstract class IsobmffTrackBacking<
 					if (index === -1) {
 						// This is the first time we've seen this fragment
 						isobmffReader.pos = startPos;
-
 						fragment = await demuxer.readFragment();
-						if (prevFragment) prevFragment.nextFragment = fragment;
-						prevFragment = fragment;
 					} else {
 						// We already know this fragment
 						fragment = demuxer.fragments[index]!;
-						// Even if we already know the fragment, we might not yet know its predecessor
-						if (prevFragment) prevFragment.nextFragment = fragment;
-						prevFragment = fragment;
+					}
+
+					// Even if we already know the fragment, we might not yet know its predecessor, so always do this
+					if (prevFragment) prevFragment.nextFragment = fragment;
+					prevFragment = fragment;
+
+					if (nextFragmentIsFirstFragment) {
+						fragment.isKnownToBeFirstFragment = true;
+						nextFragmentIsFirstFragment = false;
 					}
 
 					const { fragmentIndex, sampleIndex, correctSampleFound } = getBestMatch();
@@ -2222,6 +2272,15 @@ class IsobmffVideoTrackBacking extends IsobmffTrackBacking<EncodedVideoSample> i
 
 	async getRotation() {
 		return this.internalTrack.rotation;
+	}
+
+	async getColorSpace(): Promise<VideoColorSpaceInit> {
+		return {
+			primaries: this.internalTrack.info.colorSpace?.primaries,
+			transfer: this.internalTrack.info.colorSpace?.transfer,
+			matrix: this.internalTrack.info.colorSpace?.matrix,
+			fullRange: this.internalTrack.info.colorSpace?.fullRange,
+		};
 	}
 
 	async getDecoderConfig(): Promise<VideoDecoderConfig | null> {

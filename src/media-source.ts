@@ -6,8 +6,9 @@ import {
 	getAudioEncoderConfigExtension,
 	getVideoEncoderConfigExtension,
 	parsePcmCodec,
-	PCM_CODECS,
+	PCM_AUDIO_CODECS,
 	PcmAudioCodec,
+	Quality,
 	SUBTITLE_CODECS,
 	SubtitleCodec,
 	VIDEO_CODECS,
@@ -25,7 +26,7 @@ export abstract class MediaSource {
 	/** @internal */
 	_connectedTrack: OutputTrack | null = null;
 	/** @internal */
-	_closing = false;
+	_closingPromise: Promise<void> | null = null;
 	/** @internal */
 	_closed = false;
 	/** @internal */
@@ -59,30 +60,42 @@ export abstract class MediaSource {
 	/** @internal */
 	async _flush() {}
 
-	async close() {
-		if (this._closing) {
+	close() {
+		if (this._closingPromise) {
 			throw new Error('Source already closed.');
 		}
 
-		if (!this._connectedTrack) {
+		const connectedTrack = this._connectedTrack;
+
+		if (!connectedTrack) {
 			throw new Error('Cannot call close without connecting the source to an output track.');
 		}
 
-		if (!this._connectedTrack.output._started) {
+		if (!connectedTrack.output._started) {
 			throw new Error('Cannot call close before output has been started.');
 		}
 
-		this._closing = true;
+		return this._closingPromise = (async () => {
+			await this._flush();
 
-		await this._flush();
+			this._closed = true;
 
-		this._closed = true;
+			if (connectedTrack.output._finalizing) {
+				return;
+			}
 
-		if (this._connectedTrack.output._finalizing) {
-			return;
+			connectedTrack.output._muxer.onTrackClose(connectedTrack);
+		})();
+	}
+
+	/** @internal */
+	async _flushOrWaitForClose() {
+		if (this._closingPromise) {
+			// Since closing also flushes, we don't want to do it twice
+			return this._closingPromise;
+		} else {
+			return this._flush();
 		}
-
-		this._connectedTrack.output._muxer.onTrackClose(this._connectedTrack);
 	}
 }
 
@@ -126,10 +139,10 @@ export class EncodedVideoSampleSource extends VideoSource {
 /** @public */
 export type VideoEncodingConfig = {
 	codec: VideoCodec;
-	bitrate: number;
+	bitrate: number | Quality;
 	latencyMode?: VideoEncoderConfig['latencyMode'];
 	keyFrameInterval?: number;
-	onEncodedSample?: (chunk: EncodedVideoSample, meta: EncodedVideoChunkMetadata | undefined) => unknown;
+	onEncodedSample?: (sample: EncodedVideoSample, meta: EncodedVideoChunkMetadata | undefined) => unknown;
 	onEncodingError?: (error: Error) => unknown;
 };
 
@@ -140,8 +153,8 @@ const validateVideoEncodingConfig = (config: VideoEncodingConfig) => {
 	if (!VIDEO_CODECS.includes(config.codec)) {
 		throw new TypeError(`Invalid video codec '${config.codec}'. Must be one of: ${VIDEO_CODECS.join(', ')}.`);
 	}
-	if (!Number.isInteger(config.bitrate) || config.bitrate <= 0) {
-		throw new TypeError('config.bitrate must be a positive integer.');
+	if (!(config.bitrate instanceof Quality) && (!Number.isInteger(config.bitrate) || config.bitrate <= 0)) {
+		throw new TypeError('config.bitrate must be a positive integer or a quality.');
 	}
 	if (config.latencyMode !== undefined && !['quality', 'realtime'].includes(config.latencyMode)) {
 		throw new TypeError('config.latencyMode, when provided, must be \'quality\' or \'realtime\'.');
@@ -205,7 +218,9 @@ class VideoEncoderWrapper {
 		// in Matroska.
 		this.encoder.encode(videoFrame, {
 			...encodeOptions,
-			keyFrame: keyFrameInterval === 0 || multipleOfKeyFrameInterval !== this.lastMultipleOfKeyFrameInterval,
+			keyFrame: encodeOptions?.keyFrame
+				|| keyFrameInterval === 0
+				|| multipleOfKeyFrameInterval !== this.lastMultipleOfKeyFrameInterval,
 		});
 
 		if (shouldClose) {
@@ -234,16 +249,22 @@ class VideoEncoderWrapper {
 		const { promise, resolve } = promiseWithResolvers();
 		this.ensureEncoderPromise = promise;
 
+		const width = videoFrame.codedWidth;
+		const height = videoFrame.codedHeight;
+		const bitrate = this.encodingConfig.bitrate instanceof Quality
+			? this.encodingConfig.bitrate._toVideoBitrate(this.encodingConfig.codec, width, height)
+			: this.encodingConfig.bitrate;
+
 		const encoderConfig: VideoEncoderConfig = {
 			codec: buildVideoCodecString(
 				this.encodingConfig.codec,
-				videoFrame.codedWidth,
-				videoFrame.codedHeight,
-				this.encodingConfig.bitrate,
+				width,
+				height,
+				bitrate,
 			),
-			width: videoFrame.codedWidth,
-			height: videoFrame.codedHeight,
-			bitrate: this.encodingConfig.bitrate,
+			width,
+			height,
+			bitrate,
 			framerate: this.source._connectedTrack?.metadata.frameRate,
 			latencyMode: this.encodingConfig.latencyMode,
 			...getVideoEncoderConfigExtension(this.encodingConfig.codec),
@@ -444,8 +465,8 @@ export class EncodedAudioSampleSource extends AudioSource {
 /** @public */
 export type AudioEncodingConfig = {
 	codec: AudioCodec;
-	bitrate?: number;
-	onEncodedSample?: (chunk: EncodedAudioSample, meta: EncodedAudioChunkMetadata | undefined) => unknown;
+	bitrate?: number | Quality;
+	onEncodedSample?: (sample: EncodedAudioSample, meta: EncodedAudioChunkMetadata | undefined) => unknown;
 	onEncodingError?: (error: Error) => unknown;
 };
 
@@ -456,11 +477,18 @@ const validateAudioEncodingConfig = (config: AudioEncodingConfig) => {
 	if (!AUDIO_CODECS.includes(config.codec)) {
 		throw new TypeError(`Invalid audio codec '${config.codec}'. Must be one of: ${AUDIO_CODECS.join(', ')}.`);
 	}
-	if (config.bitrate === undefined && !(PCM_CODECS as readonly string[]).includes(config.codec)) {
+	if (
+		config.bitrate === undefined
+		&& (!(PCM_AUDIO_CODECS as readonly string[]).includes(config.codec) || config.codec === 'flac')
+	) {
 		throw new TypeError('config.bitrate must be provided for compressed audio codecs.');
 	}
-	if (config.bitrate !== undefined && (!Number.isInteger(config.bitrate) || config.bitrate <= 0)) {
-		throw new TypeError('config.bitrate must be a positive integer.');
+	if (
+		config.bitrate !== undefined
+		&& !(config.bitrate instanceof Quality)
+		&& (!Number.isInteger(config.bitrate) || config.bitrate <= 0)
+	) {
+		throw new TypeError('config.bitrate, when provided, must be a positive integer or a quality.');
 	}
 	if (config.onEncodingError !== undefined && typeof config.onEncodingError !== 'function') {
 		throw new TypeError('config.onEncodingError, when provided, must be a function.');
@@ -610,22 +638,27 @@ class AudioEncoderWrapper {
 		const { promise, resolve } = promiseWithResolvers();
 		this.ensureEncoderPromise = promise;
 
-		if ((PCM_CODECS as readonly string[]).includes(this.encodingConfig.codec)) {
+		if ((PCM_AUDIO_CODECS as readonly string[]).includes(this.encodingConfig.codec)) {
 			this.initPcmEncoder();
 		} else {
 			if (typeof AudioEncoder === 'undefined') {
 				throw new Error('AudioEncoder is not supported by this browser.');
 			}
 
+			const { numberOfChannels, sampleRate } = audioData;
+			const bitrate = this.encodingConfig.bitrate instanceof Quality
+				? this.encodingConfig.bitrate._toAudioBitrate(this.encodingConfig.codec)
+				: this.encodingConfig.bitrate;
+
 			const encoderConfig: AudioEncoderConfig = {
 				codec: buildAudioCodecString(
 					this.encodingConfig.codec,
-					audioData.numberOfChannels,
-					audioData.sampleRate,
+					numberOfChannels,
+					sampleRate,
 				),
-				numberOfChannels: audioData.numberOfChannels,
-				sampleRate: audioData.sampleRate,
-				bitrate: this.encodingConfig.bitrate,
+				numberOfChannels,
+				sampleRate,
+				bitrate,
 				...getAudioEncoderConfigExtension(this.encodingConfig.codec),
 			};
 			const support = await AudioEncoder.isConfigSupported(encoderConfig);

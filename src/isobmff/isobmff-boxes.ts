@@ -17,7 +17,7 @@ import {
 	AudioCodec,
 	generateAv1CodecConfigurationFromCodecString,
 	parsePcmCodec,
-	PCM_CODECS,
+	PCM_AUDIO_CODECS,
 	PcmAudioCodec,
 	SubtitleCodec,
 	VideoCodec,
@@ -680,7 +680,7 @@ export const soundSampleDescription = (
 	let contents: NestedNumberArray;
 
 	let sampleSizeInBits = 16;
-	if ((PCM_CODECS as readonly AudioCodec[]).includes(trackData.track.source._codec)) {
+	if ((PCM_AUDIO_CODECS as readonly AudioCodec[]).includes(trackData.track.source._codec)) {
 		const codec = trackData.track.source._codec as PcmAudioCodec;
 		const { sampleSize } = parsePcmCodec(codec);
 		sampleSizeInBits = 8 * sampleSize;

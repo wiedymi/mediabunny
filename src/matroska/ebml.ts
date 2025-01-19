@@ -450,7 +450,7 @@ export class EBMLReader {
 		}
 
 		if (width !== 4 && width !== 8) {
-			throw new Error('Bad FLOAT size ' + width);
+			throw new Error('Bad float size ' + width);
 		}
 
 		const { view, offset } = this.reader.getViewAndOffset(this.pos, this.pos + width);

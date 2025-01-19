@@ -11,17 +11,18 @@ import {
 } from './misc';
 import { SubtitleMetadata } from './subtitles';
 
+// Codecs are ordered by encoding preference:
+
 /** @public */
 export const VIDEO_CODECS = [
 	'avc',
 	'hevc',
-	'vp8',
 	'vp9',
 	'av1',
+	'vp8',
 ] as const;
-export const PCM_CODECS = [
-	'pcm-u8',
-	'pcm-s8',
+/** @public */
+export const PCM_AUDIO_CODECS = [
 	'pcm-s16', // We don't prefix 'le' so we're compatible with the WebCodecs-registered PCM codec strings
 	'pcm-s16be',
 	'pcm-s24',
@@ -30,26 +31,34 @@ export const PCM_CODECS = [
 	'pcm-s32be',
 	'pcm-f32',
 	'pcm-f32be',
+	'pcm-u8',
+	'pcm-s8',
 	'ulaw',
 	'alaw',
 ] as const;
 /** @public */
-export const AUDIO_CODECS = [
+export const NON_PCM_AUDIO_CODECS = [
 	'aac',
-	'mp3',
 	'opus',
+	'mp3',
 	'vorbis',
 	'flac',
-	...PCM_CODECS,
 ] as const;
 /** @public */
-export const SUBTITLE_CODECS = ['webvtt'] as const; // TODO add the rest
+export const AUDIO_CODECS = [
+	...NON_PCM_AUDIO_CODECS,
+	...PCM_AUDIO_CODECS,
+] as const;
+/** @public */
+export const SUBTITLE_CODECS = [
+	'webvtt',
+] as const; // TODO add the rest
 
 /** @public */
 export type VideoCodec = typeof VIDEO_CODECS[number];
 /** @public */
 export type AudioCodec = typeof AUDIO_CODECS[number];
-export type PcmAudioCodec = typeof PCM_CODECS[number];
+export type PcmAudioCodec = typeof PCM_AUDIO_CODECS[number];
 /** @public */
 export type SubtitleCodec = typeof SUBTITLE_CODECS[number];
 /** @public */
@@ -855,7 +864,7 @@ export const buildAudioCodecString = (codec: AudioCodec, numberOfChannels: numbe
 		return 'vorbis';
 	} else if (codec === 'flac') {
 		return 'flac';
-	} else if ((PCM_CODECS as readonly string[]).includes(codec)) {
+	} else if ((PCM_AUDIO_CODECS as readonly string[]).includes(codec)) {
 		return codec;
 	}
 
@@ -892,7 +901,7 @@ export const extractAudioCodecString = (trackInfo: {
 		return 'vorbis';
 	} else if (codec === 'flac') {
 		return 'flac';
-	} else if (codec && (PCM_CODECS as readonly string[]).includes(codec)) {
+	} else if (codec && (PCM_AUDIO_CODECS as readonly string[]).includes(codec)) {
 		return codec;
 	}
 
@@ -958,7 +967,7 @@ export const parseAacAudioSpecificConfig = (bytes: Uint8Array | null) => {
 
 const PCM_CODEC_REGEX = /^pcm-([usf])(\d+)+(be)?$/;
 export const parsePcmCodec = (codec: PcmAudioCodec) => {
-	assert(PCM_CODECS.includes(codec));
+	assert(PCM_AUDIO_CODECS.includes(codec));
 
 	if (codec === 'ulaw') {
 		return { dataType: 'ulaw' as const, sampleSize: 1 as const, littleEndian: true, silentValue: 255 };
@@ -1020,6 +1029,91 @@ export const getAudioEncoderConfigExtension = (codec: AudioCodec) => {
 
 	return {};
 };
+
+/** @public */
+export class Quality {
+	/** @internal */
+	_factor: number;
+
+	/** @internal */
+	constructor(factor: number) {
+		this._factor = factor;
+	}
+
+	/** @internal */
+	_toVideoBitrate(codec: VideoCodec, width: number, height: number) {
+		const pixels = width * height;
+
+		const codecEfficiencyFactors = {
+			avc: 1.0, // H.264/AVC (baseline)
+			hevc: 0.6, // H.265/HEVC (~40% more efficient than AVC)
+			vp9: 0.6, // Similar to HEVC
+			av1: 0.4, // ~60% more efficient than AVC
+			vp8: 1.2, // Slightly less efficient than AVC
+		};
+
+		const getBaseBitrateForPixels = (pixelCount: number): number => {
+			const referencePixels = 1920 * 1080;
+			const referenceBitrate = 2000000;
+
+			// Non-linear scaling
+			const scaleFactor = Math.pow(pixelCount / referencePixels, 0.75);
+			return referenceBitrate * scaleFactor;
+		};
+
+		const baseBitrate = getBaseBitrateForPixels(pixels);
+		const codecAdjustedBitrate = baseBitrate * codecEfficiencyFactors[codec];
+		const finalBitrate = codecAdjustedBitrate * this._factor;
+
+		return Math.ceil(finalBitrate / 1000) * 1000;
+	}
+
+	/** @internal */
+	_toAudioBitrate(codec: AudioCodec) {
+		if ((PCM_AUDIO_CODECS as readonly string[]).includes(codec) || codec === 'flac') {
+			return -1;
+		}
+
+		const baseRates = {
+			aac: 128000, // 128kbps base for AAC
+			opus: 64000, // 64kbps base for Opus
+			mp3: 160000, // 160kbps base for MP3
+			vorbis: 64000, // 64kbps base for Vorbis
+		};
+
+		const baseBitrate = baseRates[codec as keyof typeof baseRates];
+		if (!baseBitrate) {
+			throw new Error(`Unhandled codec: ${codec}`);
+		}
+
+		let finalBitrate = baseBitrate * this._factor;
+
+		if (codec === 'aac') {
+			// AAC only works with specific bitrates, let's find the closest
+			const validRates = [96000, 128000, 160000, 192000];
+			finalBitrate = validRates.reduce((prev, curr) =>
+				Math.abs(curr - finalBitrate) < Math.abs(prev - finalBitrate) ? curr : prev,
+			);
+		} else if (codec === 'opus' || codec === 'vorbis') {
+			finalBitrate = Math.max(6000, finalBitrate);
+		} else if (codec === 'mp3') {
+			finalBitrate = Math.round(finalBitrate / 32000) * 32000;
+		}
+
+		return Math.round(finalBitrate / 1000) * 1000;
+	}
+}
+
+/** @public */
+export const QUALITY_VERY_LOW = new Quality(0.4);
+/** @public */
+export const QUALITY_LOW = new Quality(0.6);
+/** @public */
+export const QUALITY_MEDIUM = new Quality(1);
+/** @public */
+export const QUALITY_HIGH = new Quality(2);
+/** @public */
+export const QUALITY_VERY_HIGH = new Quality(4);
 
 const VALID_VIDEO_CODEC_STRING_PREFIXES = ['avc1', 'avc3', 'hev1', 'hvc1', 'vp8', 'vp09', 'av01'];
 const AVC_CODEC_STRING_REGEX = /^(avc1|avc3)\.[0-9a-fA-F]{6}$/;
@@ -1287,10 +1381,10 @@ export const validateAudioChunkMetadata = (metadata: EncodedAudioChunkMetadata |
 		|| metadata.decoderConfig.codec.startsWith('ulaw')
 		|| metadata.decoderConfig.codec.startsWith('alaw')
 	) {
-		if (!(PCM_CODECS as readonly string[]).includes(metadata.decoderConfig.codec)) {
+		if (!(PCM_AUDIO_CODECS as readonly string[]).includes(metadata.decoderConfig.codec)) {
 			throw new TypeError(
 				'Audio chunk metadata decoder configuration codec string for PCM must be one of the supported PCM'
-				+ ` codecs (${PCM_CODECS.join(', ')}).`,
+				+ ` codecs (${PCM_AUDIO_CODECS.join(', ')}).`,
 			);
 		}
 	}
@@ -1331,7 +1425,7 @@ export const canEncode = (codec: MediaCodec) => {
 export const canEncodeVideo = async (codec: VideoCodec, { width = 1280, height = 720, bitrate = 1e6 }: {
 	width?: number;
 	height?: number;
-	bitrate?: 1e6;
+	bitrate?: number;
 } = {}) => {
 	if (!VIDEO_CODECS.includes(codec)) {
 		return false;
@@ -1380,7 +1474,7 @@ export const canEncodeAudio = async (codec: AudioCodec, { numberOfChannels = 2, 
 		throw new TypeError('bitrate must be a positive integer.');
 	}
 
-	if ((PCM_CODECS as readonly string[]).includes(codec)) {
+	if ((PCM_AUDIO_CODECS as readonly string[]).includes(codec)) {
 		return true; // Because we encode these ourselves
 	}
 
@@ -1420,19 +1514,35 @@ export const getEncodableCodecs = async (): Promise<MediaCodec[]> => {
 };
 
 /** @public */
-export const getEncodableVideoCodecs = async (): Promise<VideoCodec[]> => {
-	const bools = await Promise.all(VIDEO_CODECS.map(canEncode));
-	return VIDEO_CODECS.filter((_, i) => bools[i]);
+export const getEncodableVideoCodecs = async (
+	checkedCodecs = VIDEO_CODECS as unknown as VideoCodec[],
+	options?: {
+		width?: number;
+		height?: number;
+		bitrate?: number;
+	},
+): Promise<VideoCodec[]> => {
+	const bools = await Promise.all(checkedCodecs.map(codec => canEncodeVideo(codec, options)));
+	return checkedCodecs.filter((_, i) => bools[i]);
 };
 
 /** @public */
-export const getEncodableAudioCodecs = async (): Promise<AudioCodec[]> => {
-	const bools = await Promise.all(AUDIO_CODECS.map(canEncode));
-	return AUDIO_CODECS.filter((_, i) => bools[i]);
+export const getEncodableAudioCodecs = async (
+	checkedCodecs = AUDIO_CODECS as unknown as AudioCodec[],
+	options?: {
+		numberOfChannels?: number;
+		sampleRate?: number;
+		bitrate?: number;
+	},
+): Promise<AudioCodec[]> => {
+	const bools = await Promise.all(checkedCodecs.map(codec => canEncodeAudio(codec, options)));
+	return checkedCodecs.filter((_, i) => bools[i]);
 };
 
 /** @public */
-export const getEncodableSubtitleCodecs = async (): Promise<SubtitleCodec[]> => {
-	const bools = await Promise.all(SUBTITLE_CODECS.map(canEncode));
-	return SUBTITLE_CODECS.filter((_, i) => bools[i]);
+export const getEncodableSubtitleCodecs = async (
+	checkedCodecs = SUBTITLE_CODECS as unknown as SubtitleCodec[],
+): Promise<SubtitleCodec[]> => {
+	const bools = await Promise.all(checkedCodecs.map(canEncodeSubtitles));
+	return checkedCodecs.filter((_, i) => bools[i]);
 };

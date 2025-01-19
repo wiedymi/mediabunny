@@ -42,11 +42,19 @@ export {
 export {
 	VIDEO_CODECS,
 	VideoCodec,
+	PCM_AUDIO_CODECS,
+	NON_PCM_AUDIO_CODECS,
 	AUDIO_CODECS,
 	AudioCodec,
 	SUBTITLE_CODECS,
 	SubtitleCodec,
 	MediaCodec,
+	Quality,
+	QUALITY_VERY_LOW,
+	QUALITY_LOW,
+	QUALITY_MEDIUM,
+	QUALITY_HIGH,
+	QUALITY_VERY_HIGH,
 	canEncode,
 	canEncodeVideo,
 	canEncodeAudio,
@@ -57,7 +65,7 @@ export {
 	getEncodableSubtitleCodecs,
 } from './codec';
 export { Target, BufferTarget, StreamTarget, StreamTargetChunk, StreamTargetOptions } from './target';
-export { Rotation, TransformationMatrix, AnyIterable } from './misc';
+export { Rotation, TransformationMatrix, AnyIterable, setVideoFrameTiming } from './misc';
 export { Source, BufferSource, BlobSource, UrlSource } from './source';
 export {
 	InputFormat,
@@ -96,5 +104,6 @@ export {
 	AudioBufferSink,
 	WrappedAudioBuffer,
 } from './media-sink';
+export { convert, ConversionOptions, ConversionInfo } from './conversion';
 
 // 🐡🦔

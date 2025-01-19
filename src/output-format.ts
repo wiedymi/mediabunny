@@ -1,4 +1,14 @@
-import { AUDIO_CODECS, MediaCodec, PCM_CODECS, SUBTITLE_CODECS, VIDEO_CODECS } from './codec';
+import {
+	AUDIO_CODECS,
+	AudioCodec,
+	MediaCodec,
+	NON_PCM_AUDIO_CODECS,
+	PCM_AUDIO_CODECS,
+	SUBTITLE_CODECS,
+	SubtitleCodec,
+	VIDEO_CODECS,
+	VideoCodec,
+} from './codec';
 import { IsobmffMuxer } from './isobmff/isobmff-muxer';
 import { MatroskaMuxer } from './matroska/matroska-muxer';
 import { Muxer } from './muxer';
@@ -26,15 +36,18 @@ export abstract class OutputFormat {
 	abstract getSupportedTrackCounts(): TrackCountLimits;
 
 	getSupportedVideoCodecs() {
-		return this.getSupportedCodecs().filter(codec => (VIDEO_CODECS as readonly string[]).includes(codec));
+		return this.getSupportedCodecs()
+			.filter(codec => (VIDEO_CODECS as readonly string[]).includes(codec)) as VideoCodec[];
 	}
 
 	getSupportedAudioCodecs() {
-		return this.getSupportedCodecs().filter(codec => (AUDIO_CODECS as readonly string[]).includes(codec));
+		return this.getSupportedCodecs()
+			.filter(codec => (AUDIO_CODECS as readonly string[]).includes(codec)) as AudioCodec[];
 	}
 
 	getSupportedSubtitleCodecs() {
-		return this.getSupportedCodecs().filter(codec => (SUBTITLE_CODECS as readonly string[]).includes(codec));
+		return this.getSupportedCodecs()
+			.filter(codec => (SUBTITLE_CODECS as readonly string[]).includes(codec)) as SubtitleCodec[];
 	}
 
 	/** @internal */
@@ -99,9 +112,9 @@ export class Mp4OutputFormat extends IsobmffOutputFormat {
 
 	static getSupportedCodecs(): MediaCodec[] {
 		return [
-			'avc', 'hevc', 'vp8', 'vp9', 'av1',
-			'aac', 'mp3', 'opus', 'vorbis', 'flac', // No PCM codecs
-			'webvtt',
+			...VIDEO_CODECS,
+			...NON_PCM_AUDIO_CODECS,
+			...SUBTITLE_CODECS,
 		];
 	}
 
@@ -132,8 +145,8 @@ export class MovOutputFormat extends IsobmffOutputFormat {
 
 	static getSupportedCodecs(): MediaCodec[] {
 		return [
-			'avc', 'hevc', 'vp8', 'vp9', 'av1',
-			'aac', 'mp3', 'opus', 'vorbis', 'flac', ...PCM_CODECS,
+			...VIDEO_CODECS,
+			...AUDIO_CODECS,
 		];
 	}
 
@@ -199,11 +212,10 @@ export class MkvOutputFormat extends OutputFormat {
 
 	static getSupportedCodecs(): MediaCodec[] {
 		return [
-			'avc', 'hevc', 'vp8', 'vp9', 'av1',
-			'aac', 'mp3', 'opus', 'vorbis', 'flac',
-			// pcm-s8, pcm-f32be, ulaw and alaw are not supported
-			'pcm-u8', 'pcm-s16', 'pcm-s16be', 'pcm-s24', 'pcm-s24be', 'pcm-s32', 'pcm-s32be', 'pcm-f32',
-			'webvtt',
+			...VIDEO_CODECS,
+			...NON_PCM_AUDIO_CODECS,
+			...PCM_AUDIO_CODECS.filter(codec => !['pcm-s8', 'pcm-f32be', 'ulaw', 'alaw'].includes(codec)),
+			...SUBTITLE_CODECS,
 		];
 	}
 }
@@ -228,9 +240,9 @@ export class WebMOutputFormat extends MkvOutputFormat {
 
 	static override getSupportedCodecs(): MediaCodec[] {
 		return [
-			'vp8', 'vp9', 'av1',
-			'opus', 'vorbis',
-			'webvtt',
+			...VIDEO_CODECS.filter(codec => ['vp8', 'vp9', 'av1'].includes(codec)),
+			...AUDIO_CODECS.filter(codec => ['opus', 'vorbis'].includes(codec)),
+			...SUBTITLE_CODECS,
 		];
 	}
 
@@ -275,7 +287,9 @@ export class WaveOutputFormat extends OutputFormat {
 
 	static getSupportedCodecs(): MediaCodec[] {
 		return [
-			'pcm-u8', 'pcm-s16', 'pcm-s24', 'pcm-s32', 'pcm-f32', 'ulaw', 'alaw',
+			...PCM_AUDIO_CODECS.filter(codec =>
+				['pcm-s16', 'pcm-s24', 'pcm-s32', 'pcm-f32', 'pcm-u8', 'ulaw', 'alaw'].includes(codec),
+			),
 		];
 	}
 }

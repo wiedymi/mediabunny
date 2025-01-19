@@ -60,27 +60,33 @@ const invertObject = <K extends PropertyKey, V extends PropertyKey>(object: Reco
 	return Object.fromEntries(Object.entries(object).map(([key, value]) => [value, key])) as Record<V, K>;
 };
 
-// These maps are taken from https://www.matroska.org/technical/elements.html,
-// which references the tables in ITU-T H.273 - they should be valid for Matroska and ISOBMFF.
-export const COLOR_PRIMARIES_MAP: Record<VideoColorPrimaries, number> = {
+// For the color space mappings, see Rec. ITU-T H.273.
+
+export const COLOR_PRIMARIES_MAP = {
 	bt709: 1, // ITU-R BT.709
 	bt470bg: 5, // ITU-R BT.470BG
 	smpte170m: 6, // ITU-R BT.601 525 - SMPTE 170M
+	bt2020: 9, // ITU-R BT.202
+	smpte432: 12, // SMPTE EG 432-1
 };
 export const COLOR_PRIMARIES_MAP_INVERSE = invertObject(COLOR_PRIMARIES_MAP);
 
-export const TRANSFER_CHARACTERISTICS_MAP: Record<VideoTransferCharacteristics, number> = {
+export const TRANSFER_CHARACTERISTICS_MAP = {
 	'bt709': 1, // ITU-R BT.709
 	'smpte170m': 6, // SMPTE 170M
+	'linear': 8, // Linear transfer characteristics
 	'iec61966-2-1': 13, // IEC 61966-2-1
+	'pg': 16, // Rec. ITU-R BT.2100-2 perceptual quantization (PQ) system
+	'hlg': 18, // Rec. ITU-R BT.2100-2 hybrid loggamma (HLG) system
 };
 export const TRANSFER_CHARACTERISTICS_MAP_INVERSE = invertObject(TRANSFER_CHARACTERISTICS_MAP);
 
-export const MATRIX_COEFFICIENTS_MAP: Record<VideoMatrixCoefficients, number> = {
-	rgb: 0, // Identity
-	bt709: 1, // ITU-R BT.709
-	bt470bg: 5, // ITU-R BT.470BG
-	smpte170m: 6, // SMPTE 170M
+export const MATRIX_COEFFICIENTS_MAP = {
+	'rgb': 0, // Identity
+	'bt709': 1, // ITU-R BT.709
+	'bt470bg': 5, // ITU-R BT.470BG
+	'smpte170m': 6, // SMPTE 170M
+	'bt2020-ncl': 9, // ITU-R BT.2020-2 (non-constant luminance)
 };
 export const MATRIX_COEFFICIENTS_MAP_INVERSE = invertObject(MATRIX_COEFFICIENTS_MAP);
 
@@ -127,7 +133,7 @@ export class AsyncMutex {
 	}
 }
 
-export const rotationMatrix = (rotationInDegrees: Rotation): TransformationMatrix => {
+export const rotationMatrix = (rotationInDegrees: number): TransformationMatrix => {
 	const theta = rotationInDegrees * (Math.PI / 180);
 	const cosTheta = Math.round(Math.cos(theta));
 	const sinTheta = Math.round(Math.sin(theta));
@@ -138,6 +144,18 @@ export const rotationMatrix = (rotationInDegrees: Rotation): TransformationMatri
 		-sinTheta, cosTheta, 0,
 		0, 0, 1,
 	];
+};
+
+/** Extracts the rotation component from a transformation matrix, in degrees. */
+export const extractRotationFromMatrix = (matrix: TransformationMatrix) => {
+	const [m11, , , m21] = matrix;
+
+	const scaleX = Math.hypot(m11, m21);
+
+	const cosTheta = m11 / scaleX;
+	const sinTheta = m21 / scaleX;
+
+	return Math.atan2(sinTheta, cosTheta) * (180 / Math.PI);
 };
 
 export const IDENTITY_MATRIX = rotationMatrix(0);
@@ -331,3 +349,17 @@ export const clamp = (value: number, min: number, max: number) => {
 };
 
 export const UNDETERMINED_LANGUAGE = 'und';
+
+/** @public */
+export const setVideoFrameTiming = (frame: VideoFrame, timing: {
+	timestamp?: number;
+	duration?: number;
+}) => {
+	const clone = new VideoFrame(frame, {
+		timestamp: timing.timestamp && 1e6 * timing.timestamp,
+		duration: timing.duration && 1e6 * timing.duration,
+	});
+	frame.close();
+
+	return clone;
+};

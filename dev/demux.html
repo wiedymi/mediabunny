@@ -6,32 +6,23 @@
 	const fileInput = document.createElement('input');
 	fileInput.type = 'file';
 	document.body.append(fileInput);
-	
-	/*
-	const encoder = new AudioEncoder({
-		output: console.log,
-		error: console.error
-	});
-	encoder.configure({
-		codec: 'vorbis',
-		numberOfChannels: 2,
-		sampleRate: 48000,
-		bitrate: 128000
-	});
-
-	let audioData = new AudioData({
-		format: 'f32',
-		numberOfChannels: 2,
-		sampleRate: 48000,
-		timestamp: 0,
-		data: new Float32Array(2 * 48000),
-		numberOfFrames: 48000
-	});
-	encoder.encode(audioData);
-	*/
 
 	fileInput.addEventListener('change', async () => {
 		const file = fileInput.files[0];
+		const source = new Metamuxer.BlobSource(file);
+
+		const input = new Metamuxer.Input({
+			formats: Metamuxer.ALL_FORMATS,
+			source
+		});
+
+		const videoTrack = await input.getPrimaryVideoTrack();
+		const sink = new Metamuxer.EncodedVideoSampleSink(videoTrack);
+
+		console.log(await sink.getSample(16));
+		console.log(await sink.getFirstSample());
+
+		/*
 		const source = new Metamuxer.BufferSource(await file.arrayBuffer()) ?? new Metamuxer.BlobSource(file);
 
 		const start = performance.now();	
@@ -45,6 +36,7 @@
 			target: new Metamuxer.BufferTarget()
 		});
 		output.start();
+		*/
 
 		/*
 		const audioTrack = await input.getPrimaryAudioTrack();

@@ -31,7 +31,7 @@ import {
 	parseSubtitleTimestamp,
 } from '../subtitles';
 import {
-	PCM_CODECS,
+	PCM_AUDIO_CODECS,
 	PcmAudioCodec,
 	generateAv1CodecConfigurationFromCodecString,
 	parsePcmCodec,
@@ -308,7 +308,7 @@ export class MatroskaMuxer extends Muxer {
 							},
 							{
 								id: EBMLId.ProjectionPoseRoll,
-								data: (rotation + 180) % 360 - 180, // [0, 270] -> [-180, 90]
+								data: new EBMLFloat32((rotation + 180) % 360 - 180), // [0, 270] -> [-180, 90]
 							},
 						],
 					}
@@ -321,7 +321,7 @@ export class MatroskaMuxer extends Muxer {
 	}
 
 	private audioSpecificTrackInfo(trackData: MatroskaAudioTrackData) {
-		const pcmInfo = (PCM_CODECS as readonly string[]).includes(trackData.track.source._codec)
+		const pcmInfo = (PCM_AUDIO_CODECS as readonly string[]).includes(trackData.track.source._codec)
 			? parsePcmCodec(trackData.track.source._codec as PcmAudioCodec)
 			: null;
 
@@ -659,16 +659,16 @@ export class MatroskaMuxer extends Muxer {
 		// We can only finalize this cluster (and begin a new one) if we know that each track will be able to
 		// start the new one with a key frame.
 		const keyFrameQueuedEverywhere = this.trackDatas.every((otherTrackData) => {
-			if (otherTrackData.track.source._closed) {
-				return true;
-			}
-
 			if (trackData === otherTrackData) {
 				return chunk.type === 'key';
 			}
 
 			const firstQueuedSample = otherTrackData.chunkQueue[0];
-			return firstQueuedSample && firstQueuedSample.type === 'key';
+			if (firstQueuedSample) {
+				return firstQueuedSample.type === 'key';
+			}
+
+			return otherTrackData.track.source._closed;
 		});
 
 		if (
