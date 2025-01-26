@@ -1,4 +1,4 @@
-import { assert } from '../misc';
+import { assert, toDataView } from '../misc';
 import { Muxer } from '../muxer';
 import { Output, OutputAudioTrack } from '../output';
 import { EncodedAudioSample } from '../sample';
@@ -36,7 +36,7 @@ export class Mp3Muxer extends Muxer {
 
 		try {
 			if (!this.xingFrameData) {
-				const view = new DataView(sample.data.buffer, sample.data.byteOffset, sample.data.byteLength);
+				const view = toDataView(sample.data);
 				if (view.byteLength < 4) {
 					throw new Error('Invalid MP3 header in sample.');
 				}

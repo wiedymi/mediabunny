@@ -8,6 +8,7 @@ import {
 	last,
 	readBits,
 	reverseBitsU32,
+	toDataView,
 } from './misc';
 import { SubtitleMetadata } from './subtitles';
 
@@ -306,7 +307,7 @@ export const extractVideoCodecString = (trackInfo: {
 			throw new TypeError('HEVC description must be provided.');
 		}
 
-		const view = new DataView(description.buffer, description.byteOffset, description.byteLength);
+		const view = toDataView(description);
 		let codecString = 'hev1.';
 
 		// general_profile_space and general_profile_idc

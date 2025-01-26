@@ -9,6 +9,7 @@ import {
 	mapAsyncGenerator,
 	promiseWithResolvers,
 	toAsyncIterator,
+	toDataView,
 	validateAnyIterable,
 } from './misc';
 import { fromAlaw, fromUlaw } from './pcm';
@@ -1015,7 +1016,7 @@ class PcmAudioDecoderWrapper extends DecoderWrapper<EncodedAudioSample, AudioDat
 	}
 
 	decode(sample: EncodedAudioSample) {
-		const inputView = new DataView(sample.data.buffer, sample.data.byteOffset, sample.byteLength);
+		const inputView = toDataView(sample.data);
 
 		const numberOfFrames = sample.byteLength / this.decoderConfig.numberOfChannels / this.inputSampleSize;
 

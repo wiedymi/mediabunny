@@ -54,6 +54,10 @@ export const toUint8Array = (source: AllowSharedBufferSource): Uint8Array => {
 	}
 };
 
+export const toDataView = (bytes: Uint8Array) => {
+	return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+};
+
 export const textEncoder = new TextEncoder();
 
 const invertObject = <K extends PropertyKey, V extends PropertyKey>(object: Record<K, V>) => {
