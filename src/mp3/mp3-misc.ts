@@ -33,6 +33,7 @@ export const INFO = 0x496e666f;
 
 export type FrameHeader = {
 	startPos: number;
+	totalSize: number;
 	mpegVersionId: number;
 	layer: number;
 	bitrate: number;
@@ -43,9 +44,6 @@ export type FrameHeader = {
 	copyright: number;
 	original: number;
 	emphasis: number;
-	totalSize: number;
-	dataStart: number;
-	dataSize: number;
 };
 
 export const computeMp3FrameSize = (bitrate: number, sampleRate: number, padding: number) => {
@@ -113,6 +111,7 @@ export const readFrameHeader = (word: number, reader: { pos: number; fileSize: n
 
 	return {
 		startPos: startPos,
+		totalSize: frameLength,
 		mpegVersionId,
 		layer,
 		bitrate,
@@ -123,8 +122,5 @@ export const readFrameHeader = (word: number, reader: { pos: number; fileSize: n
 		copyright,
 		original,
 		emphasis,
-		totalSize: frameLength,
-		dataStart: startPos + 4,
-		dataSize: frameLength - 4,
 	};
 };
