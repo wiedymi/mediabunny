@@ -24,7 +24,7 @@ export class WaveMuxer extends Muxer {
 	}
 
 	async addEncodedVideoSample() {
-		throw new Error('WAVE format does not support video.');
+		throw new Error('WAVE does not support video.');
 	}
 
 	async addEncodedAudioSample(
@@ -46,19 +46,17 @@ export class WaveMuxer extends Muxer {
 
 			this.validateAndNormalizeTimestamp(track, sample.timestamp, sample.type === 'key');
 
-			if (sample.data) {
-				this.output._writer.write(sample.data);
-				this.dataSize += sample.data.byteLength;
-			}
+			this.writer.write(sample.data);
+			this.dataSize += sample.data.byteLength;
 
-			await this.output._writer.flush();
+			await this.writer.flush();
 		} finally {
 			release();
 		}
 	}
 
 	async addSubtitleCue() {
-		throw new Error('WAVE format does not support subtitles.');
+		throw new Error('WAVE does not support subtitles.');
 	}
 
 	private writeHeader(track: OutputAudioTrack, config: AudioDecoderConfig) {
@@ -102,7 +100,7 @@ export class WaveMuxer extends Muxer {
 	}
 
 	async finalize() {
-		const currentPos = this.writer.getPos();
+		const endPos = this.writer.getPos();
 
 		// Write file size
 		this.writer.seek(4);
@@ -112,6 +110,6 @@ export class WaveMuxer extends Muxer {
 		this.writer.seek(40);
 		this.riffWriter.writeU32(this.dataSize);
 
-		this.writer.seek(currentPos);
+		this.writer.seek(endPos);
 	}
 }

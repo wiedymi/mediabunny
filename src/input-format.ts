@@ -180,39 +180,6 @@ export class WebMInputFormat extends MatroskaInputFormat {
 }
 
 /** @public */
-export class WaveInputFormat extends InputFormat {
-	async _canReadInput(input: Input) {
-		const sourceSize = await input._mainReader.source._getSize();
-		if (sourceSize < 12) {
-			return false;
-		}
-
-		const riffReader = new RiffReader(input._mainReader);
-		const riffType = riffReader.readAscii(4);
-		if (riffType !== 'RIFF' && riffType !== 'RIFX') {
-			return false;
-		}
-
-		riffReader.pos = 8;
-		const format = riffReader.readAscii(4);
-		return format === 'WAVE';
-	}
-
-	/** @internal */
-	_createDemuxer(input: Input) {
-		return new WaveDemuxer(input);
-	}
-
-	getName() {
-		return 'WAVE';
-	}
-
-	getMimeType() {
-		return 'audio/wav';
-	}
-}
-
-/** @public */
 export class Mp3InputFormat extends InputFormat {
 	async _canReadInput(input: Input) {
 		const sourceSize = await input._mainReader.source._getSize();
@@ -245,6 +212,39 @@ export class Mp3InputFormat extends InputFormat {
 
 	getMimeType() {
 		return 'audio/mpeg';
+	}
+}
+
+/** @public */
+export class WaveInputFormat extends InputFormat {
+	async _canReadInput(input: Input) {
+		const sourceSize = await input._mainReader.source._getSize();
+		if (sourceSize < 12) {
+			return false;
+		}
+
+		const riffReader = new RiffReader(input._mainReader);
+		const riffType = riffReader.readAscii(4);
+		if (riffType !== 'RIFF' && riffType !== 'RIFX') {
+			return false;
+		}
+
+		riffReader.pos = 8;
+		const format = riffReader.readAscii(4);
+		return format === 'WAVE';
+	}
+
+	/** @internal */
+	_createDemuxer(input: Input) {
+		return new WaveDemuxer(input);
+	}
+
+	getName() {
+		return 'WAVE';
+	}
+
+	getMimeType() {
+		return 'audio/wav';
 	}
 }
 

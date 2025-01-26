@@ -14,12 +14,12 @@ export abstract class Muxer {
 	abstract start(): Promise<void>;
 	abstract addEncodedVideoSample(
 		track: OutputVideoTrack,
-		chunk: EncodedVideoSample,
+		sample: EncodedVideoSample,
 		meta?: EncodedVideoChunkMetadata
 	): Promise<void>;
 	abstract addEncodedAudioSample(
 		track: OutputAudioTrack,
-		chunk: EncodedAudioSample,
+		sample: EncodedAudioSample,
 		meta?: EncodedAudioChunkMetadata
 	): Promise<void>;
 	abstract addSubtitleCue(track: OutputSubtitleTrack, cue: SubtitleCue, meta?: SubtitleMetadata): Promise<void>;

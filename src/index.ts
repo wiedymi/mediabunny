@@ -18,6 +18,7 @@ export {
 	MkvOutputFormatOptions,
 	WebMOutputFormat,
 	WebMOutputFormatOptions,
+	Mp3OutputFormat,
 	WaveOutputFormat,
 	TrackCountLimits,
 	InclusiveRange,

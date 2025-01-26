@@ -5,7 +5,8 @@ import { InputAudioTrack, InputAudioTrackBacking } from '../input-track';
 import { SampleRetrievalOptions } from '../media-sink';
 import { assert, binarySearchExact, binarySearchLessOrEqual, last, UNDETERMINED_LANGUAGE } from '../misc';
 import { EncodedAudioSample, PLACEHOLDER_DATA } from '../sample';
-import { FrameHeader, Mp3Reader } from './mp3-reader';
+import { FrameHeader, getXingOffset, INFO, XING } from './mp3-misc';
+import { Mp3Reader } from './mp3-reader';
 
 const AUDIO_SAMPLES_PER_FRAME = 1152;
 
@@ -54,13 +55,10 @@ export class Mp3Demuxer extends Demuxer {
 					break;
 				}
 
-				const xingOffset = header.mpegVersionId === 3
-					? (header.channelCount === 1 ? 21 : 36)
-					: (header.channelCount === 1 ? 13 : 21);
+				const xingOffset = getXingOffset(header.mpegVersionId, header.channel);
 				this.reader.pos = header.startPos + xingOffset;
 				const word = this.reader.readU32();
-				const isXing = word === 0x58696e67 // 'Xing'
-					|| word === 0x496e666f; // 'Info'
+				const isXing = word === XING || word === INFO;
 
 				this.reader.pos = header.startPos + header.totalSize - 1; // -1 in case the frame is 1 byte too short
 
@@ -137,7 +135,7 @@ class Mp3AudioTrackBacking implements InputAudioTrackBacking {
 
 	async getNumberOfChannels() {
 		assert(this.demuxer.firstFrameHeader);
-		return this.demuxer.firstFrameHeader.channelCount;
+		return this.demuxer.firstFrameHeader.channel === 3 ? 1 : 2;
 	}
 
 	async getSampleRate() {
@@ -150,7 +148,7 @@ class Mp3AudioTrackBacking implements InputAudioTrackBacking {
 
 		return {
 			codec: 'mp3',
-			numberOfChannels: this.demuxer.firstFrameHeader.channelCount,
+			numberOfChannels: this.demuxer.firstFrameHeader.channel === 3 ? 1 : 2,
 			sampleRate: this.demuxer.firstFrameHeader.sampleRate,
 		};
 	}

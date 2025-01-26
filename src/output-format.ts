@@ -11,6 +11,7 @@ import {
 } from './codec';
 import { IsobmffMuxer } from './isobmff/isobmff-muxer';
 import { MatroskaMuxer } from './matroska/matroska-muxer';
+import { Mp3Muxer } from './mp3/mp3-muxer';
 import { Muxer } from './muxer';
 import { Output, TrackType } from './output';
 import { WaveMuxer } from './wave/wave-muxer';
@@ -253,6 +254,40 @@ export class WebMOutputFormat extends MkvOutputFormat {
 		}
 
 		return '';
+	}
+}
+
+/** @public */
+export class Mp3OutputFormat extends OutputFormat {
+	/** @internal */
+	_createMuxer(output: Output) {
+		return new Mp3Muxer(output);
+	}
+
+	/** @internal */
+	_getName() {
+		return 'MP3';
+	}
+
+	getSupportedTrackCounts(): TrackCountLimits {
+		return {
+			video: { min: 0, max: 0 },
+			audio: { min: 1, max: 1 },
+			subtitle: { min: 0, max: 0 },
+			total: { min: 1, max: 1 },
+		};
+	}
+
+	getFileExtension() {
+		return '.mp3';
+	}
+
+	getSupportedCodecs() {
+		return Mp3OutputFormat.getSupportedCodecs();
+	}
+
+	static getSupportedCodecs(): MediaCodec[] {
+		return ['mp3'];
 	}
 }
 

@@ -16,11 +16,45 @@
 			source
 		});
 
+		const output = new Metamuxer.Output({
+			format: new Metamuxer.Mp3OutputFormat(),
+			target: new Metamuxer.BufferTarget()
+		});
+
+		const audioTrack = await input.getPrimaryAudioTrack();
+		const sink = new Metamuxer.EncodedAudioSampleSink(audioTrack);
+
+		const mediaSource = new Metamuxer.EncodedAudioSampleSource(await audioTrack.getCodec());
+		output.addAudioTrack(mediaSource);
+
+		output.start();
+
+		for await (const sample of sink.samples()) {
+			await mediaSource.digest(sample);
+		}
+
+		await output.finalize();
+
+		function download(blob, filename) {
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = filename;
+			a.click();
+			URL.revokeObjectURL(url);
+		}	
+		
+		console.log(output.target.buffer)
+		download(new Blob([output.target.buffer]), 'converted.mp3');	
+	
+
+		/*
 		const videoTrack = await input.getPrimaryVideoTrack();
 		const sink = new Metamuxer.EncodedVideoSampleSink(videoTrack);
 
 		console.log(await sink.getSample(16));
 		console.log(await sink.getFirstSample());
+		*/
 
 		/*
 		const source = new Metamuxer.BufferSource(await file.arrayBuffer()) ?? new Metamuxer.BlobSource(file);
