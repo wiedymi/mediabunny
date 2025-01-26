@@ -1,3 +1,4 @@
+import { customAudioEncoders, customVideoEncoders } from './custom-coder';
 import {
 	COLOR_PRIMARIES_MAP,
 	MATRIX_COEFFICIENTS_MAP,
@@ -1098,7 +1099,13 @@ export class Quality {
 		} else if (codec === 'opus' || codec === 'vorbis') {
 			finalBitrate = Math.max(6000, finalBitrate);
 		} else if (codec === 'mp3') {
-			finalBitrate = Math.round(finalBitrate / 32000) * 32000;
+			const validRates = [
+				8000, 16000, 24000, 32000, 40000, 48000, 64000, 80000,
+				96000, 112000, 128000, 160000, 192000, 224000, 256000, 320000,
+			];
+			finalBitrate = validRates.reduce((prev, curr) =>
+				Math.abs(curr - finalBitrate) < Math.abs(prev - finalBitrate) ? curr : prev,
+			);
 		}
 
 		return Math.round(finalBitrate / 1000) * 1000;
@@ -1441,6 +1448,26 @@ export const canEncodeVideo = async (codec: VideoCodec, { width = 1280, height =
 		throw new TypeError('bitrate must be a positive integer.');
 	}
 
+	if (customVideoEncoders.length > 0) {
+		const encoderConfig: VideoEncoderConfig = {
+			codec: buildVideoCodecString(
+				codec,
+				width,
+				height,
+				bitrate,
+			),
+			width,
+			height,
+			bitrate,
+			...getVideoEncoderConfigExtension(codec),
+		};
+
+		if (customVideoEncoders.some(x => x.supports(codec, encoderConfig))) {
+			// There's a custom encoder
+			return true;
+		}
+	}
+
 	if (typeof VideoEncoder === 'undefined') {
 		return false;
 	}
@@ -1473,6 +1500,25 @@ export const canEncodeAudio = async (codec: AudioCodec, { numberOfChannels = 2, 
 	}
 	if (!Number.isInteger(bitrate) || bitrate <= 0) {
 		throw new TypeError('bitrate must be a positive integer.');
+	}
+
+	if (customAudioEncoders.length > 0) {
+		const encoderConfig: AudioEncoderConfig = {
+			codec: buildAudioCodecString(
+				codec,
+				numberOfChannels,
+				sampleRate,
+			),
+			numberOfChannels,
+			sampleRate,
+			bitrate,
+			...getAudioEncoderConfigExtension(codec),
+		};
+
+		if (customAudioEncoders.some(x => x.supports(codec, encoderConfig))) {
+			// There's a custom encoder
+			return true;
+		}
 	}
 
 	if ((PCM_AUDIO_CODECS as readonly string[]).includes(codec)) {

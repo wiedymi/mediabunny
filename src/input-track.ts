@@ -1,6 +1,7 @@
 import { AudioCodec, MediaCodec, VideoCodec } from './codec';
+import { customAudioDecoders, customVideoDecoders } from './custom-coder';
 import { EncodedAudioSampleSink, EncodedVideoSampleSink, SampleRetrievalOptions } from './media-sink';
-import { Rotation } from './misc';
+import { assert, Rotation } from './misc';
 import { TrackType } from './output';
 import { EncodedAudioSample, EncodedVideoSample } from './sample';
 
@@ -137,6 +138,17 @@ export class InputVideoTrack extends InputTrack {
 				return false;
 			}
 
+			const codec = await this.getCodec();
+			assert(codec !== null);
+
+			if (customVideoDecoders.some(x => x.supports(codec, decoderConfig))) {
+				return true;
+			}
+
+			if (typeof VideoDecoder === 'undefined') {
+				return false;
+			}
+
 			const support = await VideoDecoder.isConfigSupported(decoderConfig);
 			return support.supported === true;
 		} catch (error) {
@@ -206,9 +218,20 @@ export class InputAudioTrack extends InputTrack {
 				return false;
 			}
 
+			const codec = await this.getCodec();
+			assert(codec !== null);
+
+			if (customAudioDecoders.some(x => x.supports(codec, decoderConfig))) {
+				return true;
+			}
+
 			if (decoderConfig.codec.startsWith('pcm-')) {
 				return true; // Since we decode it ourselves
 			} else {
+				if (typeof AudioDecoder === 'undefined') {
+					return false;
+				}
+
 				const support = await AudioDecoder.isConfigSupported(decoderConfig);
 				return support.supported === true;
 			}

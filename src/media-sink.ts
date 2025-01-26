@@ -1,4 +1,5 @@
-import { parsePcmCodec, PCM_AUDIO_CODECS, PcmAudioCodec } from './codec';
+import { parsePcmCodec, PCM_AUDIO_CODECS, PcmAudioCodec, VideoCodec, AudioCodec } from './codec';
+import { CustomVideoDecoder, customVideoDecoders, CustomAudioDecoder, customAudioDecoders } from './custom-coder';
 import { InputAudioTrack, InputVideoTrack } from './input-track';
 import {
 	AnyIterable,
@@ -579,40 +580,57 @@ export class EncodedVideoSampleSink extends BaseSampleSink<EncodedVideoSample> {
 }
 
 class VideoDecoderWrapper extends DecoderWrapper<EncodedVideoSample, VideoFrame> {
-	decoder: VideoDecoder;
+	decoder: VideoDecoder | null = null;
 	pendingSamples: EncodedVideoSample[] = [];
+
+	customDecoder: CustomVideoDecoder | null = null;
+	lastCustomDecoderPromise = Promise.resolve();
+	customDecoderQueueSize = 0;
 
 	constructor(
 		onFrame: (frame: WrappedMediaFrame<VideoFrame, EncodedVideoSample>) => unknown,
 		onError: (error: DOMException) => unknown,
+		codec: VideoCodec,
 		decoderConfig: VideoDecoderConfig,
 	) {
 		super(onFrame, onError);
 
-		this.decoder = new VideoDecoder({
-			output: (frame) => {
-				const sample = this.pendingSamples.shift();
-				assert(sample);
+		const frameHandler = (frame: VideoFrame) => {
+			const sample = this.pendingSamples.shift();
+			assert(sample);
 
-				// Let's get these from the sample instead of the frame, as the frame has no innate timing info
-				// (unlike AudioData), so the sample will always be more accurate.
-				const timestamp = sample.timestamp;
-				const duration = sample.duration;
+			// Let's get these from the sample instead of the frame, as the frame has no innate timing info
+			// (unlike AudioData), so the sample will always be more accurate.
+			const timestamp = sample.timestamp;
+			const duration = sample.duration;
 
-				onFrame({
-					frame,
-					sample,
-					timestamp,
-					duration,
-				});
-			},
-			error: onError,
-		});
-		this.decoder.configure(decoderConfig);
+			onFrame({
+				frame,
+				sample,
+				timestamp,
+				duration,
+			});
+		};
+
+		const MatchingCustomDecoder = customVideoDecoders.find(x => x.supports(codec, decoderConfig));
+		if (MatchingCustomDecoder) {
+			this.customDecoder = new MatchingCustomDecoder(codec, decoderConfig, frameHandler);
+		} else {
+			this.decoder = new VideoDecoder({
+				output: frameHandler,
+				error: onError,
+			});
+			this.decoder.configure(decoderConfig);
+		}
 	}
 
 	getDecodeQueueSize() {
-		return this.decoder.decodeQueueSize;
+		if (this.customDecoder) {
+			return this.customDecoderQueueSize;
+		} else {
+			assert(this.decoder);
+			return this.decoder.decodeQueueSize;
+		}
 	}
 
 	decode(sample: EncodedVideoSample) {
@@ -620,15 +638,35 @@ class VideoDecoderWrapper extends DecoderWrapper<EncodedVideoSample, VideoFrame>
 		const insertionIndex = binarySearchLessOrEqual(this.pendingSamples, sample.timestamp, x => x.timestamp);
 		this.pendingSamples.splice(insertionIndex + 1, 0, sample);
 
-		this.decoder.decode(sample.toEncodedVideoChunk());
+		if (this.customDecoder) {
+			this.customDecoderQueueSize++;
+			this.lastCustomDecoderPromise = this.lastCustomDecoderPromise.then(() => {
+				return this.customDecoder!.decode(sample);
+			});
+
+			void this.lastCustomDecoderPromise.then(() => this.customDecoderQueueSize--);
+		} else {
+			assert(this.decoder);
+			this.decoder.decode(sample.toEncodedVideoChunk());
+		}
 	}
 
 	flush() {
-		return this.decoder.flush();
+		if (this.customDecoder) {
+			return this.lastCustomDecoderPromise.then(() => this.customDecoder!.flush());
+		} else {
+			assert(this.decoder);
+			return this.decoder.flush();
+		}
 	}
 
 	close() {
-		this.decoder.close();
+		if (this.customDecoder) {
+			void this.lastCustomDecoderPromise.then(() => this.customDecoder!.flush());
+		} else {
+			assert(this.decoder);
+			this.decoder.close();
+		}
 	}
 }
 
@@ -666,10 +704,11 @@ export class VideoFrameSink extends BaseMediaFrameSink<EncodedVideoSample, Video
 			);
 		}
 
+		const codec = await this._videoTrack.getCodec();
 		const decoderConfig = await this._videoTrack.getDecoderConfig();
-		assert(decoderConfig);
+		assert(codec && decoderConfig);
 
-		return new VideoDecoderWrapper(onFrame, onError, decoderConfig);
+		return new VideoDecoderWrapper(onFrame, onError, codec, decoderConfig);
 	}
 
 	/** @internal */
@@ -848,22 +887,26 @@ export class EncodedAudioSampleSink extends BaseSampleSink<EncodedAudioSample> {
 }
 
 class AudioDecoderWrapper extends DecoderWrapper<EncodedAudioSample, AudioData> {
-	decoder: AudioDecoder;
+	decoder: AudioDecoder | null = null;
 	pendingSamples: EncodedAudioSample[] = [];
+
+	customDecoder: CustomAudioDecoder | null = null;
+	lastCustomDecoderPromise = Promise.resolve();
+	customDecoderQueueSize = 0;
 
 	constructor(
 		onData: (data: WrappedMediaFrame<AudioData, EncodedAudioSample>) => unknown,
 		onError: (error: DOMException) => unknown,
+		codec: AudioCodec,
 		decoderConfig: AudioDecoderConfig,
 	) {
 		super(onData, onError);
 
-		this.decoder = new AudioDecoder({ output: (data) => {
+		const dataHandler = (data: AudioData) => {
 			const sample = this.pendingSamples.shift();
 			assert(sample);
 
-			// We use the timing information from the data instead of sample as it will be more accurate. However,
-			// we also know these need to be multiple of the sample length, so let's round:
+			// We use the timing information from the data instead of sample as it will be more accurate
 			const timestamp = Math.round(data.timestamp / 1e6 * decoderConfig.sampleRate) / decoderConfig.sampleRate;
 			const duration = Math.round(data.duration / 1e6 * decoderConfig.sampleRate) / decoderConfig.sampleRate;
 
@@ -873,12 +916,27 @@ class AudioDecoderWrapper extends DecoderWrapper<EncodedAudioSample, AudioData> 
 				timestamp,
 				duration,
 			});
-		}, error: onError });
-		this.decoder.configure(decoderConfig);
+		};
+
+		const MatchingCustomDecoder = customAudioDecoders.find(x => x.supports(codec, decoderConfig));
+		if (MatchingCustomDecoder) {
+			this.customDecoder = new MatchingCustomDecoder(codec, decoderConfig, dataHandler);
+		} else {
+			this.decoder = new AudioDecoder({
+				output: dataHandler,
+				error: onError,
+			});
+			this.decoder.configure(decoderConfig);
+		}
 	}
 
 	getDecodeQueueSize() {
-		return this.decoder.decodeQueueSize;
+		if (this.customDecoder) {
+			return this.customDecoderQueueSize;
+		} else {
+			assert(this.decoder);
+			return this.decoder.decodeQueueSize;
+		}
 	}
 
 	decode(sample: EncodedAudioSample) {
@@ -886,15 +944,35 @@ class AudioDecoderWrapper extends DecoderWrapper<EncodedAudioSample, AudioData> 
 		const insertionIndex = binarySearchLessOrEqual(this.pendingSamples, sample.timestamp, x => x.timestamp);
 		this.pendingSamples.splice(insertionIndex + 1, 0, sample);
 
-		this.decoder.decode(sample.toEncodedAudioChunk());
+		if (this.customDecoder) {
+			this.customDecoderQueueSize++;
+			this.lastCustomDecoderPromise = this.lastCustomDecoderPromise.then(() => {
+				return this.customDecoder!.decode(sample);
+			});
+
+			void this.lastCustomDecoderPromise.then(() => this.customDecoderQueueSize--);
+		} else {
+			assert(this.decoder);
+			this.decoder.decode(sample.toEncodedAudioChunk());
+		}
 	}
 
 	flush() {
-		return this.decoder.flush();
+		if (this.customDecoder) {
+			return this.lastCustomDecoderPromise.then(() => this.customDecoder!.flush());
+		} else {
+			assert(this.decoder);
+			return this.decoder.flush();
+		}
 	}
 
 	close() {
-		this.decoder.close();
+		if (this.customDecoder) {
+			void this.lastCustomDecoderPromise.then(() => this.customDecoder!.flush());
+		} else {
+			assert(this.decoder);
+			this.decoder.close();
+		}
 	}
 }
 
@@ -1102,13 +1180,14 @@ export class AudioDataSink extends BaseMediaFrameSink<EncodedAudioSample, AudioD
 			);
 		}
 
+		const codec = await this._audioTrack.getCodec();
 		const decoderConfig = await this._audioTrack.getDecoderConfig();
-		assert(decoderConfig);
+		assert(codec && decoderConfig);
 
 		if ((PCM_AUDIO_CODECS as readonly string[]).includes(decoderConfig.codec)) {
 			return new PcmAudioDecoderWrapper(onData, onError, decoderConfig);
 		} else {
-			return new AudioDecoderWrapper(onData, onError, decoderConfig);
+			return new AudioDecoderWrapper(onData, onError, codec, decoderConfig);
 		}
 	}
 

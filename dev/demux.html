@@ -22,15 +22,18 @@
 		});
 
 		const audioTrack = await input.getPrimaryAudioTrack();
-		const sink = new Metamuxer.EncodedAudioSampleSink(audioTrack);
+		const sink = new Metamuxer.AudioDataSink(audioTrack);
 
-		const mediaSource = new Metamuxer.EncodedAudioSampleSource(await audioTrack.getCodec());
+		const mediaSource = new Metamuxer.AudioDataSource({
+			codec: 'mp3',
+			bitrate: 192000
+		});
 		output.addAudioTrack(mediaSource);
 
 		output.start();
 
-		for await (const sample of sink.samples()) {
-			await mediaSource.digest(sample);
+		for await (const { data } of sink.data()) {
+			await mediaSource.digest(data);
 		}
 
 		await output.finalize();

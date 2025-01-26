@@ -108,5 +108,13 @@ export {
 	WrappedAudioBuffer,
 } from './media-sink';
 export { convert, ConversionOptions, ConversionInfo } from './conversion';
+export {
+	CustomVideoDecoder,
+	CustomAudioDecoder,
+	CustomVideoEncoder,
+	CustomAudioEncoder,
+	registerDecoder,
+	registerEncoder,
+} from './custom-coder';
 
 // 🐡🦔

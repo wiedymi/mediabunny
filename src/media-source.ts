@@ -20,6 +20,12 @@ import { Muxer } from './muxer';
 import { SubtitleParser } from './subtitles';
 import { EncodedAudioSample, EncodedVideoSample } from './sample';
 import { toAlaw, toUlaw } from './pcm';
+import {
+	CustomVideoEncoder,
+	CustomAudioEncoder,
+	customVideoEncoders,
+	customAudioEncoders,
+} from './custom-coder';
 
 /** @public */
 export abstract class MediaSource {
@@ -175,15 +181,18 @@ const validateVideoEncodingConfig = (config: VideoEncodingConfig) => {
 
 class VideoEncoderWrapper {
 	private ensureEncoderPromise: Promise<void> | null = null;
+	private encoderInitialized = false;
 	private encoder: VideoEncoder | null = null;
 	private muxer: Muxer | null = null;
 	private lastMultipleOfKeyFrameInterval = -1;
 	private lastWidth: number | null = null;
 	private lastHeight: number | null = null;
 
-	constructor(private source: VideoSource, private encodingConfig: VideoEncodingConfig) {
-		validateVideoEncodingConfig(encodingConfig);
-	}
+	private customEncoder: CustomVideoEncoder | null = null;
+	private lastCustomEncoderPromise = Promise.resolve();
+	private customEncoderQueueSize = 0;
+
+	constructor(private source: VideoSource, private encodingConfig: VideoEncodingConfig) {}
 
 	async digest(videoFrame: VideoFrame, shouldClose: boolean, encodeOptions?: VideoEncoderEncodeOptions) {
 		this.source._ensureValidDigest();
@@ -201,14 +210,14 @@ class VideoEncoderWrapper {
 			this.lastHeight = videoFrame.codedHeight;
 		}
 
-		if (!this.encoder) {
+		if (!this.encoderInitialized) {
 			if (this.ensureEncoderPromise) {
 				await this.ensureEncoderPromise;
 			} else {
 				await this.ensureEncoder(videoFrame);
 			}
 		}
-		assert(this.encoder);
+		assert(this.encoderInitialized);
 
 		const keyFrameInterval = this.encodingConfig.keyFrameInterval ?? 5;
 		const multipleOfKeyFrameInterval = Math.floor((videoFrame.timestamp / 1e6) / keyFrameInterval);
@@ -216,22 +225,43 @@ class VideoEncoderWrapper {
 		// Ensure a key frame every KEY_FRAME_INTERVAL seconds. It is important that all video tracks follow the same
 		// "key frame" rhythm, because aligned key frames are required to start new fragments in ISOBMFF or clusters
 		// in Matroska.
-		this.encoder.encode(videoFrame, {
+		const finalEncodeOptions = {
 			...encodeOptions,
 			keyFrame: encodeOptions?.keyFrame
 				|| keyFrameInterval === 0
 				|| multipleOfKeyFrameInterval !== this.lastMultipleOfKeyFrameInterval,
-		});
-
-		if (shouldClose) {
-			videoFrame.close();
-		}
-
+		};
 		this.lastMultipleOfKeyFrameInterval = multipleOfKeyFrameInterval;
 
-		// We need to do this after sending the frame to the encoder as the frame otherwise might be closed
-		if (this.encoder.encodeQueueSize >= 4) {
-			await new Promise(resolve => this.encoder!.addEventListener('dequeue', resolve, { once: true }));
+		if (this.customEncoder) {
+			this.customEncoderQueueSize++;
+			this.lastCustomEncoderPromise = this.lastCustomEncoderPromise.then(() => {
+				return this.customEncoder!.encode(videoFrame, finalEncodeOptions);
+			});
+
+			void this.lastCustomEncoderPromise.then(() => {
+				this.customEncoderQueueSize--;
+
+				if (shouldClose) {
+					videoFrame.close();
+				}
+			});
+
+			if (this.customEncoderQueueSize >= 4) {
+				await this.lastCustomEncoderPromise;
+			}
+		} else {
+			assert(this.encoder);
+			this.encoder.encode(videoFrame, finalEncodeOptions);
+
+			if (shouldClose) {
+				videoFrame.close();
+			}
+
+			// We need to do this after sending the frame to the encoder as the frame otherwise might be closed
+			if (this.encoder.encodeQueueSize >= 4) {
+				await new Promise(resolve => this.encoder!.addEventListener('dequeue', resolve, { once: true }));
+			}
 		}
 
 		await this.muxer!.mutex.currentPromise; // Allow the writer to apply backpressure
@@ -240,10 +270,6 @@ class VideoEncoderWrapper {
 	private async ensureEncoder(videoFrame: VideoFrame) {
 		if (this.encoder) {
 			return;
-		}
-
-		if (typeof VideoEncoder === 'undefined') {
-			throw new Error('VideoEncoder is not supported by this browser.');
 		}
 
 		const { promise, resolve } = promiseWithResolvers();
@@ -269,33 +295,58 @@ class VideoEncoderWrapper {
 			latencyMode: this.encodingConfig.latencyMode,
 			...getVideoEncoderConfigExtension(this.encodingConfig.codec),
 		};
-		const support = await VideoEncoder.isConfigSupported(encoderConfig);
-		if (!support.supported) {
-			throw new Error(
-				'This specific encoder configuration is not supported by this browser. Consider using another codec or'
-				+ ' changing your video parameters.',
+
+		const MatchingCustomEncoder = customVideoEncoders.find(x => x.supports(
+			this.encodingConfig.codec,
+			encoderConfig,
+		));
+
+		if (MatchingCustomEncoder) {
+			this.customEncoder = new MatchingCustomEncoder(
+				this.encodingConfig.codec,
+				encoderConfig,
+				(sample, meta) => {
+					this.encodingConfig.onEncodedSample?.(sample, meta);
+					void this.muxer!.addEncodedVideoSample(this.source._connectedTrack!, sample, meta);
+				},
 			);
+		} else {
+			if (typeof VideoEncoder === 'undefined') {
+				throw new Error('VideoEncoder is not supported by this browser.');
+			}
+
+			const support = await VideoEncoder.isConfigSupported(encoderConfig);
+			if (!support.supported) {
+				throw new Error(
+					'This specific encoder configuration is not supported by this browser. Consider using another codec'
+					+ ' or changing your video parameters.',
+				);
+			}
+
+			this.encoder = new VideoEncoder({
+				output: (chunk, meta) => {
+					const sample = EncodedVideoSample.fromEncodedVideoChunk(chunk);
+
+					this.encodingConfig.onEncodedSample?.(sample, meta);
+					void this.muxer!.addEncodedVideoSample(this.source._connectedTrack!, sample, meta);
+				},
+				error: this.encodingConfig.onEncodingError ?? (error => console.error('VideoEncoder error:', error)),
+			});
+			this.encoder.configure(encoderConfig);
 		}
-
-		this.encoder = new VideoEncoder({
-			output: (chunk, meta) => {
-				const sample = EncodedVideoSample.fromEncodedVideoChunk(chunk);
-
-				this.encodingConfig.onEncodedSample?.(sample, meta);
-				void this.muxer!.addEncodedVideoSample(this.source._connectedTrack!, sample, meta);
-			},
-			error: this.encodingConfig.onEncodingError ?? (error => console.error('VideoEncoder error:', error)),
-		});
-		this.encoder.configure(encoderConfig);
 
 		assert(this.source._connectedTrack);
 		this.muxer = this.source._connectedTrack.output._muxer;
+
+		this.encoderInitialized = true;
 
 		resolve();
 	}
 
 	async flush() {
-		if (this.encoder) {
+		if (this.customEncoder) {
+			await this.lastCustomEncoderPromise.then(() => this.customEncoder!.flush());
+		} else if (this.encoder) {
 			await this.encoder.flush();
 			this.encoder.close();
 		}
@@ -308,6 +359,8 @@ export class VideoFrameSource extends VideoSource {
 	private _encoder: VideoEncoderWrapper;
 
 	constructor(encodingConfig: VideoEncodingConfig) {
+		validateVideoEncodingConfig(encodingConfig);
+
 		super(encodingConfig.codec);
 		this._encoder = new VideoEncoderWrapper(this, encodingConfig);
 	}
@@ -337,6 +390,7 @@ export class CanvasSource extends VideoSource {
 		if (!(canvas instanceof HTMLCanvasElement)) {
 			throw new TypeError('canvas must be an HTMLCanvasElement.');
 		}
+		validateVideoEncodingConfig(encodingConfig);
 
 		super(encodingConfig.codec);
 		this._encoder = new VideoEncoderWrapper(this, encodingConfig);
@@ -382,6 +436,7 @@ export class MediaStreamVideoTrackSource extends VideoSource {
 		if (!(track instanceof MediaStreamTrack) || track.kind !== 'video') {
 			throw new TypeError('track must be a video MediaStreamTrack.');
 		}
+		validateVideoEncodingConfig(encodingConfig);
 
 		encodingConfig = {
 			...encodingConfig,
@@ -507,9 +562,11 @@ class AudioEncoderWrapper {
 	private outputSampleSize: number | null = null;
 	private writeOutputValue: ((view: DataView, byteOffset: number, value: number) => void) | null = null;
 
-	constructor(private source: AudioSource, private encodingConfig: AudioEncodingConfig) {
-		validateAudioEncodingConfig(encodingConfig);
-	}
+	private customEncoder: CustomAudioEncoder | null = null;
+	private lastCustomEncoderPromise = Promise.resolve();
+	private customEncoderQueueSize = 0;
+
+	constructor(private source: AudioSource, private encodingConfig: AudioEncodingConfig) {}
 
 	async digest(audioData: AudioData, shouldClose: boolean) {
 		this.source._ensureValidDigest();
@@ -540,7 +597,26 @@ class AudioEncoderWrapper {
 		}
 		assert(this.encoderInitialized);
 
-		if (this.isPcmEncoder) {
+		if (this.customEncoder) {
+			this.customEncoderQueueSize++;
+			this.lastCustomEncoderPromise = this.lastCustomEncoderPromise.then(() => {
+				return this.customEncoder!.encode(audioData);
+			});
+
+			void this.lastCustomEncoderPromise.then(() => {
+				this.customEncoderQueueSize--;
+
+				if (shouldClose) {
+					audioData.close();
+				}
+			});
+
+			if (this.customEncoderQueueSize >= 4) {
+				await this.lastCustomEncoderPromise;
+			}
+
+			await this.muxer!.mutex.currentPromise; // Allow the writer to apply backpressure
+		} else if (this.isPcmEncoder) {
 			await this.doPcmEncoding(audioData, shouldClose);
 		} else {
 			assert(this.encoder);
@@ -638,29 +714,44 @@ class AudioEncoderWrapper {
 		const { promise, resolve } = promiseWithResolvers();
 		this.ensureEncoderPromise = promise;
 
-		if ((PCM_AUDIO_CODECS as readonly string[]).includes(this.encodingConfig.codec)) {
+		const { numberOfChannels, sampleRate } = audioData;
+		const bitrate = this.encodingConfig.bitrate instanceof Quality
+			? this.encodingConfig.bitrate._toAudioBitrate(this.encodingConfig.codec)
+			: this.encodingConfig.bitrate;
+
+		const encoderConfig: AudioEncoderConfig = {
+			codec: buildAudioCodecString(
+				this.encodingConfig.codec,
+				numberOfChannels,
+				sampleRate,
+			),
+			numberOfChannels,
+			sampleRate,
+			bitrate,
+			...getAudioEncoderConfigExtension(this.encodingConfig.codec),
+		};
+
+		const MatchingCustomEncoder = customAudioEncoders.find(x => x.supports(
+			this.encodingConfig.codec,
+			encoderConfig,
+		));
+
+		if (MatchingCustomEncoder) {
+			this.customEncoder = new MatchingCustomEncoder(
+				this.encodingConfig.codec,
+				encoderConfig,
+				(sample, meta) => {
+					this.encodingConfig.onEncodedSample?.(sample, meta);
+					void this.muxer!.addEncodedAudioSample(this.source._connectedTrack!, sample, meta);
+				},
+			);
+		} else if ((PCM_AUDIO_CODECS as readonly string[]).includes(this.encodingConfig.codec)) {
 			this.initPcmEncoder();
 		} else {
 			if (typeof AudioEncoder === 'undefined') {
 				throw new Error('AudioEncoder is not supported by this browser.');
 			}
 
-			const { numberOfChannels, sampleRate } = audioData;
-			const bitrate = this.encodingConfig.bitrate instanceof Quality
-				? this.encodingConfig.bitrate._toAudioBitrate(this.encodingConfig.codec)
-				: this.encodingConfig.bitrate;
-
-			const encoderConfig: AudioEncoderConfig = {
-				codec: buildAudioCodecString(
-					this.encodingConfig.codec,
-					numberOfChannels,
-					sampleRate,
-				),
-				numberOfChannels,
-				sampleRate,
-				bitrate,
-				...getAudioEncoderConfigExtension(this.encodingConfig.codec),
-			};
 			const support = await AudioEncoder.isConfigSupported(encoderConfig);
 			if (!support.supported) {
 				throw new Error(
@@ -770,7 +861,9 @@ class AudioEncoderWrapper {
 	}
 
 	async flush() {
-		if (this.encoder) {
+		if (this.customEncoder) {
+			await this.lastCustomEncoderPromise.then(() => this.customEncoder!.flush());
+		} else if (this.encoder) {
 			await this.encoder.flush();
 			this.encoder.close();
 		}
@@ -783,6 +876,8 @@ export class AudioDataSource extends AudioSource {
 	private _encoder: AudioEncoderWrapper;
 
 	constructor(encodingConfig: AudioEncodingConfig) {
+		validateAudioEncodingConfig(encodingConfig);
+
 		super(encodingConfig.codec);
 		this._encoder = new AudioEncoderWrapper(this, encodingConfig);
 	}
@@ -809,6 +904,8 @@ export class AudioBufferSource extends AudioSource {
 	private _accumulatedFrameCount = 0;
 
 	constructor(encodingConfig: AudioEncodingConfig) {
+		validateAudioEncodingConfig(encodingConfig);
+
 		super(encodingConfig.codec);
 		this._encoder = new AudioEncoderWrapper(this, encodingConfig);
 	}
@@ -884,6 +981,7 @@ export class MediaStreamAudioTrackSource extends AudioSource {
 		if (!(track instanceof MediaStreamTrack) || track.kind !== 'audio') {
 			throw new TypeError('track must be an audio MediaStreamTrack.');
 		}
+		validateAudioEncodingConfig(encodingConfig);
 
 		super(encodingConfig.codec);
 		this._encoder = new AudioEncoderWrapper(this, encodingConfig);
