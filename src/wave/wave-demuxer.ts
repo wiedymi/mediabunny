@@ -17,7 +17,7 @@ export enum WaveFormat {
 }
 
 export class WaveDemuxer extends Demuxer {
-	riffReader: RiffReader;
+	metadataReader: RiffReader;
 	chunkReader: RiffReader;
 
 	metadataPromise: Promise<void> | null = null;
@@ -36,38 +36,38 @@ export class WaveDemuxer extends Demuxer {
 	constructor(input: Input) {
 		super(input);
 
-		this.riffReader = new RiffReader(input._mainReader);
+		this.metadataReader = new RiffReader(input._mainReader);
 		this.chunkReader = new RiffReader(new Reader(input._source, 64 * 2 ** 20));
 	}
 
 	async readMetadata() {
 		return this.metadataPromise ??= (async () => {
-			const riffType = this.riffReader.readAscii(4);
-			this.riffReader.littleEndian = riffType === 'RIFF';
+			const riffType = this.metadataReader.readAscii(4);
+			this.metadataReader.littleEndian = riffType === 'RIFF';
 
-			const totalFileSize = this.riffReader.readU32() + 8;
-			const format = this.riffReader.readAscii(4);
+			const totalFileSize = this.metadataReader.readU32() + 8;
+			const format = this.metadataReader.readAscii(4);
 
 			if (format !== 'WAVE') {
 				throw new Error('Invalid WAVE file - wrong format');
 			}
 
-			this.riffReader.pos = 12;
-			while (this.riffReader.pos < totalFileSize) {
-				await this.riffReader.reader.loadRange(this.riffReader.pos, this.riffReader.pos + 8);
+			this.metadataReader.pos = 12;
+			while (this.metadataReader.pos < totalFileSize) {
+				await this.metadataReader.reader.loadRange(this.metadataReader.pos, this.metadataReader.pos + 8);
 
-				const chunkId = this.riffReader.readAscii(4);
-				const chunkSize = this.riffReader.readU32();
-				const startPos = this.riffReader.pos;
+				const chunkId = this.metadataReader.readAscii(4);
+				const chunkSize = this.metadataReader.readU32();
+				const startPos = this.metadataReader.pos;
 
 				if (chunkId === 'fmt ') {
 					await this.parseFmtChunk(chunkSize);
 				} else if (chunkId === 'data') {
-					this.dataStart = this.riffReader.pos;
+					this.dataStart = this.metadataReader.pos;
 					this.dataSize = chunkSize;
 				}
 
-				this.riffReader.pos = startPos + chunkSize + (chunkSize & 1); // Handle padding
+				this.metadataReader.pos = startPos + chunkSize + (chunkSize & 1); // Handle padding
 			}
 
 			if (!this.audioInfo) {
@@ -85,32 +85,32 @@ export class WaveDemuxer extends Demuxer {
 	}
 
 	private async parseFmtChunk(size: number) {
-		await this.riffReader.reader.loadRange(this.riffReader.pos, this.riffReader.pos + size);
+		await this.metadataReader.reader.loadRange(this.metadataReader.pos, this.metadataReader.pos + size);
 
-		let formatTag = this.riffReader.readU16();
-		const numChannels = this.riffReader.readU16();
-		const sampleRate = this.riffReader.readU32();
-		this.riffReader.pos += 4;
-		const blockAlign = this.riffReader.readU16();
+		let formatTag = this.metadataReader.readU16();
+		const numChannels = this.metadataReader.readU16();
+		const sampleRate = this.metadataReader.readU32();
+		this.metadataReader.pos += 4;
+		const blockAlign = this.metadataReader.readU16();
 
 		let bitsPerSample: number;
 
 		if (size === 14) { // Plain WAVEFORMAT
 			bitsPerSample = 8;
 		} else {
-			bitsPerSample = this.riffReader.readU16();
+			bitsPerSample = this.metadataReader.readU16();
 		}
 
 		// Handle WAVEFORMATEXTENSIBLE
 		if (size >= 18 && formatTag !== 0x0165) {
-			const cbSize = this.riffReader.readU16();
+			const cbSize = this.metadataReader.readU16();
 			const remainingSize = size - 18;
 			const extensionSize = Math.min(remainingSize, cbSize);
 
 			if (extensionSize >= 22 && formatTag === WaveFormat.EXTENSIBLE) {
 				// Parse WAVEFORMATEXTENSIBLE
-				this.riffReader.pos += 2 + 4;
-				const subFormat = this.riffReader.readBytes(16);
+				this.metadataReader.pos += 2 + 4;
+				const subFormat = this.metadataReader.readBytes(16);
 
 				// Get actual format from subFormat GUID
 				formatTag = subFormat[0]! | (subFormat[1]! << 8);

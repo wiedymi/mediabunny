@@ -4,6 +4,8 @@ import { IsobmffDemuxer } from './isobmff/isobmff-demuxer';
 import { IsobmffReader } from './isobmff/isobmff-reader';
 import { EBMLId, EBMLReader } from './matroska/ebml';
 import { MatroskaDemuxer } from './matroska/matroska-demuxer';
+import { Mp3Demuxer } from './mp3/mp3-demuxer';
+import { Mp3Reader } from './mp3/mp3-reader';
 import { RiffReader } from './wave/riff-reader';
 import { WaveDemuxer } from './wave/wave-demuxer';
 
@@ -211,6 +213,42 @@ export class WaveInputFormat extends InputFormat {
 }
 
 /** @public */
+export class Mp3InputFormat extends InputFormat {
+	async _canReadInput(input: Input) {
+		const sourceSize = await input._mainReader.source._getSize();
+		if (sourceSize < 4) {
+			return false;
+		}
+
+		const mp3Reader = new Mp3Reader(input._mainReader);
+		mp3Reader.fileSize = sourceSize;
+
+		const id3Tag = mp3Reader.readId3();
+
+		if (id3Tag) {
+			mp3Reader.pos += id3Tag.size;
+		}
+
+		await mp3Reader.reader.loadRange(mp3Reader.pos, mp3Reader.pos + 4096);
+
+		return mp3Reader.readNextFrameHeader(mp3Reader.pos + 4096) !== null;
+	}
+
+	/** @internal */
+	_createDemuxer(input: Input) {
+		return new Mp3Demuxer(input);
+	}
+
+	getName() {
+		return 'MP3';
+	}
+
+	getMimeType() {
+		return 'audio/mpeg';
+	}
+}
+
+/** @public */
 export const MP4 = new Mp4InputFormat();
 /** @public */
 export const QTFF = new QuickTimeInputFormat();
@@ -219,7 +257,9 @@ export const MATROSKA = new MatroskaInputFormat();
 /** @public */
 export const WEBM = new WebMInputFormat();
 /** @public */
+export const MP3 = new Mp3InputFormat();
+/** @public */
 export const WAVE = new WaveInputFormat();
 
 /** @public */
-export const ALL_FORMATS: InputFormat[] = [MP4, QTFF, MATROSKA, WEBM, WAVE];
+export const ALL_FORMATS: InputFormat[] = [MP4, QTFF, MATROSKA, WEBM, MP3, WAVE];

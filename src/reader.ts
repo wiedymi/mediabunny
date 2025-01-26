@@ -27,6 +27,10 @@ export class Reader {
 	async loadRange(start: number, end: number) {
 		end = Math.min(end, await this.source._getSize());
 
+		if (start >= end) {
+			return;
+		}
+
 		const matchingLoadingSegment = this.loadingSegments.find(x => x.start <= start && x.end >= end);
 		if (matchingLoadingSegment) {
 			// Simply wait for the existing promise to finish to avoid loading the same range twice

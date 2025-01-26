@@ -74,12 +74,14 @@ export {
 	QuickTimeInputFormat,
 	MatroskaInputFormat,
 	WebMInputFormat,
+	Mp3InputFormat,
 	WaveInputFormat,
 	ALL_FORMATS,
 	MP4,
 	QTFF,
 	MATROSKA,
 	WEBM,
+	MP3,
 	WAVE,
 } from './input-format';
 export { Input, InputOptions } from './input';
