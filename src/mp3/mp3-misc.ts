@@ -46,8 +46,13 @@ export type FrameHeader = {
 	emphasis: number;
 };
 
-export const computeMp3FrameSize = (bitrate: number, sampleRate: number, padding: number) => {
-	return Math.floor((144 * bitrate / sampleRate) + padding);
+export const computeMp3FrameSize = (layer: number, bitrate: number, sampleRate: number, padding: number) => {
+	if (layer === 3) {
+		// Layer 1
+		return Math.floor((12 * bitrate / sampleRate + padding) * 4);
+	} else {
+		return Math.floor((144 * bitrate / sampleRate) + padding);
+	}
 };
 
 export const getXingOffset = (mpegVersionId: number, channel: number) => {
@@ -102,7 +107,7 @@ export const readFrameHeader = (word: number, reader: { pos: number; fileSize: n
 		return null;
 	}
 
-	const frameLength = computeMp3FrameSize(bitrate, sampleRate, padding);
+	const frameLength = computeMp3FrameSize(layer, bitrate, sampleRate, padding);
 
 	if (reader.fileSize !== null && reader.fileSize - startPos < frameLength) {
 		// The frame doesn't fit into the rest of the file

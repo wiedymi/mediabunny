@@ -177,7 +177,13 @@ export class MatroskaDemuxer extends Demuxer {
 	override async getMimeType() {
 		await this.readMetadata();
 
-		let string = this.isWebM ? 'video/webm' : 'video/x-matroska';
+		const base = this.segments.some(segment => segment.tracks.some(x => x.info?.type === 'video'))
+			? 'video/'
+			: this.segments.some(segment => segment.tracks.some(x => x.info?.type === 'audio'))
+				? 'audio/'
+				: 'application/';
+
+		let string = base + (this.isWebM ? 'webm' : 'x-matroska');
 
 		const tracks = await this.getTracks();
 		if (tracks.length > 0) {

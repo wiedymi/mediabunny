@@ -56,7 +56,7 @@ export class Mp3Writer {
 
 		// Let's find the lowest bitrate for which the frame size is sufficiently large to fit all the data
 		const bitrateIndex = bitrates.findIndex((kbr) => {
-			return computeMp3FrameSize(1000 * kbr, sampleRate, padding) >= neededBytes;
+			return computeMp3FrameSize(data.layer, 1000 * kbr, sampleRate, padding) >= neededBytes;
 		});
 		if (bitrateIndex === -1) {
 			throw new Error('No suitable bitrate found.');
@@ -98,7 +98,7 @@ export class Mp3Writer {
 		this.writeU32(data.fileSize ?? 0);
 		this.writer.write(data.toc ?? new Uint8Array(100));
 
-		const frameSize = computeMp3FrameSize(1000 * bitrates[bitrateIndex]!, sampleRate, padding);
+		const frameSize = computeMp3FrameSize(data.layer, 1000 * bitrates[bitrateIndex]!, sampleRate, padding);
 		this.writer.seek(startPos + frameSize);
 	}
 }

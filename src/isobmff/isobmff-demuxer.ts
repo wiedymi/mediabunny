@@ -210,7 +210,13 @@ export class IsobmffDemuxer extends Demuxer {
 	override async getMimeType() {
 		await this.readMetadata();
 
-		let string = this.isQuickTime ? 'video/quicktime' : 'video/mp4';
+		const base = this.tracks.some(x => x.info?.type === 'video')
+			? 'video/'
+			: this.tracks.some(x => x.info?.type === 'audio')
+				? 'audio/'
+				: 'application/';
+
+		let string = base + (this.isQuickTime ? 'quicktime' : 'mp4');
 
 		if (this.tracks.length > 0) {
 			const codecMimeTypes = await Promise.all(this.tracks.map(x => x.inputTrack!.getCodecMimeType()));
