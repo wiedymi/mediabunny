@@ -29,6 +29,7 @@ import {
 	last,
 	MATRIX_COEFFICIENTS_MAP_INVERSE,
 	Rotation,
+	roundToPrecision,
 	TRANSFER_CHARACTERISTICS_MAP_INVERSE,
 	UNDETERMINED_LANGUAGE,
 } from '../misc';
@@ -1043,16 +1044,10 @@ abstract class MatroskaTrackBacking<
 	}
 
 	private intoTimescale(timestamp: number) {
-		const result = timestamp * this.internalTrack.segment.timestampFactor;
-		const rounded = Math.round(result);
-
-		if (Math.abs(1 - (result / rounded)) < 10 * Number.EPSILON) {
-			// The result is very close to an integer, meaning the number likely originated by an integer being divided
-			// by the timestamp factor. For stability, it's best to return the integer in this case.
-			return rounded;
-		}
-
-		return result;
+		// Do a little rounding to catch cases where the result is very close to an integer. If it is, it's likely
+		// that the number was originally an integer divided by the timescale. For stability, it's best
+		// to return the integer in this case.
+		return roundToPrecision(timestamp * this.internalTrack.segment.timestampFactor, 14);
 	}
 
 	async getSample(timestamp: number, options: SampleRetrievalOptions) {

@@ -967,6 +967,27 @@ export const parseAacAudioSpecificConfig = (bytes: Uint8Array | null) => {
 	};
 };
 
+// From https://datatracker.ietf.org/doc/html/rfc6716, in 48 kHz samples
+const OPUS_FRAME_DURATION_TABLE = [
+	480, 960, 1920, 2880,
+	480, 960, 1920, 2880,
+	480, 960, 1920, 2880,
+	480, 960,
+	480, 960,
+	120, 240, 480, 960,
+	120, 240, 480, 960,
+	120, 240, 480, 960,
+	120, 240, 480, 960,
+];
+
+export const parseOpusTocByte = (packet: Uint8Array) => {
+	const config = packet[0]! >> 3;
+
+	return {
+		durationInSamples: OPUS_FRAME_DURATION_TABLE[config]!,
+	};
+};
+
 const PCM_CODEC_REGEX = /^pcm-([usf])(\d+)+(be)?$/;
 export const parsePcmCodec = (codec: PcmAudioCodec) => {
 	assert(PCM_AUDIO_CODECS.includes(codec));

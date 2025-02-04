@@ -237,6 +237,16 @@ export const removeItem = <T>(arr: T[], item: T) => {
 	}
 };
 
+export const findLast = <T>(arr: T[], predicate: (x: T) => boolean) => {
+	for (let i = arr.length - 1; i >= 0; i--) {
+		if (predicate(arr[i]!)) {
+			return arr[i];
+		}
+	}
+
+	return undefined;
+};
+
 export const findLastIndex = <T>(arr: T[], predicate: (x: T) => boolean) => {
 	for (let i = arr.length - 1; i >= 0; i--) {
 		if (predicate(arr[i]!)) {
@@ -366,4 +376,18 @@ export const setVideoFrameTiming = (frame: VideoFrame, timing: {
 	frame.close();
 
 	return clone;
+};
+
+export const roundToPrecision = (value: number, digits: number) => {
+	const factor = 10 ** digits;
+	return Math.round(value * factor) / factor;
+};
+
+export const ilog = (x: number) => {
+	let ret = 0;
+	while (x) {
+		ret++;
+		x >>= 1;
+	}
+	return ret;
 };

@@ -11,7 +11,23 @@ export class EncodedVideoSample {
 		public readonly timestamp: number,
 		public readonly duration: number,
 		public readonly byteLength = data.byteLength,
-	) {}
+	) {
+		if (!(data instanceof Uint8Array)) {
+			throw new TypeError('data must be a Uint8Array.');
+		}
+		if (type !== 'key' && type !== 'delta') {
+			throw new TypeError('type must be either "key" or "delta".');
+		}
+		if (!Number.isFinite(timestamp)) {
+			throw new TypeError('timestamp must be a number.');
+		}
+		if (!Number.isFinite(duration) || duration < 0) {
+			throw new TypeError('duration must be a non-negative number.');
+		}
+		if (!Number.isInteger(byteLength) || byteLength < 0) {
+			throw new TypeError('byteLength must be a non-negative integer.');
+		}
+	}
 
 	get isMetadataOnly() {
 		return this.data === PLACEHOLDER_DATA;
@@ -103,7 +119,23 @@ export class EncodedAudioSample {
 		public readonly timestamp: number,
 		public readonly duration: number,
 		public readonly byteLength = data.byteLength,
-	) {}
+	) {
+		if (!(data instanceof Uint8Array)) {
+			throw new TypeError('data must be a Uint8Array.');
+		}
+		if (type !== 'key' && type !== 'delta') {
+			throw new TypeError('type must be either "key" or "delta".');
+		}
+		if (!Number.isFinite(timestamp)) {
+			throw new TypeError('timestamp must be a number.');
+		}
+		if (!Number.isFinite(duration) || duration < 0) {
+			throw new TypeError('duration must be a non-negative number.');
+		}
+		if (!Number.isInteger(byteLength) || byteLength < 0) {
+			throw new TypeError('byteLength must be a non-negative integer.');
+		}
+	}
 
 	get isMetadataOnly() {
 		return this.data === PLACEHOLDER_DATA;

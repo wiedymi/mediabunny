@@ -77,6 +77,7 @@ export {
 	WebMInputFormat,
 	Mp3InputFormat,
 	WaveInputFormat,
+	OggInputFormat,
 	ALL_FORMATS,
 	MP4,
 	QTFF,
@@ -84,6 +85,7 @@ export {
 	WEBM,
 	MP3,
 	WAVE,
+	OGG,
 } from './input-format';
 export { Input, InputOptions } from './input';
 export { InputTrack, InputVideoTrack, InputAudioTrack, SampleStats } from './input-track';

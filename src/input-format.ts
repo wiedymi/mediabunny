@@ -6,6 +6,8 @@ import { EBMLId, EBMLReader } from './matroska/ebml';
 import { MatroskaDemuxer } from './matroska/matroska-demuxer';
 import { Mp3Demuxer } from './mp3/mp3-demuxer';
 import { Mp3Reader } from './mp3/mp3-reader';
+import { OggDemuxer } from './ogg/ogg-demuxer';
+import { OggReader } from './ogg/ogg-reader';
 import { RiffReader } from './wave/riff-reader';
 import { WaveDemuxer } from './wave/wave-demuxer';
 
@@ -196,9 +198,34 @@ export class Mp3InputFormat extends InputFormat {
 			mp3Reader.pos += id3Tag.size;
 		}
 
+		const framesStartPos = mp3Reader.pos;
 		await mp3Reader.reader.loadRange(mp3Reader.pos, mp3Reader.pos + 4096);
 
-		return mp3Reader.readNextFrameHeader(mp3Reader.pos + 4096) !== null;
+		const firstHeader = mp3Reader.readNextFrameHeader(framesStartPos + 4096);
+		if (!firstHeader) {
+			return false;
+		}
+
+		if (id3Tag) {
+			// If there was an ID3 tag at the start, we can be pretty sure this is MP3 by now
+			return true;
+		}
+
+		// Fine, we found one frame header, but we're still not entirely sure this is MP3. Let's check if we can find
+		// another header nearby:
+		mp3Reader.pos = firstHeader.startPos + firstHeader.totalSize;
+		const secondHeader = mp3Reader.readNextFrameHeader(framesStartPos + 4096);
+		if (!secondHeader) {
+			return false;
+		}
+
+		// In a well-formed MP3 file, we'd expect these two frames to share some similarities:
+		if (firstHeader.channel !== secondHeader.channel || firstHeader.sampleRate !== secondHeader.sampleRate) {
+			return false;
+		}
+
+		// We have found two matching MP3 frames, a strong indicator that this is an MP3 file
+		return true;
 	}
 
 	/** @internal */
@@ -249,6 +276,32 @@ export class WaveInputFormat extends InputFormat {
 }
 
 /** @public */
+export class OggInputFormat extends InputFormat {
+	async _canReadInput(input: Input) {
+		const sourceSize = await input._mainReader.source._getSize();
+		if (sourceSize < 4) {
+			return false;
+		}
+
+		const oggReader = new OggReader(input._mainReader);
+		return oggReader.readAscii(4) === 'OggS';
+	}
+
+	/** @internal */
+	_createDemuxer(input: Input) {
+		return new OggDemuxer(input);
+	}
+
+	getName() {
+		return 'Ogg';
+	}
+
+	getMimeType() {
+		return 'application/ogg';
+	}
+}
+
+/** @public */
 export const MP4 = new Mp4InputFormat();
 /** @public */
 export const QTFF = new QuickTimeInputFormat();
@@ -260,6 +313,8 @@ export const WEBM = new WebMInputFormat();
 export const MP3 = new Mp3InputFormat();
 /** @public */
 export const WAVE = new WaveInputFormat();
+/** @public */
+export const OGG = new OggInputFormat();
 
 /** @public */
-export const ALL_FORMATS: InputFormat[] = [MP4, QTFF, MATROSKA, WEBM, MP3, WAVE];
+export const ALL_FORMATS: InputFormat[] = [MP4, QTFF, MATROSKA, WEBM, WAVE, OGG, MP3];
