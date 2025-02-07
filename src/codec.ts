@@ -967,6 +967,30 @@ export const parseAacAudioSpecificConfig = (bytes: Uint8Array | null) => {
 	};
 };
 
+export const parseOpusIdentificationHeader = (bytes: Uint8Array) => {
+	const view = toDataView(bytes);
+
+	const outputChannelCount = view.getUint8(9);
+	const preSkip = view.getUint16(10, true);
+	const inputSampleRate = view.getUint32(12, true);
+	const outputGain = view.getInt16(16, true);
+	const channelMappingFamily = view.getUint8(18);
+
+	let channelMappingTable: Uint8Array | null = null;
+	if (channelMappingFamily) {
+		channelMappingTable = bytes.subarray(19, 19 + 2 + outputChannelCount);
+	}
+
+	return {
+		outputChannelCount,
+		preSkip,
+		inputSampleRate,
+		outputGain,
+		channelMappingFamily,
+		channelMappingTable,
+	};
+};
+
 // From https://datatracker.ietf.org/doc/html/rfc6716, in 48 kHz samples
 const OPUS_FRAME_DURATION_TABLE = [
 	480, 960, 1920, 2880,

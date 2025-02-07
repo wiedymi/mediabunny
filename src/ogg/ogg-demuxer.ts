@@ -1,4 +1,4 @@
-import { AudioCodec, parseOpusTocByte } from '../codec';
+import { AudioCodec, parseOpusIdentificationHeader, parseOpusTocByte } from '../codec';
 import { Demuxer } from '../demuxer';
 import { Input } from '../input';
 import { InputAudioTrack, InputAudioTrackBacking } from '../input-track';
@@ -236,12 +236,12 @@ export class OggDemuxer extends Demuxer {
 		bitstream.description = firstPacket.data;
 		bitstream.lastMetadataPacket = secondPacket;
 
-		const view = toDataView(firstPacket.data);
-		bitstream.numberOfChannels = view.getUint8(9);
-		bitstream.sampleRate = view.getUint32(12, true);
+		const header = parseOpusIdentificationHeader(firstPacket.data);
+		bitstream.numberOfChannels = header.outputChannelCount;
+		bitstream.sampleRate = header.inputSampleRate;
 
 		bitstream.opusInfo = {
-			preSkip: view.getUint16(10, true),
+			preSkip: header.preSkip,
 		};
 	}
 

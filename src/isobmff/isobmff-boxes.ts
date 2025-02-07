@@ -16,6 +16,7 @@ import {
 import {
 	AudioCodec,
 	generateAv1CodecConfigurationFromCodecString,
+	parseOpusIdentificationHeader,
 	parsePcmCodec,
 	PCM_AUDIO_CODECS,
 	PcmAudioCodec,
@@ -824,19 +825,17 @@ export const dOps = (trackData: IsobmffAudioTrackData) => {
 	if (description) {
 		assert(description.byteLength >= 18);
 
-		const view = ArrayBuffer.isView(description)
-			? new DataView(description.buffer, description.byteOffset, description.byteLength)
-			: new DataView(description);
+		const bytes = toUint8Array(description);
+		const header = parseOpusIdentificationHeader(bytes);
 
-		outputChannelCount = view.getUint8(9);
-		preSkip = view.getUint16(10, true);
-		inputSampleRate = view.getUint32(12, true);
-		outputGain = view.getInt16(16, true);
-		channelMappingFamily = view.getUint8(18);
+		outputChannelCount = header.outputChannelCount;
+		preSkip = header.preSkip;
+		inputSampleRate = header.inputSampleRate;
+		outputGain = header.outputGain;
+		channelMappingFamily = header.channelMappingFamily;
 
-		if (channelMappingFamily) {
-			const bytes = toUint8Array(description);
-			channelMappingTable = bytes.subarray(19, 19 + 2 + outputChannelCount);
+		if (header.channelMappingTable) {
+			channelMappingTable = header.channelMappingTable;
 		}
 	}
 

@@ -34,6 +34,7 @@ import {
 	PCM_AUDIO_CODECS,
 	PcmAudioCodec,
 	generateAv1CodecConfigurationFromCodecString,
+	parseOpusIdentificationHeader,
 	parsePcmCodec,
 	validateAudioChunkMetadata,
 	validateSubtitleMetadata,
@@ -228,12 +229,11 @@ export class MatroskaMuxer extends Muxer {
 
 				const description = trackData.info.decoderConfig.description;
 				if (description) {
-					const view = ArrayBuffer.isView(description)
-						? new DataView(description.buffer, description.byteOffset, description.byteLength)
-						: new DataView(description);
+					const bytes = toUint8Array(description);
+					const header = parseOpusIdentificationHeader(bytes);
 
-					// Read the value from the Opus Identification Header
-					seekPreRollNs = Math.round(1e9 * (view.getUint16(10, true) / 48000));
+					// Use the preSkip value from the header
+					seekPreRollNs = Math.round(1e9 * (header.preSkip / 48000));
 				}
 			}
 
