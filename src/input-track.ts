@@ -11,6 +11,7 @@ export interface InputTrackBacking {
 	getFirstTimestamp(): Promise<number>;
 	computeDuration(): Promise<number>;
 	getLanguageCode(): Promise<string>;
+	getTimeResolution(): Promise<number>;
 }
 
 /** @public */
@@ -51,6 +52,10 @@ export abstract class InputTrack {
 
 	getLanguageCode() {
 		return this._backing.getLanguageCode();
+	}
+
+	getTimeResolution() {
+		return this._backing.getTimeResolution();
 	}
 }
 

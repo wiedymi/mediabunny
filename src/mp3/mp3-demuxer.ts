@@ -8,8 +8,6 @@ import { EncodedAudioSample, PLACEHOLDER_DATA } from '../sample';
 import { FrameHeader, getXingOffset, INFO, XING } from './mp3-misc';
 import { Mp3Reader } from './mp3-reader';
 
-const AUDIO_SAMPLES_PER_FRAME = 1152;
-
 type Sample = {
 	timestamp: number;
 	duration: number;
@@ -46,7 +44,7 @@ export class Mp3Demuxer extends Demuxer {
 				this.reader.pos += id3Tag.size;
 			}
 
-			let nextTimestamp = 0;
+			let nextTimestampInSamples = 0;
 
 			// Let's read all samples
 			while (true) {
@@ -71,16 +69,16 @@ export class Mp3Demuxer extends Demuxer {
 					this.firstFrameHeader = header;
 				}
 
-				const sampleDuration = AUDIO_SAMPLES_PER_FRAME / header.sampleRate;
+				const sampleDuration = header.audioSamplesInFrame / header.sampleRate;
 				const sample: Sample = {
-					timestamp: nextTimestamp,
+					timestamp: nextTimestampInSamples / header.sampleRate,
 					duration: sampleDuration,
 					dataStart: header.startPos,
 					dataSize: header.totalSize,
 				};
 
 				this.allSamples.push(sample);
-				nextTimestamp += sampleDuration;
+				nextTimestampInSamples += header.audioSamplesInFrame;
 			}
 
 			if (!this.firstFrameHeader) {
@@ -119,6 +117,11 @@ class Mp3AudioTrackBacking implements InputAudioTrackBacking {
 
 	async getFirstTimestamp() {
 		return 0;
+	}
+
+	async getTimeResolution() {
+		assert(this.demuxer.firstFrameHeader);
+		return this.demuxer.firstFrameHeader.sampleRate / this.demuxer.firstFrameHeader.audioSamplesInFrame;
 	}
 
 	computeDuration() {

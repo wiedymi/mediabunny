@@ -998,6 +998,10 @@ abstract class MatroskaTrackBacking<
 		return firstSample?.timestamp ?? 0;
 	}
 
+	async getTimeResolution() {
+		return this.internalTrack.segment.timestampFactor;
+	}
+
 	abstract createSample(
 		data: Uint8Array,
 		byteLength: number,

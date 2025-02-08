@@ -1743,6 +1743,10 @@ abstract class IsobmffTrackBacking<
 		return firstSample?.timestamp ?? 0;
 	}
 
+	async getTimeResolution() {
+		return this.internalTrack.timescale;
+	}
+
 	abstract createSample(
 		data: Uint8Array,
 		byteLength: number,

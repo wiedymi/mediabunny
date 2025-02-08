@@ -418,6 +418,10 @@ class OggAudioTrackBacking implements InputAudioTrackBacking {
 		return this.bitstream.sampleRate;
 	}
 
+	async getTimeResolution() {
+		return this.bitstream.sampleRate;
+	}
+
 	async getCodec() {
 		return this.bitstream.codec;
 	}

@@ -44,6 +44,7 @@ export type FrameHeader = {
 	copyright: number;
 	original: number;
 	emphasis: number;
+	audioSamplesInFrame: number;
 };
 
 export const computeMp3FrameSize = (layer: number, bitrate: number, sampleRate: number, padding: number) => {
@@ -114,6 +115,19 @@ export const readFrameHeader = (word: number, reader: { pos: number; fileSize: n
 		return null;
 	}
 
+	let audioSamplesInFrame: number;
+	if (mpegVersionId === 3) {
+		audioSamplesInFrame = layer === 3 ? 384 : 1152;
+	} else {
+		if (layer === 3) {
+			audioSamplesInFrame = 384;
+		} else if (layer === 2) {
+			audioSamplesInFrame = 1152;
+		} else {
+			audioSamplesInFrame = 576;
+		}
+	}
+
 	return {
 		startPos: startPos,
 		totalSize: frameLength,
@@ -127,5 +141,6 @@ export const readFrameHeader = (word: number, reader: { pos: number; fileSize: n
 		copyright,
 		original,
 		emphasis,
+		audioSamplesInFrame,
 	};
 };
