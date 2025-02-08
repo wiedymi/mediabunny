@@ -410,19 +410,19 @@ class OggAudioTrackBacking implements InputAudioTrackBacking {
 		return this.bitstream.serialNumber;
 	}
 
-	async getNumberOfChannels() {
+	getNumberOfChannels() {
 		return this.bitstream.numberOfChannels;
 	}
 
-	async getSampleRate() {
+	getSampleRate() {
 		return this.bitstream.sampleRate;
 	}
 
-	async getTimeResolution() {
+	getTimeResolution() {
 		return this.bitstream.sampleRate;
 	}
 
-	async getCodec() {
+	getCodec() {
 		return this.bitstream.codec;
 	}
 
@@ -437,7 +437,7 @@ class OggAudioTrackBacking implements InputAudioTrackBacking {
 		};
 	}
 
-	async getLanguageCode() {
+	getLanguageCode() {
 		return UNDETERMINED_LANGUAGE;
 	}
 

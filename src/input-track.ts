@@ -7,11 +7,11 @@ import { EncodedAudioSample, EncodedVideoSample } from './sample';
 
 export interface InputTrackBacking {
 	getId(): number;
-	getCodec(): Promise<MediaCodec | null>;
+	getCodec(): MediaCodec | null;
+	getLanguageCode(): string;
+	getTimeResolution(): number;
 	getFirstTimestamp(): Promise<number>;
 	computeDuration(): Promise<number>;
-	getLanguageCode(): Promise<string>;
-	getTimeResolution(): Promise<number>;
 }
 
 /** @public */
@@ -24,8 +24,8 @@ export abstract class InputTrack {
 		this._backing = backing;
 	}
 
-	abstract getType(): TrackType;
-	abstract getCodec(): Promise<MediaCodec | null>;
+	abstract get type(): TrackType;
+	abstract get codec(): MediaCodec | null;
 	abstract getCodecMimeType(): Promise<string | null>;
 	abstract canDecode(): Promise<boolean>;
 	abstract computeSampleStats(): Promise<SampleStats>;
@@ -38,8 +38,16 @@ export abstract class InputTrack {
 		return this instanceof InputAudioTrack;
 	}
 
-	getId() {
+	get id() {
 		return this._backing.getId();
+	}
+
+	get languageCode() {
+		return this._backing.getLanguageCode();
+	}
+
+	get timeResolution() {
+		return this._backing.getTimeResolution();
 	}
 
 	getFirstTimestamp() {
@@ -49,21 +57,13 @@ export abstract class InputTrack {
 	computeDuration() {
 		return this._backing.computeDuration();
 	}
-
-	getLanguageCode() {
-		return this._backing.getLanguageCode();
-	}
-
-	getTimeResolution() {
-		return this._backing.getTimeResolution();
-	}
 }
 
 export interface InputVideoTrackBacking extends InputTrackBacking {
-	getCodec(): Promise<VideoCodec | null>;
-	getCodedWidth(): Promise<number>;
-	getCodedHeight(): Promise<number>;
-	getRotation(): Promise<Rotation>;
+	getCodec(): VideoCodec | null;
+	getCodedWidth(): number;
+	getCodedHeight(): number;
+	getRotation(): Rotation;
 	getColorSpace(): Promise<VideoColorSpaceInit>;
 	getDecoderConfig(): Promise<VideoDecoderConfig | null>;
 	getFirstSample(options: SampleRetrievalOptions): Promise<EncodedVideoSample | null>;
@@ -85,33 +85,33 @@ export class InputVideoTrack extends InputTrack {
 		this._backing = backing;
 	}
 
-	getType(): TrackType {
+	get type(): TrackType {
 		return 'video';
 	}
 
-	getCodec(): Promise<VideoCodec | null> {
+	get codec() {
 		return this._backing.getCodec();
 	}
 
-	getCodedWidth() {
+	get codedWidth() {
 		return this._backing.getCodedWidth();
 	}
 
-	getCodedHeight() {
+	get codedHeight() {
 		return this._backing.getCodedHeight();
 	}
 
-	getRotation() {
+	get rotation() {
 		return this._backing.getRotation();
 	}
 
-	async getDisplayWidth() {
-		const rotation = await this._backing.getRotation();
+	get displayWidth() {
+		const rotation = this._backing.getRotation();
 		return rotation % 180 === 0 ? this._backing.getCodedWidth() : this._backing.getCodedHeight();
 	}
 
-	async getDisplayHeight() {
-		const rotation = await this._backing.getRotation();
+	get displayHeight() {
+		const rotation = this._backing.getRotation();
 		return rotation % 180 === 0 ? this._backing.getCodedHeight() : this._backing.getCodedWidth();
 	}
 
@@ -132,7 +132,7 @@ export class InputVideoTrack extends InputTrack {
 	}
 
 	async getCodecMimeType() {
-		const decoderConfig = await this.getDecoderConfig();
+		const decoderConfig = await this._backing.getDecoderConfig();
 		return decoderConfig?.codec ?? null;
 	}
 
@@ -143,7 +143,7 @@ export class InputVideoTrack extends InputTrack {
 				return false;
 			}
 
-			const codec = await this.getCodec();
+			const codec = this._backing.getCodec();
 			assert(codec !== null);
 
 			if (customVideoDecoders.some(x => x.supports(codec, decoderConfig))) {
@@ -168,9 +168,9 @@ export class InputVideoTrack extends InputTrack {
 }
 
 export interface InputAudioTrackBacking extends InputTrackBacking {
-	getCodec(): Promise<AudioCodec | null>;
-	getNumberOfChannels(): Promise<number>;
-	getSampleRate(): Promise<number>;
+	getCodec(): AudioCodec | null;
+	getNumberOfChannels(): number;
+	getSampleRate(): number;
 	getDecoderConfig(): Promise<AudioDecoderConfig | null>;
 	getFirstSample(options: SampleRetrievalOptions): Promise<EncodedAudioSample | null>;
 	getSample(timestamp: number, options: SampleRetrievalOptions): Promise<EncodedAudioSample | null>;
@@ -191,19 +191,19 @@ export class InputAudioTrack extends InputTrack {
 		this._backing = backing;
 	}
 
-	getType(): TrackType {
+	get type(): TrackType {
 		return 'audio';
 	}
 
-	getCodec(): Promise<AudioCodec | null> {
+	get codec(): AudioCodec | null {
 		return this._backing.getCodec();
 	}
 
-	getNumberOfChannels() {
+	get numberOfChannels() {
 		return this._backing.getNumberOfChannels();
 	}
 
-	getSampleRate() {
+	get sampleRate() {
 		return this._backing.getSampleRate();
 	}
 
@@ -212,7 +212,7 @@ export class InputAudioTrack extends InputTrack {
 	}
 
 	async getCodecMimeType() {
-		const decoderConfig = await this.getDecoderConfig();
+		const decoderConfig = await this._backing.getDecoderConfig();
 		return decoderConfig?.codec ?? null;
 	}
 
@@ -223,7 +223,7 @@ export class InputAudioTrack extends InputTrack {
 				return false;
 			}
 
-			const codec = await this.getCodec();
+			const codec = this._backing.getCodec();
 			assert(codec !== null);
 
 			if (customAudioDecoders.some(x => x.supports(codec, decoderConfig))) {

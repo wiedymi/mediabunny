@@ -980,7 +980,7 @@ abstract class MatroskaTrackBacking<
 		return this.internalTrack.id;
 	}
 
-	getCodec(): Promise<MediaCodec | null> {
+	getCodec(): MediaCodec | null {
 		throw new Error('Not implemented on base class.');
 	}
 
@@ -989,7 +989,7 @@ abstract class MatroskaTrackBacking<
 		return (lastSample?.timestamp ?? 0) + (lastSample?.duration ?? 0);
 	}
 
-	async getLanguageCode() {
+	getLanguageCode() {
 		return this.internalTrack.languageCode;
 	}
 
@@ -998,7 +998,7 @@ abstract class MatroskaTrackBacking<
 		return firstSample?.timestamp ?? 0;
 	}
 
-	async getTimeResolution() {
+	getTimeResolution() {
 		return this.internalTrack.segment.timestampFactor;
 	}
 
@@ -1439,19 +1439,19 @@ class MatroskaVideoTrackBacking extends MatroskaTrackBacking<EncodedVideoSample>
 		this.internalTrack = internalTrack;
 	}
 
-	override async getCodec(): Promise<VideoCodec | null> {
+	override getCodec(): VideoCodec | null {
 		return this.internalTrack.info.codec;
 	}
 
-	async getCodedWidth() {
+	getCodedWidth() {
 		return this.internalTrack.info.width;
 	}
 
-	async getCodedHeight() {
+	getCodedHeight() {
 		return this.internalTrack.info.height;
 	}
 
-	async getRotation() {
+	getRotation() {
 		return this.internalTrack.info.rotation;
 	}
 
@@ -1513,22 +1513,22 @@ class MatroskaVideoTrackBacking extends MatroskaTrackBacking<EncodedVideoSample>
 
 class MatroskaAudioTrackBacking extends MatroskaTrackBacking<EncodedAudioSample> implements InputAudioTrackBacking {
 	override internalTrack: InternalAudioTrack;
-	decoderConfigPromise: Promise<AudioDecoderConfig> | null = null;
+	decoderConfig: AudioDecoderConfig | null = null;
 
 	constructor(internalTrack: InternalAudioTrack) {
 		super(internalTrack);
 		this.internalTrack = internalTrack;
 	}
 
-	override async getCodec(): Promise<AudioCodec | null> {
+	override getCodec(): AudioCodec | null {
 		return this.internalTrack.info.codec;
 	}
 
-	async getNumberOfChannels() {
+	getNumberOfChannels() {
 		return this.internalTrack.info.numberOfChannels;
 	}
 
-	async getSampleRate() {
+	getSampleRate() {
 		return this.internalTrack.info.sampleRate;
 	}
 
@@ -1537,18 +1537,16 @@ class MatroskaAudioTrackBacking extends MatroskaTrackBacking<EncodedAudioSample>
 			return null;
 		}
 
-		return this.decoderConfigPromise ??= (async (): Promise<AudioDecoderConfig> => {
-			return {
-				codec: extractAudioCodecString({
-					codec: this.internalTrack.info.codec,
-					codecDescription: this.internalTrack.codecPrivate,
-					aacCodecInfo: this.internalTrack.info.aacCodecInfo,
-				}),
-				numberOfChannels: this.internalTrack.info.numberOfChannels,
-				sampleRate: this.internalTrack.info.sampleRate,
-				description: this.internalTrack.codecPrivate ?? undefined,
-			};
-		})();
+		return this.decoderConfig ??= {
+			codec: extractAudioCodecString({
+				codec: this.internalTrack.info.codec,
+				codecDescription: this.internalTrack.codecPrivate,
+				aacCodecInfo: this.internalTrack.info.aacCodecInfo,
+			}),
+			numberOfChannels: this.internalTrack.info.numberOfChannels,
+			sampleRate: this.internalTrack.info.sampleRate,
+			description: this.internalTrack.codecPrivate ?? undefined,
+		};
 	}
 
 	createSample(

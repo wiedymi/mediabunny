@@ -187,7 +187,7 @@ class WaveAudioTrackBacking implements InputAudioTrackBacking {
 		return 1;
 	}
 
-	async getCodec() {
+	getCodec() {
 		return this.demuxer.getCodec();
 	}
 
@@ -209,22 +209,22 @@ class WaveAudioTrackBacking implements InputAudioTrackBacking {
 		return this.demuxer.computeDuration();
 	}
 
-	async getNumberOfChannels() {
+	getNumberOfChannels() {
 		assert(this.demuxer.audioInfo);
 		return this.demuxer.audioInfo.numberOfChannels;
 	}
 
-	async getSampleRate() {
+	getSampleRate() {
 		assert(this.demuxer.audioInfo);
 		return this.demuxer.audioInfo.sampleRate;
 	}
 
-	async getTimeResolution() {
+	getTimeResolution() {
 		assert(this.demuxer.audioInfo);
 		return this.demuxer.audioInfo.sampleRate;
 	}
 
-	async getLanguageCode() {
+	getLanguageCode() {
 		return UNDETERMINED_LANGUAGE;
 	}
 

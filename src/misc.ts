@@ -335,7 +335,7 @@ export const setInt24 = (view: DataView, byteOffset: number, value: number, litt
  */
 export const mapAsyncGenerator = <T, U>(
 	generator: AsyncGenerator<T, void, unknown>,
-	map: (t: T) => Promise<U>,
+	map: (t: T) => U,
 ): AsyncGenerator<U, void, unknown> => {
 	return {
 		async next() {
@@ -343,7 +343,7 @@ export const mapAsyncGenerator = <T, U>(
 			if (result.done) {
 				return { value: undefined, done: true };
 			} else {
-				return { value: await map(result.value), done: false };
+				return { value: map(result.value), done: false };
 			}
 		},
 		return() {

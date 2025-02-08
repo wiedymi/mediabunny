@@ -119,7 +119,7 @@ class Mp3AudioTrackBacking implements InputAudioTrackBacking {
 		return 0;
 	}
 
-	async getTimeResolution() {
+	getTimeResolution() {
 		assert(this.demuxer.firstFrameHeader);
 		return this.demuxer.firstFrameHeader.sampleRate / this.demuxer.firstFrameHeader.audioSamplesInFrame;
 	}
@@ -128,20 +128,20 @@ class Mp3AudioTrackBacking implements InputAudioTrackBacking {
 		return this.demuxer.computeDuration();
 	}
 
-	async getLanguageCode() {
+	getLanguageCode() {
 		return UNDETERMINED_LANGUAGE;
 	}
 
-	async getCodec(): Promise<AudioCodec> {
+	getCodec(): AudioCodec {
 		return 'mp3';
 	}
 
-	async getNumberOfChannels() {
+	getNumberOfChannels() {
 		assert(this.demuxer.firstFrameHeader);
 		return this.demuxer.firstFrameHeader.channel === 3 ? 1 : 2;
 	}
 
-	async getSampleRate() {
+	getSampleRate() {
 		assert(this.demuxer.firstFrameHeader);
 		return this.demuxer.firstFrameHeader.sampleRate;
 	}

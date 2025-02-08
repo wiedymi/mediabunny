@@ -1725,8 +1725,16 @@ abstract class IsobmffTrackBacking<
 		return this.internalTrack.id;
 	}
 
-	getCodec(): Promise<MediaCodec | null> {
+	getCodec(): MediaCodec | null {
 		throw new Error('Not implemented on base class.');
+	}
+
+	getLanguageCode() {
+		return this.internalTrack.languageCode;
+	}
+
+	getTimeResolution() {
+		return this.internalTrack.timescale;
 	}
 
 	async computeDuration() {
@@ -1734,17 +1742,9 @@ abstract class IsobmffTrackBacking<
 		return (lastSample?.timestamp ?? 0) + (lastSample?.duration ?? 0);
 	}
 
-	async getLanguageCode() {
-		return this.internalTrack.languageCode;
-	}
-
 	async getFirstTimestamp() {
 		const firstSample = await this.getFirstSample({ metadataOnly: true });
 		return firstSample?.timestamp ?? 0;
-	}
-
-	async getTimeResolution() {
-		return this.internalTrack.timescale;
 	}
 
 	abstract createSample(
@@ -2264,19 +2264,19 @@ class IsobmffVideoTrackBacking extends IsobmffTrackBacking<EncodedVideoSample> i
 		this.internalTrack = internalTrack;
 	}
 
-	override async getCodec(): Promise<VideoCodec | null> {
+	override getCodec(): VideoCodec | null {
 		return this.internalTrack.info.codec;
 	}
 
-	async getCodedWidth() {
+	getCodedWidth() {
 		return this.internalTrack.info.width;
 	}
 
-	async getCodedHeight() {
+	getCodedHeight() {
 		return this.internalTrack.info.height;
 	}
 
-	async getRotation() {
+	getRotation() {
 		return this.internalTrack.rotation;
 	}
 
@@ -2294,12 +2294,12 @@ class IsobmffVideoTrackBacking extends IsobmffTrackBacking<EncodedVideoSample> i
 			return null;
 		}
 
-		if (this.internalTrack.info.codec === 'vp9' && !this.internalTrack.info.vp9CodecInfo) {
-			const firstSample = await this.getFirstSample({});
-			this.internalTrack.info.vp9CodecInfo = firstSample && extractVp9CodecInfoFromFrame(firstSample.data);
-		}
-
 		return this.decoderConfigPromise ??= (async (): Promise<VideoDecoderConfig> => {
+			if (this.internalTrack.info.codec === 'vp9' && !this.internalTrack.info.vp9CodecInfo) {
+				const firstSample = await this.getFirstSample({});
+				this.internalTrack.info.vp9CodecInfo = firstSample && extractVp9CodecInfoFromFrame(firstSample.data);
+			}
+
 			return {
 				codec: extractVideoCodecString(this.internalTrack.info),
 				codedWidth: this.internalTrack.info.width,
@@ -2323,22 +2323,22 @@ class IsobmffVideoTrackBacking extends IsobmffTrackBacking<EncodedVideoSample> i
 
 class IsobmffAudioTrackBacking extends IsobmffTrackBacking<EncodedAudioSample> implements InputAudioTrackBacking {
 	override internalTrack: InternalAudioTrack;
-	decoderConfigPromise: Promise<AudioDecoderConfig> | null = null;
+	decoderConfig: AudioDecoderConfig | null = null;
 
 	constructor(internalTrack: InternalAudioTrack) {
 		super(internalTrack);
 		this.internalTrack = internalTrack;
 	}
 
-	override async getCodec(): Promise<AudioCodec | null> {
+	override getCodec(): AudioCodec | null {
 		return this.internalTrack.info.codec;
 	}
 
-	async getNumberOfChannels() {
+	getNumberOfChannels() {
 		return this.internalTrack.info.numberOfChannels;
 	}
 
-	async getSampleRate() {
+	getSampleRate() {
 		return this.internalTrack.info.sampleRate;
 	}
 
@@ -2347,14 +2347,12 @@ class IsobmffAudioTrackBacking extends IsobmffTrackBacking<EncodedAudioSample> i
 			return null;
 		}
 
-		return this.decoderConfigPromise ??= (async (): Promise<AudioDecoderConfig> => {
-			return {
-				codec: extractAudioCodecString(this.internalTrack.info),
-				numberOfChannels: this.internalTrack.info.numberOfChannels,
-				sampleRate: this.internalTrack.info.sampleRate,
-				description: this.internalTrack.info.codecDescription ?? undefined,
-			};
-		})();
+		return this.decoderConfig ??= {
+			codec: extractAudioCodecString(this.internalTrack.info),
+			numberOfChannels: this.internalTrack.info.numberOfChannels,
+			sampleRate: this.internalTrack.info.sampleRate,
+			description: this.internalTrack.info.codecDescription ?? undefined,
+		};
 	}
 
 	createSample(

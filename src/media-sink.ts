@@ -693,9 +693,9 @@ export class VideoFrameSink extends BaseMediaFrameSink<EncodedVideoSample, Video
 			);
 		}
 
-		const codec = await this._videoTrack.getCodec();
+		const codec = this._videoTrack.codec;
 		const decoderConfig = await this._videoTrack.getDecoderConfig();
-		const timeResolution = await this._videoTrack.getTimeResolution();
+		const timeResolution = this._videoTrack.timeResolution;
 		assert(codec && decoderConfig);
 
 		return new VideoDecoderWrapper(onFrame, onError, codec, decoderConfig, timeResolution);
@@ -727,14 +727,14 @@ export class VideoFrameSink extends BaseMediaFrameSink<EncodedVideoSample, Video
 	frames(startTimestamp = 0, endTimestamp = Infinity) {
 		return mapAsyncGenerator(
 			this.mediaFramesInRange(startTimestamp, endTimestamp),
-			async frame => this._wrappedFrameToWrappedVideoFrame(frame),
+			frame => this._wrappedFrameToWrappedVideoFrame(frame),
 		);
 	}
 
 	framesAtTimestamps(timestamps: AnyIterable<number>) {
 		return mapAsyncGenerator(
 			this.mediaFramesAtTimestamps(timestamps),
-			async frame => frame && this._wrappedFrameToWrappedVideoFrame(frame),
+			frame => frame && this._wrappedFrameToWrappedVideoFrame(frame),
 		);
 	}
 }
@@ -775,10 +775,10 @@ export class CanvasSink {
 	}
 
 	/** @internal */
-	async _videoFrameToWrappedCanvas(frame: WrappedVideoFrame): Promise<WrappedCanvas> {
-		const width = this._dimensions?.width ?? await this._videoTrack.getDisplayWidth();
-		const height = this._dimensions?.height ?? await this._videoTrack.getDisplayHeight();
-		const rotation = await this._videoTrack.getRotation();
+	_videoFrameToWrappedCanvas(frame: WrappedVideoFrame): WrappedCanvas {
+		const width = this._dimensions?.width ?? this._videoTrack.displayWidth;
+		const height = this._dimensions?.height ?? this._videoTrack.displayHeight;
+		const rotation = this._videoTrack.rotation;
 
 		const canvas = document.createElement('canvas');
 		canvas.width = width;
@@ -822,7 +822,7 @@ export class CanvasSink {
 	canvasesAtTimestamps(timestamps: AnyIterable<number>) {
 		return mapAsyncGenerator(
 			this._videoFrameSink.framesAtTimestamps(timestamps),
-			async frame => frame && this._videoFrameToWrappedCanvas(frame),
+			frame => frame && this._videoFrameToWrappedCanvas(frame),
 		);
 	}
 }
@@ -1161,14 +1161,14 @@ export class AudioDataSink extends BaseMediaFrameSink<EncodedAudioSample, AudioD
 			);
 		}
 
-		const codec = await this._audioTrack.getCodec();
+		const codec = this._audioTrack.codec;
 		const decoderConfig = await this._audioTrack.getDecoderConfig();
 		assert(codec && decoderConfig);
 
 		if ((PCM_AUDIO_CODECS as readonly string[]).includes(decoderConfig.codec)) {
 			return new PcmAudioDecoderWrapper(onData, onError, decoderConfig);
 		} else {
-			const timeResolution = await this._audioTrack.getTimeResolution();
+			const timeResolution = this._audioTrack.timeResolution;
 			return new AudioDecoderWrapper(onData, onError, codec, decoderConfig, timeResolution);
 		}
 	}
@@ -1199,14 +1199,14 @@ export class AudioDataSink extends BaseMediaFrameSink<EncodedAudioSample, AudioD
 	data(startTimestamp = 0, endTimestamp = Infinity) {
 		return mapAsyncGenerator(
 			this.mediaFramesInRange(startTimestamp, endTimestamp),
-			async data => this._wrappedFrameToWrappedAudioData(data),
+			data => this._wrappedFrameToWrappedAudioData(data),
 		);
 	}
 
 	dataAtTimestamps(timestamps: AnyIterable<number>) {
 		return mapAsyncGenerator(
 			this.mediaFramesAtTimestamps(timestamps),
-			async data => data && this._wrappedFrameToWrappedAudioData(data),
+			data => data && this._wrappedFrameToWrappedAudioData(data),
 		);
 	}
 }
@@ -1267,14 +1267,14 @@ export class AudioBufferSink {
 	buffers(startTimestamp = 0, endTimestamp = Infinity) {
 		return mapAsyncGenerator(
 			this._audioDataSink.data(startTimestamp, endTimestamp),
-			async data => this._audioDataToWrappedArrayBuffer(data),
+			data => this._audioDataToWrappedArrayBuffer(data),
 		);
 	}
 
 	buffersAtTimestamps(timestamps: AnyIterable<number>) {
 		return mapAsyncGenerator(
 			this._audioDataSink.dataAtTimestamps(timestamps),
-			async data => data && this._audioDataToWrappedArrayBuffer(data),
+			data => data && this._audioDataToWrappedArrayBuffer(data),
 		);
 	}
 }

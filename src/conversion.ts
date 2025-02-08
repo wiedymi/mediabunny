@@ -257,8 +257,7 @@ class Conversion {
 				continue;
 			}
 
-			const type = track.getType();
-			if (this.addedCounts[type] === outputTrackCounts[type].max) {
+			if (this.addedCounts[track.type] === outputTrackCounts[track.type].max) {
 				this.result.discardedTracks.push({
 					track,
 					reason: 'maxTrackCountOfTypeReached',
@@ -310,9 +309,7 @@ class Conversion {
 	}
 
 	async processVideoTrack(track: InputVideoTrack) {
-		const trackId = track.getId();
-
-		const sourceCodec = await track.getCodec();
+		const sourceCodec = track.codec;
 		if (!sourceCodec) {
 			this.result.discardedTracks.push({
 				track,
@@ -323,8 +320,8 @@ class Conversion {
 
 		let videoSource: VideoSource;
 
-		const originalWidth = await track.getCodedWidth();
-		const originalHeight = await track.getCodedHeight();
+		const originalWidth = track.codedWidth;
+		const originalHeight = track.codedHeight;
 		const originalAspectRatio = originalWidth / originalHeight;
 
 		let width = originalWidth;
@@ -368,16 +365,16 @@ class Conversion {
 				const meta: EncodedVideoChunkMetadata = { decoderConfig: decoderConfig ?? undefined };
 
 				for await (const sample of sink.samples(undefined, this.endTimestamp)) {
-					if (this.synchronizer.shouldWait(trackId, sample.timestamp)) {
+					if (this.synchronizer.shouldWait(track.id, sample.timestamp)) {
 						await this.synchronizer.wait(sample.timestamp);
 					}
 
 					await source.digest(sample, meta);
-					this.reportProgress(trackId, sample.timestamp + sample.duration);
+					this.reportProgress(track.id, sample.timestamp + sample.duration);
 				}
 
 				await source.close();
-				this.synchronizer.closeTrack(trackId);
+				this.synchronizer.closeTrack(track.id);
 			})());
 		} else {
 			// We need to decode & reencode the video
@@ -396,8 +393,8 @@ class Conversion {
 			}
 
 			const encodableCodecs = await getEncodableVideoCodecs(videoCodecs, {
-				width: needsResize ? width : await track.getCodedWidth(),
-				height: needsResize ? height : await track.getCodedHeight(),
+				width: needsResize ? width : track.codedWidth,
+				height: needsResize ? height : track.codedHeight,
 			});
 			if (encodableCodecs.length === 0) {
 				this.result.discardedTracks.push({
@@ -410,7 +407,7 @@ class Conversion {
 			const encodingConfig: VideoEncodingConfig = {
 				codec: encodableCodecs[0]!,
 				bitrate: this.options.video?.bitrate ?? QUALITY_HIGH,
-				onEncodedSample: sample => this.reportProgress(trackId, sample.timestamp + sample.duration),
+				onEncodedSample: sample => this.reportProgress(track.id, sample.timestamp + sample.duration),
 			};
 
 			if (needsResize) {
@@ -432,7 +429,7 @@ class Conversion {
 					const iterator = sink.canvases(this.startTimestamp, this.endTimestamp);
 
 					for await (const { canvas, timestamp, duration } of iterator) {
-						if (this.synchronizer.shouldWait(trackId, timestamp)) {
+						if (this.synchronizer.shouldWait(track.id, timestamp)) {
 							await this.synchronizer.wait(timestamp);
 						}
 
@@ -458,7 +455,7 @@ class Conversion {
 					}
 
 					await source.close();
-					this.synchronizer.closeTrack(trackId);
+					this.synchronizer.closeTrack(track.id);
 				})());
 			} else {
 				const source = new VideoFrameSource(encodingConfig);
@@ -470,7 +467,7 @@ class Conversion {
 					const sink = new VideoFrameSink(track);
 
 					for await (const { frame, timestamp } of sink.frames(this.startTimestamp, this.endTimestamp)) {
-						if (this.synchronizer.shouldWait(trackId, timestamp)) {
+						if (this.synchronizer.shouldWait(track.id, timestamp)) {
 							await this.synchronizer.wait(timestamp);
 						}
 
@@ -483,16 +480,16 @@ class Conversion {
 					}
 
 					await source.close();
-					this.synchronizer.closeTrack(trackId);
+					this.synchronizer.closeTrack(track.id);
 				})());
 			}
 		}
 
 		// Rotation metadata is reset if we do resizing
-		const baseRotation = needsResize ? 0 : await track.getRotation();
+		const baseRotation = needsResize ? 0 : track.rotation;
 
 		this.output.addVideoTrack(videoSource, {
-			languageCode: await track.getLanguageCode(),
+			languageCode: track.languageCode,
 			rotation: (baseRotation + (this.options.video?.rotate ?? 0)) % 360 as Rotation,
 		});
 		this.addedCounts.video++;
@@ -502,9 +499,7 @@ class Conversion {
 	}
 
 	async processAudioTrack(track: InputAudioTrack) {
-		const trackId = track.getId();
-
-		const sourceCodec = await track.getCodec();
+		const sourceCodec = track.codec;
 		if (!sourceCodec) {
 			this.result.discardedTracks.push({
 				track,
@@ -515,8 +510,8 @@ class Conversion {
 
 		let audioSource: AudioSource;
 
-		const originalNumberOfChannels = await track.getNumberOfChannels();
-		const originalSampleRate = await track.getSampleRate();
+		const originalNumberOfChannels = track.numberOfChannels;
+		const originalSampleRate = track.sampleRate;
 
 		let numberOfChannels = this.options.audio?.numberOfChannels ?? originalNumberOfChannels;
 		let sampleRate = this.options.audio?.sampleRate ?? originalSampleRate;
@@ -545,16 +540,16 @@ class Conversion {
 				const meta: EncodedAudioChunkMetadata = { decoderConfig: decoderConfig ?? undefined };
 
 				for await (const sample of sink.samples(undefined, this.endTimestamp)) {
-					if (this.synchronizer.shouldWait(trackId, sample.timestamp)) {
+					if (this.synchronizer.shouldWait(track.id, sample.timestamp)) {
 						await this.synchronizer.wait(sample.timestamp);
 					}
 
 					await source.digest(sample, meta);
-					this.reportProgress(trackId, sample.timestamp + sample.duration);
+					this.reportProgress(track.id, sample.timestamp + sample.duration);
 				}
 
 				await source.close();
-				this.synchronizer.closeTrack(trackId);
+				this.synchronizer.closeTrack(track.id);
 			})());
 		} else {
 			// We need to decode & reencode the audio
@@ -621,7 +616,7 @@ class Conversion {
 				const source = new AudioDataSource({
 					codec: codecOfChoice,
 					bitrate: this.options.audio?.bitrate ?? QUALITY_HIGH,
-					onEncodedSample: sample => this.reportProgress(trackId, sample.timestamp + sample.duration),
+					onEncodedSample: sample => this.reportProgress(track.id, sample.timestamp + sample.duration),
 				});
 				audioSource = source;
 
@@ -630,7 +625,7 @@ class Conversion {
 
 					const sink = new AudioDataSink(track);
 					for await (const { data, timestamp } of sink.data(undefined, this.startTimestamp)) {
-						if (this.synchronizer.shouldWait(trackId, timestamp)) {
+						if (this.synchronizer.shouldWait(track.id, timestamp)) {
 							await this.synchronizer.wait(timestamp);
 						}
 
@@ -639,13 +634,13 @@ class Conversion {
 					}
 
 					await source.close();
-					this.synchronizer.closeTrack(trackId);
+					this.synchronizer.closeTrack(track.id);
 				})());
 			}
 		}
 
 		this.output.addAudioTrack(audioSource, {
-			languageCode: await track.getLanguageCode(),
+			languageCode: track.languageCode,
 		});
 		this.addedCounts.audio++;
 		this.totalTrackCount++;
@@ -663,11 +658,10 @@ class Conversion {
 		targetNumberOfChannels: number,
 		targetSampleRate: number,
 	) {
-		const trackId = track.getId();
 		const source = new AudioBufferSource({
 			codec,
 			bitrate: this.options.audio?.bitrate ?? QUALITY_HIGH,
-			onEncodedSample: sample => this.reportProgress(trackId, sample.timestamp + sample.duration),
+			onEncodedSample: sample => this.reportProgress(track.id, sample.timestamp + sample.duration),
 		});
 
 		this.trackPromises.push((async () => {
@@ -690,7 +684,7 @@ class Conversion {
 
 			const sink = new AudioBufferSink(track);
 			for await (const { buffer, timestamp, duration } of sink.buffers(this.startTimestamp, this.endTimestamp)) {
-				if (this.synchronizer.shouldWait(trackId, timestamp)) {
+				if (this.synchronizer.shouldWait(track.id, timestamp)) {
 					await this.synchronizer.wait(timestamp);
 				}
 
@@ -746,7 +740,7 @@ class Conversion {
 			}
 
 			await source.close();
-			this.synchronizer.closeTrack(trackId);
+			this.synchronizer.closeTrack(track.id);
 		})());
 
 		return source;
