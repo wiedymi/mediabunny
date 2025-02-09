@@ -351,6 +351,15 @@ class VideoEncoderWrapper {
 			this.encoder.close();
 		}
 	}
+
+	getQueueSize() {
+		if (this.customEncoder) {
+			return this.customEncoderQueueSize;
+		} else {
+			assert(this.encoder);
+			return this.encoder.encodeQueueSize;
+		}
+	}
 }
 
 /** @public */
@@ -455,7 +464,12 @@ export class MediaStreamVideoTrackSource extends VideoSource {
 		const processor = new MediaStreamTrackProcessor({ track: this._track });
 		const consumer = new WritableStream<VideoFrame>({
 			write: (videoFrame) => {
-				// TODO: Drop frames if encoder overloaded
+				if (this._encoder.getQueueSize() >= 4) {
+					// Drop frames if the encoder is overloaded
+					videoFrame.close();
+					return;
+				}
+
 				void this._encoder.digest(videoFrame, true);
 			},
 		});
@@ -868,6 +882,17 @@ class AudioEncoderWrapper {
 			this.encoder.close();
 		}
 	}
+
+	getQueueSize() {
+		if (this.customEncoder) {
+			return this.customEncoderQueueSize;
+		} else if (this.isPcmEncoder) {
+			return 0;
+		} else {
+			assert(this.encoder);
+			return this.encoder.encodeQueueSize;
+		}
+	}
 }
 
 /** @public */
@@ -995,7 +1020,12 @@ export class MediaStreamAudioTrackSource extends AudioSource {
 		const processor = new MediaStreamTrackProcessor({ track: this._track });
 		const consumer = new WritableStream<AudioData>({
 			write: (audioData) => {
-				// TODO: Drop frames if encoder overloaded
+				if (this._encoder.getQueueSize() >= 4) {
+					// Drop data if the encoder is overloaded
+					audioData.close();
+					return;
+				}
+
 				void this._encoder.digest(audioData, true);
 			},
 		});
