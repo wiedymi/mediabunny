@@ -69,7 +69,7 @@
 			duration: 1e6 * 0.25,
 			data: new Uint8Array(1024)
 		});
-		videoSource.digest(encodedVideoChunk, {
+		videoSource.add(encodedVideoChunk, {
 			decoderConfig: {
 				codedWidth: 64,
 				codedHeight: 64,
@@ -155,14 +155,14 @@ Testing... <00:17.350>One... <00:18.125>Two...
 9. <b>justify (bottom, right)</b>.
 `;
 
-	//subtitleSource.digest(simpleWebvttFile);
+	//subtitleSource.add(simpleWebvttFile);
 	//subtitleSource.close();
 
 	for (let i = 0; i < 100; i++) {
 		context.fillStyle = ['red', 'green', 'blue', 'yellow'][i % 4];
 		context.fillRect(canvas.width * Math.random(), canvas.height * Math.random(), canvas.width * Math.random(), canvas.height * Math.random());
 
-		//await videoSource.digest(i / 10, 1 / 10);
+		//await videoSource.add(i / 10, 1 / 10);
 	}
 
 	let audioContext = new AudioContext();
@@ -170,7 +170,7 @@ Testing... <00:17.350>One... <00:18.125>Two...
 	let length = 10;
 	let slicedAudioBuffer = sliceAudioBuffer(audioBuffer, length, audioContext);
 
-	await audioSource.digest(slicedAudioBuffer);
+	await audioSource.add(slicedAudioBuffer);
 
 	await output.finalize();
 

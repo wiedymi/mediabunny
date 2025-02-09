@@ -33,7 +33,7 @@
 		output.start();
 
 		for await (const { data } of sink.data()) {
-			await mediaSource.digest(data);
+			await mediaSource.add(data);
 		}
 
 		await output.finalize();
@@ -137,16 +137,16 @@
 		//	//sample.timestamp *= 2;
 		//	//console.log(sample);
 		//	//console.log(sample)
-		//	await sampleSource.digest(sample, { decoderConfig });
+		//	await sampleSource.add(sample, { decoderConfig });
 		//}
 		for await (const { data, timestamp } of new Metamuxer.AudioDataSink(audioTrack).data()) {
 			//console.log("wow", data.timestamp);
 			//console.log(sample)
-			await audioDataSource.digest(data);
+			await audioDataSource.add(data);
 		}
 		//for await (const sample of new Metamuxer.EncodedVideoSampleSink(videoTrack).samples()) {
 		//	//console.log(sample)
-		//	await videoSampleSource.digest(sample, { decoderConfig: videoDecoderConfig });
+		//	await videoSampleSource.add(sample, { decoderConfig: videoDecoderConfig });
 		//}
 		
 		await output.finalize();
@@ -265,7 +265,7 @@
 		output.start();
 
 		for await (const frame of drain.frames(0, 10)) {
-			await mediaSource.digest(frame);
+			await mediaSource.add(frame);
 			frame.close();
 		}
 

@@ -39,7 +39,7 @@ export abstract class MediaSource {
 	_offsetTimestamps = false;
 
 	/** @internal */
-	_ensureValidDigest() {
+	_ensureValidAdd() {
 		if (!this._connectedTrack) {
 			throw new Error('Source is not connected to an output track.');
 		}
@@ -129,15 +129,15 @@ export class EncodedVideoSampleSource extends VideoSource {
 		super(codec);
 	}
 
-	digest(sample: EncodedVideoSample, meta?: EncodedVideoChunkMetadata) {
+	add(sample: EncodedVideoSample, meta?: EncodedVideoChunkMetadata) {
 		if (!(sample instanceof EncodedVideoSample)) {
 			throw new TypeError('sample must be an EncodedVideoSample.');
 		}
 		if (sample.isMetadataOnly) {
-			throw new TypeError('Metadata-only samples cannot be digested.');
+			throw new TypeError('Metadata-only samples cannot be added.');
 		}
 
-		this._ensureValidDigest();
+		this._ensureValidAdd();
 		return this._connectedTrack!.output._muxer.addEncodedVideoSample(this._connectedTrack!, sample, meta);
 	}
 }
@@ -194,8 +194,8 @@ class VideoEncoderWrapper {
 
 	constructor(private source: VideoSource, private encodingConfig: VideoEncodingConfig) {}
 
-	async digest(videoFrame: VideoFrame, shouldClose: boolean, encodeOptions?: VideoEncoderEncodeOptions) {
-		this.source._ensureValidDigest();
+	async add(videoFrame: VideoFrame, shouldClose: boolean, encodeOptions?: VideoEncoderEncodeOptions) {
+		this.source._ensureValidAdd();
 
 		// Ensure video frame size remains constant
 		if (this.lastWidth !== null && this.lastHeight !== null) {
@@ -374,12 +374,12 @@ export class VideoFrameSource extends VideoSource {
 		this._encoder = new VideoEncoderWrapper(this, encodingConfig);
 	}
 
-	digest(videoFrame: VideoFrame, encodeOptions?: VideoEncoderEncodeOptions) {
+	add(videoFrame: VideoFrame, encodeOptions?: VideoEncoderEncodeOptions) {
 		if (!(videoFrame instanceof VideoFrame)) {
 			throw new TypeError('videoFrame must be a VideoFrame.');
 		}
 
-		return this._encoder.digest(videoFrame, false, encodeOptions);
+		return this._encoder.add(videoFrame, false, encodeOptions);
 	}
 
 	/** @internal */
@@ -406,7 +406,7 @@ export class CanvasSource extends VideoSource {
 		this._canvas = canvas;
 	}
 
-	digest(timestamp: number, duration = 0, encodeOptions?: VideoEncoderEncodeOptions) {
+	add(timestamp: number, duration = 0, encodeOptions?: VideoEncoderEncodeOptions) {
 		if (!Number.isFinite(timestamp) || timestamp < 0) {
 			throw new TypeError('timestamp must be a non-negative number.');
 		}
@@ -420,7 +420,7 @@ export class CanvasSource extends VideoSource {
 			alpha: 'discard',
 		});
 
-		return this._encoder.digest(frame, true, encodeOptions);
+		return this._encoder.add(frame, true, encodeOptions);
 	}
 
 	/** @internal */
@@ -470,7 +470,7 @@ export class MediaStreamVideoTrackSource extends VideoSource {
 					return;
 				}
 
-				void this._encoder.digest(videoFrame, true);
+				void this._encoder.add(videoFrame, true);
 			},
 		});
 
@@ -519,15 +519,15 @@ export class EncodedAudioSampleSource extends AudioSource {
 		super(codec);
 	}
 
-	digest(sample: EncodedAudioSample, meta?: EncodedAudioChunkMetadata) {
+	add(sample: EncodedAudioSample, meta?: EncodedAudioChunkMetadata) {
 		if (!(sample instanceof EncodedAudioSample)) {
 			throw new TypeError('chunk must be an EncodedAudioSample.');
 		}
 		if (sample.isMetadataOnly) {
-			throw new TypeError('Metadata-only samples cannot be digested.');
+			throw new TypeError('Metadata-only samples cannot be added.');
 		}
 
-		this._ensureValidDigest();
+		this._ensureValidAdd();
 		return this._connectedTrack!.output._muxer.addEncodedAudioSample(this._connectedTrack!, sample, meta);
 	}
 }
@@ -582,8 +582,8 @@ class AudioEncoderWrapper {
 
 	constructor(private source: AudioSource, private encodingConfig: AudioEncodingConfig) {}
 
-	async digest(audioData: AudioData, shouldClose: boolean) {
-		this.source._ensureValidDigest();
+	async add(audioData: AudioData, shouldClose: boolean) {
+		this.source._ensureValidAdd();
 
 		// Ensure audio parameters remain constant
 		if (this.lastNumberOfChannels !== null && this.lastSampleRate !== null) {
@@ -907,12 +907,12 @@ export class AudioDataSource extends AudioSource {
 		this._encoder = new AudioEncoderWrapper(this, encodingConfig);
 	}
 
-	digest(audioData: AudioData) {
+	add(audioData: AudioData) {
 		if (!(audioData instanceof AudioData)) {
 			throw new TypeError('audioData must be an AudioData.');
 		}
 
-		return this._encoder.digest(audioData, false);
+		return this._encoder.add(audioData, false);
 	}
 
 	/** @internal */
@@ -935,7 +935,7 @@ export class AudioBufferSource extends AudioSource {
 		this._encoder = new AudioEncoderWrapper(this, encodingConfig);
 	}
 
-	digest(audioBuffer: AudioBuffer) {
+	add(audioBuffer: AudioBuffer) {
 		if (!(audioBuffer instanceof AudioBuffer)) {
 			throw new TypeError('audioBuffer must be an AudioBuffer.');
 		}
@@ -974,7 +974,7 @@ export class AudioBufferSource extends AudioSource {
 				data: chunkData,
 			});
 
-			promises.push(this._encoder.digest(audioData, true));
+			promises.push(this._encoder.add(audioData, true));
 
 			currentRelativeFrame += framesToCopy;
 			remainingFrames -= framesToCopy;
@@ -1026,7 +1026,7 @@ export class MediaStreamAudioTrackSource extends AudioSource {
 					return;
 				}
 
-				void this._encoder.digest(audioData, true);
+				void this._encoder.add(audioData, true);
 			},
 		});
 
@@ -1084,12 +1084,12 @@ export class TextSubtitleSource extends SubtitleSource {
 		});
 	}
 
-	digest(text: string) {
+	add(text: string) {
 		if (typeof text !== 'string') {
 			throw new TypeError('text must be a string.');
 		}
 
-		this._ensureValidDigest();
+		this._ensureValidAdd();
 		this._parser.parse(text);
 
 		return this._connectedTrack!.output._muxer.mutex.currentPromise;

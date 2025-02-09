@@ -384,7 +384,7 @@ class Conversion {
 						return;
 					}
 
-					await source.digest(sample, meta);
+					await source.add(sample, meta);
 					this.reportProgress(track.id, sample.timestamp + sample.duration);
 				}
 
@@ -470,7 +470,7 @@ class Conversion {
 							return;
 						}
 
-						await source.digest(Math.max(timestamp - this.startTimestamp, 0), duration);
+						await source.add(Math.max(timestamp - this.startTimestamp, 0), duration);
 					}
 
 					await source.close();
@@ -498,7 +498,7 @@ class Conversion {
 							return;
 						}
 
-						await source.digest(clone);
+						await source.add(clone);
 						clone.close();
 					}
 
@@ -574,7 +574,7 @@ class Conversion {
 						return;
 					}
 
-					await source.digest(sample, meta);
+					await source.add(sample, meta);
 					this.reportProgress(track.id, sample.timestamp + sample.duration);
 				}
 
@@ -663,7 +663,7 @@ class Conversion {
 							return;
 						}
 
-						await source.digest(data);
+						await source.add(data);
 						data.close();
 					}
 
@@ -751,7 +751,7 @@ class Conversion {
 							return;
 						}
 
-						await source.digest(renderedBuffer);
+						await source.add(renderedBuffer);
 
 						currentContextStartFrame += currentContext.length;
 
@@ -779,7 +779,7 @@ class Conversion {
 					return;
 				}
 
-				await source.digest(renderedBuffer);
+				await source.add(renderedBuffer);
 			}
 
 			await source.close();
