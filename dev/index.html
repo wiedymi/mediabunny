@@ -40,6 +40,7 @@
 
 	let format = new Metamuxer.MkvOutputFormat({ streamable: false });
 	format = new Metamuxer.Mp4OutputFormat({ fastStart: 'fragmented' }); // new Metamuxer.MkvOutputFormat();// new Metamuxer.Mp4OutputFormat({ fastStart: false });
+	format = new Metamuxer.OggOutputFormat();
 	let target = new Metamuxer.BufferTarget();
 
 	/*
@@ -93,9 +94,9 @@
 	});
 	let subtitleSource = new Metamuxer.TextSubtitleSource('webvtt');
 
-	output.addVideoTrack(videoSource, { languageCode: 'eng' });
+	//output.addVideoTrack(videoSource, { languageCode: 'eng' });
 	output.addAudioTrack(audioSource);
-	output.addSubtitleTrack(subtitleSource);
+	//output.addSubtitleTrack(subtitleSource);
 
 	output.start();
 
@@ -161,7 +162,7 @@ Testing... <00:17.350>One... <00:18.125>Two...
 		context.fillStyle = ['red', 'green', 'blue', 'yellow'][i % 4];
 		context.fillRect(canvas.width * Math.random(), canvas.height * Math.random(), canvas.width * Math.random(), canvas.height * Math.random());
 
-		await videoSource.digest(i / 10, 1 / 10);
+		//await videoSource.digest(i / 10, 1 / 10);
 	}
 
 	let audioContext = new AudioContext();

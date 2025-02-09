@@ -1,6 +1,6 @@
 import { Reader } from '../reader';
+import { OGGS } from './ogg-misc';
 
-const OGGS = 0x5367674f; // 'OggS'
 export const MIN_PAGE_HEADER_SIZE = 27;
 export const MAX_PAGE_HEADER_SIZE = 27 + 255;
 export const MAX_PAGE_SIZE = MAX_PAGE_HEADER_SIZE + 255 * 255;
@@ -15,7 +15,7 @@ export type Page = {
 	serialNumber: number;
 	sequenceNumber: number;
 	checksum: number;
-	lacingValues: number[];
+	lacingValues: Uint8Array;
 };
 
 export class OggReader {
@@ -83,10 +83,10 @@ export class OggReader {
 		const checksum = this.readU32();
 
 		const numberPageSegments = this.readU8();
-		const lacingValues: number[] = [];
+		const lacingValues = new Uint8Array(numberPageSegments);
 
 		for (let i = 0; i < numberPageSegments; i++) {
-			lacingValues.push(this.readU8());
+			lacingValues[i] = this.readU8();
 		}
 
 		const headerSize = 27 + numberPageSegments;

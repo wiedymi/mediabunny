@@ -1,29 +1,21 @@
-import { AudioCodec, parseOpusIdentificationHeader, parseOpusTocByte } from '../codec';
+import { OPUS_INTERNAL_SAMPLE_RATE, parseOpusIdentificationHeader } from '../codec';
 import { Demuxer } from '../demuxer';
 import { Input } from '../input';
 import { InputAudioTrack, InputAudioTrackBacking } from '../input-track';
 import { SampleRetrievalOptions } from '../media-sink';
-import { assert, findLast, ilog, roundToPrecision, toDataView, UNDETERMINED_LANGUAGE } from '../misc';
+import { assert, findLast, roundToPrecision, toDataView, UNDETERMINED_LANGUAGE } from '../misc';
 import { Reader } from '../reader';
 import { EncodedAudioSample, PLACEHOLDER_DATA } from '../sample';
-import { computeOggPageCrc } from './ogg-misc';
+import { computeOggPageCrc, extractSampleMetadata, OggCodecInfo, parseModesFromVorbisSetupPacket } from './ogg-misc';
 import { MAX_PAGE_HEADER_SIZE, MAX_PAGE_SIZE, MIN_PAGE_HEADER_SIZE, OggReader, Page } from './ogg-reader';
-import { parseModesFromSetupPacket } from './vorbis';
 
 type LogicalBitstream = {
 	serialNumber: number;
 	bosPage: Page;
-	codec: AudioCodec | null;
 	description: Uint8Array | null;
 	numberOfChannels: number;
 	sampleRate: number;
-	vorbisInfo: {
-		blocksizes: number[];
-		modeBlockflags: number[];
-	} | null;
-	opusInfo: {
-		preSkip: number;
-	} | null;
+	codecInfo: OggCodecInfo;
 
 	lastMetadataPacket: Packet | null;
 };
@@ -74,12 +66,14 @@ export class OggDemuxer extends Demuxer {
 				this.bitstreams.push({
 					serialNumber: page.serialNumber,
 					bosPage: page,
-					codec: null,
 					description: null,
 					numberOfChannels: -1,
 					sampleRate: -1,
-					vorbisInfo: null,
-					opusInfo: null,
+					codecInfo: {
+						codec: null,
+						vorbisInfo: null,
+						opusInfo: null,
+					},
 					lastMetadataPacket: null,
 				});
 
@@ -119,7 +113,7 @@ export class OggDemuxer extends Demuxer {
 					await this.readOpusMetadata(firstPacket, bitstream);
 				}
 
-				if (bitstream.codec !== null) {
+				if (bitstream.codecInfo.codec !== null) {
 					this.tracks.push(new InputAudioTrack(new OggAudioTrackBacking(bitstream, this)));
 				}
 			}
@@ -194,7 +188,7 @@ export class OggDemuxer extends Demuxer {
 			thirdPacket.data, 1 + lacingValues.length + firstPacket.data.length + secondPacket.data.length,
 		);
 
-		bitstream.codec = 'vorbis';
+		bitstream.codecInfo.codec = 'vorbis';
 		bitstream.description = description;
 		bitstream.lastMetadataPacket = thirdPacket;
 
@@ -203,12 +197,12 @@ export class OggDemuxer extends Demuxer {
 		bitstream.sampleRate = view.getUint32(12, true);
 
 		const blockSizeByte = view.getUint8(28);
-		bitstream.vorbisInfo = {
+		bitstream.codecInfo.vorbisInfo = {
 			blocksizes: [
 				1 << (blockSizeByte & 0xf),
 				1 << (blockSizeByte >> 4),
 			],
-			modeBlockflags: parseModesFromSetupPacket(thirdPacket.data).modeBlockflags,
+			modeBlockflags: parseModesFromVorbisSetupPacket(thirdPacket.data).modeBlockflags,
 		};
 	}
 
@@ -232,7 +226,7 @@ export class OggDemuxer extends Demuxer {
 
 		// We don't make use of the comment header's data
 
-		bitstream.codec = 'opus';
+		bitstream.codecInfo.codec = 'opus';
 		bitstream.description = firstPacket.data;
 		bitstream.lastMetadataPacket = secondPacket;
 
@@ -240,7 +234,7 @@ export class OggDemuxer extends Demuxer {
 		bitstream.numberOfChannels = header.outputChannelCount;
 		bitstream.sampleRate = header.inputSampleRate;
 
-		bitstream.opusInfo = {
+		bitstream.codecInfo.opusInfo = {
 			preSkip: header.preSkip,
 		};
 	}
@@ -402,8 +396,10 @@ class OggAudioTrackBacking implements InputAudioTrackBacking {
 	sampleToMetadata = new WeakMap<EncodedAudioSample, SampleMetadata>();
 
 	constructor(public bitstream: LogicalBitstream, public demuxer: OggDemuxer) {
-		// Opus always uses 48000 for its internal calculations, even if the actual sample rate is different
-		this.internalSampleRate = bitstream.codec === 'opus' ? 48000 : bitstream.sampleRate;
+		// Opus always uses a fixed sample rate for its internal calculations, even if the actual rate is different
+		this.internalSampleRate = bitstream.codecInfo.codec === 'opus'
+			? OPUS_INTERNAL_SAMPLE_RATE
+			: bitstream.sampleRate;
 	}
 
 	getId() {
@@ -423,14 +419,14 @@ class OggAudioTrackBacking implements InputAudioTrackBacking {
 	}
 
 	getCodec() {
-		return this.bitstream.codec;
+		return this.bitstream.codecInfo.codec;
 	}
 
 	async getDecoderConfig(): Promise<AudioDecoderConfig | null> {
-		assert(this.bitstream.codec);
+		assert(this.bitstream.codecInfo.codec);
 
 		return {
-			codec: this.bitstream.codec,
+			codec: this.bitstream.codecInfo.codec,
 			numberOfChannels: this.bitstream.numberOfChannels,
 			sampleRate: this.bitstream.sampleRate,
 			description: this.bitstream.description ?? undefined,
@@ -451,9 +447,9 @@ class OggAudioTrackBacking implements InputAudioTrackBacking {
 	}
 
 	granulePositionToTimestampInSamples(granulePosition: number) {
-		if (this.bitstream.codec === 'opus') {
-			assert(this.bitstream.opusInfo);
-			return granulePosition - this.bitstream.opusInfo.preSkip;
+		if (this.bitstream.codecInfo.codec === 'opus') {
+			assert(this.bitstream.codecInfo.opusInfo);
+			return granulePosition - this.bitstream.codecInfo.opusInfo.preSkip;
 		}
 
 		return granulePosition;
@@ -471,46 +467,11 @@ class OggAudioTrackBacking implements InputAudioTrackBacking {
 			return null;
 		}
 
-		let durationInSamples = 0;
-		let currentBlocksize: number | null = null;
-
-		if (packet.data.length > 0) {
-			// To know sample duration, we'll need to peak inside the packet
-
-			if (this.bitstream.codec === 'vorbis') {
-				assert(this.bitstream.vorbisInfo);
-
-				const vorbisModeCount = this.bitstream.vorbisInfo.modeBlockflags.length;
-				const bitCount = ilog(vorbisModeCount - 1);
-				const modeMask = ((1 << bitCount) - 1) << 1;
-				const modeNumber = (packet.data[0]! & modeMask) >> 1;
-
-				if (modeNumber >= this.bitstream.vorbisInfo.modeBlockflags.length) {
-					throw new Error('Invalid mode number.');
-				}
-
-				// In Vorbis, packet duration also depends on the blocksize of the previous packet
-				let prevBlocksize = additional.vorbisLastBlocksize;
-
-				const blockflag = this.bitstream.vorbisInfo.modeBlockflags[modeNumber]!;
-				currentBlocksize = this.bitstream.vorbisInfo.blocksizes[blockflag]!;
-
-				if (blockflag === 1) {
-					const prevMask = (modeMask | 0x1) + 1;
-					const flag = packet.data[0]! & prevMask ? 1 : 0;
-					prevBlocksize = this.bitstream.vorbisInfo.blocksizes[flag]!;
-				}
-
-				durationInSamples = prevBlocksize !== null
-					? (prevBlocksize + currentBlocksize) >> 2
-					: 0; // The first sample outputs no audio data and therefore has a duration of 0
-			} else if (this.bitstream.codec === 'opus') {
-				assert(this.bitstream.opusInfo);
-
-				const toc = parseOpusTocByte(packet.data);
-				durationInSamples = toc.durationInSamples;
-			}
-		}
+		const { durationInSamples, vorbisBlockSize } = extractSampleMetadata(
+			packet.data,
+			this.bitstream.codecInfo,
+			additional.vorbisLastBlocksize,
+		);
 
 		const sample = new EncodedAudioSample(
 			options.metadataOnly ? PLACEHOLDER_DATA : packet.data,
@@ -523,7 +484,7 @@ class OggAudioTrackBacking implements InputAudioTrackBacking {
 			packet,
 			timestampInSamples: additional.timestampInSamples,
 			durationInSamples,
-			vorbisBlockSize: currentBlocksize,
+			vorbisBlockSize,
 		});
 		return sample;
 	}
@@ -539,9 +500,9 @@ class OggAudioTrackBacking implements InputAudioTrackBacking {
 		}
 
 		let timestampInSamples = 0;
-		if (this.bitstream.codec === 'opus') {
-			assert(this.bitstream.opusInfo);
-			timestampInSamples -= this.bitstream.opusInfo.preSkip;
+		if (this.bitstream.codecInfo.codec === 'opus') {
+			assert(this.bitstream.codecInfo.opusInfo);
+			timestampInSamples -= this.bitstream.codecInfo.opusInfo.preSkip;
 		}
 
 		const packet = await this.demuxer.readPacket(

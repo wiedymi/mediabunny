@@ -101,6 +101,8 @@ export class Mp3Muxer extends Muxer {
 			return;
 		}
 
+		const release = await this.mutex.acquire();
+
 		const endPos = this.writer.getPos();
 
 		this.writer.seek(0);
@@ -121,5 +123,7 @@ export class Mp3Muxer extends Muxer {
 		this.mp3Writer.writeXingFrame(this.xingFrameData);
 
 		this.writer.seek(endPos);
+
+		release();
 	}
 }

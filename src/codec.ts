@@ -991,6 +991,8 @@ export const parseOpusIdentificationHeader = (bytes: Uint8Array) => {
 	};
 };
 
+export const OPUS_INTERNAL_SAMPLE_RATE = 48000;
+
 // From https://datatracker.ietf.org/doc/html/rfc6716, in 48 kHz samples
 const OPUS_FRAME_DURATION_TABLE = [
 	480, 960, 1920, 2880,

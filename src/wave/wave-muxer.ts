@@ -100,6 +100,8 @@ export class WaveMuxer extends Muxer {
 	}
 
 	async finalize() {
+		const release = await this.mutex.acquire();
+
 		const endPos = this.writer.getPos();
 
 		// Write file size
@@ -111,5 +113,7 @@ export class WaveMuxer extends Muxer {
 		this.riffWriter.writeU32(this.dataSize);
 
 		this.writer.seek(endPos);
+
+		release();
 	}
 }

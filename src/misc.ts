@@ -329,6 +329,16 @@ export const setInt24 = (view: DataView, byteOffset: number, value: number, litt
 	setUint24(view, byteOffset, value, littleEndian);
 };
 
+export const setInt64 = (view: DataView, byteOffset: number, value: number, littleEndian: boolean) => {
+	if (littleEndian) {
+		view.setUint32(byteOffset + 0, value, true);
+		view.setInt32(byteOffset + 4, Math.floor(value / 2 ** 32), true);
+	} else {
+		view.setInt32(byteOffset + 0, Math.floor(value / 2 ** 32), true);
+		view.setUint32(byteOffset + 4, value, true);
+	}
+};
+
 /**
  * Calls a function on each value spat out by an async generator. The reason for writing this manually instead of
  * using a generator function is that the generator function queues return() calls - here, we forward them immediately.

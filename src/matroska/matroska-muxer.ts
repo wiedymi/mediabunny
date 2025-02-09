@@ -31,6 +31,7 @@ import {
 	parseSubtitleTimestamp,
 } from '../subtitles';
 import {
+	OPUS_INTERNAL_SAMPLE_RATE,
 	PCM_AUDIO_CODECS,
 	PcmAudioCodec,
 	generateAv1CodecConfigurationFromCodecString,
@@ -233,7 +234,7 @@ export class MatroskaMuxer extends Muxer {
 					const header = parseOpusIdentificationHeader(bytes);
 
 					// Use the preSkip value from the header
-					seekPreRollNs = Math.round(1e9 * (header.preSkip / 48000));
+					seekPreRollNs = Math.round(1e9 * (header.preSkip / OPUS_INTERNAL_SAMPLE_RATE));
 				}
 			}
 

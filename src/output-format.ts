@@ -13,6 +13,7 @@ import { IsobmffMuxer } from './isobmff/isobmff-muxer';
 import { MatroskaMuxer } from './matroska/matroska-muxer';
 import { Mp3Muxer } from './mp3/mp3-muxer';
 import { Muxer } from './muxer';
+import { OggMuxer } from './ogg/ogg-muxer';
 import { Output, TrackType } from './output';
 import { WaveMuxer } from './wave/wave-muxer';
 
@@ -325,6 +326,42 @@ export class WaveOutputFormat extends OutputFormat {
 			...PCM_AUDIO_CODECS.filter(codec =>
 				['pcm-s16', 'pcm-s24', 'pcm-s32', 'pcm-f32', 'pcm-u8', 'ulaw', 'alaw'].includes(codec),
 			),
+		];
+	}
+}
+
+/** @public */
+export class OggOutputFormat extends OutputFormat {
+	/** @internal */
+	_createMuxer(output: Output) {
+		return new OggMuxer(output);
+	}
+
+	/** @internal */
+	_getName() {
+		return 'Ogg';
+	}
+
+	getSupportedTrackCounts(): TrackCountLimits {
+		return {
+			video: { min: 0, max: 0 },
+			audio: { min: 0, max: Infinity },
+			subtitle: { min: 0, max: 0 },
+			total: { min: 1, max: 2 ** 32 },
+		};
+	}
+
+	getFileExtension() {
+		return '.ogg';
+	}
+
+	getSupportedCodecs() {
+		return OggOutputFormat.getSupportedCodecs();
+	}
+
+	static getSupportedCodecs(): MediaCodec[] {
+		return [
+			...AUDIO_CODECS.filter(codec => ['vorbis', 'opus'].includes(codec)),
 		];
 	}
 }
