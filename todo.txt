@@ -1,3 +1,2 @@
-- A stream source?? Or like a callback-driven source
 - onHeader, etc callbacks for Matroska
 - https://github.com/Vanilagy/mp4-muxer/issues/83 tell him it's possible now

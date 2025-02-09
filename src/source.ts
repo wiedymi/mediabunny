@@ -32,13 +32,51 @@ export class BufferSource extends Source {
 	}
 
 	/** @internal */
-	override async _read(start: number, end: number) {
+	async _read(start: number, end: number) {
 		return this._bytes.subarray(start, end);
 	}
 
 	/** @internal */
-	override async _retrieveSize() {
+	async _retrieveSize() {
 		return this._bytes.byteLength;
+	}
+}
+
+/** @public */
+export type StreamSourceOptions = {
+	read: (start: number, end: number) => Uint8Array | Promise<Uint8Array>;
+	getSize: () => number | Promise<number>;
+};
+
+/** @public */
+export class StreamSource extends Source {
+	/** @internal */
+	_options: StreamSourceOptions;
+
+	constructor(options: StreamSourceOptions) {
+		if (!options || typeof options !== 'object') {
+			throw new TypeError('options must be an object.');
+		}
+		if (typeof options.read !== 'function') {
+			throw new TypeError('options.read must be a function.');
+		}
+		if (typeof options.getSize !== 'function') {
+			throw new TypeError('options.getSize must be a function.');
+		}
+
+		super();
+
+		this._options = options;
+	}
+
+	/** @internal */
+	async _read(start: number, end: number) {
+		return this._options.read(start, end);
+	}
+
+	/** @internal */
+	async _retrieveSize() {
+		return this._options.getSize();
 	}
 }
 
@@ -58,14 +96,14 @@ export class BlobSource extends Source {
 	}
 
 	/** @internal */
-	override async _read(start: number, end: number) {
+	async _read(start: number, end: number) {
 		const slice = this._blob.slice(start, end);
 		const buffer = await slice.arrayBuffer();
 		return new Uint8Array(buffer);
 	}
 
 	/** @internal */
-	override async _retrieveSize() {
+	async _retrieveSize() {
 		return this._blob.size;
 	}
 }
@@ -140,7 +178,7 @@ export class UrlSource extends Source {
 	}
 
 	/** @internal */
-	override async _read(start: number, end: number): Promise<Uint8Array> {
+	async _read(start: number, end: number): Promise<Uint8Array> {
 		if (this._fullData) {
 			return new Uint8Array(this._fullData, start, end - start);
 		}
@@ -158,7 +196,7 @@ export class UrlSource extends Source {
 	}
 
 	/** @internal */
-	override async _retrieveSize(): Promise<number> {
+	async _retrieveSize(): Promise<number> {
 		if (this._fullData) {
 			return this._fullData.byteLength;
 		}
