@@ -28,6 +28,9 @@
 				format: outputFormat,
 				target
 			}),
+			audio: {
+				//discard: true
+			},
 			/*
 			video: {
 				discard: true,
@@ -43,6 +46,7 @@
 				codec: 'aac',
 			},
 			*/
+			/*
 			video: {
 				codec: 'avc',
 			},
@@ -50,9 +54,10 @@
 				codec: 'mp3',
 				bitrate: 320000
 			},
+			*/
 			trim: {
 				start: 0,
-				end: 60
+				end: 20
 			},
 			onProgress: (event) => {
 				progress.value = event.completion;

@@ -57,6 +57,7 @@ type InternalTrack = {
 	fragmentLookupTable: FragmentLookupTableEntry[] | null;
 	currentFragmentState: FragmentTrackState | null;
 	fragments: Fragment[];
+	editListOffset: number;
 } & ({
 	info: null;
 } | {
@@ -547,7 +548,8 @@ export class IsobmffDemuxer extends Demuxer {
 			case 'mdia':
 			case 'minf':
 			case 'dinf':
-			case 'mfra': {
+			case 'mfra':
+			case 'edts': {
 				this.readContiguousBoxes(boxInfo.contentSize);
 			}; break;
 
@@ -582,6 +584,7 @@ export class IsobmffDemuxer extends Demuxer {
 					fragmentLookupTable: null,
 					currentFragmentState: null,
 					fragments: [],
+					editListOffset: 0,
 				} satisfies InternalTrack as InternalTrack;
 				this.currentTrack = track;
 
@@ -651,6 +654,47 @@ export class IsobmffDemuxer extends Demuxer {
 					track.rotation = 0;
 				} else {
 					track.rotation = (90 * matrixIndex) as Rotation;
+				}
+			}; break;
+
+			case 'elst': {
+				const track = this.currentTrack;
+				assert(track);
+
+				const version = this.metadataReader.readU8();
+				this.metadataReader.pos += 3; // Flags
+
+				let relevantEntryFound = false;
+
+				const entryCount = this.metadataReader.readU32();
+				for (let i = 0; i < entryCount; i++) {
+					const segmentDuration = version === 1
+						? this.metadataReader.readU64()
+						: this.metadataReader.readU32();
+					const mediaTime = version === 1
+						? this.metadataReader.readI64()
+						: this.metadataReader.readI32();
+					const mediaRate = this.metadataReader.readFixed_16_16();
+
+					if (segmentDuration === 0) {
+						// Don't care
+						continue;
+					}
+
+					if (relevantEntryFound) {
+						throw new Error('Unsupported edit list: multiple edits are not supported.');
+					}
+
+					if (mediaTime === -1) {
+						throw new Error('Unsupported edit list: no empty edits allowed.');
+					}
+
+					if (mediaRate !== 1) {
+						throw new Error('Unsupported edit list: media rate must be 1.');
+					}
+
+					track.editListOffset = mediaTime;
+					relevantEntryFound = true;
 				}
 			}; break;
 
@@ -1796,15 +1840,15 @@ abstract class IsobmffTrackBacking<
 		return this.fetchSampleForSampleIndex(0, options);
 	}
 
-	private intoTimescale(timestamp: number) {
+	private mapTimestampIntoTimescale(timestamp: number) {
 		// Do a little rounding to catch cases where the result is very close to an integer. If it is, it's likely
 		// that the number was originally an integer divided by the timescale. For stability, it's best
 		// to return the integer in this case.
-		return roundToPrecision(timestamp * this.internalTrack.timescale, 14);
+		return roundToPrecision(timestamp * this.internalTrack.timescale, 14) + this.internalTrack.editListOffset;
 	}
 
 	async getSample(timestamp: number, options: SampleRetrievalOptions) {
-		const timestampInTimescale = this.intoTimescale(timestamp);
+		const timestampInTimescale = this.mapTimestampIntoTimescale(timestamp);
 
 		if (this.internalTrack.demuxer.isFragmented) {
 			return this.performFragmentedLookup(
@@ -1890,7 +1934,7 @@ abstract class IsobmffTrackBacking<
 	}
 
 	async getKeySample(timestamp: number, options: SampleRetrievalOptions) {
-		const timestampInTimescale = this.intoTimescale(timestamp);
+		const timestampInTimescale = this.mapTimestampIntoTimescale(timestamp);
 
 		if (this.internalTrack.demuxer.isFragmented) {
 			return this.performFragmentedLookup(
@@ -2014,7 +2058,8 @@ abstract class IsobmffTrackBacking<
 			data = this.internalTrack.demuxer.chunkReader.readBytes(sampleInfo.sampleSize);
 		}
 
-		const timestamp = sampleInfo.presentationTimestamp / this.internalTrack.timescale;
+		const timestamp = (sampleInfo.presentationTimestamp - this.internalTrack.editListOffset)
+			/ this.internalTrack.timescale;
 		const duration = sampleInfo.duration / this.internalTrack.timescale;
 		const sample = this.createSample(
 			data,
@@ -2049,7 +2094,8 @@ abstract class IsobmffTrackBacking<
 			data = this.internalTrack.demuxer.chunkReader.readBytes(fragmentSample.byteSize);
 		}
 
-		const timestamp = fragmentSample.presentationTimestamp / this.internalTrack.timescale;
+		const timestamp = (fragmentSample.presentationTimestamp - this.internalTrack.editListOffset)
+			/ this.internalTrack.timescale;
 		const duration = fragmentSample.duration / this.internalTrack.timescale;
 		const sample = this.createSample(
 			data,

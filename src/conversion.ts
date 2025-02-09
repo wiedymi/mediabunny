@@ -341,7 +341,8 @@ class Conversion {
 			height = ceilToMultipleOfTwo(this.options.video.height);
 		}
 
-		const needsReencode = !!this.options.video?.forceReencode || this.startTimestamp > 0;
+		const firstTimestamp = await track.getFirstTimestamp();
+		const needsReencode = !!this.options.video?.forceReencode || this.startTimestamp > 0 || firstTimestamp < 0;
 		const needsResize = width !== originalWidth || height !== originalHeight;
 
 		let videoCodecs = this.output.format.getSupportedVideoCodecs();
@@ -513,11 +514,14 @@ class Conversion {
 		const originalNumberOfChannels = track.numberOfChannels;
 		const originalSampleRate = track.sampleRate;
 
+		const firstTimestamp = await track.getFirstTimestamp();
+
 		let numberOfChannels = this.options.audio?.numberOfChannels ?? originalNumberOfChannels;
 		let sampleRate = this.options.audio?.sampleRate ?? originalSampleRate;
 		let needsResample = numberOfChannels !== originalNumberOfChannels
 			|| sampleRate !== originalSampleRate
-			|| this.startTimestamp > 0;
+			|| this.startTimestamp > 0
+			|| firstTimestamp < 0;
 
 		let audioCodecs = this.output.format.getSupportedAudioCodecs();
 		if (
@@ -671,13 +675,12 @@ class Conversion {
 				await track.computeDuration() - this.startTimestamp,
 				this.endTimestamp - this.startTimestamp,
 			);
-			const totalFrameCount = Math.round(trackDuration * FALLBACK_SAMPLE_RATE);
-
-			const MAX_CHUNK_LENGTH = 5 * FALLBACK_SAMPLE_RATE;
+			const totalFrameCount = Math.round(trackDuration * targetSampleRate);
+			const maxChunkLength = 5 * targetSampleRate;
 
 			let currentContextStartFrame = 0;
 			let currentContext: OfflineAudioContext | null = new OfflineAudioContext({
-				length: Math.min(totalFrameCount - currentContextStartFrame, MAX_CHUNK_LENGTH),
+				length: Math.min(totalFrameCount - currentContextStartFrame, maxChunkLength),
 				numberOfChannels: targetNumberOfChannels,
 				sampleRate: targetSampleRate,
 			});
@@ -719,7 +722,7 @@ class Conversion {
 
 						const newLength = Math.min(
 							totalFrameCount - currentContextStartFrame,
-							MAX_CHUNK_LENGTH,
+							maxChunkLength,
 						);
 						currentContext = newLength > 0
 							? new OfflineAudioContext({
