@@ -65,6 +65,7 @@ export type ConversionOptions = {
 	};
 
 	onProgress?: (event: { completion: number }) => unknown;
+	abortSignal?: AbortSignal;
 };
 
 /** @public */
@@ -227,6 +228,9 @@ class Conversion {
 		if (options.onProgress !== undefined && typeof options.onProgress !== 'function') {
 			throw new TypeError('options.onProgress, when provided, must be a function.');
 		}
+		if (options.abortSignal !== undefined && !(options.abortSignal instanceof AbortSignal)) {
+			throw new TypeError('options.abortSignal, when provided, must be an AbortSignal.');
+		}
 
 		this.input = options.input;
 		this.output = options.output;
@@ -242,6 +246,12 @@ class Conversion {
 			utilizedTracks: [],
 			discardedTracks: [],
 		};
+
+		options.abortSignal?.addEventListener('abort', () => {
+			if (!this.output.isFinalizing) {
+				void this.output.cancel();
+			}
+		});
 	}
 
 	async execute() {
@@ -370,6 +380,10 @@ class Conversion {
 						await this.synchronizer.wait(sample.timestamp);
 					}
 
+					if (this.options.abortSignal?.aborted) {
+						return;
+					}
+
 					await source.digest(sample, meta);
 					this.reportProgress(track.id, sample.timestamp + sample.duration);
 				}
@@ -452,6 +466,10 @@ class Conversion {
 							context.drawImage(canvas, 0, 0, canvas.width, canvas.height, dx, dy, newWidth, newHeight);
 						}
 
+						if (this.options.abortSignal?.aborted) {
+							return;
+						}
+
 						await source.digest(Math.max(timestamp - this.startTimestamp, 0), duration);
 					}
 
@@ -475,6 +493,10 @@ class Conversion {
 						const clone = setVideoFrameTiming(frame, {
 							timestamp: Math.max(timestamp - this.startTimestamp, 0),
 						});
+
+						if (this.options.abortSignal?.aborted) {
+							return;
+						}
 
 						await source.digest(clone);
 						clone.close();
@@ -546,6 +568,10 @@ class Conversion {
 				for await (const sample of sink.samples(undefined, this.endTimestamp)) {
 					if (this.synchronizer.shouldWait(track.id, sample.timestamp)) {
 						await this.synchronizer.wait(sample.timestamp);
+					}
+
+					if (this.options.abortSignal?.aborted) {
+						return;
 					}
 
 					await source.digest(sample, meta);
@@ -633,6 +659,10 @@ class Conversion {
 							await this.synchronizer.wait(timestamp);
 						}
 
+						if (this.options.abortSignal?.aborted) {
+							return;
+						}
+
 						await source.digest(data);
 						data.close();
 					}
@@ -716,6 +746,11 @@ class Conversion {
 					if (endTimestamp >= currentContextEndTime) {
 						// Render the audio
 						const renderedBuffer = await currentContext.startRendering();
+
+						if (this.options.abortSignal?.aborted) {
+							return;
+						}
+
 						await source.digest(renderedBuffer);
 
 						currentContextStartFrame += currentContext.length;
@@ -739,6 +774,11 @@ class Conversion {
 
 			if (currentContext) {
 				const renderedBuffer = await currentContext.startRendering();
+
+				if (this.options.abortSignal?.aborted) {
+					return;
+				}
+
 				await source.digest(renderedBuffer);
 			}
 

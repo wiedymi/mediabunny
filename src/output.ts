@@ -86,7 +86,25 @@ export class Output<
 	/** @internal */
 	_finalizing = false;
 	/** @internal */
+	_finalized = false;
+	/** @internal */
 	_mutex = new AsyncMutex();
+
+	get isStarted() {
+		return this._started;
+	}
+
+	get isCanceled() {
+		return this._canceled;
+	}
+
+	get isFinalizing() {
+		return this._finalizing;
+	}
+
+	get isFinalized() {
+		return this._finalized;
+	}
 
 	constructor(options: OutputOptions<F, T>) {
 		if (!options || typeof options !== 'object') {
@@ -333,6 +351,8 @@ export class Output<
 
 		await this._writer.flush();
 		await this._writer.finalize();
+
+		this._finalized = true;
 
 		release();
 	}
