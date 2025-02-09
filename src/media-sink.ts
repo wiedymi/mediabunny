@@ -888,14 +888,15 @@ class AudioDecoderWrapper extends DecoderWrapper<EncodedAudioSample, AudioData> 
 		onError: (error: DOMException) => unknown,
 		codec: AudioCodec,
 		decoderConfig: AudioDecoderConfig,
-		timeResolution: number,
 	) {
 		super(onData, onError);
 
 		const dataHandler = (data: AudioData) => {
-			// Round the microsecond timestamps to the time resolution
-			const timestamp = Math.round(data.timestamp / 1e6 * timeResolution) / timeResolution;
-			const duration = Math.round(data.duration / 1e6 * timeResolution) / timeResolution;
+			const sampleRate = decoderConfig.sampleRate;
+
+			// Round the microsecond timestamps to the sample rate
+			const timestamp = Math.round(data.timestamp / 1e6 * sampleRate) / sampleRate;
+			const duration = Math.round(data.duration / 1e6 * sampleRate) / sampleRate;
 
 			onData({
 				frame: data,
@@ -1168,8 +1169,7 @@ export class AudioDataSink extends BaseMediaFrameSink<EncodedAudioSample, AudioD
 		if ((PCM_AUDIO_CODECS as readonly string[]).includes(decoderConfig.codec)) {
 			return new PcmAudioDecoderWrapper(onData, onError, decoderConfig);
 		} else {
-			const timeResolution = this._audioTrack.timeResolution;
-			return new AudioDecoderWrapper(onData, onError, codec, decoderConfig, timeResolution);
+			return new AudioDecoderWrapper(onData, onError, codec, decoderConfig);
 		}
 	}
 
