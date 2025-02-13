@@ -1,3 +1,4 @@
 - onHeader, etc callbacks for Matroska
 - https://github.com/Vanilagy/mp4-muxer/issues/83 tell him it's possible now
 - is this fixed? https://github.com/Vanilagy/webm-muxer/issues/50
+- decode and flush abstract in custom coders
