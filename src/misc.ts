@@ -380,8 +380,8 @@ export const setVideoFrameTiming = (frame: VideoFrame, timing: {
 	duration?: number;
 }) => {
 	const clone = new VideoFrame(frame, {
-		timestamp: timing.timestamp && 1e6 * timing.timestamp,
-		duration: timing.duration && 1e6 * timing.duration,
+		timestamp: timing.timestamp !== undefined ? 1e6 * timing.timestamp : undefined,
+		duration: timing.duration !== undefined ? 1e6 * timing.duration : undefined,
 	});
 	frame.close();
 

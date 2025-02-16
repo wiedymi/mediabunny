@@ -418,7 +418,7 @@ export class CanvasSource extends VideoSource {
 
 		const frame = new VideoFrame(this._canvas, {
 			timestamp: Math.round(1e6 * timestamp),
-			duration: Math.round(1e6 * duration),
+			duration: Math.round(1e6 * duration) || undefined, // Drag 0 duration to undefined, glitches some codecs
 			alpha: 'discard',
 		});
 
