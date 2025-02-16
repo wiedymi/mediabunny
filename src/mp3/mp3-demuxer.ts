@@ -179,6 +179,7 @@ class Mp3AudioTrackBacking implements InputAudioTrackBacking {
 			'key',
 			rawSample.timestamp,
 			rawSample.duration,
+			sampleIndex,
 		);
 	}
 

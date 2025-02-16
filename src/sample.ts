@@ -10,6 +10,7 @@ export class EncodedVideoSample {
 		public readonly type: SampleType,
 		public readonly timestamp: number,
 		public readonly duration: number,
+		public readonly sequenceNumber = -1,
 		public readonly byteLength = data.byteLength,
 	) {
 		if (!(data instanceof Uint8Array)) {
@@ -56,19 +57,6 @@ export class EncodedVideoSample {
 			timestamp: this.microsecondTimestamp,
 			duration: this.microsecondDuration,
 		});
-	}
-
-	is(otherSample: EncodedVideoSample) {
-		if (!(otherSample instanceof EncodedVideoSample)) {
-			throw new TypeError('otherSample must be an EncodedVideoSample.');
-		}
-
-		return (
-			this.type === otherSample.type
-			&& this.timestamp === otherSample.timestamp
-			&& this.duration === otherSample.duration
-			&& this.byteLength === otherSample.byteLength
-		);
 	}
 
 	clone(options?: {
@@ -118,6 +106,7 @@ export class EncodedAudioSample {
 		public readonly type: SampleType,
 		public readonly timestamp: number,
 		public readonly duration: number,
+		public readonly sequenceNumber = -1,
 		public readonly byteLength = data.byteLength,
 	) {
 		if (!(data instanceof Uint8Array)) {
@@ -164,19 +153,6 @@ export class EncodedAudioSample {
 			timestamp: this.microsecondTimestamp,
 			duration: this.microsecondDuration,
 		});
-	}
-
-	is(otherSample: EncodedAudioSample) {
-		if (!(otherSample instanceof EncodedAudioSample)) {
-			throw new TypeError('otherSample must be an EncodedAudioSample.');
-		}
-
-		return (
-			this.type === otherSample.type
-			&& this.timestamp === otherSample.timestamp
-			&& this.duration === otherSample.duration
-			&& this.byteLength === otherSample.byteLength
-		);
 	}
 
 	clone(options?: {

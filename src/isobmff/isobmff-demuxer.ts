@@ -1797,6 +1797,7 @@ abstract class IsobmffTrackBacking<
 		type: SampleType,
 		timestamp: number,
 		duration: number,
+		sequenceNumber: number
 	): Sample;
 
 	async getFirstSample(options: SampleRetrievalOptions) {
@@ -2067,6 +2068,7 @@ abstract class IsobmffTrackBacking<
 			sampleInfo.isKeyFrame ? 'key' : 'delta',
 			timestamp,
 			duration,
+			sampleIndex,
 		);
 
 		this.sampleToSampleIndex.set(sample, sampleIndex);
@@ -2103,6 +2105,7 @@ abstract class IsobmffTrackBacking<
 			fragmentSample.isKeyFrame ? 'key' : 'delta',
 			timestamp,
 			duration,
+			fragment.moofOffset + sampleIndex,
 		);
 
 		this.sampleToFragmentLocation.set(sample, { fragment, sampleIndex });
@@ -2362,8 +2365,9 @@ class IsobmffVideoTrackBacking extends IsobmffTrackBacking<EncodedVideoSample> i
 		type: SampleType,
 		timestamp: number,
 		duration: number,
+		sequenceNumber: number,
 	) {
-		return new EncodedVideoSample(data, type, timestamp, duration, byteLength);
+		return new EncodedVideoSample(data, type, timestamp, duration, sequenceNumber, byteLength);
 	}
 }
 

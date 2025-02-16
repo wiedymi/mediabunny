@@ -478,6 +478,7 @@ class OggAudioTrackBacking implements InputAudioTrackBacking {
 			'key',
 			Math.max(0, additional.timestampInSamples) / this.internalSampleRate,
 			durationInSamples / this.internalSampleRate,
+			packet.endPage.headerStartPos + packet.endSegmentIndex,
 		);
 
 		this.sampleToMetadata.set(sample, {
@@ -738,11 +739,12 @@ class OggAudioTrackBacking implements InputAudioTrackBacking {
 			}
 
 			endSegmentIndex = currentSegmentIndex - 1;
-			const nextPosition = await this.demuxer.findNextPacketStart(reader, {
+			const pseudopacket: Packet = {
 				data: PLACEHOLDER_DATA,
 				endPage,
 				endSegmentIndex,
-			});
+			};
+			const nextPosition = await this.demuxer.findNextPacketStart(reader, pseudopacket);
 
 			if (nextPosition) {
 				// Let's rewind a single step (packet) - this previous packet ensures that we'll correctly compute the

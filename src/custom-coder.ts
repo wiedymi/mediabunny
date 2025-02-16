@@ -2,75 +2,71 @@ import { AudioCodec, VideoCodec } from './codec';
 import { EncodedAudioSample, EncodedVideoSample } from './sample';
 
 /** @public */
-export class CustomVideoDecoder {
-	constructor(
-		public codec: VideoCodec,
-		public config: VideoDecoderConfig,
-		public onFrame: (frame: VideoFrame) => unknown,
-	) {}
+export abstract class CustomVideoDecoder {
+	codec!: VideoCodec;
+	config!: VideoDecoderConfig;
+	onFrame!: (frame: VideoFrame) => unknown;
 
 	// eslint-disable-next-line @typescript-eslint/no-unused-vars
 	static supports(codec: VideoCodec, config: VideoDecoderConfig): boolean {
 		return false;
 	}
 
-	// eslint-disable-next-line @typescript-eslint/no-unused-vars
-	decode(sample: EncodedVideoSample): Promise<void> | void {}
-	flush(): Promise<void> | void {}
+	abstract init(): void;
+	abstract decode(sample: EncodedVideoSample): Promise<void> | void;
+	abstract flush(): Promise<void> | void;
+	abstract close(): Promise<void> | void;
 }
 
 /** @public */
-export class CustomAudioDecoder {
-	constructor(
-		public codec: AudioCodec,
-		public config: AudioDecoderConfig,
-		public onData: (data: AudioData) => unknown,
-	) {}
+export abstract class CustomAudioDecoder {
+	codec!: AudioCodec;
+	config!: AudioDecoderConfig;
+	onData!: (data: AudioData) => unknown;
 
 	// eslint-disable-next-line @typescript-eslint/no-unused-vars
 	static supports(codec: AudioCodec, config: AudioDecoderConfig): boolean {
 		return false;
 	}
 
-	// eslint-disable-next-line @typescript-eslint/no-unused-vars
-	decode(sample: EncodedAudioSample): Promise<void> | void {}
-	flush(): Promise<void> | void {}
+	abstract init(): void;
+	abstract decode(sample: EncodedAudioSample): Promise<void> | void;
+	abstract flush(): Promise<void> | void;
+	abstract close(): Promise<void> | void;
 }
 
 /** @public */
-export class CustomVideoEncoder {
-	constructor(
-		public codec: VideoCodec,
-		public config: VideoEncoderConfig,
-		public onSample: (sample: EncodedVideoSample, meta?: EncodedVideoChunkMetadata) => unknown,
-	) {}
+export abstract class CustomVideoEncoder {
+	codec!: VideoCodec;
+	config!: VideoEncoderConfig;
+	onSample!: (sample: EncodedVideoSample, meta?: EncodedVideoChunkMetadata) => unknown;
 
 	// eslint-disable-next-line @typescript-eslint/no-unused-vars
 	static supports(codec: VideoCodec, config: VideoEncoderConfig): boolean {
 		return false;
 	}
 
-	// eslint-disable-next-line @typescript-eslint/no-unused-vars
-	encode(videoFrame: VideoFrame, options: VideoEncoderEncodeOptions): Promise<void> | void {}
-	flush(): Promise<void> | void {}
+	abstract init(): void;
+	abstract encode(videoFrame: VideoFrame, options: VideoEncoderEncodeOptions): Promise<void> | void;
+	abstract flush(): Promise<void> | void;
+	abstract close(): Promise<void> | void;
 }
 
 /** @public */
-export class CustomAudioEncoder {
-	constructor(
-		public codec: AudioCodec,
-		public config: AudioEncoderConfig,
-		public onSample: (sample: EncodedAudioSample, meta?: EncodedAudioChunkMetadata) => unknown,
-	) {}
+export abstract class CustomAudioEncoder {
+	codec!: AudioCodec;
+	config!: AudioEncoderConfig;
+	onSample!: (sample: EncodedAudioSample, meta?: EncodedAudioChunkMetadata) => unknown;
 
 	// eslint-disable-next-line @typescript-eslint/no-unused-vars
 	static supports(codec: AudioCodec, config: AudioEncoderConfig): boolean {
 		return false;
 	}
 
-	// eslint-disable-next-line @typescript-eslint/no-unused-vars
-	encode(audioData: AudioData): Promise<void> | void {}
-	flush(): Promise<void> | void {}
+	abstract init(): void;
+	abstract encode(audioData: AudioData): Promise<void> | void;
+	abstract flush(): Promise<void> | void;
+	abstract close(): Promise<void> | void;
 }
 
 export const customVideoDecoders: typeof CustomVideoDecoder[] = [];

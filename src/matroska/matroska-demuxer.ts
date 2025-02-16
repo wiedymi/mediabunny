@@ -1008,6 +1008,7 @@ abstract class MatroskaTrackBacking<
 		type: SampleType,
 		timestamp: number,
 		duration: number,
+		sequenceNumber: number,
 	): Sample;
 
 	async getFirstSample(options: SampleRetrievalOptions) {
@@ -1223,6 +1224,7 @@ abstract class MatroskaTrackBacking<
 			block.isKeyFrame ? 'key' : 'delta',
 			timestamp,
 			duration,
+			cluster.dataStartPos + blockIndex,
 		);
 
 		this.sampleToClusterLocation.set(sample, { cluster, blockIndex });
@@ -1506,8 +1508,9 @@ class MatroskaVideoTrackBacking extends MatroskaTrackBacking<EncodedVideoSample>
 		type: SampleType,
 		timestamp: number,
 		duration: number,
+		sequenceNumber: number,
 	) {
-		return new EncodedVideoSample(data, type, timestamp, duration, byteLength);
+		return new EncodedVideoSample(data, type, timestamp, duration, sequenceNumber, byteLength);
 	}
 }
 

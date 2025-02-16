@@ -4,8 +4,10 @@ import { InputAudioTrack, InputVideoTrack } from './input-track';
 import {
 	AnyIterable,
 	assert,
+	binarySearchLessOrEqual,
 	getInt24,
 	getUint24,
+	last,
 	mapAsyncGenerator,
 	promiseWithResolvers,
 	toAsyncIterator,
@@ -338,6 +340,8 @@ export abstract class BaseMediaFrameSink<
 				onQueueDequeue();
 				onQueueNotEmpty();
 
+				lastFrame?.frame.close();
+
 				for (const frame of frameQueue) {
 					frame.frame.close();
 				}
@@ -443,30 +447,40 @@ export abstract class BaseMediaFrameSink<
 					continue;
 				}
 
-				timestampsOfInterest.push(targetSample.timestamp);
+				if (lastSample && targetSample.sequenceNumber < lastSample.sequenceNumber) {
+					// We're going back in time with this one, let's flush and reset to an clean state
+					await decoder.flush();
+					timestampsOfInterest.length = 0;
+				}
 
 				if (
 					lastKeySample
-					&& keySample.timestamp === lastKeySample.timestamp
+					&& keySample.sequenceNumber === lastKeySample.sequenceNumber
 					&& targetSample.timestamp >= lastSample!.timestamp
 				) {
 					assert(lastSample);
 
-					if (targetSample.timestamp === lastSample.timestamp && timestampsOfInterest.length === 1) {
+					if (
+						targetSample.sequenceNumber === lastSample.sequenceNumber
+						&& timestampsOfInterest.length === 0
+					) {
 						// Special case: We have a repeat sample, but the frame for that sample has already been
 						// decoded. Therefore, we need to push the frame here instead of in the decoder callback.
 						if (lastUsedFrame) {
 							pushToQueue(this._duplicateFrame(lastUsedFrame));
 						}
-						timestampsOfInterest.shift();
+					} else {
+						timestampsOfInterest.push(targetSample.timestamp);
 					}
 				} else {
+					// The key sample has changed
 					lastKeySample = keySample;
 					lastSample = keySample;
 					decoder.decode(keySample);
+					timestampsOfInterest.push(targetSample.timestamp);
 				}
 
-				while (lastSample.timestamp !== targetSample.timestamp) {
+				while (lastSample.sequenceNumber < targetSample.sequenceNumber) {
 					const nextSample = await sampleSink.getNextSample(lastSample);
 					assert(nextSample);
 
@@ -475,7 +489,10 @@ export abstract class BaseMediaFrameSink<
 				}
 			}
 
-			if (!terminated) await decoder.flush();
+			if (!terminated) {
+				await decoder.flush();
+				lastUsedFrame?.frame.close();
+			}
 			decoder.close();
 
 			decoderIsFlushed = true;
@@ -584,30 +601,48 @@ class VideoDecoderWrapper extends DecoderWrapper<EncodedVideoSample, VideoFrame>
 	lastCustomDecoderPromise = Promise.resolve();
 	customDecoderQueueSize = 0;
 
+	frameQueue: VideoFrame[] = [];
+
 	constructor(
 		onFrame: (frame: WrappedMediaFrame<VideoFrame>) => unknown,
 		onError: (error: DOMException) => unknown,
 		codec: VideoCodec,
 		decoderConfig: VideoDecoderConfig,
-		timeResolution: number,
+		public timeResolution: number,
 	) {
 		super(onFrame, onError);
 
 		const frameHandler = (frame: VideoFrame) => {
-			// Round the microsecond timestamps to the time resolution
-			const timestamp = Math.round(frame.timestamp / 1e6 * timeResolution) / timeResolution;
-			const duration = Math.round((frame.duration ?? 0) / 1e6 * timeResolution) / timeResolution;
+			// For correct B-frame handling, we don't just hand over the frames directly but instead add them to a
+			// queue, because we want to ensure frames are emitted in presentation order. We flush the queue each time
+			// we receive a frame with a timestamp larger than the highest we've seen so far, as we can sure that is
+			// not a B-frame. Typically, WebCodecs automatically guarantees that frames are emitted in presentation
+			// order, but some browsers (Safari) don't always follow this rule.
+			if (this.frameQueue.length > 0 && (frame.timestamp >= last(this.frameQueue)!.timestamp)) {
+				for (const frame of this.frameQueue) {
+					this.wrapAndEmitFrame(frame);
+				}
 
-			onFrame({
-				frame,
-				timestamp,
-				duration,
-			});
+				this.frameQueue.length = 0;
+			}
+
+			const insertionIndex = binarySearchLessOrEqual(
+				this.frameQueue,
+				frame.timestamp,
+				x => x.timestamp,
+			);
+			this.frameQueue.splice(insertionIndex + 1, 0, frame);
 		};
 
 		const MatchingCustomDecoder = customVideoDecoders.find(x => x.supports(codec, decoderConfig));
 		if (MatchingCustomDecoder) {
-			this.customDecoder = new MatchingCustomDecoder(codec, decoderConfig, frameHandler);
+			// @ts-expect-error "Can't create instance of abstract class 🤓"
+			this.customDecoder = new MatchingCustomDecoder() as CustomVideoDecoder;
+			this.customDecoder.codec = codec;
+			this.customDecoder.config = decoderConfig;
+			this.customDecoder.onFrame = frameHandler;
+
+			this.customDecoder.init();
 		} else {
 			this.decoder = new VideoDecoder({
 				output: frameHandler,
@@ -615,6 +650,18 @@ class VideoDecoderWrapper extends DecoderWrapper<EncodedVideoSample, VideoFrame>
 			});
 			this.decoder.configure(decoderConfig);
 		}
+	}
+
+	wrapAndEmitFrame(frame: VideoFrame) {
+		// Round the microsecond timestamps to the time resolution
+		const timestamp = Math.round(frame.timestamp / 1e6 * this.timeResolution) / this.timeResolution;
+		const duration = Math.round((frame.duration ?? 0) / 1e6 * this.timeResolution) / this.timeResolution;
+
+		this.onFrame({
+			frame,
+			timestamp,
+			duration,
+		});
 	}
 
 	getDecodeQueueSize() {
@@ -640,22 +687,32 @@ class VideoDecoderWrapper extends DecoderWrapper<EncodedVideoSample, VideoFrame>
 		}
 	}
 
-	flush() {
+	async flush() {
 		if (this.customDecoder) {
-			return this.lastCustomDecoderPromise.then(() => this.customDecoder!.flush());
+			await this.lastCustomDecoderPromise.then(() => this.customDecoder!.flush());
 		} else {
 			assert(this.decoder);
-			return this.decoder.flush();
+			await this.decoder.flush();
 		}
+
+		for (const frame of this.frameQueue) {
+			this.wrapAndEmitFrame(frame);
+		}
+		this.frameQueue.length = 0;
 	}
 
 	close() {
 		if (this.customDecoder) {
-			void this.lastCustomDecoderPromise.then(() => this.customDecoder!.flush());
+			void this.lastCustomDecoderPromise.then(() => this.customDecoder!.close());
 		} else {
 			assert(this.decoder);
 			this.decoder.close();
 		}
+
+		for (const frame of this.frameQueue) {
+			frame.close();
+		}
+		this.frameQueue.length = 0;
 	}
 }
 
@@ -907,7 +964,13 @@ class AudioDecoderWrapper extends DecoderWrapper<EncodedAudioSample, AudioData> 
 
 		const MatchingCustomDecoder = customAudioDecoders.find(x => x.supports(codec, decoderConfig));
 		if (MatchingCustomDecoder) {
-			this.customDecoder = new MatchingCustomDecoder(codec, decoderConfig, dataHandler);
+			// @ts-expect-error "Can't create instance of abstract class 🤓"
+			this.customDecoder = new MatchingCustomDecoder() as CustomAudioDecoder;
+			this.customDecoder.codec = codec;
+			this.customDecoder.config = decoderConfig;
+			this.customDecoder.onData = dataHandler;
+
+			this.customDecoder.init();
 		} else {
 			this.decoder = new AudioDecoder({
 				output: dataHandler,
@@ -951,7 +1014,7 @@ class AudioDecoderWrapper extends DecoderWrapper<EncodedAudioSample, AudioData> 
 
 	close() {
 		if (this.customDecoder) {
-			void this.lastCustomDecoderPromise.then(() => this.customDecoder!.flush());
+			void this.lastCustomDecoderPromise.then(() => this.customDecoder!.close());
 		} else {
 			assert(this.decoder);
 			this.decoder.close();

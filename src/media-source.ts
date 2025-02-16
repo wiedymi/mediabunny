@@ -302,14 +302,16 @@ class VideoEncoderWrapper {
 		));
 
 		if (MatchingCustomEncoder) {
-			this.customEncoder = new MatchingCustomEncoder(
-				this.encodingConfig.codec,
-				encoderConfig,
-				(sample, meta) => {
-					this.encodingConfig.onEncodedSample?.(sample, meta);
-					void this.muxer!.addEncodedVideoSample(this.source._connectedTrack!, sample, meta);
-				},
-			);
+			// @ts-expect-error "Can't create instance of abstract class 🤓"
+			this.customEncoder = new MatchingCustomEncoder() as CustomVideoEncoder;
+			this.customEncoder.codec = this.encodingConfig.codec;
+			this.customEncoder.config = encoderConfig;
+			this.customEncoder.onSample = (sample, meta) => {
+				this.encodingConfig.onEncodedSample?.(sample, meta);
+				void this.muxer!.addEncodedVideoSample(this.source._connectedTrack!, sample, meta);
+			};
+
+			this.customEncoder.init();
 		} else {
 			if (typeof VideoEncoder === 'undefined') {
 				throw new Error('VideoEncoder is not supported by this browser.');
@@ -751,14 +753,16 @@ class AudioEncoderWrapper {
 		));
 
 		if (MatchingCustomEncoder) {
-			this.customEncoder = new MatchingCustomEncoder(
-				this.encodingConfig.codec,
-				encoderConfig,
-				(sample, meta) => {
-					this.encodingConfig.onEncodedSample?.(sample, meta);
-					void this.muxer!.addEncodedAudioSample(this.source._connectedTrack!, sample, meta);
-				},
-			);
+			// @ts-expect-error "Can't create instance of abstract class 🤓"
+			this.customEncoder = new MatchingCustomEncoder() as CustomAudioEncoder;
+			this.customEncoder.codec = this.encodingConfig.codec;
+			this.customEncoder.config = encoderConfig;
+			this.customEncoder.onSample = (sample, meta) => {
+				this.encodingConfig.onEncodedSample?.(sample, meta);
+				void this.muxer!.addEncodedAudioSample(this.source._connectedTrack!, sample, meta);
+			};
+
+			this.customEncoder.init();
 		} else if ((PCM_AUDIO_CODECS as readonly string[]).includes(this.encodingConfig.codec)) {
 			this.initPcmEncoder();
 		} else {

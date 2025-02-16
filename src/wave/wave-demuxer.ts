@@ -274,6 +274,7 @@ class WaveAudioTrackBacking implements InputAudioTrackBacking {
 			'key',
 			timestamp,
 			duration,
+			sampleIndex,
 		);
 	}
 
