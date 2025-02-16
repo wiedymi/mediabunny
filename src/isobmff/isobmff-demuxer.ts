@@ -57,6 +57,9 @@ type InternalTrack = {
 	fragmentLookupTable: FragmentLookupTableEntry[] | null;
 	currentFragmentState: FragmentTrackState | null;
 	fragments: Fragment[];
+	/** The segment durations of all edit list entries leading up to the main one (from which the offset is taken.) */
+	editListPreviousSegmentDurations: number;
+	/** The media time offset of the main edit list entry (with media time !== -1) */
 	editListOffset: number;
 } & ({
 	info: null;
@@ -252,6 +255,14 @@ export class IsobmffDemuxer extends Demuxer {
 						this.metadataReader.pos + boxInfo.contentSize,
 					);
 					this.readContiguousBoxes(boxInfo.contentSize);
+
+					for (const track of this.tracks) {
+						// Modify the edit list offset based on the previous segment durations. They are in different
+						// timescales, so we first convert to seconds and then into the track timescale.
+						const previousSegmentDurationsInSeconds
+							= track.editListPreviousSegmentDurations / this.movieTimescale;
+						track.editListOffset -= Math.round(previousSegmentDurationsInSeconds * track.timescale);
+					}
 
 					break;
 				}
@@ -584,6 +595,7 @@ export class IsobmffDemuxer extends Demuxer {
 					fragmentLookupTable: null,
 					currentFragmentState: null,
 					fragments: [],
+					editListPreviousSegmentDurations: 0,
 					editListOffset: 0,
 				} satisfies InternalTrack as InternalTrack;
 				this.currentTrack = track;
@@ -665,6 +677,7 @@ export class IsobmffDemuxer extends Demuxer {
 				this.metadataReader.pos += 3; // Flags
 
 				let relevantEntryFound = false;
+				let previousSegmentDurations = 0;
 
 				const entryCount = this.metadataReader.readU32();
 				for (let i = 0; i < entryCount; i++) {
@@ -686,13 +699,15 @@ export class IsobmffDemuxer extends Demuxer {
 					}
 
 					if (mediaTime === -1) {
-						throw new Error('Unsupported edit list: no empty edits allowed.');
+						previousSegmentDurations += segmentDuration;
+						continue;
 					}
 
 					if (mediaRate !== 1) {
 						throw new Error('Unsupported edit list: media rate must be 1.');
 					}
 
+					track.editListPreviousSegmentDurations = previousSegmentDurations;
 					track.editListOffset = mediaTime;
 					relevantEntryFound = true;
 				}
