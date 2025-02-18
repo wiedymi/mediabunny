@@ -26,6 +26,7 @@ import {
 	binarySearchLessOrEqual,
 	COLOR_PRIMARIES_MAP_INVERSE,
 	findLastIndex,
+	isIso639Dash2LanguageCode,
 	last,
 	MATRIX_COEFFICIENTS_MAP_INVERSE,
 	Rotation,
@@ -749,6 +750,10 @@ export class MatroskaDemuxer extends Demuxer {
 				if (!this.currentTrack) break;
 
 				this.currentTrack.languageCode = reader.readString(size);
+
+				if (!isIso639Dash2LanguageCode(this.currentTrack.languageCode)) {
+					this.currentTrack.languageCode = UNDETERMINED_LANGUAGE;
+				}
 			}; break;
 
 			case EBMLId.Video: {

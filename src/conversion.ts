@@ -641,7 +641,7 @@ class Conversion {
 			}
 
 			if (needsResample) {
-				audioSource = await this.resampleAudio(track, codecOfChoice, numberOfChannels, sampleRate);
+				audioSource = this.resampleAudio(track, codecOfChoice, numberOfChannels, sampleRate);
 			} else {
 				const source = new AudioDataSource({
 					codec: codecOfChoice,
@@ -654,7 +654,7 @@ class Conversion {
 					await this.started;
 
 					const sink = new AudioDataSink(track);
-					for await (const { data, timestamp } of sink.data(undefined, this.startTimestamp)) {
+					for await (const { data, timestamp } of sink.data(undefined, this.endTimestamp)) {
 						if (this.synchronizer.shouldWait(track.id, timestamp)) {
 							await this.synchronizer.wait(timestamp);
 						}
@@ -686,7 +686,7 @@ class Conversion {
 	 * Resamples the audio by decoding it, playing it onto an OfflineAudioContext and encoding the
 	 * resulting AudioBuffer.
 	 */
-	async resampleAudio(
+	resampleAudio(
 		track: InputAudioTrack,
 		codec: AudioCodec,
 		targetNumberOfChannels: number,

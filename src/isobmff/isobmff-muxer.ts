@@ -13,7 +13,7 @@ import {
 	validateSubtitleMetadata,
 	validateVideoChunkMetadata,
 } from '../codec';
-import { EncodedAudioSample, EncodedVideoSample } from '../sample';
+import { EncodedAudioSample, EncodedVideoSample, SampleType } from '../sample';
 import { BufferTarget } from '../target';
 
 export const GLOBAL_TIMESCALE = 1000;
@@ -25,7 +25,7 @@ export type Sample = {
 	duration: number;
 	data: Uint8Array | null;
 	size: number;
-	type: 'key' | 'delta';
+	type: SampleType;
 	timescaleUnitsToNextSample: number;
 };
 
@@ -492,7 +492,7 @@ export class IsobmffMuxer extends Muxer {
 		data: Uint8Array,
 		timestamp: number,
 		duration: number,
-		type: 'key' | 'delta',
+		type: SampleType,
 	) {
 		const sample: Sample = {
 			timestamp,
@@ -564,6 +564,8 @@ export class IsobmffMuxer extends Muxer {
 
 				const timescaleUnits = intoTimescale(sample.decodeTimestamp, trackData.timescale, false);
 				const delta = Math.round(timescaleUnits - trackData.lastTimescaleUnits);
+				assert(delta >= 0);
+
 				trackData.lastTimescaleUnits += delta;
 				trackData.lastSample.timescaleUnitsToNextSample = delta;
 

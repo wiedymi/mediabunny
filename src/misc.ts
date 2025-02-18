@@ -393,6 +393,10 @@ export const roundToPrecision = (value: number, digits: number) => {
 	return Math.round(value * factor) / factor;
 };
 
+export const roundToMultiple = (value: number, multiple: number) => {
+	return Math.round(value / multiple) * multiple;
+};
+
 export const ilog = (x: number) => {
 	let ret = 0;
 	while (x) {
@@ -400,4 +404,9 @@ export const ilog = (x: number) => {
 		x >>= 1;
 	}
 	return ret;
+};
+
+const ISO_639_2_REGEX = /^[a-z]{3}$/;
+export const isIso639Dash2LanguageCode = (x: string) => {
+	return ISO_639_2_REGEX.test(x);
 };

@@ -1,4 +1,4 @@
-import { AsyncMutex, TransformationMatrix } from './misc';
+import { AsyncMutex, isIso639Dash2LanguageCode, TransformationMatrix } from './misc';
 import { Muxer } from './muxer';
 import { OutputFormat } from './output-format';
 import { AudioSource, MediaSource, SubtitleSource, VideoSource } from './media-source';
@@ -60,7 +60,7 @@ const validateBaseTrackMetadata = (metadata: BaseTrackMetadata) => {
 	if (!metadata || typeof metadata !== 'object') {
 		throw new TypeError('metadata must be an object.');
 	}
-	if (metadata.languageCode !== undefined && !/^[a-z]{3}$/.test(metadata.languageCode)) {
+	if (metadata.languageCode !== undefined && !isIso639Dash2LanguageCode(metadata.languageCode)) {
 		throw new TypeError('metadata.languageCode must be a three-letter, ISO 639-2 language code.');
 	}
 };

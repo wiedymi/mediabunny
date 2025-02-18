@@ -687,8 +687,8 @@ export class MatroskaMuxer extends Muxer {
 		}
 
 		const relativeTimestamp = msTimestamp - this.currentClusterStartMsTimestamp!;
-		if (relativeTimestamp < 0) {
-			// The chunk lies outside of the current cluster
+		if (relativeTimestamp < -(2 ** 15)) {
+			// The block lies too far in the past, it's not representable within this cluster
 			return;
 		}
 

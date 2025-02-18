@@ -27,7 +27,6 @@ import {
 	COLOR_PRIMARIES_MAP_INVERSE,
 	MATRIX_COEFFICIENTS_MAP_INVERSE,
 	TRANSFER_CHARACTERISTICS_MAP_INVERSE,
-	rotationMatrix,
 	binarySearchLessOrEqual,
 	binarySearchExact,
 	Rotation,
@@ -38,6 +37,8 @@ import {
 	TransformationMatrix,
 	extractRotationFromMatrix,
 	roundToPrecision,
+	isIso639Dash2LanguageCode,
+	roundToMultiple,
 } from '../misc';
 import { Reader } from '../reader';
 import { EncodedAudioSample, EncodedVideoSample, PLACEHOLDER_DATA, SampleType } from '../sample';
@@ -174,8 +175,6 @@ type Fragment = {
 	nextFragment: Fragment | null;
 	isKnownToBeFirstFragment: boolean;
 };
-
-const knownMatrixes = [rotationMatrix(0), rotationMatrix(90), rotationMatrix(180), rotationMatrix(270)];
 
 export class IsobmffDemuxer extends Demuxer {
 	metadataReader: IsobmffReader;
@@ -657,16 +656,11 @@ export class IsobmffDemuxer extends Demuxer {
 					this.metadataReader.readFixed_2_30(),
 				];
 
-				const rotation = extractRotationFromMatrix(matrix);
-				const comparisonMatrix = rotationMatrix(rotation);
+				const rotation = (roundToMultiple(extractRotationFromMatrix(matrix), 90) + 360) % 360 as Rotation;
+				assert(rotation === 0 || rotation === 90 || rotation === 180 || rotation === 270);
 
-				const matrixIndex = knownMatrixes.findIndex(mat => mat.every((y, i) => y === comparisonMatrix[i]));
-				if (matrixIndex === -1) {
-					console.warn(`Wacky rotation matrix ${comparisonMatrix.join(',')}; sticking with no rotation.`);
-					track.rotation = 0;
-				} else {
-					track.rotation = (90 * matrixIndex) as Rotation;
-				}
+				// Flip clockwise to counter-clockwise
+				track.rotation = (-rotation + 360) % 360 as Rotation;
 			}; break;
 
 			case 'elst': {
@@ -738,6 +732,11 @@ export class IsobmffDemuxer extends Demuxer {
 					for (let i = 0; i < 3; i++) {
 						track.languageCode = String.fromCharCode(0x60 + (language & 0b11111)) + track.languageCode;
 						language >>= 5;
+					}
+
+					if (!isIso639Dash2LanguageCode(track.languageCode)) {
+						// Sometimes the bytes are garbage
+						track.languageCode = UNDETERMINED_LANGUAGE;
 					}
 				}
 			}; break;

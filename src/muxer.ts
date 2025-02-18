@@ -31,7 +31,7 @@ export abstract class Muxer {
 	private trackTimestampInfo = new WeakMap<OutputTrack, {
 		timestampOffset: number;
 		maxTimestamp: number;
-		lastKeyFrameTimestamp: number;
+		maxTimestampBeforeLastKeyFrame: number;
 	}>();
 
 	protected validateAndNormalizeTimestamp(track: OutputTrack, timestampInSeconds: number, isKeyFrame: boolean) {
@@ -44,7 +44,7 @@ export abstract class Muxer {
 			timestampInfo = {
 				timestampOffset: timestampInSeconds,
 				maxTimestamp: track.source._offsetTimestamps ? 0 : timestampInSeconds,
-				lastKeyFrameTimestamp: track.source._offsetTimestamps ? 0 : timestampInSeconds,
+				maxTimestampBeforeLastKeyFrame: track.source._offsetTimestamps ? 0 : timestampInSeconds,
 			};
 			this.trackTimestampInfo.set(track, timestampInfo);
 		}
@@ -57,22 +57,16 @@ export abstract class Muxer {
 			throw new Error(`Timestamps must be non-negative (got ${timestampInSeconds}s).`);
 		}
 
-		if (timestampInSeconds < timestampInfo.lastKeyFrameTimestamp) {
-			throw new Error(
-				`Timestamp cannot be smaller than last key frame's timestamp (got ${timestampInSeconds}s,`
-				+ ` last key frame at ${timestampInfo.lastKeyFrameTimestamp}s).`,
-			);
+		if (isKeyFrame) {
+			timestampInfo.maxTimestampBeforeLastKeyFrame = timestampInfo.maxTimestamp;
 		}
 
-		if (isKeyFrame) {
-			if (timestampInSeconds < timestampInfo.maxTimestamp) {
-				throw new Error(
-					`Key frame timestamps cannot be smaller than any timestamp that came before`
-					+ ` (got ${timestampInSeconds}s, max timestamp was ${timestampInfo.maxTimestamp}s).`,
-				);
-			}
-
-			timestampInfo.lastKeyFrameTimestamp = timestampInSeconds;
+		if (timestampInSeconds < timestampInfo.maxTimestampBeforeLastKeyFrame) {
+			throw new Error(
+				`Timestamps cannot be smaller than the highest timestamp of the previous run (a run begins with a`
+				+ ` key frame and ends right before the next key frame). Got ${timestampInSeconds}s, but highest`
+				+ ` timestamp is ${timestampInfo.maxTimestampBeforeLastKeyFrame}s.`,
+			);
 		}
 
 		timestampInfo.maxTimestamp = Math.max(timestampInfo.maxTimestamp, timestampInSeconds);
