@@ -1,10 +1,10 @@
 import { Muxer } from '../muxer';
 import { Output, OutputAudioTrack } from '../output';
-import { EncodedAudioSample } from '../sample';
 import { parsePcmCodec, PcmAudioCodec } from '../codec';
 import { WaveFormat } from './wave-demuxer';
 import { RiffWriter } from './riff-writer';
 import { Writer } from '../writer';
+import { EncodedPacket } from '../packet';
 
 export class WaveMuxer extends Muxer {
 	private writer: Writer;
@@ -23,13 +23,13 @@ export class WaveMuxer extends Muxer {
 		// Nothing needed here - we'll write the header with the first sample
 	}
 
-	async addEncodedVideoSample() {
+	async addEncodedVideoPacket() {
 		throw new Error('WAVE does not support video.');
 	}
 
-	async addEncodedAudioSample(
+	async addEncodedAudioPacket(
 		track: OutputAudioTrack,
-		sample: EncodedAudioSample,
+		packet: EncodedPacket,
 		meta?: EncodedAudioChunkMetadata,
 	) {
 		const release = await this.mutex.acquire();
@@ -44,10 +44,10 @@ export class WaveMuxer extends Muxer {
 				this.headerWritten = true;
 			}
 
-			this.validateAndNormalizeTimestamp(track, sample.timestamp, sample.type === 'key');
+			this.validateAndNormalizeTimestamp(track, packet.timestamp, packet.type === 'key');
 
-			this.writer.write(sample.data);
-			this.dataSize += sample.data.byteLength;
+			this.writer.write(packet.data);
+			this.dataSize += packet.data.byteLength;
 
 			await this.writer.flush();
 		} finally {

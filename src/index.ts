@@ -29,12 +29,12 @@ export {
 	AudioEncodingConfig,
 	MediaSource,
 	VideoSource,
-	EncodedVideoSampleSource,
+	EncodedVideoPacketSource,
 	VideoFrameSource,
 	CanvasSource,
 	MediaStreamVideoTrackSource,
 	AudioSource,
-	EncodedAudioSampleSource,
+	EncodedAudioPacketSource,
 	AudioDataSource,
 	AudioBufferSource,
 	MediaStreamAudioTrackSource,
@@ -89,20 +89,18 @@ export {
 	OGG,
 } from './input-format';
 export { Input, InputOptions } from './input';
-export { InputTrack, InputVideoTrack, InputAudioTrack, SampleStats } from './input-track';
+export { InputTrack, InputVideoTrack, InputAudioTrack, PacketStats } from './input-track';
+export { EncodedPacket, PacketType } from './packet';
 export {
-	EncodedVideoSample,
-	EncodedAudioSample,
-	SampleType,
+	AudioSample,
+	AudioSampleInit,
 } from './sample';
 export {
-	SampleRetrievalOptions,
-	BaseSampleSink,
+	PacketRetrievalOptions,
+	EncodedPacketSink,
 	BaseMediaFrameSink,
-	EncodedVideoSampleSink,
 	VideoFrameSink,
 	WrappedVideoFrame,
-	EncodedAudioSampleSink,
 	CanvasSink,
 	WrappedCanvas,
 	AudioDataSink,

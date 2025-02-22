@@ -1,7 +1,7 @@
 import { assert, toDataView } from '../misc';
 import { Muxer } from '../muxer';
 import { Output, OutputAudioTrack } from '../output';
-import { EncodedAudioSample } from '../sample';
+import { EncodedPacket } from '../packet';
 import { Writer } from '../writer';
 import { getXingOffset, INFO, readFrameHeader, XING } from './mp3-misc';
 import { Mp3Writer, XingFrameData } from './mp3-writer';
@@ -24,19 +24,19 @@ export class Mp3Muxer extends Muxer {
 		// Nothing needed here
 	}
 
-	async addEncodedVideoSample() {
+	async addEncodedVideoPacket() {
 		throw new Error('MP3 does not support video.');
 	}
 
-	async addEncodedAudioSample(
+	async addEncodedAudioPacket(
 		track: OutputAudioTrack,
-		sample: EncodedAudioSample,
+		packet: EncodedPacket,
 	) {
 		const release = await this.mutex.acquire();
 
 		try {
 			if (!this.xingFrameData) {
-				const view = toDataView(sample.data);
+				const view = toDataView(packet.data);
 				if (view.byteLength < 4) {
 					throw new Error('Invalid MP3 header in sample.');
 				}
@@ -80,10 +80,10 @@ export class Mp3Muxer extends Muxer {
 				this.frameCount++;
 			}
 
-			this.validateAndNormalizeTimestamp(track, sample.timestamp, sample.type === 'key');
+			this.validateAndNormalizeTimestamp(track, packet.timestamp, packet.type === 'key');
 
 			this.framePositions.push(this.writer.getPos());
-			this.writer.write(sample.data);
+			this.writer.write(packet.data);
 			this.frameCount++;
 
 			await this.writer.flush();

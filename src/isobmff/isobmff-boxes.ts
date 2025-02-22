@@ -287,14 +287,16 @@ export const ftyp = (details: {
 		]);
 	}
 
-	if (details.fragmented) return box('ftyp', [
-		ascii('iso5'), // Major brand
-		u32(minorVersion), // Minor version
-		// Compatible brands
-		ascii('iso5'),
-		ascii('iso6'),
-		ascii('mp41'),
-	]);
+	if (details.fragmented) {
+		return box('ftyp', [
+			ascii('iso5'), // Major brand
+			u32(minorVersion), // Minor version
+			// Compatible brands
+			ascii('iso5'),
+			ascii('iso6'),
+			ascii('mp41'),
+		]);
+	}
 
 	return box('ftyp', [
 		ascii('isom'), // Major brand

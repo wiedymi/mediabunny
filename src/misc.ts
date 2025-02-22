@@ -410,3 +410,6 @@ const ISO_639_2_REGEX = /^[a-z]{3}$/;
 export const isIso639Dash2LanguageCode = (x: string) => {
 	return ISO_639_2_REGEX.test(x);
 };
+
+// Since the result will be floored, add a bit of eps to compensate for floating point errors
+export const SECOND_TO_MICROSECOND_FACTOR = 1e6 * (1 + Number.EPSILON);

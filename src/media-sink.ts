@@ -1,6 +1,6 @@
 import { parsePcmCodec, PCM_AUDIO_CODECS, PcmAudioCodec, VideoCodec, AudioCodec } from './codec';
 import { CustomVideoDecoder, customVideoDecoders, CustomAudioDecoder, customAudioDecoders } from './custom-coder';
-import { InputAudioTrack, InputVideoTrack } from './input-track';
+import { InputAudioTrack, InputTrack, InputVideoTrack } from './input-track';
 import {
 	AnyIterable,
 	assert,
@@ -14,15 +14,15 @@ import {
 	toDataView,
 	validateAnyIterable,
 } from './misc';
+import { EncodedPacket } from './packet';
 import { fromAlaw, fromUlaw } from './pcm';
-import { EncodedAudioSample, EncodedVideoSample } from './sample';
 
 /** @public */
-export type SampleRetrievalOptions = {
+export type PacketRetrievalOptions = {
 	metadataOnly?: boolean;
 };
 
-const validateSampleRetrievalOptions = (options: SampleRetrievalOptions) => {
+const validatePacketRetrievalOptions = (options: PacketRetrievalOptions) => {
 	if (!options || typeof options !== 'object') {
 		throw new TypeError('options must be an object.');
 	}
@@ -38,19 +38,57 @@ const validateTimestamp = (timestamp: number) => {
 };
 
 /** @public */
-export abstract class BaseSampleSink<Sample extends EncodedVideoSample | EncodedAudioSample> {
-	abstract getFirstSample(options?: SampleRetrievalOptions): Promise<Sample | null>;
-	abstract getSample(timestamp: number, options?: SampleRetrievalOptions): Promise<Sample | null>;
-	abstract getNextSample(sample: Sample, options?: SampleRetrievalOptions): Promise<Sample | null>;
-	abstract getKeySample(timestamp: number, options?: SampleRetrievalOptions): Promise<Sample | null>;
-	abstract getNextKeySample(sample: Sample, options?: SampleRetrievalOptions): Promise<Sample | null>;
+export class EncodedPacketSink {
+	/** @internal */
+	_track: InputTrack;
 
-	samples(
-		startSample?: Sample,
+	constructor(track: InputTrack) {
+		if (!(track instanceof InputTrack)) {
+			throw new TypeError('track must be an InputTrack.');
+		}
+
+		this._track = track;
+	}
+
+	getFirstPacket(options: PacketRetrievalOptions = {}) {
+		validatePacketRetrievalOptions(options);
+		return this._track._backing.getFirstPacket(options);
+	}
+
+	getPacket(timestamp: number, options: PacketRetrievalOptions = {}) {
+		validateTimestamp(timestamp);
+		validatePacketRetrievalOptions(options);
+		return this._track._backing.getPacket(timestamp, options);
+	}
+
+	getNextPacket(packet: EncodedPacket, options: PacketRetrievalOptions = {}) {
+		if (!(packet instanceof EncodedPacket)) {
+			throw new TypeError('packet must be an EncodedPacket.');
+		}
+		validatePacketRetrievalOptions(options);
+		return this._track._backing.getNextPacket(packet, options);
+	}
+
+	getKeyPacket(timestamp: number, options: PacketRetrievalOptions = {}) {
+		validateTimestamp(timestamp);
+		validatePacketRetrievalOptions(options);
+		return this._track._backing.getKeyPacket(timestamp, options);
+	}
+
+	getNextKeyPacket(packet: EncodedPacket, options: PacketRetrievalOptions = {}) {
+		if (!(packet instanceof EncodedPacket)) {
+			throw new TypeError('packet must be an EncodedPacket.');
+		}
+		validatePacketRetrievalOptions(options);
+		return this._track._backing.getNextKeyPacket(packet, options);
+	}
+
+	packets(
+		startPacket?: EncodedPacket,
 		endTimestamp = Infinity,
-		options?: SampleRetrievalOptions,
-	): AsyncGenerator<Sample, void, unknown> {
-		const sampleQueue: Sample[] = [];
+		options?: PacketRetrievalOptions,
+	): AsyncGenerator<EncodedPacket, void, unknown> {
+		const packetQueue: EncodedPacket[] = [];
 
 		let { promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers();
 		let { promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers();
@@ -63,30 +101,30 @@ export abstract class BaseSampleSink<Sample extends EncodedVideoSample | Encoded
 		let outOfBandError = null as Error | null;
 
 		const timestamps: number[] = [];
-		// The queue should always be big enough to hold 1 second worth of samples
+		// The queue should always be big enough to hold 1 second worth of packets
 		const maxQueueSize = () => Math.max(2, timestamps.length);
 
-		// The following is the "pump" process that keeps pumping samples into the queue
+		// The following is the "pump" process that keeps pumping packets into the queue
 		(async () => {
-			let sample = startSample ?? await this.getFirstSample(options);
+			let packet = startPacket ?? await this.getFirstPacket(options);
 
-			while (sample && !terminated) {
-				if (sample.timestamp >= endTimestamp) {
+			while (packet && !terminated) {
+				if (packet.timestamp >= endTimestamp) {
 					break;
 				}
 
-				if (sampleQueue.length > maxQueueSize()) {
+				if (packetQueue.length > maxQueueSize()) {
 					({ promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers());
 					await queueDequeue;
 					continue;
 				}
 
-				sampleQueue.push(sample);
+				packetQueue.push(packet);
 
 				onQueueNotEmpty();
 				({ promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers());
 
-				sample = await this.getNextSample(sample, options);
+				packet = await this.getNextPacket(packet, options);
 			}
 
 			ended = true;
@@ -105,8 +143,8 @@ export abstract class BaseSampleSink<Sample extends EncodedVideoSample | Encoded
 						return { value: undefined, done: true };
 					} else if (outOfBandError) {
 						throw outOfBandError;
-					} else if (sampleQueue.length > 0) {
-						const value = sampleQueue.shift()!;
+					} else if (packetQueue.length > 0) {
+						const value = packetQueue.shift()!;
 						const now = performance.now();
 						timestamps.push(now);
 
@@ -148,7 +186,6 @@ export type WrappedMediaFrame<T extends VideoFrame | AudioData> = {
 };
 
 abstract class DecoderWrapper<
-	Sample extends EncodedVideoSample | EncodedAudioSample,
 	MediaFrame extends VideoFrame | AudioData,
 	WrappedFrame extends WrappedMediaFrame<MediaFrame> = WrappedMediaFrame<MediaFrame>,
 > {
@@ -158,14 +195,13 @@ abstract class DecoderWrapper<
 	) {}
 
 	abstract getDecodeQueueSize(): number;
-	abstract decode(sample: Sample): void;
+	abstract decode(packet: EncodedPacket): void;
 	abstract flush(): Promise<void>;
 	abstract close(): void;
 }
 
 /** @public */
 export abstract class BaseMediaFrameSink<
-	Sample extends EncodedVideoSample | EncodedAudioSample,
 	MediaFrame extends VideoFrame | AudioData,
 	/** @internal */
 	WrappedFrame extends WrappedMediaFrame<MediaFrame> = WrappedMediaFrame<MediaFrame>,
@@ -174,9 +210,9 @@ export abstract class BaseMediaFrameSink<
 	abstract _createDecoder(
 		onFrame: (frame: WrappedFrame) => unknown,
 		onError: (error: DOMException) => unknown
-	): Promise<DecoderWrapper<Sample, MediaFrame>>;
+	): Promise<DecoderWrapper<MediaFrame>>;
 	/** @internal */
-	abstract _createSampleSink(): BaseSampleSink<Sample>;
+	abstract _createPacketSink(): EncodedPacketSink;
 
 	/** @internal */
 	private _duplicateFrame(frame: WrappedFrame) {
@@ -206,7 +242,7 @@ export abstract class BaseMediaFrameSink<
 		// the consumer.
 		let outOfBandError = null as Error | null;
 
-		// The following is the "pump" process that keeps pumping samples into the decoder
+		// The following is the "pump" process that keeps pumping packets into the decoder
 		(async () => {
 			const decoderError = new Error();
 			const decoder = await this._createDecoder((wrappedFrame) => {
@@ -252,53 +288,53 @@ export abstract class BaseMediaFrameSink<
 				}
 			});
 
-			const sampleSink = this._createSampleSink();
-			const keySample = await sampleSink.getKeySample(startTimestamp) ?? await sampleSink.getFirstSample();
-			if (!keySample) {
+			const packetSink = this._createPacketSink();
+			const keyPacket = await packetSink.getKeyPacket(startTimestamp) ?? await packetSink.getFirstPacket();
+			if (!keyPacket) {
 				return;
 			}
 
-			let currentSample: Sample | null = keySample;
+			let currentPacket: EncodedPacket | null = keyPacket;
 
-			let samplesEndTimestamp = Infinity;
+			let packetsEndTimestamp = Infinity;
 			if (endTimestamp < Infinity) {
-				// When an end timestamp is set, we cannot simply use that for the sample iterator due to out-of-order
-				// frames (B-frames). Instead, we'll need to keep decoding samples until we get a frame that exceeds
+				// When an end timestamp is set, we cannot simply use that for the packet iterator due to out-of-order
+				// frames (B-frames). Instead, we'll need to keep decoding packets until we get a frame that exceeds
 				// this end time. However, we can still put a bound on it: Since key frames are by definition never
 				// out of order, we can stop at the first key frame after the end timestamp.
-				const endSample = await sampleSink.getSample(endTimestamp);
-				const endKeySample = !endSample
+				const endPacket = await packetSink.getPacket(endTimestamp);
+				const endKeyPacket = !endPacket
 					? null
-					: endSample.type === 'key' && endSample.timestamp === endTimestamp
-						? endSample
-						: await sampleSink.getNextKeySample(endSample);
+					: endPacket.type === 'key' && endPacket.timestamp === endTimestamp
+						? endPacket
+						: await packetSink.getNextKeyPacket(endPacket);
 
-				if (endKeySample) {
-					samplesEndTimestamp = endKeySample.timestamp;
+				if (endKeyPacket) {
+					packetsEndTimestamp = endKeyPacket.timestamp;
 				}
 			}
 
-			const samples = sampleSink.samples(keySample, samplesEndTimestamp);
-			await samples.next(); // Skip the start sample as we already have it
+			const packets = packetSink.packets(keyPacket, packetsEndTimestamp);
+			await packets.next(); // Skip the start packet as we already have it
 
-			while (currentSample && !ended) {
+			while (currentPacket && !ended) {
 				if (frameQueue.length + decoder.getDecodeQueueSize() > MAX_QUEUE_SIZE) {
 					({ promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers());
 					await queueDequeue;
 					continue;
 				}
 
-				decoder.decode(currentSample);
+				decoder.decode(currentPacket);
 
-				const sampleResult = await samples.next();
-				if (sampleResult.done) {
+				const packetResult = await packets.next();
+				if (packetResult.done) {
 					break;
 				}
 
-				currentSample = sampleResult.value;
+				currentPacket = packetResult.value;
 			}
 
-			await samples.return();
+			await packets.return();
 
 			if (!terminated) await decoder.flush();
 			decoder.close();
@@ -384,7 +420,7 @@ export abstract class BaseMediaFrameSink<
 			({ promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers());
 		};
 
-		// The following is the "pump" process that keeps pumping samples into the decoder
+		// The following is the "pump" process that keeps pumping packets into the decoder
 		(async () => {
 			const decoderError = new Error();
 			const decoder = await this._createDecoder((wrappedFrame) => {
@@ -419,9 +455,9 @@ export abstract class BaseMediaFrameSink<
 				}
 			});
 
-			const sampleSink = this._createSampleSink();
-			let lastKeySample: Sample | null = null;
-			let lastSample: Sample | null = null;
+			const packetSink = this._createPacketSink();
+			let lastKeyPacket: EncodedPacket | null = null;
+			let lastPacket: EncodedPacket | null = null;
 
 			for await (const timestamp of timestampIterator) {
 				validateTimestamp(timestamp);
@@ -435,57 +471,57 @@ export abstract class BaseMediaFrameSink<
 					break;
 				}
 
-				const targetSample = await sampleSink.getSample(timestamp);
-				if (!targetSample) {
+				const targetPacket = await packetSink.getPacket(timestamp);
+				if (!targetPacket) {
 					pushToQueue(null);
 					continue;
 				}
 
-				const keySample = await sampleSink.getKeySample(timestamp);
-				if (!keySample) {
+				const keyPacket = await packetSink.getKeyPacket(timestamp);
+				if (!keyPacket) {
 					pushToQueue(null);
 					continue;
 				}
 
-				if (lastSample && targetSample.sequenceNumber < lastSample.sequenceNumber) {
+				if (lastPacket && targetPacket.sequenceNumber < lastPacket.sequenceNumber) {
 					// We're going back in time with this one, let's flush and reset to an clean state
 					await decoder.flush();
 					timestampsOfInterest.length = 0;
 				}
 
 				if (
-					lastKeySample
-					&& keySample.sequenceNumber === lastKeySample.sequenceNumber
-					&& targetSample.timestamp >= lastSample!.timestamp
+					lastKeyPacket
+					&& keyPacket.sequenceNumber === lastKeyPacket.sequenceNumber
+					&& targetPacket.timestamp >= lastPacket!.timestamp
 				) {
-					assert(lastSample);
+					assert(lastPacket);
 
 					if (
-						targetSample.sequenceNumber === lastSample.sequenceNumber
+						targetPacket.sequenceNumber === lastPacket.sequenceNumber
 						&& timestampsOfInterest.length === 0
 					) {
-						// Special case: We have a repeat sample, but the frame for that sample has already been
+						// Special case: We have a repeat packet, but the frame for that packet has already been
 						// decoded. Therefore, we need to push the frame here instead of in the decoder callback.
 						if (lastUsedFrame) {
 							pushToQueue(this._duplicateFrame(lastUsedFrame));
 						}
 					} else {
-						timestampsOfInterest.push(targetSample.timestamp);
+						timestampsOfInterest.push(targetPacket.timestamp);
 					}
 				} else {
-					// The key sample has changed
-					lastKeySample = keySample;
-					lastSample = keySample;
-					decoder.decode(keySample);
-					timestampsOfInterest.push(targetSample.timestamp);
+					// The key packet has changed
+					lastKeyPacket = keyPacket;
+					lastPacket = keyPacket;
+					decoder.decode(keyPacket);
+					timestampsOfInterest.push(targetPacket.timestamp);
 				}
 
-				while (lastSample.sequenceNumber < targetSample.sequenceNumber) {
-					const nextSample = await sampleSink.getNextSample(lastSample);
-					assert(nextSample);
+				while (lastPacket.sequenceNumber < targetPacket.sequenceNumber) {
+					const nextPacket = await packetSink.getNextPacket(lastPacket);
+					assert(nextPacket);
 
-					lastSample = nextSample;
-					decoder.decode(nextSample);
+					lastPacket = nextPacket;
+					decoder.decode(nextPacket);
 				}
 			}
 
@@ -545,56 +581,7 @@ export abstract class BaseMediaFrameSink<
 	}
 }
 
-/** @public */
-export class EncodedVideoSampleSink extends BaseSampleSink<EncodedVideoSample> {
-	/** @internal */
-	_videoTrack: InputVideoTrack;
-
-	constructor(videoTrack: InputVideoTrack) {
-		if (!(videoTrack instanceof InputVideoTrack)) {
-			throw new TypeError('videoTrack must be an InputVideoTrack.');
-		}
-
-		super();
-
-		this._videoTrack = videoTrack;
-	}
-
-	getFirstSample(options: SampleRetrievalOptions = {}) {
-		validateSampleRetrievalOptions(options);
-		return this._videoTrack._backing.getFirstSample(options);
-	}
-
-	getSample(timestamp: number, options: SampleRetrievalOptions = {}) {
-		validateTimestamp(timestamp);
-		validateSampleRetrievalOptions(options);
-		return this._videoTrack._backing.getSample(timestamp, options);
-	}
-
-	getNextSample(sample: EncodedVideoSample, options: SampleRetrievalOptions = {}) {
-		if (!(sample instanceof EncodedVideoSample)) {
-			throw new TypeError('sample must be an EncodedVideoSample.');
-		}
-		validateSampleRetrievalOptions(options);
-		return this._videoTrack._backing.getNextSample(sample, options);
-	}
-
-	getKeySample(timestamp: number, options: SampleRetrievalOptions = {}) {
-		validateTimestamp(timestamp);
-		validateSampleRetrievalOptions(options);
-		return this._videoTrack._backing.getKeySample(timestamp, options);
-	}
-
-	getNextKeySample(sample: EncodedVideoSample, options: SampleRetrievalOptions = {}) {
-		if (!(sample instanceof EncodedVideoSample)) {
-			throw new TypeError('sample must be an EncodedVideoSample.');
-		}
-		validateSampleRetrievalOptions(options);
-		return this._videoTrack._backing.getNextKeySample(sample, options);
-	}
-}
-
-class VideoDecoderWrapper extends DecoderWrapper<EncodedVideoSample, VideoFrame> {
+class VideoDecoderWrapper extends DecoderWrapper<VideoFrame> {
 	decoder: VideoDecoder | null = null;
 
 	customDecoder: CustomVideoDecoder | null = null;
@@ -673,17 +660,17 @@ class VideoDecoderWrapper extends DecoderWrapper<EncodedVideoSample, VideoFrame>
 		}
 	}
 
-	decode(sample: EncodedVideoSample) {
+	decode(packet: EncodedPacket) {
 		if (this.customDecoder) {
 			this.customDecoderQueueSize++;
 			this.lastCustomDecoderPromise = this.lastCustomDecoderPromise.then(() => {
-				return this.customDecoder!.decode(sample);
+				return this.customDecoder!.decode(packet);
 			});
 
 			void this.lastCustomDecoderPromise.then(() => this.customDecoderQueueSize--);
 		} else {
 			assert(this.decoder);
-			this.decoder.decode(sample.toEncodedVideoChunk());
+			this.decoder.decode(packet.toEncodedVideoChunk());
 		}
 	}
 
@@ -724,7 +711,7 @@ export type WrappedVideoFrame = {
 };
 
 /** @public */
-export class VideoFrameSink extends BaseMediaFrameSink<EncodedVideoSample, VideoFrame> {
+export class VideoFrameSink extends BaseMediaFrameSink<VideoFrame> {
 	/** @internal */
 	_videoTrack: InputVideoTrack;
 
@@ -759,8 +746,8 @@ export class VideoFrameSink extends BaseMediaFrameSink<EncodedVideoSample, Video
 	}
 
 	/** @internal */
-	_createSampleSink() {
-		return new EncodedVideoSampleSink(this._videoTrack);
+	_createPacketSink() {
+		return new EncodedPacketSink(this._videoTrack);
 	}
 
 	/** @internal */
@@ -884,56 +871,7 @@ export class CanvasSink {
 	}
 }
 
-/** @public */
-export class EncodedAudioSampleSink extends BaseSampleSink<EncodedAudioSample> {
-	/** @internal */
-	_audioTrack: InputAudioTrack;
-
-	constructor(audioTrack: InputAudioTrack) {
-		if (!(audioTrack instanceof InputAudioTrack)) {
-			throw new TypeError('audioTrack must be an InputAudioTrack.');
-		}
-
-		super();
-
-		this._audioTrack = audioTrack;
-	}
-
-	getFirstSample(options: SampleRetrievalOptions = {}) {
-		validateSampleRetrievalOptions(options);
-		return this._audioTrack._backing.getFirstSample(options);
-	}
-
-	getSample(timestamp: number, options: SampleRetrievalOptions = {}) {
-		validateTimestamp(timestamp);
-		validateSampleRetrievalOptions(options);
-		return this._audioTrack._backing.getSample(timestamp, options);
-	}
-
-	getNextSample(sample: EncodedAudioSample, options: SampleRetrievalOptions = {}) {
-		if (!(sample instanceof EncodedAudioSample)) {
-			throw new TypeError('sample must be an EncodedAudioSample.');
-		}
-		validateSampleRetrievalOptions(options);
-		return this._audioTrack._backing.getNextSample(sample, options);
-	}
-
-	getKeySample(timestamp: number, options: SampleRetrievalOptions = {}) {
-		validateTimestamp(timestamp);
-		validateSampleRetrievalOptions(options);
-		return this._audioTrack._backing.getKeySample(timestamp, options);
-	}
-
-	getNextKeySample(sample: EncodedAudioSample, options: SampleRetrievalOptions = {}) {
-		if (!(sample instanceof EncodedAudioSample)) {
-			throw new TypeError('sample must be an EncodedAudioSample.');
-		}
-		validateSampleRetrievalOptions(options);
-		return this._audioTrack._backing.getNextKeySample(sample, options);
-	}
-}
-
-class AudioDecoderWrapper extends DecoderWrapper<EncodedAudioSample, AudioData> {
+class AudioDecoderWrapper extends DecoderWrapper<AudioData> {
 	decoder: AudioDecoder | null = null;
 
 	customDecoder: CustomAudioDecoder | null = null;
@@ -989,17 +927,17 @@ class AudioDecoderWrapper extends DecoderWrapper<EncodedAudioSample, AudioData> 
 		}
 	}
 
-	decode(sample: EncodedAudioSample) {
+	decode(packet: EncodedPacket) {
 		if (this.customDecoder) {
 			this.customDecoderQueueSize++;
 			this.lastCustomDecoderPromise = this.lastCustomDecoderPromise.then(() => {
-				return this.customDecoder!.decode(sample);
+				return this.customDecoder!.decode(packet);
 			});
 
 			void this.lastCustomDecoderPromise.then(() => this.customDecoderQueueSize--);
 		} else {
 			assert(this.decoder);
-			this.decoder.decode(sample.toEncodedAudioChunk());
+			this.decoder.decode(packet.toEncodedAudioChunk());
 		}
 	}
 
@@ -1024,7 +962,7 @@ class AudioDecoderWrapper extends DecoderWrapper<EncodedAudioSample, AudioData> 
 
 // There are a lot of PCM variants not natively supported by the browser and by AudioData. Therefore we need a simple
 // decoder that maps any input PCM format into a PCM format supported by the browser.
-class PcmAudioDecoderWrapper extends DecoderWrapper<EncodedAudioSample, AudioData> {
+class PcmAudioDecoderWrapper extends DecoderWrapper<AudioData> {
 	codec: PcmAudioCodec;
 
 	inputSampleSize: 1 | 2 | 3 | 4;
@@ -1139,10 +1077,10 @@ class PcmAudioDecoderWrapper extends DecoderWrapper<EncodedAudioSample, AudioDat
 		return 0;
 	}
 
-	decode(sample: EncodedAudioSample) {
-		const inputView = toDataView(sample.data);
+	decode(packet: EncodedPacket) {
+		const inputView = toDataView(packet.data);
 
-		const numberOfFrames = sample.byteLength / this.decoderConfig.numberOfChannels / this.inputSampleSize;
+		const numberOfFrames = packet.byteLength / this.decoderConfig.numberOfChannels / this.inputSampleSize;
 
 		const outputBufferSize = numberOfFrames * this.decoderConfig.numberOfChannels * this.outputSampleSize;
 		const outputBuffer = new ArrayBuffer(outputBufferSize);
@@ -1157,9 +1095,9 @@ class PcmAudioDecoderWrapper extends DecoderWrapper<EncodedAudioSample, AudioDat
 		}
 
 		const preciseDuration = numberOfFrames / this.decoderConfig.sampleRate;
-		if (this.currentTimestamp === null || Math.abs(sample.timestamp - this.currentTimestamp) >= preciseDuration) {
-			// We need to sync with the sample timestamp again
-			this.currentTimestamp = sample.timestamp;
+		if (this.currentTimestamp === null || Math.abs(packet.timestamp - this.currentTimestamp) >= preciseDuration) {
+			// We need to sync with the packet timestamp again
+			this.currentTimestamp = packet.timestamp;
 		}
 
 		const preciseTimestamp = this.currentTimestamp;
@@ -1199,7 +1137,7 @@ export type WrappedAudioData = {
 };
 
 /** @public */
-export class AudioDataSink extends BaseMediaFrameSink<EncodedAudioSample, AudioData> {
+export class AudioDataSink extends BaseMediaFrameSink<AudioData> {
 	/** @internal */
 	_audioTrack: InputAudioTrack;
 
@@ -1246,8 +1184,8 @@ export class AudioDataSink extends BaseMediaFrameSink<EncodedAudioSample, AudioD
 	}
 
 	/** @internal */
-	_createSampleSink() {
-		return new EncodedAudioSampleSink(this._audioTrack);
+	_createPacketSink() {
+		return new EncodedPacketSink(this._audioTrack);
 	}
 
 	async getData(timestamp: number) {

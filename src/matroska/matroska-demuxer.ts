@@ -18,7 +18,7 @@ import {
 	InputVideoTrack,
 	InputVideoTrackBacking,
 } from '../input-track';
-import { SampleRetrievalOptions } from '../media-sink';
+import { PacketRetrievalOptions } from '../media-sink';
 import {
 	assert,
 	AsyncMutex,
@@ -34,8 +34,8 @@ import {
 	TRANSFER_CHARACTERISTICS_MAP_INVERSE,
 	UNDETERMINED_LANGUAGE,
 } from '../misc';
+import { EncodedPacket, PLACEHOLDER_DATA } from '../packet';
 import { Reader } from '../reader';
-import { EncodedAudioSample, EncodedVideoSample, PLACEHOLDER_DATA, SampleType } from '../sample';
 import { CODEC_STRING_MAP, EBMLId, EBMLReader, MAX_HEADER_SIZE, MIN_HEADER_SIZE } from './ebml';
 
 type Segment = {
@@ -971,10 +971,8 @@ export class MatroskaDemuxer extends Demuxer {
 	}
 }
 
-abstract class MatroskaTrackBacking<
-	Sample extends EncodedVideoSample | EncodedAudioSample,
-> implements InputTrackBacking {
-	sampleToClusterLocation = new WeakMap<Sample, {
+abstract class MatroskaTrackBacking implements InputTrackBacking {
+	packetToClusterLocation = new WeakMap<EncodedPacket, {
 		cluster: Cluster;
 		blockIndex: number;
 	}>();
@@ -990,8 +988,8 @@ abstract class MatroskaTrackBacking<
 	}
 
 	async computeDuration() {
-		const lastSample = await this.getSample(Infinity, { metadataOnly: true });
-		return (lastSample?.timestamp ?? 0) + (lastSample?.duration ?? 0);
+		const lastPacket = await this.getPacket(Infinity, { metadataOnly: true });
+		return (lastPacket?.timestamp ?? 0) + (lastPacket?.duration ?? 0);
 	}
 
 	getLanguageCode() {
@@ -999,24 +997,15 @@ abstract class MatroskaTrackBacking<
 	}
 
 	async getFirstTimestamp() {
-		const firstSample = await this.getFirstSample({ metadataOnly: true });
-		return firstSample?.timestamp ?? 0;
+		const firstPacket = await this.getFirstPacket({ metadataOnly: true });
+		return firstPacket?.timestamp ?? 0;
 	}
 
 	getTimeResolution() {
 		return this.internalTrack.segment.timestampFactor;
 	}
 
-	abstract createSample(
-		data: Uint8Array,
-		byteLength: number,
-		type: SampleType,
-		timestamp: number,
-		duration: number,
-		sequenceNumber: number,
-	): Sample;
-
-	async getFirstSample(options: SampleRetrievalOptions) {
+	async getFirstPacket(options: PacketRetrievalOptions) {
 		return this.performClusterLookup(
 			() => {
 				const startCluster = this.internalTrack.segment.clusters[0] ?? null;
@@ -1060,7 +1049,7 @@ abstract class MatroskaTrackBacking<
 		return roundToPrecision(timestamp * this.internalTrack.segment.timestampFactor, 14);
 	}
 
-	async getSample(timestamp: number, options: SampleRetrievalOptions) {
+	async getPacket(timestamp: number, options: PacketRetrievalOptions) {
 		const timestampInTimescale = this.intoTimescale(timestamp);
 
 		return this.performClusterLookup(
@@ -1071,10 +1060,10 @@ abstract class MatroskaTrackBacking<
 		);
 	}
 
-	async getNextSample(sample: Sample, options: SampleRetrievalOptions) {
-		const locationInCluster = this.sampleToClusterLocation.get(sample);
+	async getNextPacket(packet: EncodedPacket, options: PacketRetrievalOptions) {
+		const locationInCluster = this.packetToClusterLocation.get(packet);
 		if (locationInCluster === undefined) {
-			throw new Error('Sample was not created from this track.');
+			throw new Error('Packet was not created from this track.');
 		}
 
 		const trackData = locationInCluster.cluster.trackData.get(this.internalTrack.id)!;
@@ -1132,7 +1121,7 @@ abstract class MatroskaTrackBacking<
 		);
 	}
 
-	async getKeySample(timestamp: number, options: SampleRetrievalOptions) {
+	async getKeyPacket(timestamp: number, options: PacketRetrievalOptions) {
 		const timestampInTimescale = this.intoTimescale(timestamp);
 
 		return this.performClusterLookup(
@@ -1143,10 +1132,10 @@ abstract class MatroskaTrackBacking<
 		);
 	}
 
-	async getNextKeySample(sample: Sample, options: SampleRetrievalOptions) {
-		const locationInCluster = this.sampleToClusterLocation.get(sample);
+	async getNextKeyPacket(packet: EncodedPacket, options: PacketRetrievalOptions) {
+		const locationInCluster = this.packetToClusterLocation.get(packet);
 		if (locationInCluster === undefined) {
-			throw new Error('Sample was not created from this track.');
+			throw new Error('Packet was not created from this track.');
 		}
 
 		const trackData = locationInCluster.cluster.trackData.get(this.internalTrack.id)!;
@@ -1211,7 +1200,7 @@ abstract class MatroskaTrackBacking<
 		);
 	}
 
-	private async fetchSampleInCluster(cluster: Cluster, blockIndex: number, options: SampleRetrievalOptions) {
+	private async fetchPacketInCluster(cluster: Cluster, blockIndex: number, options: PacketRetrievalOptions) {
 		if (blockIndex === -1) {
 			return null;
 		}
@@ -1223,18 +1212,18 @@ abstract class MatroskaTrackBacking<
 		const data = options.metadataOnly ? PLACEHOLDER_DATA : block.data;
 		const timestamp = block.timestamp / this.internalTrack.segment.timestampFactor;
 		const duration = block.duration / this.internalTrack.segment.timestampFactor;
-		const sample = this.createSample(
+		const packet = new EncodedPacket(
 			data,
-			block.data.byteLength,
 			block.isKeyFrame ? 'key' : 'delta',
 			timestamp,
 			duration,
 			cluster.dataStartPos + blockIndex,
+			block.data.byteLength,
 		);
 
-		this.sampleToClusterLocation.set(sample, { cluster, blockIndex });
+		this.packetToClusterLocation.set(packet, { cluster, blockIndex });
 
-		return sample;
+		return packet;
 	}
 
 	private findBlockInClustersForTimestamp(timestampInTimescale: number) {
@@ -1301,7 +1290,7 @@ abstract class MatroskaTrackBacking<
 		return { clusterIndex, blockIndex, correctBlockFound };
 	}
 
-	/** Looks for a sample in the clusters while trying to load as few clusters as possible to retrieve it. */
+	/** Looks for a packet in the clusters while trying to load as few clusters as possible to retrieve it. */
 	private async performClusterLookup(
 		// This function returns the best-matching block that is currently loaded. Based on this information, we know
 		// which clusters we need to load to find the actual match.
@@ -1310,8 +1299,8 @@ abstract class MatroskaTrackBacking<
 		searchTimestamp: number,
 		// The timestamp for which we know the correct block will not come after it
 		latestTimestamp: number,
-		options: SampleRetrievalOptions,
-	): Promise<Sample | null> {
+		options: PacketRetrievalOptions,
+	): Promise<EncodedPacket | null> {
 		const { demuxer, segment } = this.internalTrack;
 		const release = await segment.clusterLookupMutex.acquire(); // The algorithm requires exclusivity
 
@@ -1320,7 +1309,7 @@ abstract class MatroskaTrackBacking<
 			if (correctBlockFound) {
 				// The correct block already exists, easy path.
 				const cluster = this.internalTrack.clusters[clusterIndex]!;
-				return this.fetchSampleInCluster(cluster, blockIndex, options);
+				return this.fetchPacketInCluster(cluster, blockIndex, options);
 			}
 
 			// We use the metadata reader to find the cluster, but the cluster reader to load the cluster
@@ -1403,7 +1392,7 @@ abstract class MatroskaTrackBacking<
 					const { clusterIndex, blockIndex, correctBlockFound } = getBestMatch();
 					if (correctBlockFound) {
 						const cluster = this.internalTrack.clusters[clusterIndex]!;
-						return this.fetchSampleInCluster(cluster, blockIndex, options);
+						return this.fetchPacketInCluster(cluster, blockIndex, options);
 					}
 					if (clusterIndex !== -1) {
 						bestClusterIndex = clusterIndex;
@@ -1414,11 +1403,11 @@ abstract class MatroskaTrackBacking<
 				metadataReader.pos = dataStartPos + size;
 			}
 
-			let result: Sample | null = null;
+			let result: EncodedPacket | null = null;
 			const bestCluster = bestClusterIndex !== -1 ? this.internalTrack.clusters[bestClusterIndex]! : null;
 			if (bestCluster) {
 				// If we finished looping but didn't find a perfect match, still return the best match we found
-				result = await this.fetchSampleInCluster(bestCluster, bestBlockIndex, options);
+				result = await this.fetchPacketInCluster(bestCluster, bestBlockIndex, options);
 			}
 
 			// Catch faulty cue points
@@ -1437,7 +1426,7 @@ abstract class MatroskaTrackBacking<
 	}
 }
 
-class MatroskaVideoTrackBacking extends MatroskaTrackBacking<EncodedVideoSample> implements InputVideoTrackBacking {
+class MatroskaVideoTrackBacking extends MatroskaTrackBacking implements InputVideoTrackBacking {
 	override internalTrack: InternalVideoTrack;
 	decoderConfigPromise: Promise<VideoDecoderConfig> | null = null;
 
@@ -1477,12 +1466,12 @@ class MatroskaVideoTrackBacking extends MatroskaTrackBacking<EncodedVideoSample>
 		}
 
 		return this.decoderConfigPromise ??= (async (): Promise<VideoDecoderConfig> => {
-			let firstSample: EncodedVideoSample | null = null;
-			const needsSampleForAdditionalInfo
+			let firstPacket: EncodedPacket | null = null;
+			const needsPacketForAdditionalInfo
 				= this.internalTrack.info.codec === 'vp9' || this.internalTrack.info.codec === 'av1';
 
-			if (needsSampleForAdditionalInfo) {
-				firstSample = await this.getFirstSample({});
+			if (needsPacketForAdditionalInfo) {
+				firstPacket = await this.getFirstPacket({});
 			}
 
 			return {
@@ -1492,11 +1481,11 @@ class MatroskaVideoTrackBacking extends MatroskaTrackBacking<EncodedVideoSample>
 					codec: this.internalTrack.info.codec,
 					codecDescription: this.internalTrack.codecPrivate,
 					colorSpace: this.internalTrack.info.colorSpace,
-					vp9CodecInfo: this.internalTrack.info.codec === 'vp9' && firstSample
-						? extractVp9CodecInfoFromFrame(firstSample.data)
+					vp9CodecInfo: this.internalTrack.info.codec === 'vp9' && firstPacket
+						? extractVp9CodecInfoFromFrame(firstPacket.data)
 						: null,
-					av1CodecInfo: this.internalTrack.info.codec === 'av1' && firstSample
-						? extractAv1CodecInfoFromFrame(firstSample.data)
+					av1CodecInfo: this.internalTrack.info.codec === 'av1' && firstPacket
+						? extractAv1CodecInfoFromFrame(firstPacket.data)
 						: null,
 				}),
 				codedWidth: this.internalTrack.info.width,
@@ -1506,20 +1495,9 @@ class MatroskaVideoTrackBacking extends MatroskaTrackBacking<EncodedVideoSample>
 			};
 		})();
 	}
-
-	createSample(
-		data: Uint8Array,
-		byteLength: number,
-		type: SampleType,
-		timestamp: number,
-		duration: number,
-		sequenceNumber: number,
-	) {
-		return new EncodedVideoSample(data, type, timestamp, duration, sequenceNumber, byteLength);
-	}
 }
 
-class MatroskaAudioTrackBacking extends MatroskaTrackBacking<EncodedAudioSample> implements InputAudioTrackBacking {
+class MatroskaAudioTrackBacking extends MatroskaTrackBacking implements InputAudioTrackBacking {
 	override internalTrack: InternalAudioTrack;
 	decoderConfig: AudioDecoderConfig | null = null;
 
@@ -1555,16 +1533,6 @@ class MatroskaAudioTrackBacking extends MatroskaTrackBacking<EncodedAudioSample>
 			sampleRate: this.internalTrack.info.sampleRate,
 			description: this.internalTrack.codecPrivate ?? undefined,
 		};
-	}
-
-	createSample(
-		data: Uint8Array,
-		byteLength: number,
-		type: SampleType,
-		timestamp: number,
-		duration: number,
-	) {
-		return new EncodedAudioSample(data, type, timestamp, duration, byteLength);
 	}
 }
 

@@ -2,7 +2,7 @@ import { OPUS_INTERNAL_SAMPLE_RATE, parseOpusIdentificationHeader } from '../cod
 import { assert, setInt64, toDataView, toUint8Array } from '../misc';
 import { Muxer } from '../muxer';
 import { Output, OutputAudioTrack } from '../output';
-import { EncodedAudioSample } from '../sample';
+import { EncodedPacket } from '../packet';
 import { Writer } from '../writer';
 import {
 	computeOggPageCrc,
@@ -58,7 +58,7 @@ export class OggMuxer extends Muxer {
 		// Nothin'
 	}
 
-	addEncodedVideoSample(): never {
+	addEncodedVideoPacket(): never {
 		throw new Error('Video tracks are not supported.');
 	}
 
@@ -209,18 +209,18 @@ export class OggMuxer extends Muxer {
 		}
 	}
 
-	async addEncodedAudioSample(track: OutputAudioTrack, sample: EncodedAudioSample, meta?: EncodedAudioChunkMetadata) {
+	async addEncodedAudioPacket(track: OutputAudioTrack, packet: EncodedPacket, meta?: EncodedAudioChunkMetadata) {
 		const release = await this.mutex.acquire();
 
 		try {
 			const trackData = this.getTrackData(track, meta);
 
-			this.validateAndNormalizeTimestamp(trackData.track, sample.timestamp, sample.type === 'key');
+			this.validateAndNormalizeTimestamp(trackData.track, packet.timestamp, packet.type === 'key');
 
 			const currentTimestampInSamples = trackData.currentTimestampInSamples;
 
 			const { durationInSamples, vorbisBlockSize } = extractSampleMetadata(
-				sample.data,
+				packet.data,
 				trackData.codecInfo,
 				trackData.vorbisLastBlocksize,
 			);
@@ -228,7 +228,7 @@ export class OggMuxer extends Muxer {
 			trackData.vorbisLastBlocksize = vorbisBlockSize;
 
 			trackData.packetQueue.push({
-				data: sample.data,
+				data: packet.data,
 				endGranulePosition: trackData.currentTimestampInSamples,
 				timestamp: currentTimestampInSamples / trackData.internalSampleRate,
 				forcePageFlush: false,

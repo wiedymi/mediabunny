@@ -1,6 +1,6 @@
 import { AsyncMutex } from './misc';
 import { Output, OutputAudioTrack, OutputSubtitleTrack, OutputTrack, OutputVideoTrack } from './output';
-import { EncodedAudioSample, EncodedVideoSample } from './sample';
+import { EncodedPacket } from './packet';
 import { SubtitleCue, SubtitleMetadata } from './subtitles';
 
 export abstract class Muxer {
@@ -12,14 +12,14 @@ export abstract class Muxer {
 	}
 
 	abstract start(): Promise<void>;
-	abstract addEncodedVideoSample(
+	abstract addEncodedVideoPacket(
 		track: OutputVideoTrack,
-		sample: EncodedVideoSample,
+		packet: EncodedPacket,
 		meta?: EncodedVideoChunkMetadata
 	): Promise<void>;
-	abstract addEncodedAudioSample(
+	abstract addEncodedAudioPacket(
 		track: OutputAudioTrack,
-		sample: EncodedAudioSample,
+		packet: EncodedPacket,
 		meta?: EncodedAudioChunkMetadata
 	): Promise<void>;
 	abstract addSubtitleCue(track: OutputSubtitleTrack, cue: SubtitleCue, meta?: SubtitleMetadata): Promise<void>;

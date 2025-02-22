@@ -182,8 +182,9 @@ export const parseModesFromVorbisSetupPacket = (setupHeader: Uint8Array) => {
 		}
 		bs.skip(1);
 		modeCount++;
-		if (modeCount > 64)
+		if (modeCount > 64) {
 			break;
+		}
 		const bsClone = bs.clone();
 		const candidate = bsClone.read(6) + 1;
 		if (candidate === modeCount) {

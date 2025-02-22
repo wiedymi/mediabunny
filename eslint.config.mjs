@@ -24,6 +24,7 @@ export default tseslint.config(
 			'@stylistic/max-len': ['error', {
 				code: 120,
 			}],
+			'curly': ['error', 'multi-line'],
 			'@typescript-eslint/no-empty-object-type': 'off',
 			'@typescript-eslint/require-await': 'off',
 			'@stylistic/yield-star-spacing': ['error', { before: false, after: true }],

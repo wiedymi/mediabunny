@@ -1,5 +1,5 @@
 import { AudioCodec, VideoCodec } from './codec';
-import { EncodedAudioSample, EncodedVideoSample } from './sample';
+import { EncodedPacket } from './packet';
 
 /** @public */
 export abstract class CustomVideoDecoder {
@@ -13,7 +13,7 @@ export abstract class CustomVideoDecoder {
 	}
 
 	abstract init(): void;
-	abstract decode(sample: EncodedVideoSample): Promise<void> | void;
+	abstract decode(packet: EncodedPacket): Promise<void> | void;
 	abstract flush(): Promise<void> | void;
 	abstract close(): Promise<void> | void;
 }
@@ -30,7 +30,7 @@ export abstract class CustomAudioDecoder {
 	}
 
 	abstract init(): void;
-	abstract decode(sample: EncodedAudioSample): Promise<void> | void;
+	abstract decode(packet: EncodedPacket): Promise<void> | void;
 	abstract flush(): Promise<void> | void;
 	abstract close(): Promise<void> | void;
 }
@@ -39,7 +39,7 @@ export abstract class CustomAudioDecoder {
 export abstract class CustomVideoEncoder {
 	codec!: VideoCodec;
 	config!: VideoEncoderConfig;
-	onSample!: (sample: EncodedVideoSample, meta?: EncodedVideoChunkMetadata) => unknown;
+	onPacket!: (packet: EncodedPacket, meta?: EncodedVideoChunkMetadata) => unknown;
 
 	// eslint-disable-next-line @typescript-eslint/no-unused-vars
 	static supports(codec: VideoCodec, config: VideoEncoderConfig): boolean {
@@ -56,7 +56,7 @@ export abstract class CustomVideoEncoder {
 export abstract class CustomAudioEncoder {
 	codec!: AudioCodec;
 	config!: AudioEncoderConfig;
-	onSample!: (sample: EncodedAudioSample, meta?: EncodedAudioChunkMetadata) => unknown;
+	onPacket!: (packet: EncodedPacket, meta?: EncodedAudioChunkMetadata) => unknown;
 
 	// eslint-disable-next-line @typescript-eslint/no-unused-vars
 	static supports(codec: AudioCodec, config: AudioEncoderConfig): boolean {

@@ -18,7 +18,6 @@ import { OutputAudioTrack, OutputSubtitleTrack, OutputTrack, OutputVideoTrack } 
 import { assert, clamp, promiseWithResolvers, setInt24, setUint24 } from './misc';
 import { Muxer } from './muxer';
 import { SubtitleParser } from './subtitles';
-import { EncodedAudioSample, EncodedVideoSample } from './sample';
 import { toAlaw, toUlaw } from './pcm';
 import {
 	CustomVideoEncoder,
@@ -26,6 +25,7 @@ import {
 	customVideoEncoders,
 	customAudioEncoders,
 } from './custom-coder';
+import { EncodedPacket } from './packet';
 
 /** @public */
 export abstract class MediaSource {
@@ -124,21 +124,21 @@ export abstract class VideoSource extends MediaSource {
 }
 
 /** @public */
-export class EncodedVideoSampleSource extends VideoSource {
+export class EncodedVideoPacketSource extends VideoSource {
 	constructor(codec: VideoCodec) {
 		super(codec);
 	}
 
-	add(sample: EncodedVideoSample, meta?: EncodedVideoChunkMetadata) {
-		if (!(sample instanceof EncodedVideoSample)) {
-			throw new TypeError('sample must be an EncodedVideoSample.');
+	add(packet: EncodedPacket, meta?: EncodedVideoChunkMetadata) {
+		if (!(packet instanceof EncodedPacket)) {
+			throw new TypeError('packet must be an EncodedPacket.');
 		}
-		if (sample.isMetadataOnly) {
-			throw new TypeError('Metadata-only samples cannot be added.');
+		if (packet.isMetadataOnly) {
+			throw new TypeError('Metadata-only packets cannot be added.');
 		}
 
 		this._ensureValidAdd();
-		return this._connectedTrack!.output._muxer.addEncodedVideoSample(this._connectedTrack!, sample, meta);
+		return this._connectedTrack!.output._muxer.addEncodedVideoPacket(this._connectedTrack!, packet, meta);
 	}
 }
 
@@ -148,7 +148,7 @@ export type VideoEncodingConfig = {
 	bitrate: number | Quality;
 	latencyMode?: VideoEncoderConfig['latencyMode'];
 	keyFrameInterval?: number;
-	onEncodedSample?: (sample: EncodedVideoSample, meta: EncodedVideoChunkMetadata | undefined) => unknown;
+	onEncodedPacket?: (packet: EncodedPacket, meta: EncodedVideoChunkMetadata | undefined) => unknown;
 	onEncodingError?: (error: Error) => unknown;
 };
 
@@ -171,7 +171,7 @@ const validateVideoEncodingConfig = (config: VideoEncodingConfig) => {
 	) {
 		throw new TypeError('config.keyFrameInterval, when provided, must be a non-negative number.');
 	}
-	if (config.onEncodedSample !== undefined && typeof config.onEncodedSample !== 'function') {
+	if (config.onEncodedPacket !== undefined && typeof config.onEncodedPacket !== 'function') {
 		throw new TypeError('config.onEncodedChunk, when provided, must be a function.');
 	}
 	if (config.onEncodingError !== undefined && typeof config.onEncodingError !== 'function') {
@@ -306,9 +306,9 @@ class VideoEncoderWrapper {
 			this.customEncoder = new MatchingCustomEncoder() as CustomVideoEncoder;
 			this.customEncoder.codec = this.encodingConfig.codec;
 			this.customEncoder.config = encoderConfig;
-			this.customEncoder.onSample = (sample, meta) => {
-				this.encodingConfig.onEncodedSample?.(sample, meta);
-				void this.muxer!.addEncodedVideoSample(this.source._connectedTrack!, sample, meta);
+			this.customEncoder.onPacket = (packet, meta) => {
+				this.encodingConfig.onEncodedPacket?.(packet, meta);
+				void this.muxer!.addEncodedVideoPacket(this.source._connectedTrack!, packet, meta);
 			};
 
 			this.customEncoder.init();
@@ -327,10 +327,10 @@ class VideoEncoderWrapper {
 
 			this.encoder = new VideoEncoder({
 				output: (chunk, meta) => {
-					const sample = EncodedVideoSample.fromEncodedVideoChunk(chunk);
+					const packet = EncodedPacket.fromEncodedChunk(chunk);
 
-					this.encodingConfig.onEncodedSample?.(sample, meta);
-					void this.muxer!.addEncodedVideoSample(this.source._connectedTrack!, sample, meta);
+					this.encodingConfig.onEncodedPacket?.(packet, meta);
+					void this.muxer!.addEncodedVideoPacket(this.source._connectedTrack!, packet, meta);
 				},
 				error: this.encodingConfig.onEncodingError ?? (error => console.error('VideoEncoder error:', error)),
 			});
@@ -516,28 +516,28 @@ export abstract class AudioSource extends MediaSource {
 }
 
 /** @public */
-export class EncodedAudioSampleSource extends AudioSource {
+export class EncodedAudioPacketSource extends AudioSource {
 	constructor(codec: AudioCodec) {
 		super(codec);
 	}
 
-	add(sample: EncodedAudioSample, meta?: EncodedAudioChunkMetadata) {
-		if (!(sample instanceof EncodedAudioSample)) {
-			throw new TypeError('chunk must be an EncodedAudioSample.');
+	add(packet: EncodedPacket, meta?: EncodedAudioChunkMetadata) {
+		if (!(packet instanceof EncodedPacket)) {
+			throw new TypeError('packet must be an EncodedPacket.');
 		}
-		if (sample.isMetadataOnly) {
-			throw new TypeError('Metadata-only samples cannot be added.');
+		if (packet.isMetadataOnly) {
+			throw new TypeError('Metadata-only packets cannot be added.');
 		}
 
 		this._ensureValidAdd();
-		return this._connectedTrack!.output._muxer.addEncodedAudioSample(this._connectedTrack!, sample, meta);
+		return this._connectedTrack!.output._muxer.addEncodedAudioPacket(this._connectedTrack!, packet, meta);
 	}
 }
 /** @public */
 export type AudioEncodingConfig = {
 	codec: AudioCodec;
 	bitrate?: number | Quality;
-	onEncodedSample?: (sample: EncodedAudioSample, meta: EncodedAudioChunkMetadata | undefined) => unknown;
+	onEncodedPacket?: (packet: EncodedPacket, meta: EncodedAudioChunkMetadata | undefined) => unknown;
 	onEncodingError?: (error: Error) => unknown;
 };
 
@@ -663,7 +663,7 @@ class AudioEncoderWrapper {
 			view: DataView;
 		}[] = [];
 
-		// Prepare all of the output buffers, each being bounded by CHUNK_SIZE so we don't generate huge samples
+		// Prepare all of the output buffers, each being bounded by CHUNK_SIZE so we don't generate huge packets
 		for (let frame = 0; frame < numberOfFrames; frame += CHUNK_SIZE) {
 			const frameCount = Math.min(CHUNK_SIZE, audioData.numberOfFrames - frame);
 			const outputSize = frameCount * numberOfChannels * this.outputSampleSize;
@@ -710,15 +710,15 @@ class AudioEncoderWrapper {
 			const outputBuffer = view.buffer;
 			const startFrame = i * CHUNK_SIZE;
 
-			const sample = new EncodedAudioSample(
+			const packet = new EncodedPacket(
 				new Uint8Array(outputBuffer),
 				'key',
 				timestamp / 1e6 + startFrame / sampleRate,
 				frameCount / sampleRate,
 			);
 
-			this.encodingConfig.onEncodedSample?.(sample, meta);
-			await this.muxer!.addEncodedAudioSample(this.source._connectedTrack!, sample, meta); // With backpressure
+			this.encodingConfig.onEncodedPacket?.(packet, meta);
+			await this.muxer!.addEncodedAudioPacket(this.source._connectedTrack!, packet, meta); // With backpressure
 		}
 	}
 
@@ -757,9 +757,9 @@ class AudioEncoderWrapper {
 			this.customEncoder = new MatchingCustomEncoder() as CustomAudioEncoder;
 			this.customEncoder.codec = this.encodingConfig.codec;
 			this.customEncoder.config = encoderConfig;
-			this.customEncoder.onSample = (sample, meta) => {
-				this.encodingConfig.onEncodedSample?.(sample, meta);
-				void this.muxer!.addEncodedAudioSample(this.source._connectedTrack!, sample, meta);
+			this.customEncoder.onPacket = (packet, meta) => {
+				this.encodingConfig.onEncodedPacket?.(packet, meta);
+				void this.muxer!.addEncodedAudioPacket(this.source._connectedTrack!, packet, meta);
 			};
 
 			this.customEncoder.init();
@@ -780,10 +780,10 @@ class AudioEncoderWrapper {
 
 			this.encoder = new AudioEncoder({
 				output: (chunk, meta) => {
-					const sample = EncodedAudioSample.fromEncodedAudioChunk(chunk);
+					const packet = EncodedPacket.fromEncodedChunk(chunk);
 
-					this.encodingConfig.onEncodedSample?.(sample, meta);
-					void this.muxer!.addEncodedAudioSample(this.source._connectedTrack!, sample, meta);
+					this.encodingConfig.onEncodedPacket?.(packet, meta);
+					void this.muxer!.addEncodedAudioPacket(this.source._connectedTrack!, packet, meta);
 				},
 				error: this.encodingConfig.onEncodingError ?? (error => console.error('AudioEncoder error:', error)),
 			});

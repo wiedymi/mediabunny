@@ -2,10 +2,10 @@ import { OPUS_INTERNAL_SAMPLE_RATE, parseOpusIdentificationHeader } from '../cod
 import { Demuxer } from '../demuxer';
 import { Input } from '../input';
 import { InputAudioTrack, InputAudioTrackBacking } from '../input-track';
-import { SampleRetrievalOptions } from '../media-sink';
+import { PacketRetrievalOptions } from '../media-sink';
 import { assert, findLast, roundToPrecision, toDataView, UNDETERMINED_LANGUAGE } from '../misc';
+import { EncodedPacket, PLACEHOLDER_DATA } from '../packet';
 import { Reader } from '../reader';
-import { EncodedAudioSample, PLACEHOLDER_DATA } from '../sample';
 import { computeOggPageCrc, extractSampleMetadata, OggCodecInfo, parseModesFromVorbisSetupPacket } from './ogg-misc';
 import { MAX_PAGE_HEADER_SIZE, MAX_PAGE_SIZE, MIN_PAGE_HEADER_SIZE, OggReader, Page } from './ogg-reader';
 
@@ -384,7 +384,7 @@ export class OggDemuxer extends Demuxer {
 	}
 }
 
-type SampleMetadata = {
+type EncodedPacketMetadata = {
 	packet: Packet;
 	timestampInSamples: number;
 	durationInSamples: number;
@@ -393,7 +393,7 @@ type SampleMetadata = {
 
 class OggAudioTrackBacking implements InputAudioTrackBacking {
 	internalSampleRate: number;
-	sampleToMetadata = new WeakMap<EncodedAudioSample, SampleMetadata>();
+	encodedPacketToMetadata = new WeakMap<EncodedPacket, EncodedPacketMetadata>();
 
 	constructor(public bitstream: LogicalBitstream, public demuxer: OggDemuxer) {
 		// Opus always uses a fixed sample rate for its internal calculations, even if the actual rate is different
@@ -442,8 +442,8 @@ class OggAudioTrackBacking implements InputAudioTrackBacking {
 	}
 
 	async computeDuration() {
-		const lastSample = await this.getSample(Infinity, { metadataOnly: true });
-		return (lastSample?.timestamp ?? 0) + (lastSample?.duration ?? 0);
+		const lastPacket = await this.getPacket(Infinity, { metadataOnly: true });
+		return (lastPacket?.timestamp ?? 0) + (lastPacket?.duration ?? 0);
 	}
 
 	granulePositionToTimestampInSamples(granulePosition: number) {
@@ -455,13 +455,13 @@ class OggAudioTrackBacking implements InputAudioTrackBacking {
 		return granulePosition;
 	}
 
-	createSampleFromPacket(
+	createEncodedPacketFromOggPacket(
 		packet: Packet | null,
 		additional: {
 			timestampInSamples: number;
 			vorbisLastBlocksize: number | null;
 		},
-		options: SampleRetrievalOptions,
+		options: PacketRetrievalOptions,
 	) {
 		if (!packet) {
 			return null;
@@ -473,7 +473,7 @@ class OggAudioTrackBacking implements InputAudioTrackBacking {
 			additional.vorbisLastBlocksize,
 		);
 
-		const sample = new EncodedAudioSample(
+		const encodedPacket = new EncodedPacket(
 			options.metadataOnly ? PLACEHOLDER_DATA : packet.data,
 			'key',
 			Math.max(0, additional.timestampInSamples) / this.internalSampleRate,
@@ -481,16 +481,16 @@ class OggAudioTrackBacking implements InputAudioTrackBacking {
 			packet.endPage.headerStartPos + packet.endSegmentIndex,
 		);
 
-		this.sampleToMetadata.set(sample, {
+		this.encodedPacketToMetadata.set(encodedPacket, {
 			packet,
 			timestampInSamples: additional.timestampInSamples,
 			durationInSamples,
 			vorbisBlockSize,
 		});
-		return sample;
+		return encodedPacket;
 	}
 
-	async getFirstSample(options: SampleRetrievalOptions) {
+	async getFirstPacket(options: PacketRetrievalOptions) {
 		assert(this.bitstream.lastMetadataPacket);
 		const packetPosition = await this.demuxer.findNextPacketStart(
 			this.demuxer.reader,
@@ -512,7 +512,7 @@ class OggAudioTrackBacking implements InputAudioTrackBacking {
 			packetPosition.startSegmentIndex,
 		);
 
-		return this.createSampleFromPacket(
+		return this.createEncodedPacketFromOggPacket(
 			packet,
 			{
 				timestampInSamples,
@@ -522,10 +522,10 @@ class OggAudioTrackBacking implements InputAudioTrackBacking {
 		);
 	}
 
-	async getNextSample(prevSample: EncodedAudioSample, options: SampleRetrievalOptions) {
-		const prevMetadata = this.sampleToMetadata.get(prevSample);
+	async getNextPacket(prevPacket: EncodedPacket, options: PacketRetrievalOptions) {
+		const prevMetadata = this.encodedPacketToMetadata.get(prevPacket);
 		if (!prevMetadata) {
-			throw new Error('Sample was not created from this track.');
+			throw new Error('Packet was not created from this track.');
 		}
 
 		const packetPosition = await this.demuxer.findNextPacketStart(this.demuxer.reader, prevMetadata.packet);
@@ -541,7 +541,7 @@ class OggAudioTrackBacking implements InputAudioTrackBacking {
 			packetPosition.startSegmentIndex,
 		);
 
-		return this.createSampleFromPacket(
+		return this.createEncodedPacketFromOggPacket(
 			packet,
 			{
 				timestampInSamples,
@@ -551,13 +551,13 @@ class OggAudioTrackBacking implements InputAudioTrackBacking {
 		);
 	}
 
-	async getSample(timestamp: number, options: SampleRetrievalOptions) {
+	async getPacket(timestamp: number, options: PacketRetrievalOptions) {
 		assert(this.demuxer.fileSize !== null);
 
 		const timestampInSamples = roundToPrecision(timestamp * this.internalSampleRate, 14);
 		if (timestampInSamples === 0) {
 			// Fast path for timestamp 0 - avoids binary search when playing back from the start
-			return this.getFirstSample(options);
+			return this.getFirstPacket(options);
 		}
 		if (timestampInSamples < 0) {
 			// There's nothing here
@@ -581,8 +581,8 @@ class OggAudioTrackBacking implements InputAudioTrackBacking {
 		const lowPages: Page[] = [lowPage];
 
 		// First, let's perform a binary serach (bisection search) on the file to find the approximate page where we'll
-		// find the sample. We want to find a page whose end sample position is less than or equal to the
-		// sample position we're searching for.
+		// find the packet. We want to find a page whose end packet position is less than or equal to the
+		// packet position we're searching for.
 
 		// Outer loop: Does the binary serach
 		outer:
@@ -644,7 +644,7 @@ class OggAudioTrackBacking implements InputAudioTrackBacking {
 
 				const isContinuationPage = page.granulePosition === -1;
 				if (isContinuationPage) {
-					// No sample ends on this page - keep looking
+					// No packet ends on this page - keep looking
 					searchStartPos = page.headerStartPos + page.totalSize;
 					continue;
 				}
@@ -662,9 +662,9 @@ class OggAudioTrackBacking implements InputAudioTrackBacking {
 			}
 		}
 
-		// Now we have the last page with a sample position <= the sample position we're looking for, but there might
-		// be multiple pages with the sample position, in which case we actually need to find the first of such pages.
-		// We'll do this in two steps: First, let's find the latest page we know with an earlier sample position, and
+		// Now we have the last page with a packet position <= the packet position we're looking for, but there might
+		// be multiple pages with the packet position, in which case we actually need to find the first of such pages.
+		// We'll do this in two steps: First, let's find the latest page we know with an earlier packet position, and
 		// then linear scan ourselves forward until we find the correct page.
 
 		let lowerPage = startPosition.startPage;
@@ -760,7 +760,7 @@ class OggAudioTrackBacking implements InputAudioTrackBacking {
 					currentSegmentIndex = startPosition.segmentIndex;
 				}
 			} else {
-				// There is no next position, which means we're looking for the last sample in the bitstream. The
+				// There is no next position, which means we're looking for the last packet in the bitstream. The
 				// granule position on the last page tends to be fucky, so let's instead start the search on the page
 				// before that. So let's loop until we find a packet that ends in a previous page.
 				while (true) {
@@ -788,8 +788,8 @@ class OggAudioTrackBacking implements InputAudioTrackBacking {
 			}
 		}
 
-		let lastSample: EncodedAudioSample | null = null;
-		let lastSampleMetadata: SampleMetadata | null = null;
+		let lastEncodedPacket: EncodedPacket | null = null;
+		let lastEncodedPacketMetadata: EncodedPacketMetadata | null = null;
 
 		// Alright, now it's time for the final, granular seek: We keep iterating over packets until we've found the one
 		// with the correct timestamp - i.e., the last one with a timestamp <= the timestamp we're looking for.
@@ -806,18 +806,18 @@ class OggAudioTrackBacking implements InputAudioTrackBacking {
 				&& currentSegmentIndex < startPosition.startSegmentIndex;
 
 			if (!skipPacket) {
-				let sample = this.createSampleFromPacket(
+				let encodedPacket = this.createEncodedPacketFromOggPacket(
 					packet,
 					{
 						timestampInSamples: currentTimestampInSamples,
-						vorbisLastBlocksize: lastSampleMetadata?.vorbisBlockSize ?? null,
+						vorbisLastBlocksize: lastEncodedPacketMetadata?.vorbisBlockSize ?? null,
 					},
 					options,
 				);
-				assert(sample);
+				assert(encodedPacket);
 
-				let sampleMetadata = this.sampleToMetadata.get(sample);
-				assert(sampleMetadata);
+				let encodedPacketMetadata = this.encodedPacketToMetadata.get(encodedPacket);
+				assert(encodedPacketMetadata);
 
 				if (
 					!currentTimestampIsCorrect
@@ -828,25 +828,25 @@ class OggAudioTrackBacking implements InputAudioTrackBacking {
 					currentTimestampInSamples = this.granulePositionToTimestampInSamples(currentPage.granulePosition);
 					currentTimestampIsCorrect = true;
 
-					// Let's backpatch the sample we just created with the correct timestamp
-					sample = this.createSampleFromPacket(
+					// Let's backpatch the packet we just created with the correct timestamp
+					encodedPacket = this.createEncodedPacketFromOggPacket(
 						packet,
 						{
-							timestampInSamples: currentTimestampInSamples - sampleMetadata.durationInSamples,
-							vorbisLastBlocksize: lastSampleMetadata?.vorbisBlockSize ?? null,
+							timestampInSamples: currentTimestampInSamples - encodedPacketMetadata.durationInSamples,
+							vorbisLastBlocksize: lastEncodedPacketMetadata?.vorbisBlockSize ?? null,
 						},
 						options,
 					);
-					assert(sample);
+					assert(encodedPacket);
 
-					sampleMetadata = this.sampleToMetadata.get(sample);
-					assert(sampleMetadata);
+					encodedPacketMetadata = this.encodedPacketToMetadata.get(encodedPacket);
+					assert(encodedPacketMetadata);
 				} else {
-					currentTimestampInSamples += sampleMetadata.durationInSamples;
+					currentTimestampInSamples += encodedPacketMetadata.durationInSamples;
 				}
 
-				lastSample = sample;
-				lastSampleMetadata = sampleMetadata;
+				lastEncodedPacket = encodedPacket;
+				lastEncodedPacketMetadata = encodedPacketMetadata;
 
 				if (
 					currentTimestampIsCorrect
@@ -854,7 +854,7 @@ class OggAudioTrackBacking implements InputAudioTrackBacking {
 						// Next timestamp will be too late
 						Math.max(currentTimestampInSamples, 0) > timestampInSamples
 						// This timestamp already matches
-						|| Math.max(sampleMetadata.timestampInSamples, 0) === timestampInSamples
+						|| Math.max(encodedPacketMetadata.timestampInSamples, 0) === timestampInSamples
 					)
 				) {
 					break;
@@ -870,15 +870,15 @@ class OggAudioTrackBacking implements InputAudioTrackBacking {
 			currentSegmentIndex = nextPosition.startSegmentIndex;
 		}
 
-		return lastSample;
+		return lastEncodedPacket;
 	}
 
-	getKeySample(timestamp: number, options: SampleRetrievalOptions) {
-		return this.getSample(timestamp, options);
+	getKeyPacket(timestamp: number, options: PacketRetrievalOptions) {
+		return this.getPacket(timestamp, options);
 	}
 
-	getNextKeySample(sample: EncodedAudioSample, options: SampleRetrievalOptions) {
-		return this.getNextSample(sample, options);
+	getNextKeyPacket(packet: EncodedPacket, options: PacketRetrievalOptions) {
+		return this.getNextPacket(packet, options);
 	}
 }
 
@@ -894,7 +894,7 @@ const findPacketStartPosition = (pageList: Page[], endPage: Page, endSegmentInde
 		for (segmentIndex; segmentIndex >= 0; segmentIndex--) {
 			const lacingValue = page.lacingValues[segmentIndex]!;
 			if (lacingValue < 255) {
-				segmentIndex++; // We know the last sample starts here
+				segmentIndex++; // We know the last packet starts here
 				break outer;
 			}
 		}

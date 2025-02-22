@@ -43,7 +43,7 @@ import {
 } from '../codec';
 import { Muxer } from '../muxer';
 import { Writer } from '../writer';
-import { EncodedAudioSample, EncodedVideoSample } from '../sample';
+import { EncodedPacket } from '../packet';
 
 const MAX_CHUNK_LENGTH_MS = 2 ** 15;
 const APP_NAME = 'https://github.com/Vanilagy/webm-muxer'; // TODO
@@ -477,15 +477,15 @@ export class MatroskaMuxer extends Muxer {
 		return newTrackData;
 	}
 
-	async addEncodedVideoSample(track: OutputVideoTrack, sample: EncodedVideoSample, meta?: EncodedVideoChunkMetadata) {
+	async addEncodedVideoPacket(track: OutputVideoTrack, packet: EncodedPacket, meta?: EncodedVideoChunkMetadata) {
 		const release = await this.mutex.acquire();
 
 		try {
 			const trackData = this.getVideoTrackData(track, meta);
 
-			const isKeyFrame = sample.type === 'key';
-			const timestamp = this.validateAndNormalizeTimestamp(trackData.track, sample.timestamp, isKeyFrame);
-			const videoChunk = this.createInternalChunk(sample.data, timestamp, sample.duration, sample.type);
+			const isKeyFrame = packet.type === 'key';
+			const timestamp = this.validateAndNormalizeTimestamp(trackData.track, packet.timestamp, isKeyFrame);
+			const videoChunk = this.createInternalChunk(packet.data, timestamp, packet.duration, packet.type);
 			if (track.source._codec === 'vp9') this.fixVP9ColorSpace(trackData, videoChunk);
 
 			trackData.chunkQueue.push(videoChunk);
@@ -495,15 +495,15 @@ export class MatroskaMuxer extends Muxer {
 		}
 	}
 
-	async addEncodedAudioSample(track: OutputAudioTrack, sample: EncodedAudioSample, meta?: EncodedAudioChunkMetadata) {
+	async addEncodedAudioPacket(track: OutputAudioTrack, packet: EncodedPacket, meta?: EncodedAudioChunkMetadata) {
 		const release = await this.mutex.acquire();
 
 		try {
 			const trackData = this.getAudioTrackData(track, meta);
 
-			const isKeyFrame = sample.type === 'key';
-			const timestamp = this.validateAndNormalizeTimestamp(trackData.track, sample.timestamp, isKeyFrame);
-			const audioChunk = this.createInternalChunk(sample.data, timestamp, sample.duration, sample.type);
+			const isKeyFrame = packet.type === 'key';
+			const timestamp = this.validateAndNormalizeTimestamp(trackData.track, packet.timestamp, isKeyFrame);
+			const audioChunk = this.createInternalChunk(packet.data, timestamp, packet.duration, packet.type);
 
 			trackData.chunkQueue.push(audioChunk);
 			await this.interleaveChunks();

@@ -4,3 +4,4 @@
 - cross-track offset for streaming sources
 - configurable fragmented mp4 fragment size, like the mp4-muxer PR
 - fix rotation matrix thing, make sure its counter-clockwise everywhere (is this a breaking change from mp4-muxer?)
+- canvassink ring buffer

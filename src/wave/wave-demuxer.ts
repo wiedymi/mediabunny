@@ -2,10 +2,10 @@ import { AudioCodec } from '../codec';
 import { Demuxer } from '../demuxer';
 import { Input } from '../input';
 import { InputAudioTrack, InputAudioTrackBacking } from '../input-track';
-import { SampleRetrievalOptions } from '../media-sink';
+import { PacketRetrievalOptions } from '../media-sink';
 import { assert, UNDETERMINED_LANGUAGE } from '../misc';
+import { EncodedPacket, PLACEHOLDER_DATA } from '../packet';
 import { Reader } from '../reader';
-import { EncodedAudioSample, PLACEHOLDER_DATA } from '../sample';
 import { RiffReader } from './riff-reader';
 
 export enum WaveFormat {
@@ -178,7 +178,7 @@ export class WaveDemuxer extends Demuxer {
 	}
 }
 
-const SAMPLE_SIZE_IN_FRAMES = 2048;
+const PACKET_SIZE_IN_FRAMES = 2048;
 
 class WaveAudioTrackBacking implements InputAudioTrackBacking {
 	constructor(public demuxer: WaveDemuxer) {}
@@ -232,18 +232,18 @@ class WaveAudioTrackBacking implements InputAudioTrackBacking {
 		return 0;
 	}
 
-	private async getSampleAtIndex(
-		sampleIndex: number,
-		options: SampleRetrievalOptions,
-	): Promise<EncodedAudioSample | null> {
+	private async getPacketAtIndex(
+		packetIndex: number,
+		options: PacketRetrievalOptions,
+	): Promise<EncodedPacket | null> {
 		assert(this.demuxer.audioInfo);
-		const startOffset = sampleIndex * SAMPLE_SIZE_IN_FRAMES * this.demuxer.audioInfo.blockSizeInBytes;
+		const startOffset = packetIndex * PACKET_SIZE_IN_FRAMES * this.demuxer.audioInfo.blockSizeInBytes;
 		if (startOffset >= this.demuxer.dataSize) {
 			return null;
 		}
 
 		const sizeInBytes = Math.min(
-			SAMPLE_SIZE_IN_FRAMES * this.demuxer.audioInfo.blockSizeInBytes,
+			PACKET_SIZE_IN_FRAMES * this.demuxer.audioInfo.blockSizeInBytes,
 			this.demuxer.dataSize - startOffset,
 		);
 
@@ -251,12 +251,12 @@ class WaveAudioTrackBacking implements InputAudioTrackBacking {
 		if (options.metadataOnly) {
 			data = PLACEHOLDER_DATA;
 		} else {
-			const sizeOfOneSample = SAMPLE_SIZE_IN_FRAMES * this.demuxer.audioInfo.blockSizeInBytes;
-			const chunkSize = Math.ceil(2 ** 19 / sizeOfOneSample) * sizeOfOneSample;
+			const sizeOfOnePacket = PACKET_SIZE_IN_FRAMES * this.demuxer.audioInfo.blockSizeInBytes;
+			const chunkSize = Math.ceil(2 ** 19 / sizeOfOnePacket) * sizeOfOnePacket;
 			const chunkStart = Math.floor(startOffset / chunkSize) * chunkSize;
 			const chunkEnd = chunkStart + chunkSize;
 
-			// Always load large 0.5 MiB chunks instead of just the required sample
+			// Always load large 0.5 MiB chunks instead of just the required packet
 			await this.demuxer.chunkReader.reader.loadRange(
 				this.demuxer.dataStart + chunkStart,
 				this.demuxer.dataStart + chunkEnd,
@@ -266,41 +266,41 @@ class WaveAudioTrackBacking implements InputAudioTrackBacking {
 			data = this.demuxer.chunkReader.readBytes(sizeInBytes);
 		}
 
-		const timestamp = sampleIndex * SAMPLE_SIZE_IN_FRAMES / this.demuxer.audioInfo.sampleRate;
+		const timestamp = packetIndex * PACKET_SIZE_IN_FRAMES / this.demuxer.audioInfo.sampleRate;
 		const duration = sizeInBytes / this.demuxer.audioInfo.blockSizeInBytes / this.demuxer.audioInfo.sampleRate;
 
-		return new EncodedAudioSample(
+		return new EncodedPacket(
 			data,
 			'key',
 			timestamp,
 			duration,
-			sampleIndex,
+			packetIndex,
 		);
 	}
 
-	getFirstSample(options: SampleRetrievalOptions) {
-		return this.getSampleAtIndex(0, options);
+	getFirstPacket(options: PacketRetrievalOptions) {
+		return this.getPacketAtIndex(0, options);
 	}
 
-	getSample(timestamp: number, options: SampleRetrievalOptions) {
+	getPacket(timestamp: number, options: PacketRetrievalOptions) {
 		assert(this.demuxer.audioInfo);
-		const sampleIndex = Math.floor(timestamp * this.demuxer.audioInfo.sampleRate / SAMPLE_SIZE_IN_FRAMES);
+		const packetIndex = Math.floor(timestamp * this.demuxer.audioInfo.sampleRate / PACKET_SIZE_IN_FRAMES);
 
-		return this.getSampleAtIndex(sampleIndex, options);
+		return this.getPacketAtIndex(packetIndex, options);
 	}
 
-	getNextSample(sample: EncodedAudioSample, options: SampleRetrievalOptions) {
+	getNextPacket(packet: EncodedPacket, options: PacketRetrievalOptions) {
 		assert(this.demuxer.audioInfo);
-		const sampleIndex = Math.round(sample.timestamp * this.demuxer.audioInfo.sampleRate / SAMPLE_SIZE_IN_FRAMES);
+		const packetIndex = Math.round(packet.timestamp * this.demuxer.audioInfo.sampleRate / PACKET_SIZE_IN_FRAMES);
 
-		return this.getSampleAtIndex(sampleIndex + 1, options);
+		return this.getPacketAtIndex(packetIndex + 1, options);
 	}
 
-	getKeySample(timestamp: number, options: SampleRetrievalOptions) {
-		return this.getSample(timestamp, options);
+	getKeyPacket(timestamp: number, options: PacketRetrievalOptions) {
+		return this.getPacket(timestamp, options);
 	}
 
-	getNextKeySample(sample: EncodedAudioSample, options: SampleRetrievalOptions) {
-		return this.getNextSample(sample, options);
+	getNextKeyPacket(packet: EncodedPacket, options: PacketRetrievalOptions) {
+		return this.getNextPacket(packet, options);
 	}
 }

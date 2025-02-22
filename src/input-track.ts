@@ -1,9 +1,16 @@
 import { AudioCodec, MediaCodec, VideoCodec } from './codec';
 import { customAudioDecoders, customVideoDecoders } from './custom-coder';
-import { EncodedAudioSampleSink, EncodedVideoSampleSink, SampleRetrievalOptions } from './media-sink';
+import { EncodedPacketSink, PacketRetrievalOptions } from './media-sink';
 import { assert, Rotation } from './misc';
 import { TrackType } from './output';
-import { EncodedAudioSample, EncodedVideoSample } from './sample';
+import { EncodedPacket } from './packet';
+
+/** @public */
+export type PacketStats = {
+	packetCount: number;
+	averagePacketRate: number;
+	averageBitrate: number;
+};
 
 export interface InputTrackBacking {
 	getId(): number;
@@ -12,6 +19,12 @@ export interface InputTrackBacking {
 	getTimeResolution(): number;
 	getFirstTimestamp(): Promise<number>;
 	computeDuration(): Promise<number>;
+
+	getFirstPacket(options: PacketRetrievalOptions): Promise<EncodedPacket | null>;
+	getPacket(timestamp: number, options: PacketRetrievalOptions): Promise<EncodedPacket | null>;
+	getNextPacket(packet: EncodedPacket, options: PacketRetrievalOptions): Promise<EncodedPacket | null>;
+	getKeyPacket(timestamp: number, options: PacketRetrievalOptions): Promise<EncodedPacket | null>;
+	getNextKeyPacket(packet: EncodedPacket, options: PacketRetrievalOptions): Promise<EncodedPacket | null>;
 }
 
 /** @public */
@@ -28,7 +41,6 @@ export abstract class InputTrack {
 	abstract get codec(): MediaCodec | null;
 	abstract getCodecMimeType(): Promise<string | null>;
 	abstract canDecode(): Promise<boolean>;
-	abstract computeSampleStats(): Promise<SampleStats>;
 
 	isVideoTrack(): this is InputVideoTrack {
 		return this instanceof InputVideoTrack;
@@ -57,6 +69,33 @@ export abstract class InputTrack {
 	computeDuration() {
 		return this._backing.computeDuration();
 	}
+
+	async computePacketStats(): Promise<PacketStats> {
+		const sink = new EncodedPacketSink(this);
+
+		let startTimestamp = Infinity;
+		let endTimestamp = -Infinity;
+		let packetCount = 0;
+		let totalPacketBytes = 0;
+
+		for await (const packet of sink.packets(undefined, undefined, { metadataOnly: true })) {
+			startTimestamp = Math.min(startTimestamp, packet.timestamp);
+			endTimestamp = Math.max(endTimestamp, packet.timestamp + packet.duration);
+
+			packetCount++;
+			totalPacketBytes += packet.byteLength;
+		}
+
+		return {
+			packetCount,
+			averagePacketRate: packetCount
+				? Number((packetCount / (endTimestamp - startTimestamp)).toPrecision(16))
+				: 0,
+			averageBitrate: packetCount
+				? Number((8 * totalPacketBytes / (endTimestamp - startTimestamp)).toPrecision(16))
+				: 0,
+		};
+	}
 }
 
 export interface InputVideoTrackBacking extends InputTrackBacking {
@@ -66,11 +105,6 @@ export interface InputVideoTrackBacking extends InputTrackBacking {
 	getRotation(): Rotation;
 	getColorSpace(): Promise<VideoColorSpaceInit>;
 	getDecoderConfig(): Promise<VideoDecoderConfig | null>;
-	getFirstSample(options: SampleRetrievalOptions): Promise<EncodedVideoSample | null>;
-	getSample(timestamp: number, options: SampleRetrievalOptions): Promise<EncodedVideoSample | null>;
-	getNextSample(sample: EncodedVideoSample, options: SampleRetrievalOptions): Promise<EncodedVideoSample | null>;
-	getKeySample(timestamp: number, options: SampleRetrievalOptions): Promise<EncodedVideoSample | null>;
-	getNextKeySample(sample: EncodedVideoSample, options: SampleRetrievalOptions): Promise<EncodedVideoSample | null>;
 }
 
 /** @public */
@@ -161,10 +195,6 @@ export class InputVideoTrack extends InputTrack {
 			return false;
 		}
 	}
-
-	computeSampleStats() {
-		return computeSampleStats(new EncodedVideoSampleSink(this));
-	}
 }
 
 export interface InputAudioTrackBacking extends InputTrackBacking {
@@ -172,11 +202,6 @@ export interface InputAudioTrackBacking extends InputTrackBacking {
 	getNumberOfChannels(): number;
 	getSampleRate(): number;
 	getDecoderConfig(): Promise<AudioDecoderConfig | null>;
-	getFirstSample(options: SampleRetrievalOptions): Promise<EncodedAudioSample | null>;
-	getSample(timestamp: number, options: SampleRetrievalOptions): Promise<EncodedAudioSample | null>;
-	getNextSample(sample: EncodedAudioSample, options: SampleRetrievalOptions): Promise<EncodedAudioSample | null>;
-	getKeySample(timestamp: number, options: SampleRetrievalOptions): Promise<EncodedAudioSample | null>;
-	getNextKeySample(sample: EncodedAudioSample, options: SampleRetrievalOptions): Promise<EncodedAudioSample | null>;
 }
 
 /** @public */
@@ -245,40 +270,4 @@ export class InputAudioTrack extends InputTrack {
 			return false;
 		}
 	}
-
-	computeSampleStats() {
-		return computeSampleStats(new EncodedAudioSampleSink(this));
-	}
 }
-
-/** @public */
-export type SampleStats = {
-	sampleCount: number;
-	averageSampleRate: number;
-	averageBitrate: number;
-};
-
-const computeSampleStats = async (sink: EncodedVideoSampleSink | EncodedAudioSampleSink): Promise<SampleStats> => {
-	let startTimestamp = Infinity;
-	let endTimestamp = -Infinity;
-	let sampleCount = 0;
-	let totalSampleBytes = 0;
-
-	for await (const sample of sink.samples(undefined, undefined, { metadataOnly: true })) {
-		startTimestamp = Math.min(startTimestamp, sample.timestamp);
-		endTimestamp = Math.max(endTimestamp, sample.timestamp + sample.duration);
-
-		sampleCount++;
-		totalSampleBytes += sample.byteLength;
-	}
-
-	return {
-		sampleCount,
-		averageSampleRate: sampleCount
-			? Number((sampleCount / (endTimestamp - startTimestamp)).toPrecision(16))
-			: 0,
-		averageBitrate: sampleCount
-			? Number((8 * totalSampleBytes / (endTimestamp - startTimestamp)).toPrecision(16))
-			: 0,
-	};
-};

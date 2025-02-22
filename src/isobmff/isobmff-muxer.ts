@@ -13,8 +13,8 @@ import {
 	validateSubtitleMetadata,
 	validateVideoChunkMetadata,
 } from '../codec';
-import { EncodedAudioSample, EncodedVideoSample, SampleType } from '../sample';
 import { BufferTarget } from '../target';
+import { EncodedPacket, PacketType } from '../packet';
 
 export const GLOBAL_TIMESCALE = 1000;
 const TIMESTAMP_OFFSET = 2_082_844_800; // Seconds between Jan 1 1904 and Jan 1 1970
@@ -25,7 +25,7 @@ export type Sample = {
 	duration: number;
 	data: Uint8Array | null;
 	size: number;
-	type: SampleType;
+	type: PacketType;
 	timescaleUnitsToNextSample: number;
 };
 
@@ -290,7 +290,7 @@ export class IsobmffMuxer extends Muxer {
 		return newTrackData;
 	}
 
-	async addEncodedVideoSample(track: OutputVideoTrack, sample: EncodedVideoSample, meta?: EncodedVideoChunkMetadata) {
+	async addEncodedVideoPacket(track: OutputVideoTrack, packet: EncodedPacket, meta?: EncodedVideoChunkMetadata) {
 		const release = await this.mutex.acquire();
 
 		try {
@@ -298,15 +298,15 @@ export class IsobmffMuxer extends Muxer {
 
 			const timestamp = this.validateAndNormalizeTimestamp(
 				trackData.track,
-				sample.timestamp,
-				sample.type === 'key',
+				packet.timestamp,
+				packet.type === 'key',
 			);
 			const internalSample = this.createSampleForTrack(
 				trackData,
-				sample.data,
+				packet.data,
 				timestamp,
-				sample.duration,
-				sample.type,
+				packet.duration,
+				packet.type,
 			);
 
 			await this.registerSample(trackData, internalSample);
@@ -315,7 +315,7 @@ export class IsobmffMuxer extends Muxer {
 		}
 	}
 
-	async addEncodedAudioSample(track: OutputAudioTrack, sample: EncodedAudioSample, meta?: EncodedAudioChunkMetadata) {
+	async addEncodedAudioPacket(track: OutputAudioTrack, packet: EncodedPacket, meta?: EncodedAudioChunkMetadata) {
 		const release = await this.mutex.acquire();
 
 		try {
@@ -323,15 +323,15 @@ export class IsobmffMuxer extends Muxer {
 
 			const timestamp = this.validateAndNormalizeTimestamp(
 				trackData.track,
-				sample.timestamp,
-				sample.type === 'key',
+				packet.timestamp,
+				packet.type === 'key',
 			);
 			const internalSample = this.createSampleForTrack(
 				trackData,
-				sample.data,
+				packet.data,
 				timestamp,
-				sample.duration,
-				sample.type,
+				packet.duration,
+				packet.type,
 			);
 
 			if (trackData.requiresPcmTransformation) {
@@ -492,7 +492,7 @@ export class IsobmffMuxer extends Muxer {
 		data: Uint8Array,
 		timestamp: number,
 		duration: number,
-		type: SampleType,
+		type: PacketType,
 	) {
 		const sample: Sample = {
 			timestamp,

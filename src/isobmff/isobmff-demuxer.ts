@@ -21,7 +21,7 @@ import {
 	InputVideoTrack,
 	InputVideoTrackBacking,
 } from '../input-track';
-import { SampleRetrievalOptions } from '../media-sink';
+import { PacketRetrievalOptions } from '../media-sink';
 import {
 	assert,
 	COLOR_PRIMARIES_MAP_INVERSE,
@@ -40,8 +40,8 @@ import {
 	isIso639Dash2LanguageCode,
 	roundToMultiple,
 } from '../misc';
+import { EncodedPacket, PLACEHOLDER_DATA } from '../packet';
 import { Reader } from '../reader';
-import { EncodedAudioSample, EncodedVideoSample, PLACEHOLDER_DATA, SampleType } from '../sample';
 import { IsobmffReader, MAX_BOX_HEADER_SIZE } from './isobmff-reader';
 
 type InternalTrack = {
@@ -1768,11 +1768,9 @@ export class IsobmffDemuxer extends Demuxer {
 	}
 }
 
-abstract class IsobmffTrackBacking<
-	Sample extends EncodedVideoSample | EncodedAudioSample,
-> implements InputTrackBacking {
-	sampleToSampleIndex = new WeakMap<Sample, number>();
-	sampleToFragmentLocation = new WeakMap<Sample, {
+abstract class IsobmffTrackBacking implements InputTrackBacking {
+	packetToSampleIndex = new WeakMap<EncodedPacket, number>();
+	packetToFragmentLocation = new WeakMap<EncodedPacket, {
 		fragment: Fragment;
 		sampleIndex: number;
 	}>();
@@ -1796,25 +1794,16 @@ abstract class IsobmffTrackBacking<
 	}
 
 	async computeDuration() {
-		const lastSample = await this.getSample(Infinity, { metadataOnly: true });
-		return (lastSample?.timestamp ?? 0) + (lastSample?.duration ?? 0);
+		const lastPacket = await this.getPacket(Infinity, { metadataOnly: true });
+		return (lastPacket?.timestamp ?? 0) + (lastPacket?.duration ?? 0);
 	}
 
 	async getFirstTimestamp() {
-		const firstSample = await this.getFirstSample({ metadataOnly: true });
-		return firstSample?.timestamp ?? 0;
+		const firstPacket = await this.getFirstPacket({ metadataOnly: true });
+		return firstPacket?.timestamp ?? 0;
 	}
 
-	abstract createSample(
-		data: Uint8Array,
-		byteLength: number,
-		type: SampleType,
-		timestamp: number,
-		duration: number,
-		sequenceNumber: number
-	): Sample;
-
-	async getFirstSample(options: SampleRetrievalOptions) {
+	async getFirstPacket(options: PacketRetrievalOptions) {
 		if (this.internalTrack.demuxer.isFragmented) {
 			return this.performFragmentedLookup(
 				() => {
@@ -1852,7 +1841,7 @@ abstract class IsobmffTrackBacking<
 			);
 		}
 
-		return this.fetchSampleForSampleIndex(0, options);
+		return this.fetchPacketForSampleIndex(0, options);
 	}
 
 	private mapTimestampIntoTimescale(timestamp: number) {
@@ -1862,7 +1851,7 @@ abstract class IsobmffTrackBacking<
 		return roundToPrecision(timestamp * this.internalTrack.timescale, 14) + this.internalTrack.editListOffset;
 	}
 
-	async getSample(timestamp: number, options: SampleRetrievalOptions) {
+	async getPacket(timestamp: number, options: PacketRetrievalOptions) {
 		const timestampInTimescale = this.mapTimestampIntoTimescale(timestamp);
 
 		if (this.internalTrack.demuxer.isFragmented) {
@@ -1875,15 +1864,15 @@ abstract class IsobmffTrackBacking<
 		} else {
 			const sampleTable = this.internalTrack.demuxer.getSampleTableForTrack(this.internalTrack);
 			const sampleIndex = getSampleIndexForTimestamp(sampleTable, timestampInTimescale);
-			return this.fetchSampleForSampleIndex(sampleIndex, options);
+			return this.fetchPacketForSampleIndex(sampleIndex, options);
 		}
 	}
 
-	async getNextSample(sample: Sample, options: SampleRetrievalOptions) {
+	async getNextPacket(packet: EncodedPacket, options: PacketRetrievalOptions) {
 		if (this.internalTrack.demuxer.isFragmented) {
-			const locationInFragment = this.sampleToFragmentLocation.get(sample);
+			const locationInFragment = this.packetToFragmentLocation.get(packet);
 			if (locationInFragment === undefined) {
-				throw new Error('Sample was not created from this track.');
+				throw new Error('Packet was not created from this track.');
 			}
 
 			const trackData = locationInFragment.fragment.trackData.get(this.internalTrack.id)!;
@@ -1941,14 +1930,14 @@ abstract class IsobmffTrackBacking<
 			);
 		}
 
-		const sampleIndex = this.sampleToSampleIndex.get(sample);
+		const sampleIndex = this.packetToSampleIndex.get(packet);
 		if (sampleIndex === undefined) {
-			throw new Error('Sample was not created from this track.');
+			throw new Error('Packet was not created from this track.');
 		}
-		return this.fetchSampleForSampleIndex(sampleIndex + 1, options);
+		return this.fetchPacketForSampleIndex(sampleIndex + 1, options);
 	}
 
-	async getKeySample(timestamp: number, options: SampleRetrievalOptions) {
+	async getKeyPacket(timestamp: number, options: PacketRetrievalOptions) {
 		const timestampInTimescale = this.mapTimestampIntoTimescale(timestamp);
 
 		if (this.internalTrack.demuxer.isFragmented) {
@@ -1965,14 +1954,14 @@ abstract class IsobmffTrackBacking<
 		const keyFrameSampleIndex = sampleIndex === -1
 			? -1
 			: getRelevantKeyframeIndexForSample(sampleTable, sampleIndex);
-		return this.fetchSampleForSampleIndex(keyFrameSampleIndex, options);
+		return this.fetchPacketForSampleIndex(keyFrameSampleIndex, options);
 	}
 
-	async getNextKeySample(sample: Sample, options: SampleRetrievalOptions) {
+	async getNextKeyPacket(packet: EncodedPacket, options: PacketRetrievalOptions) {
 		if (this.internalTrack.demuxer.isFragmented) {
-			const locationInFragment = this.sampleToFragmentLocation.get(sample);
+			const locationInFragment = this.packetToFragmentLocation.get(packet);
 			if (locationInFragment === undefined) {
-				throw new Error('Sample was not created from this track.');
+				throw new Error('Packet was not created from this track.');
 			}
 
 			const trackData = locationInFragment.fragment.trackData.get(this.internalTrack.id)!;
@@ -2039,16 +2028,16 @@ abstract class IsobmffTrackBacking<
 			);
 		}
 
-		const sampleIndex = this.sampleToSampleIndex.get(sample);
+		const sampleIndex = this.packetToSampleIndex.get(packet);
 		if (sampleIndex === undefined) {
-			throw new Error('Sample was not created from this track.');
+			throw new Error('Packet was not created from this track.');
 		}
 		const sampleTable = this.internalTrack.demuxer.getSampleTableForTrack(this.internalTrack);
 		const nextKeyFrameSampleIndex = getNextKeyframeIndexForSample(sampleTable, sampleIndex);
-		return this.fetchSampleForSampleIndex(nextKeyFrameSampleIndex, options);
+		return this.fetchPacketForSampleIndex(nextKeyFrameSampleIndex, options);
 	}
 
-	private async fetchSampleForSampleIndex(sampleIndex: number, options: SampleRetrievalOptions) {
+	private async fetchPacketForSampleIndex(sampleIndex: number, options: PacketRetrievalOptions) {
 		if (sampleIndex === -1) {
 			return null;
 		}
@@ -2076,21 +2065,21 @@ abstract class IsobmffTrackBacking<
 		const timestamp = (sampleInfo.presentationTimestamp - this.internalTrack.editListOffset)
 			/ this.internalTrack.timescale;
 		const duration = sampleInfo.duration / this.internalTrack.timescale;
-		const sample = this.createSample(
+		const packet = new EncodedPacket(
 			data,
-			sampleInfo.sampleSize,
 			sampleInfo.isKeyFrame ? 'key' : 'delta',
 			timestamp,
 			duration,
 			sampleIndex,
+			sampleInfo.sampleSize,
 		);
 
-		this.sampleToSampleIndex.set(sample, sampleIndex);
+		this.packetToSampleIndex.set(packet, sampleIndex);
 
-		return sample;
+		return packet;
 	}
 
-	private async fetchSampleInFragment(fragment: Fragment, sampleIndex: number, options: SampleRetrievalOptions) {
+	private async fetchPacketInFragment(fragment: Fragment, sampleIndex: number, options: PacketRetrievalOptions) {
 		if (sampleIndex === -1) {
 			return null;
 		}
@@ -2113,18 +2102,18 @@ abstract class IsobmffTrackBacking<
 		const timestamp = (fragmentSample.presentationTimestamp - this.internalTrack.editListOffset)
 			/ this.internalTrack.timescale;
 		const duration = fragmentSample.duration / this.internalTrack.timescale;
-		const sample = this.createSample(
+		const packet = new EncodedPacket(
 			data,
-			fragmentSample.byteSize,
 			fragmentSample.isKeyFrame ? 'key' : 'delta',
 			timestamp,
 			duration,
 			fragment.moofOffset + sampleIndex,
+			fragmentSample.byteSize,
 		);
 
-		this.sampleToFragmentLocation.set(sample, { fragment, sampleIndex });
+		this.packetToFragmentLocation.set(packet, { fragment, sampleIndex });
 
-		return sample;
+		return packet;
 	}
 
 	private findSampleInFragmentsForTimestamp(timestampInTimescale: number) {
@@ -2183,13 +2172,13 @@ abstract class IsobmffTrackBacking<
 		return { fragmentIndex, sampleIndex, correctSampleFound };
 	}
 
-	/** Looks for a sample in the fragments while trying to load as few fragments as possible to retrieve it. */
+	/** Looks for a packet in the fragments while trying to load as few fragments as possible to retrieve it. */
 	private async performFragmentedLookup(
 		getBestMatch: () => { fragmentIndex: number; sampleIndex: number; correctSampleFound: boolean },
 		searchTimestamp: number,
 		latestTimestamp: number,
-		options: SampleRetrievalOptions,
-	): Promise<Sample | null> {
+		options: PacketRetrievalOptions,
+	): Promise<EncodedPacket | null> {
 		const demuxer = this.internalTrack.demuxer;
 		const release = await demuxer.fragmentLookupMutex.acquire(); // The algorithm requires exclusivity
 
@@ -2198,7 +2187,7 @@ abstract class IsobmffTrackBacking<
 			if (correctSampleFound) {
 				// The correct sample already exists, easy path.
 				const fragment = this.internalTrack.fragments[fragmentIndex]!;
-				return this.fetchSampleInFragment(fragment, sampleIndex, options);
+				return this.fetchPacketInFragment(fragment, sampleIndex, options);
 			}
 
 			const metadataReader = demuxer.metadataReader;
@@ -2284,7 +2273,7 @@ abstract class IsobmffTrackBacking<
 					const { fragmentIndex, sampleIndex, correctSampleFound } = getBestMatch();
 					if (correctSampleFound) {
 						const fragment = this.internalTrack.fragments[fragmentIndex]!;
-						return this.fetchSampleInFragment(fragment, sampleIndex, options);
+						return this.fetchPacketInFragment(fragment, sampleIndex, options);
 					}
 					if (fragmentIndex !== -1) {
 						bestFragmentIndex = fragmentIndex;
@@ -2295,11 +2284,11 @@ abstract class IsobmffTrackBacking<
 				metadataReader.pos = startPos + boxInfo.totalSize;
 			}
 
-			let result: Sample | null = null;
+			let result: EncodedPacket | null = null;
 			const bestFragment = bestFragmentIndex !== -1 ? this.internalTrack.fragments[bestFragmentIndex]! : null;
 			if (bestFragment) {
 				// If we finished looping but didn't find a perfect match, still return the best match we found
-				result = await this.fetchSampleInFragment(bestFragment, bestSampleIndex, options);
+				result = await this.fetchPacketInFragment(bestFragment, bestSampleIndex, options);
 			}
 
 			// Catch faulty lookup table entries
@@ -2318,7 +2307,7 @@ abstract class IsobmffTrackBacking<
 	}
 }
 
-class IsobmffVideoTrackBacking extends IsobmffTrackBacking<EncodedVideoSample> implements InputVideoTrackBacking {
+class IsobmffVideoTrackBacking extends IsobmffTrackBacking implements InputVideoTrackBacking {
 	override internalTrack: InternalVideoTrack;
 	decoderConfigPromise: Promise<VideoDecoderConfig> | null = null;
 
@@ -2359,8 +2348,8 @@ class IsobmffVideoTrackBacking extends IsobmffTrackBacking<EncodedVideoSample> i
 
 		return this.decoderConfigPromise ??= (async (): Promise<VideoDecoderConfig> => {
 			if (this.internalTrack.info.codec === 'vp9' && !this.internalTrack.info.vp9CodecInfo) {
-				const firstSample = await this.getFirstSample({});
-				this.internalTrack.info.vp9CodecInfo = firstSample && extractVp9CodecInfoFromFrame(firstSample.data);
+				const firstPacket = await this.getFirstPacket({});
+				this.internalTrack.info.vp9CodecInfo = firstPacket && extractVp9CodecInfoFromFrame(firstPacket.data);
 			}
 
 			return {
@@ -2372,20 +2361,9 @@ class IsobmffVideoTrackBacking extends IsobmffTrackBacking<EncodedVideoSample> i
 			};
 		})();
 	}
-
-	createSample(
-		data: Uint8Array,
-		byteLength: number,
-		type: SampleType,
-		timestamp: number,
-		duration: number,
-		sequenceNumber: number,
-	) {
-		return new EncodedVideoSample(data, type, timestamp, duration, sequenceNumber, byteLength);
-	}
 }
 
-class IsobmffAudioTrackBacking extends IsobmffTrackBacking<EncodedAudioSample> implements InputAudioTrackBacking {
+class IsobmffAudioTrackBacking extends IsobmffTrackBacking implements InputAudioTrackBacking {
 	override internalTrack: InternalAudioTrack;
 	decoderConfig: AudioDecoderConfig | null = null;
 
@@ -2417,16 +2395,6 @@ class IsobmffAudioTrackBacking extends IsobmffTrackBacking<EncodedAudioSample> i
 			sampleRate: this.internalTrack.info.sampleRate,
 			description: this.internalTrack.info.codecDescription ?? undefined,
 		};
-	}
-
-	createSample(
-		data: Uint8Array,
-		byteLength: number,
-		type: SampleType,
-		timestamp: number,
-		duration: number,
-	) {
-		return new EncodedAudioSample(data, type, timestamp, duration, byteLength);
 	}
 }
 

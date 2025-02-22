@@ -15,8 +15,7 @@ import {
 	AudioBufferSink,
 	AudioDataSink,
 	CanvasSink,
-	EncodedAudioSampleSink,
-	EncodedVideoSampleSink,
+	EncodedPacketSink,
 	VideoFrameSink,
 } from './media-sink';
 import {
@@ -25,8 +24,8 @@ import {
 	AudioEncodingConfig,
 	AudioSource,
 	CanvasSource,
-	EncodedAudioSampleSource,
-	EncodedVideoSampleSource,
+	EncodedVideoPacketSource,
+	EncodedAudioPacketSource,
 	VideoEncodingConfig,
 	VideoFrameSource,
 	VideoSource,
@@ -363,29 +362,29 @@ class Conversion {
 			&& videoCodecs.includes(sourceCodec)
 			&& (!this.options.video?.codec || this.options.video?.codec === sourceCodec)
 		) {
-			// Fast path, we can simply copy over the encoded samples
+			// Fast path, we can simply copy over the encoded packets
 
-			const source = new EncodedVideoSampleSource(sourceCodec);
+			const source = new EncodedVideoPacketSource(sourceCodec);
 			videoSource = source;
 
 			this.trackPromises.push((async () => {
 				await this.started;
 
-				const sink = new EncodedVideoSampleSink(track);
+				const sink = new EncodedPacketSink(track);
 				const decoderConfig = await track.getDecoderConfig();
 				const meta: EncodedVideoChunkMetadata = { decoderConfig: decoderConfig ?? undefined };
 
-				for await (const sample of sink.samples(undefined, this.endTimestamp)) {
-					if (this.synchronizer.shouldWait(track.id, sample.timestamp)) {
-						await this.synchronizer.wait(sample.timestamp);
+				for await (const packet of sink.packets(undefined, this.endTimestamp)) {
+					if (this.synchronizer.shouldWait(track.id, packet.timestamp)) {
+						await this.synchronizer.wait(packet.timestamp);
 					}
 
 					if (this.options.abortSignal?.aborted) {
 						return;
 					}
 
-					await source.add(sample, meta);
-					this.reportProgress(track.id, sample.timestamp + sample.duration);
+					await source.add(packet, meta);
+					this.reportProgress(track.id, packet.timestamp + packet.duration);
 				}
 
 				await source.close();
@@ -422,7 +421,7 @@ class Conversion {
 			const encodingConfig: VideoEncodingConfig = {
 				codec: encodableCodecs[0]!,
 				bitrate: this.options.video?.bitrate ?? QUALITY_HIGH,
-				onEncodedSample: sample => this.reportProgress(track.id, sample.timestamp + sample.duration),
+				onEncodedPacket: sample => this.reportProgress(track.id, sample.timestamp + sample.duration),
 			};
 
 			if (needsResize) {
@@ -553,29 +552,29 @@ class Conversion {
 			&& audioCodecs.includes(sourceCodec)
 			&& (!this.options.audio?.codec || this.options.audio.codec === sourceCodec)
 		) {
-			// Fast path, we can simply copy over the encoded samples
+			// Fast path, we can simply copy over the encoded packets
 
-			const source = new EncodedAudioSampleSource(sourceCodec);
+			const source = new EncodedAudioPacketSource(sourceCodec);
 			audioSource = source;
 
 			this.trackPromises.push((async () => {
 				await this.started;
 
-				const sink = new EncodedAudioSampleSink(track);
+				const sink = new EncodedPacketSink(track);
 				const decoderConfig = await track.getDecoderConfig();
 				const meta: EncodedAudioChunkMetadata = { decoderConfig: decoderConfig ?? undefined };
 
-				for await (const sample of sink.samples(undefined, this.endTimestamp)) {
-					if (this.synchronizer.shouldWait(track.id, sample.timestamp)) {
-						await this.synchronizer.wait(sample.timestamp);
+				for await (const packet of sink.packets(undefined, this.endTimestamp)) {
+					if (this.synchronizer.shouldWait(track.id, packet.timestamp)) {
+						await this.synchronizer.wait(packet.timestamp);
 					}
 
 					if (this.options.abortSignal?.aborted) {
 						return;
 					}
 
-					await source.add(sample, meta);
-					this.reportProgress(track.id, sample.timestamp + sample.duration);
+					await source.add(packet, meta);
+					this.reportProgress(track.id, packet.timestamp + packet.duration);
 				}
 
 				await source.close();
@@ -646,7 +645,7 @@ class Conversion {
 				const source = new AudioDataSource({
 					codec: codecOfChoice,
 					bitrate: this.options.audio?.bitrate ?? QUALITY_HIGH,
-					onEncodedSample: sample => this.reportProgress(track.id, sample.timestamp + sample.duration),
+					onEncodedPacket: packet => this.reportProgress(track.id, packet.timestamp + packet.duration),
 				});
 				audioSource = source;
 
@@ -695,7 +694,7 @@ class Conversion {
 		const source = new AudioBufferSource({
 			codec,
 			bitrate: this.options.audio?.bitrate ?? QUALITY_HIGH,
-			onEncodedSample: sample => this.reportProgress(track.id, sample.timestamp + sample.duration),
+			onEncodedPacket: packet => this.reportProgress(track.id, packet.timestamp + packet.duration),
 		});
 
 		this.trackPromises.push((async () => {
@@ -813,8 +812,8 @@ class Conversion {
 const MAX_TIMESTAMP_GAP = 5;
 
 /**
- * Utility class for synchronizing multiple track sample consumers with one another. We don't want one consumer to get
- * too out-of-sync with the others, as that may lead to a large number of samples that need to be internally buffered
+ * Utility class for synchronizing multiple track packet consumers with one another. We don't want one consumer to get
+ * too out-of-sync with the others, as that may lead to a large number of packets that need to be internally buffered
  * before they can be written. Therefore, we use this class to slow down a consumer if it is too far ahead of the
  * slowest consumer.
  */

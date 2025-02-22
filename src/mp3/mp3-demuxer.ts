@@ -2,9 +2,9 @@ import { AudioCodec } from '../codec';
 import { Demuxer } from '../demuxer';
 import { Input } from '../input';
 import { InputAudioTrack, InputAudioTrackBacking } from '../input-track';
-import { SampleRetrievalOptions } from '../media-sink';
+import { PacketRetrievalOptions } from '../media-sink';
 import { assert, binarySearchExact, binarySearchLessOrEqual, last, UNDETERMINED_LANGUAGE } from '../misc';
-import { EncodedAudioSample, PLACEHOLDER_DATA } from '../sample';
+import { EncodedPacket, PLACEHOLDER_DATA } from '../packet';
 import { FrameHeader, getXingOffset, INFO, XING } from './mp3-misc';
 import { Mp3Reader } from './mp3-reader';
 
@@ -156,7 +156,7 @@ class Mp3AudioTrackBacking implements InputAudioTrackBacking {
 		};
 	}
 
-	getSampleAtIndex(sampleIndex: number, options: SampleRetrievalOptions) {
+	getPacketAtIndex(sampleIndex: number, options: PacketRetrievalOptions) {
 		if (sampleIndex === -1) {
 			return null;
 		}
@@ -174,7 +174,7 @@ class Mp3AudioTrackBacking implements InputAudioTrackBacking {
 			data = this.demuxer.reader.readBytes(rawSample.dataSize);
 		}
 
-		return new EncodedAudioSample(
+		return new EncodedPacket(
 			data,
 			'key',
 			rawSample.timestamp,
@@ -183,37 +183,37 @@ class Mp3AudioTrackBacking implements InputAudioTrackBacking {
 		);
 	}
 
-	async getFirstSample(options: SampleRetrievalOptions) {
-		return this.getSampleAtIndex(0, options);
+	async getFirstPacket(options: PacketRetrievalOptions) {
+		return this.getPacketAtIndex(0, options);
 	}
 
-	async getNextSample(sample: EncodedAudioSample, options: SampleRetrievalOptions) {
+	async getNextPacket(packet: EncodedPacket, options: PacketRetrievalOptions) {
 		const sampleIndex = binarySearchExact(
 			this.demuxer.allSamples,
-			sample.timestamp,
+			packet.timestamp,
 			x => x.timestamp,
 		);
 		if (sampleIndex === -1) {
-			throw new Error('Sample was not created from this track.');
+			throw new Error('Packet was not created from this track.');
 		}
 
-		return this.getSampleAtIndex(sampleIndex + 1, options);
+		return this.getPacketAtIndex(sampleIndex + 1, options);
 	}
 
-	async getSample(timestamp: number, options: SampleRetrievalOptions) {
+	async getPacket(timestamp: number, options: PacketRetrievalOptions) {
 		const index = binarySearchLessOrEqual(
 			this.demuxer.allSamples,
 			timestamp,
 			x => x.timestamp,
 		);
-		return this.getSampleAtIndex(index, options);
+		return this.getPacketAtIndex(index, options);
 	}
 
-	getKeySample(timestamp: number, options: SampleRetrievalOptions) {
-		return this.getSample(timestamp, options);
+	getKeyPacket(timestamp: number, options: PacketRetrievalOptions) {
+		return this.getPacket(timestamp, options);
 	}
 
-	getNextKeySample(sample: EncodedAudioSample, options: SampleRetrievalOptions) {
-		return this.getNextSample(sample, options);
+	getNextKeyPacket(packet: EncodedPacket, options: PacketRetrievalOptions) {
+		return this.getNextPacket(packet, options);
 	}
 }
