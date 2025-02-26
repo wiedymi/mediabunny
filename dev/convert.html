@@ -61,9 +61,12 @@
 				bitrate: 320000
 			},
 			*/
+			video: {
+				//forceReencode: true
+			},
 			trim: {
 				start: 0,
-				end: 20
+				end: 10
 			},
 			onProgress: (event) => {
 				progress.value = event.completion;

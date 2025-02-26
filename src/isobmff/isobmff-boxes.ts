@@ -162,12 +162,6 @@ const u64 = (value: number) => {
 	return [bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7]] as number[];
 };
 
-const i64 = (value: number) => {
-	view.setInt32(0, Math.floor(value / 2 ** 32), false);
-	view.setInt32(4, value, false);
-	return [bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7]] as number[];
-};
-
 const fixed_8_8 = (value: number) => {
 	view.setInt16(0, 2 ** 8 * value, false);
 	return [bytes[0], bytes[1]] as number[];
@@ -968,11 +962,11 @@ export const stco = (trackData: IsobmffTrackData) => {
  * composition time offset will be grouped.
  */
 export const ctts = (trackData: IsobmffTrackData) => {
-	return fullBox('ctts', 0, 0, [
+	return fullBox('ctts', 1, 0, [
 		u32(trackData.compositionTimeOffsetTable.length), // Number of entries
 		trackData.compositionTimeOffsetTable.map(x => [ // Time-to-sample table
 			u32(x.sampleCount), // Sample count
-			u32(x.sampleCompositionTimeOffset), // Sample offset
+			i32(x.sampleCompositionTimeOffset), // Sample offset
 		]),
 	]);
 };
@@ -997,18 +991,31 @@ export const cslg = (trackData: IsobmffTrackData) => {
 
 	for (let i = 0; i < trackData.samples.length; i++) {
 		const sample = trackData.samples[i]!;
-		compositionStartTime = Math.min(compositionStartTime, sample.timestamp);
-		compositionEndTime = Math.max(compositionEndTime, sample.timestamp + sample.duration);
+		compositionStartTime = Math.min(
+			compositionStartTime,
+			intoTimescale(sample.timestamp, trackData.timescale),
+		);
+		compositionEndTime = Math.max(
+			compositionEndTime,
+			intoTimescale(sample.timestamp + sample.duration, trackData.timescale),
+		);
 	}
 
 	const compositionToDtsShift = Math.max(-leastDecodeToDisplayDelta, 0);
 
-	return fullBox('cslg', 1, 0, [
-		i64(compositionToDtsShift), // Composition to DTS shift
-		i64(leastDecodeToDisplayDelta), // Least decode to display delta
-		i64(greatestDecodeToDisplayDelta), // Greatest decode to display delta
-		i64(compositionStartTime), // Composition start time
-		i64(compositionEndTime), // Composition end time
+	if (compositionEndTime >= 2 ** 31) {
+		// For very large files, the composition end time can't be represented in i32, so let's just scrap the box in
+		// that case. QuickTime fails to read the file if there's a cslg box with version 1, so that's sadly not an
+		// option.
+		return null;
+	}
+
+	return fullBox('cslg', 0, 0, [
+		i32(compositionToDtsShift), // Composition to DTS shift
+		i32(leastDecodeToDisplayDelta), // Least decode to display delta
+		i32(greatestDecodeToDisplayDelta), // Greatest decode to display delta
+		i32(compositionStartTime), // Composition start time
+		i32(compositionEndTime), // Composition end time
 	]);
 };
 
