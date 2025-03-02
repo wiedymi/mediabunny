@@ -9,8 +9,6 @@ import {
 	TRANSFER_CHARACTERISTICS_MAP,
 	MATRIX_COEFFICIENTS_MAP,
 	colorSpaceIsComplete,
-	IDENTITY_MATRIX,
-	rotationMatrix,
 	UNDETERMINED_LANGUAGE,
 } from '../misc';
 import {
@@ -220,6 +218,20 @@ const lastPresentedSample = (samples: Sample[]) => {
 	return result;
 };
 
+const rotationMatrix = (rotationInDegrees: number): TransformationMatrix => {
+	const theta = rotationInDegrees * (Math.PI / 180);
+	const cosTheta = Math.round(Math.cos(theta));
+	const sinTheta = Math.round(Math.sin(theta));
+
+	// Matrices are post-multiplied in ISOBMFF, meaning this is the transpose of your typical rotation matrix
+	return [
+		cosTheta, sinTheta, 0,
+		-sinTheta, cosTheta, 0,
+		0, 0, 1,
+	];
+};
+const IDENTITY_MATRIX = rotationMatrix(0);
+
 const matrixToBytes = (matrix: TransformationMatrix) => {
 	return [
 		fixed_16_16(matrix[0]), fixed_16_16(matrix[1]), fixed_2_30(matrix[2]),
@@ -383,7 +395,7 @@ export const tkhd = (
 	let matrix: TransformationMatrix;
 	if (trackData.type === 'video') {
 		const rotation = trackData.track.metadata.rotation;
-		matrix = rotation === undefined || typeof rotation === 'number' ? rotationMatrix(rotation ?? 0) : rotation;
+		matrix = rotationMatrix(rotation ?? 0);
 	} else {
 		matrix = IDENTITY_MATRIX;
 	}

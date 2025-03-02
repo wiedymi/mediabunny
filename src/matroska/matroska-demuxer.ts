@@ -29,6 +29,7 @@ import {
 	isIso639Dash2LanguageCode,
 	last,
 	MATRIX_COEFFICIENTS_MAP_INVERSE,
+	normalizeRotation,
 	Rotation,
 	roundToPrecision,
 	TRANSFER_CHARACTERISTICS_MAP_INVERSE,
@@ -820,9 +821,13 @@ export class MatroskaDemuxer extends Demuxer {
 			case EBMLId.ProjectionPoseRoll: {
 				if (this.currentTrack?.info?.type !== 'video') break;
 
-				const rotation = (reader.readFloat(size) + 360) % 360;
-				if ([0, 90, 180, 270].includes(rotation)) {
-					this.currentTrack.info.rotation = rotation as Rotation;
+				const rotation = reader.readFloat(size);
+				const flippedRotation = -rotation; // Convert clockwise to counter-clockwise
+
+				try {
+					this.currentTrack.info.rotation = normalizeRotation(flippedRotation);
+				} catch {
+					// It wasn't a valid rotation
 				}
 			}; break;
 

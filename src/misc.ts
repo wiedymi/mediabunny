@@ -7,7 +7,16 @@ export function assert(x: unknown): asserts x {
 /** @public */
 export type Rotation = 0 | 90 | 180 | 270;
 
-/** @public */
+export const normalizeRotation = (rotation: number) => {
+	const mappedRotation = (rotation % 360 + 360) % 360;
+
+	if (mappedRotation === 0 || mappedRotation === 90 || mappedRotation === 180 || mappedRotation === 270) {
+		return mappedRotation as Rotation;
+	} else {
+		throw new Error(`Invalid rotation ${rotation}.`);
+	}
+};
+
 export type TransformationMatrix = [number, number, number, number, number, number, number, number, number];
 
 export const last = <T>(arr: T[]) => {
@@ -136,33 +145,6 @@ export class AsyncMutex {
 		return resolver!;
 	}
 }
-
-export const rotationMatrix = (rotationInDegrees: number): TransformationMatrix => {
-	const theta = rotationInDegrees * (Math.PI / 180);
-	const cosTheta = Math.round(Math.cos(theta));
-	const sinTheta = Math.round(Math.sin(theta));
-
-	// Matrices are post-multiplied in ISOBMFF, meaning this is the transpose of your typical rotation matrix
-	return [
-		cosTheta, sinTheta, 0,
-		-sinTheta, cosTheta, 0,
-		0, 0, 1,
-	];
-};
-
-/** Extracts the rotation component from a transformation matrix, in degrees. */
-export const extractRotationFromMatrix = (matrix: TransformationMatrix) => {
-	const [m11, , , m21] = matrix;
-
-	const scaleX = Math.hypot(m11, m21);
-
-	const cosTheta = m11 / scaleX;
-	const sinTheta = m21 / scaleX;
-
-	return Math.atan2(sinTheta, cosTheta) * (180 / Math.PI);
-};
-
-export const IDENTITY_MATRIX = rotationMatrix(0);
 
 export const bytesToHexString = (bytes: Uint8Array) => {
 	return [...bytes].map(x => x.toString(16).padStart(2, '0')).join('');

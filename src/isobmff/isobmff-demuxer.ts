@@ -35,10 +35,10 @@ import {
 	findLastIndex,
 	UNDETERMINED_LANGUAGE,
 	TransformationMatrix,
-	extractRotationFromMatrix,
 	roundToPrecision,
 	isIso639Dash2LanguageCode,
 	roundToMultiple,
+	normalizeRotation,
 } from '../misc';
 import { EncodedPacket, PLACEHOLDER_DATA } from '../packet';
 import { Reader } from '../reader';
@@ -656,11 +656,10 @@ export class IsobmffDemuxer extends Demuxer {
 					this.metadataReader.readFixed_2_30(),
 				];
 
-				const rotation = (roundToMultiple(extractRotationFromMatrix(matrix), 90) + 360) % 360 as Rotation;
+				const rotation = normalizeRotation(roundToMultiple(extractRotationFromMatrix(matrix), 90));
 				assert(rotation === 0 || rotation === 90 || rotation === 180 || rotation === 270);
 
-				// Flip clockwise to counter-clockwise
-				track.rotation = (-rotation + 360) % 360 as Rotation;
+				track.rotation = rotation;
 			}; break;
 
 			case 'elst': {
@@ -2539,4 +2538,17 @@ const offsetFragmentTrackDataByTimestamp = (trackData: FragmentTrackData, timest
 	for (const entry of trackData.presentationTimestamps) {
 		entry.presentationTimestamp += timestamp;
 	}
+};
+
+/** Extracts the rotation component from a transformation matrix, in degrees. */
+const extractRotationFromMatrix = (matrix: TransformationMatrix) => {
+	const [m11, , , m21] = matrix;
+
+	const scaleX = Math.hypot(m11, m21);
+
+	const cosTheta = m11 / scaleX;
+	const sinTheta = m21 / scaleX;
+
+	// Invert the rotation beacuse matrices are post-multiplied in ISOBMFF
+	return -Math.atan2(sinTheta, cosTheta) * (180 / Math.PI);
 };

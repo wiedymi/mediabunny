@@ -10,6 +10,7 @@ import {
 	last,
 	mapAsyncGenerator,
 	promiseWithResolvers,
+	Rotation,
 	toAsyncIterator,
 	toDataView,
 	validateAnyIterable,
@@ -791,53 +792,151 @@ export type WrappedCanvas = {
 };
 
 /** @public */
+export type CanvasSinkOptions = {
+	width?: number;
+	height?: number;
+	fit?: 'fill' | 'contain' | 'cover';
+	rotation?: Rotation;
+	poolSize?: number;
+};
+
+/** @public */
 export class CanvasSink {
 	/** @internal */
 	_videoTrack: InputVideoTrack;
 	/** @internal */
-	_dimensions?: { width: number; height: number };
+	_width: number;
+	/** @internal */
+	_height: number;
+	/** @internal */
+	_fit: 'fill' | 'contain' | 'cover';
+	/** @internal */
+	_rotation: Rotation;
 	/** @internal */
 	_videoFrameSink: VideoFrameSink;
+	/** @internal */
+	_canvasPool: (HTMLCanvasElement | null)[];
+	/** @internal */
+	_nextCanvasIndex = 0;
 
-	constructor(videoTrack: InputVideoTrack, dimensions?: { width: number; height: number }) {
+	constructor(videoTrack: InputVideoTrack, options: CanvasSinkOptions = {}) {
 		if (!(videoTrack instanceof InputVideoTrack)) {
 			throw new TypeError('videoTrack must be an InputVideoTrack.');
 		}
-		if (dimensions && typeof dimensions !== 'object') {
-			throw new TypeError('dimensions, when defined, must be an object.');
+		if (options && typeof options !== 'object') {
+			throw new TypeError('options must be an object.');
 		}
-		if (dimensions && (!Number.isInteger(dimensions.width) || dimensions.width <= 0)) {
-			throw new TypeError('dimensions.width must be a positive integer.');
+		if (options.width !== undefined && (!Number.isInteger(options.width) || options.width <= 0)) {
+			throw new TypeError('options.width, when defined, must be a positive integer.');
 		}
-		if (dimensions && (!Number.isInteger(dimensions.height) || dimensions.height <= 0)) {
-			throw new TypeError('dimensions.height must be a positive integer.');
+		if (options.height !== undefined && (!Number.isInteger(options.height) || options.height <= 0)) {
+			throw new TypeError('options.height, when defined, must be a positive integer.');
+		}
+		if (options.fit !== undefined && !['fill', 'contain', 'cover'].includes(options.fit)) {
+			throw new TypeError('options.fit, when provided, must be one of "fill", "contain", or "cover".');
+		}
+		if (
+			options.width !== undefined
+			&& options.height !== undefined
+			&& options.fit === undefined
+		) {
+			throw new TypeError(
+				'When both options.width and options.height are provided, options.fit must also be provided.',
+			);
+		}
+		if (options.rotation !== undefined && ![0, 90, 180, 270].includes(options.rotation)) {
+			throw new TypeError('options.rotation, when provided, must be 0, 90, 180 or 270.');
+		}
+		if (
+			options.poolSize !== undefined
+			&& (typeof options.poolSize !== 'number' || !Number.isInteger(options.poolSize) || options.poolSize < 0)
+		) {
+			throw new TypeError('poolSize must be a non-negative integer.');
+		}
+
+		const rotation = options.rotation ?? videoTrack.rotation;
+		let [width, height] = rotation % 180 === 0
+			? [videoTrack.codedWidth, videoTrack.codedHeight]
+			: [videoTrack.codedHeight, videoTrack.codedWidth];
+		const originalAspectRatio = width / height;
+
+		// If width and height aren't defined together, deduce the missing value using the aspect ratio
+		if (options.width !== undefined && options.height === undefined) {
+			width = options.width;
+			height = Math.round(width / originalAspectRatio);
+		} else if (options.width === undefined && options.height !== undefined) {
+			height = options.height;
+			width = Math.round(height * originalAspectRatio);
+		} else if (options.width !== undefined && options.height !== undefined) {
+			width = options.width;
+			height = options.height;
 		}
 
 		this._videoTrack = videoTrack;
-		this._dimensions = dimensions;
+		this._width = width;
+		this._height = height;
+		this._rotation = rotation;
+		this._fit = options.fit ?? 'fill';
 		this._videoFrameSink = new VideoFrameSink(videoTrack);
+		this._canvasPool = Array.from({ length: options.poolSize ?? 0 }, () => null);
 	}
 
 	/** @internal */
 	_videoFrameToWrappedCanvas(frame: WrappedVideoFrame): WrappedCanvas {
-		const width = this._dimensions?.width ?? this._videoTrack.displayWidth;
-		const height = this._dimensions?.height ?? this._videoTrack.displayHeight;
-		const rotation = this._videoTrack.rotation;
+		let canvas = this._canvasPool[this._nextCanvasIndex];
+		if (!canvas) {
+			canvas = document.createElement('canvas');
+			canvas.width = this._width;
+			canvas.height = this._height;
 
-		const canvas = document.createElement('canvas');
-		canvas.width = width;
-		canvas.height = height;
+			if (this._canvasPool.length > 0) {
+				this._canvasPool[this._nextCanvasIndex] = canvas;
+			}
+		}
+
+		if (this._canvasPool.length > 0) {
+			this._nextCanvasIndex = (this._nextCanvasIndex + 1) % this._canvasPool.length;
+		}
 
 		const context = canvas.getContext('2d', { alpha: false });
 		assert(context);
 
-		context.translate(width / 2, height / 2);
-		context.rotate(rotation * Math.PI / 180);
-		context.translate(-width / 2, -height / 2);
+		context.resetTransform();
 
-		const [imageWidth, imageHeight] = rotation % 180 === 0 ? [width, height] : [height, width];
+		// These variables specify where the final frame will be drawn on the canvas
+		let dx: number;
+		let dy: number;
+		let newWidth: number;
+		let newHeight: number;
 
-		context.drawImage(frame.frame, (width - imageWidth) / 2, (height - imageHeight) / 2, imageWidth, imageHeight);
+		if (this._fit === 'fill') {
+			dx = 0;
+			dy = 0;
+			newWidth = this._width;
+			newHeight = this._height;
+		} else {
+			const [frameWidth, frameHeight] = this._rotation % 180 === 0
+				? [frame.frame.codedWidth, frame.frame.codedHeight]
+				: [frame.frame.codedHeight, frame.frame.codedWidth];
+
+			const scale = this._fit === 'contain'
+				? Math.min(this._width / frameWidth, this._height / frameHeight)
+				: Math.max(this._width / frameWidth, this._height / frameHeight);
+			newWidth = frameWidth * scale;
+			newHeight = frameHeight * scale;
+			dx = (this._width - newWidth) / 2;
+			dy = (this._height - newHeight) / 2;
+		}
+
+		const aspectRatioChange = this._rotation % 180 === 0 ? 1 : newWidth / newHeight;
+		context.translate(this._width / 2, this._height / 2);
+		context.rotate(this._rotation * Math.PI / 180);
+		// This aspect ratio compensation is done so that we can draw the frame with the intended dimensions and
+		// don't need to think about how those dimensions change after the rotation
+		context.scale(1 / aspectRatioChange, aspectRatioChange);
+		context.translate(-this._width / 2, -this._height / 2);
+
+		context.drawImage(frame.frame, dx, dy, newWidth, newHeight);
 
 		const result = {
 			canvas,

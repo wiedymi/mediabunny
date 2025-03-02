@@ -31,11 +31,12 @@ export abstract class OutputFormat {
 	/** @internal */
 	abstract _createMuxer(output: Output): Muxer;
 	/** @internal */
-	abstract _getName(): string;
+	abstract get _name(): string;
 
-	abstract getFileExtension(): string;
+	abstract get fileExtension(): string;
 	abstract getSupportedCodecs(): MediaCodec[];
 	abstract getSupportedTrackCounts(): TrackCountLimits;
+	abstract get supportsVideoRotationMetadata(): boolean;
 
 	getSupportedVideoCodecs() {
 		return this.getSupportedCodecs()
@@ -91,6 +92,10 @@ export abstract class IsobmffOutputFormat extends OutputFormat {
 		};
 	}
 
+	get supportsVideoRotationMetadata() {
+		return true;
+	}
+
 	/** @internal */
 	_createMuxer(output: Output) {
 		return new IsobmffMuxer(output, this);
@@ -100,19 +105,15 @@ export abstract class IsobmffOutputFormat extends OutputFormat {
 /** @public */
 export class Mp4OutputFormat extends IsobmffOutputFormat {
 	/** @internal */
-	_getName() {
+	get _name() {
 		return 'MP4';
 	}
 
-	getFileExtension() {
+	get fileExtension() {
 		return '.mp4';
 	}
 
-	getSupportedCodecs() {
-		return Mp4OutputFormat.getSupportedCodecs();
-	}
-
-	static getSupportedCodecs(): MediaCodec[] {
+	getSupportedCodecs(): MediaCodec[] {
 		return [
 			...VIDEO_CODECS,
 			...NON_PCM_AUDIO_CODECS,
@@ -122,7 +123,7 @@ export class Mp4OutputFormat extends IsobmffOutputFormat {
 
 	/** @internal */
 	override _codecUnsupportedHint(codec: MediaCodec) {
-		if (MovOutputFormat.getSupportedCodecs().includes(codec)) {
+		if (new MovOutputFormat().getSupportedCodecs().includes(codec)) {
 			return ' Switching to MOV will grant support for this codec.';
 		}
 
@@ -133,19 +134,15 @@ export class Mp4OutputFormat extends IsobmffOutputFormat {
 /** @public */
 export class MovOutputFormat extends IsobmffOutputFormat {
 	/** @internal */
-	_getName() {
+	get _name() {
 		return 'MOV';
 	}
 
-	getFileExtension() {
+	get fileExtension() {
 		return '.mov';
 	}
 
-	getSupportedCodecs() {
-		return MovOutputFormat.getSupportedCodecs();
-	}
-
-	static getSupportedCodecs(): MediaCodec[] {
+	getSupportedCodecs(): MediaCodec[] {
 		return [
 			...VIDEO_CODECS,
 			...AUDIO_CODECS,
@@ -154,7 +151,7 @@ export class MovOutputFormat extends IsobmffOutputFormat {
 
 	/** @internal */
 	override _codecUnsupportedHint(codec: MediaCodec) {
-		if (Mp4OutputFormat.getSupportedCodecs().includes(codec)) {
+		if (new Mp4OutputFormat().getSupportedCodecs().includes(codec)) {
 			return ' Switching to MP4 will grant support for this codec.';
 		}
 
@@ -191,7 +188,7 @@ export class MkvOutputFormat extends OutputFormat {
 	}
 
 	/** @internal */
-	_getName() {
+	get _name() {
 		return 'Matroska';
 	}
 
@@ -204,21 +201,22 @@ export class MkvOutputFormat extends OutputFormat {
 		};
 	}
 
-	getFileExtension() {
+	get fileExtension() {
 		return '.mkv';
 	}
 
-	getSupportedCodecs() {
-		return MkvOutputFormat.getSupportedCodecs();
-	}
-
-	static getSupportedCodecs(): MediaCodec[] {
+	getSupportedCodecs(): MediaCodec[] {
 		return [
 			...VIDEO_CODECS,
 			...NON_PCM_AUDIO_CODECS,
 			...PCM_AUDIO_CODECS.filter(codec => !['pcm-s8', 'pcm-f32be', 'ulaw', 'alaw'].includes(codec)),
 			...SUBTITLE_CODECS,
 		];
+	}
+
+	get supportsVideoRotationMetadata() {
+		// While it technically does support it with ProjectionPoseRoll, many players appear to ignore this value
+		return false;
 	}
 }
 
@@ -227,20 +225,7 @@ export type WebMOutputFormatOptions = MkvOutputFormatOptions;
 
 /** @public */
 export class WebMOutputFormat extends MkvOutputFormat {
-	override getSupportedCodecs() {
-		return WebMOutputFormat.getSupportedCodecs();
-	}
-
-	/** @internal */
-	override _getName() {
-		return 'WebM';
-	}
-
-	override getFileExtension() {
-		return '.webm';
-	}
-
-	static override getSupportedCodecs(): MediaCodec[] {
+	override getSupportedCodecs(): MediaCodec[] {
 		return [
 			...VIDEO_CODECS.filter(codec => ['vp8', 'vp9', 'av1'].includes(codec)),
 			...AUDIO_CODECS.filter(codec => ['opus', 'vorbis'].includes(codec)),
@@ -249,8 +234,17 @@ export class WebMOutputFormat extends MkvOutputFormat {
 	}
 
 	/** @internal */
+	override get _name() {
+		return 'WebM';
+	}
+
+	override get fileExtension() {
+		return '.webm';
+	}
+
+	/** @internal */
 	override _codecUnsupportedHint(codec: MediaCodec) {
-		if (MkvOutputFormat.getSupportedCodecs().includes(codec)) {
+		if (new MkvOutputFormat().getSupportedCodecs().includes(codec)) {
 			return ' Switching to MKV will grant support for this codec.';
 		}
 
@@ -266,7 +260,7 @@ export class Mp3OutputFormat extends OutputFormat {
 	}
 
 	/** @internal */
-	_getName() {
+	get _name() {
 		return 'MP3';
 	}
 
@@ -279,16 +273,16 @@ export class Mp3OutputFormat extends OutputFormat {
 		};
 	}
 
-	getFileExtension() {
+	get fileExtension() {
 		return '.mp3';
 	}
 
-	getSupportedCodecs() {
-		return Mp3OutputFormat.getSupportedCodecs();
+	getSupportedCodecs(): MediaCodec[] {
+		return ['mp3'];
 	}
 
-	static getSupportedCodecs(): MediaCodec[] {
-		return ['mp3'];
+	get supportsVideoRotationMetadata() {
+		return false;
 	}
 }
 
@@ -300,7 +294,7 @@ export class WaveOutputFormat extends OutputFormat {
 	}
 
 	/** @internal */
-	_getName() {
+	get _name() {
 		return 'WAVE';
 	}
 
@@ -313,20 +307,20 @@ export class WaveOutputFormat extends OutputFormat {
 		};
 	}
 
-	getFileExtension() {
+	get fileExtension() {
 		return '.wav';
 	}
 
-	getSupportedCodecs() {
-		return WaveOutputFormat.getSupportedCodecs();
-	}
-
-	static getSupportedCodecs(): MediaCodec[] {
+	getSupportedCodecs(): MediaCodec[] {
 		return [
 			...PCM_AUDIO_CODECS.filter(codec =>
 				['pcm-s16', 'pcm-s24', 'pcm-s32', 'pcm-f32', 'pcm-u8', 'ulaw', 'alaw'].includes(codec),
 			),
 		];
+	}
+
+	get supportsVideoRotationMetadata() {
+		return false;
 	}
 }
 
@@ -338,7 +332,7 @@ export class OggOutputFormat extends OutputFormat {
 	}
 
 	/** @internal */
-	_getName() {
+	get _name() {
 		return 'Ogg';
 	}
 
@@ -351,17 +345,17 @@ export class OggOutputFormat extends OutputFormat {
 		};
 	}
 
-	getFileExtension() {
+	get fileExtension() {
 		return '.ogg';
 	}
 
-	getSupportedCodecs() {
-		return OggOutputFormat.getSupportedCodecs();
-	}
-
-	static getSupportedCodecs(): MediaCodec[] {
+	getSupportedCodecs(): MediaCodec[] {
 		return [
 			...AUDIO_CODECS.filter(codec => ['vorbis', 'opus'].includes(codec)),
 		];
+	}
+
+	get supportsVideoRotationMetadata() {
+		return false;
 	}
 }

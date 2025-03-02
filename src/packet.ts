@@ -2,8 +2,10 @@ import { SECOND_TO_MICROSECOND_FACTOR } from './misc';
 
 export const PLACEHOLDER_DATA = new Uint8Array(0);
 
+/** @public */
 export type PacketType = 'key' | 'delta';
 
+/** @public */
 export class EncodedPacket {
 	constructor(
 		public readonly data: Uint8Array,

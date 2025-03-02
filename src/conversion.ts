@@ -23,14 +23,13 @@ import {
 	AudioDataSource,
 	AudioEncodingConfig,
 	AudioSource,
-	CanvasSource,
 	EncodedVideoPacketSource,
 	EncodedAudioPacketSource,
 	VideoEncodingConfig,
 	VideoFrameSource,
 	VideoSource,
 } from './media-source';
-import { assert, clamp, promiseWithResolvers, Rotation, setVideoFrameTiming } from './misc';
+import { assert, clamp, normalizeRotation, promiseWithResolvers, Rotation, setVideoFrameTiming } from './misc';
 import { Output, TrackType } from './output';
 
 /** @public */
@@ -329,22 +328,26 @@ class Conversion {
 
 		let videoSource: VideoSource;
 
-		const originalWidth = track.codedWidth;
-		const originalHeight = track.codedHeight;
-		const originalAspectRatio = originalWidth / originalHeight;
+		const totalRotation = normalizeRotation(track.rotation + (this.options.video?.rotate ?? 0));
+		const outputSupportsRotation = this.output.format.supportsVideoRotationMetadata;
+
+		const [originalWidth, originalHeight] = totalRotation % 180 === 0
+			? [track.codedWidth, track.codedHeight]
+			: [track.codedHeight, track.codedWidth];
 
 		let width = originalWidth;
 		let height = originalHeight;
+		const aspectRatio = width / height;
 
 		// A lot of video encoders require that the dimensions be multiples of 2
 		const ceilToMultipleOfTwo = (value: number) => Math.ceil(value / 2) * 2;
 
 		if (this.options.video?.width !== undefined && this.options.video.height === undefined) {
 			width = ceilToMultipleOfTwo(this.options.video.width);
-			height = ceilToMultipleOfTwo(Math.round(width / originalAspectRatio));
+			height = ceilToMultipleOfTwo(Math.round(width / aspectRatio));
 		} else if (this.options.video?.width === undefined && this.options.video?.height !== undefined) {
 			height = ceilToMultipleOfTwo(this.options.video.height);
-			width = ceilToMultipleOfTwo(Math.round(height * originalAspectRatio));
+			width = ceilToMultipleOfTwo(Math.round(height * aspectRatio));
 		} else if (this.options.video?.width !== undefined && this.options.video.height !== undefined) {
 			width = ceilToMultipleOfTwo(this.options.video.width);
 			height = ceilToMultipleOfTwo(this.options.video.height);
@@ -352,13 +355,15 @@ class Conversion {
 
 		const firstTimestamp = await track.getFirstTimestamp();
 		const needsReencode = !!this.options.video?.forceReencode || this.startTimestamp > 0 || firstTimestamp < 0;
-		const needsResize = width !== originalWidth || height !== originalHeight;
+		const needsRerender = width !== originalWidth
+			|| height !== originalHeight
+			|| (totalRotation !== 0 && !outputSupportsRotation);
 
 		let videoCodecs = this.output.format.getSupportedVideoCodecs();
 		if (
 			!needsReencode
 			&& !this.options.video?.bitrate
-			&& !needsResize
+			&& !needsRerender
 			&& videoCodecs.includes(sourceCodec)
 			&& (!this.options.video?.codec || this.options.video?.codec === sourceCodec)
 		) {
@@ -406,10 +411,7 @@ class Conversion {
 				videoCodecs = videoCodecs.filter(codec => codec === this.options.video?.codec);
 			}
 
-			const encodableCodecs = await getEncodableVideoCodecs(videoCodecs, {
-				width: needsResize ? width : track.codedWidth,
-				height: needsResize ? height : track.codedHeight,
-			});
+			const encodableCodecs = await getEncodableVideoCodecs(videoCodecs, { width, height });
 			if (encodableCodecs.length === 0) {
 				this.result.discardedTracks.push({
 					track,
@@ -424,22 +426,20 @@ class Conversion {
 				onEncodedPacket: sample => this.reportProgress(track.id, sample.timestamp + sample.duration),
 			};
 
-			if (needsResize) {
-				// For resizing, we draw the frame onto a canvas and then encode the canvas
-				const canvas = document.createElement('canvas');
-				canvas.width = width;
-				canvas.height = height;
-				const context = canvas.getContext('2d', {
-					alpha: false,
-				})!;
-
-				const source = new CanvasSource(canvas, encodingConfig);
+			if (needsRerender) {
+				const source = new VideoFrameSource(encodingConfig);
 				videoSource = source;
 
 				this.trackPromises.push((async () => {
 					await this.started;
 
-					const sink = new CanvasSink(track);
+					const sink = new CanvasSink(track, {
+						width,
+						height,
+						fit: this.options.video?.fit ?? 'fill',
+						rotation: totalRotation, // Bake the rotation into the output
+						poolSize: 1,
+					});
 					const iterator = sink.canvases(this.startTimestamp, this.endTimestamp);
 
 					for await (const { canvas, timestamp, duration } of iterator) {
@@ -447,33 +447,15 @@ class Conversion {
 							await this.synchronizer.wait(timestamp);
 						}
 
-						if (!this.options.video?.fit || this.options.video.fit === 'fill') {
-							context.drawImage(canvas, 0, 0, width, height);
-						} else if (this.options.video.fit === 'contain') {
-							const scale = Math.min(width / canvas.width, height / canvas.height);
-							const newWidth = canvas.width * scale;
-							const newHeight = canvas.height * scale;
-							const dx = (width - newWidth) / 2;
-							const dy = (height - newHeight) / 2;
-							context.drawImage(canvas, 0, 0, canvas.width, canvas.height, dx, dy, newWidth, newHeight);
-						} else if (this.options.video.fit === 'cover') {
-							const scale = Math.max(width / canvas.width, height / canvas.height);
-							const newWidth = canvas.width * scale;
-							const newHeight = canvas.height * scale;
-							const dx = (width - newWidth) / 2;
-							const dy = (height - newHeight) / 2;
-							context.drawImage(canvas, 0, 0, canvas.width, canvas.height, dx, dy, newWidth, newHeight);
-						}
-
 						if (this.options.abortSignal?.aborted) {
 							return;
 						}
 
-						await source.add(Math.max(timestamp - this.startTimestamp, 0), duration);
+						await source.add(new VideoFrame(canvas, {
+							timestamp: 1e6 * Math.max(timestamp - this.startTimestamp, 0),
+							duration: 1e6 * duration,
+						}));
 					}
-
-					await source.close();
-					this.synchronizer.closeTrack(track.id);
 				})());
 			} else {
 				const source = new VideoFrameSource(encodingConfig);
@@ -507,12 +489,9 @@ class Conversion {
 			}
 		}
 
-		// Rotation metadata is reset if we do resizing
-		const baseRotation = needsResize ? 0 : track.rotation;
-
 		this.output.addVideoTrack(videoSource, {
 			languageCode: track.languageCode,
-			rotation: (baseRotation + (this.options.video?.rotate ?? 0)) % 360 as Rotation,
+			rotation: needsRerender ? 0 : totalRotation, // Rerendering will bake the rotation into the output
 		});
 		this.addedCounts.video++;
 		this.totalTrackCount++;

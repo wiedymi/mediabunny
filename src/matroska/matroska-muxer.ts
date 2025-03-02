@@ -5,6 +5,7 @@ import {
 	UNDETERMINED_LANGUAGE,
 	assert,
 	colorSpaceIsComplete,
+	normalizeRotation,
 	readBits,
 	textEncoder,
 	toUint8Array,
@@ -272,6 +273,9 @@ export class MatroskaMuxer extends Muxer {
 				: null),
 		];
 
+		// Convert from clockwise to counter-clockwise
+		const flippedRotation = rotation ? normalizeRotation(-rotation) : 0;
+
 		const colorSpace = trackData.info.decoderConfig.colorSpace;
 		const videoElement: EBMLElement = { id: EBMLId.Video, data: [
 			{ id: EBMLId.PixelWidth, data: trackData.info.width },
@@ -299,7 +303,7 @@ export class MatroskaMuxer extends Muxer {
 						],
 					}
 				: null),
-			(typeof rotation === 'number' && rotation !== 0
+			(flippedRotation
 				? {
 						id: EBMLId.Projection,
 						data: [
@@ -309,7 +313,7 @@ export class MatroskaMuxer extends Muxer {
 							},
 							{
 								id: EBMLId.ProjectionPoseRoll,
-								data: new EBMLFloat32((rotation + 180) % 360 - 180), // [0, 270] -> [-180, 90]
+								data: new EBMLFloat32((flippedRotation + 180) % 360 - 180), // [0, 270] -> [-180, 90]
 							},
 						],
 					}

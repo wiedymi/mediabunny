@@ -67,7 +67,7 @@ export {
 	getEncodableSubtitleCodecs,
 } from './codec';
 export { Target, BufferTarget, StreamTarget, StreamTargetChunk, StreamTargetOptions } from './target';
-export { Rotation, TransformationMatrix, AnyIterable, setVideoFrameTiming } from './misc';
+export { Rotation, AnyIterable, setVideoFrameTiming } from './misc';
 export { Source, BufferSource, StreamSource, StreamSourceOptions, BlobSource, UrlSource } from './source';
 export {
 	InputFormat,
@@ -101,6 +101,7 @@ export {
 	BaseMediaFrameSink,
 	VideoFrameSink,
 	WrappedVideoFrame,
+	CanvasSinkOptions,
 	CanvasSink,
 	WrappedCanvas,
 	AudioDataSink,

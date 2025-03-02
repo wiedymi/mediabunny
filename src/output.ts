@@ -1,4 +1,4 @@
-import { AsyncMutex, isIso639Dash2LanguageCode, TransformationMatrix } from './misc';
+import { AsyncMutex, isIso639Dash2LanguageCode } from './misc';
 import { Muxer } from './muxer';
 import { OutputFormat } from './output-format';
 import { AudioSource, MediaSource, SubtitleSource, VideoSource } from './media-source';
@@ -48,7 +48,7 @@ export type BaseTrackMetadata = {
 
 /** @public */
 export type VideoTrackMetadata = BaseTrackMetadata & {
-	rotation?: 0 | 90 | 180 | 270 | TransformationMatrix;
+	rotation?: 0 | 90 | 180 | 270;
 	frameRate?: number;
 };
 /** @public */
@@ -134,13 +134,11 @@ export class Output<
 			throw new TypeError('source must be a VideoSource.');
 		}
 		validateBaseTrackMetadata(metadata);
-		if (typeof metadata.rotation === 'number' && ![0, 90, 180, 270].includes(metadata.rotation)) {
+		if (metadata.rotation !== undefined && ![0, 90, 180, 270].includes(metadata.rotation)) {
 			throw new TypeError(`Invalid video rotation: ${metadata.rotation}. Has to be 0, 90, 180 or 270.`);
-		} else if (
-			Array.isArray(metadata.rotation)
-			&& (metadata.rotation.length !== 9 || metadata.rotation.some(value => !Number.isFinite(value)))
-		) {
-			throw new TypeError(`Invalid video transformation matrix: ${metadata.rotation.join()}`);
+		}
+		if (!this.format.supportsVideoRotationMetadata && metadata.rotation) {
+			throw new Error(`${this.format._name} does not support video rotation metadata.`);
 		}
 		if (
 			metadata.frameRate !== undefined
@@ -191,15 +189,15 @@ export class Output<
 		if (presentTracksOfThisType === maxCount) {
 			throw new Error(
 				maxCount === 0
-					? `${this.format._getName()} does not support ${type} tracks.`
-					: (`${this.format._getName()} does not support more than ${maxCount} ${type} track`
+					? `${this.format._name} does not support ${type} tracks.`
+					: (`${this.format._name} does not support more than ${maxCount} ${type} track`
 						+ `${maxCount === 1 ? '' : 's'}.`),
 			);
 		}
 		const maxTotalCount = supportedTrackCounts.total.max;
 		if (this._tracks.length === maxTotalCount) {
 			throw new Error(
-				`${this.format._getName()} does not support more than ${maxTotalCount} tracks`
+				`${this.format._name} does not support more than ${maxTotalCount} tracks`
 				+ `${maxTotalCount === 1 ? '' : 's'} in total.`,
 			);
 		}
@@ -217,12 +215,12 @@ export class Output<
 
 			if (supportedVideoCodecs.length === 0) {
 				throw new Error(
-					`${this.format._getName()} does not support video tracks.`
+					`${this.format._name} does not support video tracks.`
 					+ this.format._codecUnsupportedHint(track.source._codec),
 				);
 			} else if (!supportedVideoCodecs.includes(track.source._codec)) {
 				throw new Error(
-					`Codec '${track.source._codec}' cannot be contained within ${this.format._getName()}. Supported`
+					`Codec '${track.source._codec}' cannot be contained within ${this.format._name}. Supported`
 					+ ` video codecs are: ${supportedVideoCodecs.map(codec => `'${codec}'`).join(', ')}.`
 					+ this.format._codecUnsupportedHint(track.source._codec),
 				);
@@ -232,12 +230,12 @@ export class Output<
 
 			if (supportedAudioCodecs.length === 0) {
 				throw new Error(
-					`${this.format._getName()} does not support audio tracks.`
+					`${this.format._name} does not support audio tracks.`
 					+ this.format._codecUnsupportedHint(track.source._codec),
 				);
 			} else if (!supportedAudioCodecs.includes(track.source._codec)) {
 				throw new Error(
-					`Codec '${track.source._codec}' cannot be contained within ${this.format._getName()}. Supported`
+					`Codec '${track.source._codec}' cannot be contained within ${this.format._name}. Supported`
 					+ ` audio codecs are: ${supportedAudioCodecs.map(codec => `'${codec}'`).join(', ')}.`
 					+ this.format._codecUnsupportedHint(track.source._codec),
 				);
@@ -247,12 +245,12 @@ export class Output<
 
 			if (supportedSubtitleCodecs.length === 0) {
 				throw new Error(
-					`${this.format._getName()} does not support subtitle tracks.`
+					`${this.format._name} does not support subtitle tracks.`
 					+ this.format._codecUnsupportedHint(track.source._codec),
 				);
 			} else if (!supportedSubtitleCodecs.includes(track.source._codec)) {
 				throw new Error(
-					`Codec '${track.source._codec}' cannot be contained within ${this.format._getName()}. Supported`
+					`Codec '${track.source._codec}' cannot be contained within ${this.format._name}. Supported`
 					+ ` subtitle codecs are: ${supportedSubtitleCodecs.map(codec => `'${codec}'`).join(', ')}.`
 					+ this.format._codecUnsupportedHint(track.source._codec),
 				);
@@ -282,9 +280,9 @@ export class Output<
 			if (presentTracksOfThisType < minCount) {
 				throw new Error(
 					minCount === supportedTrackCounts[trackType].max
-						? (`${this.format._getName()} requires exactly ${minCount} ${trackType}`
+						? (`${this.format._name} requires exactly ${minCount} ${trackType}`
 							+ ` track${minCount === 1 ? '' : 's'}.`)
-						: (`${this.format._getName()} requires at least ${minCount} ${trackType}`
+						: (`${this.format._name} requires at least ${minCount} ${trackType}`
 							+ ` track${minCount === 1 ? '' : 's'}.`),
 				);
 			}
@@ -293,9 +291,9 @@ export class Output<
 		if (this._tracks.length < totalMinCount) {
 			throw new Error(
 				totalMinCount === supportedTrackCounts.total.max
-					? (`${this.format._getName()} requires exactly ${totalMinCount} track`
+					? (`${this.format._name} requires exactly ${totalMinCount} track`
 						+ `${totalMinCount === 1 ? '' : 's'}.`)
-					: (`${this.format._getName()} requires at least ${totalMinCount} track`
+					: (`${this.format._name} requires at least ${totalMinCount} track`
 						+ `${totalMinCount === 1 ? '' : 's'}.`),
 			);
 		}

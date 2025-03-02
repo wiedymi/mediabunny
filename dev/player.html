@@ -107,7 +107,7 @@ durationElement.textContent = formatSeconds(totalDuration);
 
 playerDiv.style.display = 'flex';
 
-const videoSink = videoTrack && new Metamuxer.CanvasSink(videoTrack);
+const videoSink = videoTrack && new Metamuxer.CanvasSink(videoTrack, { poolSize: 2 });
 const audioSink = audioTrack && new Metamuxer.AudioBufferSink(audioTrack);
 
 let startTime = null;
