@@ -398,8 +398,11 @@ export class CanvasSource extends VideoSource {
 	private _canvas: HTMLCanvasElement | OffscreenCanvas;
 
 	constructor(canvas: HTMLCanvasElement | OffscreenCanvas, encodingConfig: VideoEncodingConfig) {
-		if (!(canvas instanceof HTMLCanvasElement)) {
-			throw new TypeError('canvas must be an HTMLCanvasElement.');
+		if (
+			!(typeof HTMLCanvasElement !== 'undefined' && canvas instanceof HTMLCanvasElement)
+			&& !(typeof OffscreenCanvas !== 'undefined' && canvas instanceof OffscreenCanvas)
+		) {
+			throw new TypeError('canvas must be an HTMLCanvasElement or OffscreenCanvas.');
 		}
 		validateVideoEncodingConfig(encodingConfig);
 

@@ -786,7 +786,7 @@ export class VideoFrameSink extends BaseMediaFrameSink<VideoFrame> {
 
 /** @public */
 export type WrappedCanvas = {
-	canvas: HTMLCanvasElement;
+	canvas: HTMLCanvasElement | OffscreenCanvas;
 	timestamp: number;
 	duration: number;
 };
@@ -815,7 +815,7 @@ export class CanvasSink {
 	/** @internal */
 	_videoFrameSink: VideoFrameSink;
 	/** @internal */
-	_canvasPool: (HTMLCanvasElement | null)[];
+	_canvasPool: (HTMLCanvasElement | OffscreenCanvas | null)[];
 	/** @internal */
 	_nextCanvasIndex = 0;
 
@@ -885,9 +885,14 @@ export class CanvasSink {
 	_videoFrameToWrappedCanvas(frame: WrappedVideoFrame): WrappedCanvas {
 		let canvas = this._canvasPool[this._nextCanvasIndex];
 		if (!canvas) {
-			canvas = document.createElement('canvas');
-			canvas.width = this._width;
-			canvas.height = this._height;
+			if (typeof OffscreenCanvas !== 'undefined') {
+				// Prefer an OffscreenCanvas
+				canvas = new OffscreenCanvas(this._width, this._height);
+			} else {
+				canvas = document.createElement('canvas');
+				canvas.width = this._width;
+				canvas.height = this._height;
+			}
 
 			if (this._canvasPool.length > 0) {
 				this._canvasPool[this._nextCanvasIndex] = canvas;
