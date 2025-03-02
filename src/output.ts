@@ -72,6 +72,7 @@ export class Output<
 > {
 	format: F;
 	target: T;
+	state: 'pending' | 'started' | 'canceled' | 'finalizing' | 'finalized' = 'pending';
 
 	/** @internal */
 	_muxer: Muxer;
@@ -80,31 +81,13 @@ export class Output<
 	/** @internal */
 	_tracks: OutputTrack[] = [];
 	/** @internal */
-	_started = false;
+	_startPromise: Promise<void> | null = null;
 	/** @internal */
-	_canceled = false;
+	_cancelPromise: Promise<void> | null = null;
 	/** @internal */
-	_finalizing = false;
-	/** @internal */
-	_finalized = false;
+	_finalizePromise: Promise<void> | null = null;
 	/** @internal */
 	_mutex = new AsyncMutex();
-
-	get isStarted() {
-		return this._started;
-	}
-
-	get isCanceled() {
-		return this._canceled;
-	}
-
-	get isFinalizing() {
-		return this._finalizing;
-	}
-
-	get isFinalized() {
-		return this._finalized;
-	}
 
 	constructor(options: OutputOptions<F, T>) {
 		if (!options || typeof options !== 'object') {
@@ -172,8 +155,8 @@ export class Output<
 
 	/** @internal */
 	private _addTrack(type: OutputTrack['type'], source: MediaSource, metadata: object) {
-		if (this._started) {
-			throw new Error('Cannot add track after output has started.');
+		if (this.state !== 'pending') {
+			throw new Error('Cannot add track after output has been started or canceled.');
 		}
 		if (source._connectedTrack) {
 			throw new Error('Source is already used for a track.');
@@ -262,13 +245,6 @@ export class Output<
 	}
 
 	async start() {
-		if (this._canceled) {
-			throw new Error('Output has been canceled.');
-		}
-		if (this._started) {
-			throw new Error('Output already started.');
-		}
-
 		// Verify minimum track count constraints
 		const supportedTrackCounts = this.format.getSupportedTrackCounts();
 		for (const trackType of ALL_TRACK_TYPES) {
@@ -298,60 +274,82 @@ export class Output<
 			);
 		}
 
-		this._started = true;
-		this._writer.start();
-
-		const release = await this._mutex.acquire();
-
-		await this._muxer.start();
-
-		for (const track of this._tracks) {
-			track.source._start();
+		if (this.state === 'canceled') {
+			throw new Error('Output has been canceled.');
 		}
 
-		release();
+		if (this._startPromise) {
+			console.warn('Output has already been started.');
+			return this._startPromise;
+		}
+
+		return this._startPromise = (async () => {
+			this.state = 'started';
+			this._writer.start();
+
+			const release = await this._mutex.acquire();
+
+			await this._muxer.start();
+
+			for (const track of this._tracks) {
+				track.source._start();
+			}
+
+			release();
+		})();
 	}
 
 	async cancel() {
-		if (this._finalizing) {
-			throw new Error('Cannot cancel after calling finalize.');
+		if (this._cancelPromise) {
+			console.warn('Output has already been canceled.');
+			return this._cancelPromise;
+		} else if (this.state === 'finalizing' || this.state === 'finalized') {
+			console.warn('Output has already been finalized.');
+			return;
 		}
-		if (this._canceled) {
-			throw new Error('Output already canceled.');
-		}
-		this._canceled = true;
 
-		const release = await this._mutex.acquire();
+		return this._cancelPromise = (async () => {
+			this.state = 'canceled';
 
-		const promises = this._tracks.map(x => x.source._flushOrWaitForClose());
-		await Promise.all(promises);
+			const release = await this._mutex.acquire();
 
-		await this._writer.close();
+			const promises = this._tracks.map(x => x.source._flushOrWaitForClose());
+			await Promise.all(promises);
 
-		release();
+			await this._writer.close();
+
+			release();
+		})();
 	}
 
 	async finalize() {
-		if (!this._started) {
+		if (this.state === 'pending') {
 			throw new Error('Cannot finalize before starting.');
 		}
-		if (this._finalizing) {
-			throw new Error('Cannot call finalize twice.');
+		if (this.state === 'canceled') {
+			throw new Error('Cannot finalize after canceling.');
 		}
-		this._finalizing = true;
+		if (this._finalizePromise) {
+			console.warn('Output has already been finalized.');
+			return this._finalizePromise;
+		}
 
-		const release = await this._mutex.acquire();
+		return this._finalizePromise = (async () => {
+			this.state = 'finalizing';
 
-		const promises = this._tracks.map(x => x.source._flushOrWaitForClose());
-		await Promise.all(promises);
+			const release = await this._mutex.acquire();
 
-		await this._muxer.finalize();
+			const promises = this._tracks.map(x => x.source._flushOrWaitForClose());
+			await Promise.all(promises);
 
-		await this._writer.flush();
-		await this._writer.finalize();
+			await this._muxer.finalize();
 
-		this._finalized = true;
+			await this._writer.flush();
+			await this._writer.finalize();
 
-		release();
+			this.state = 'finalized';
+
+			release();
+		})();
 	}
 }

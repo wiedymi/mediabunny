@@ -109,7 +109,7 @@ export {
 	AudioBufferSink,
 	WrappedAudioBuffer,
 } from './media-sink';
-export { convert, ConversionOptions, ConversionInfo } from './conversion';
+export { convert, ConversionOptions, Conversion } from './conversion';
 export {
 	CustomVideoDecoder,
 	CustomAudioDecoder,

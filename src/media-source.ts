@@ -44,16 +44,16 @@ export abstract class MediaSource {
 			throw new Error('Source is not connected to an output track.');
 		}
 
-		if (this._connectedTrack.output._canceled) {
+		if (this._connectedTrack.output.state === 'canceled') {
 			throw new Error('Output has been canceled.');
 		}
 
-		if (!this._connectedTrack.output._started) {
-			throw new Error('Output has not started.');
+		if (this._connectedTrack.output.state === 'finalizing' || this._connectedTrack.output.state === 'finalized') {
+			throw new Error('Output has been finalized.');
 		}
 
-		if (this._connectedTrack.output._finalizing) {
-			throw new Error('Output is finalizing.');
+		if (this._connectedTrack.output.state === 'pending') {
+			throw new Error('Output has not started.');
 		}
 
 		if (this._closed) {
@@ -77,7 +77,7 @@ export abstract class MediaSource {
 			throw new Error('Cannot call close without connecting the source to an output track.');
 		}
 
-		if (!connectedTrack.output._started) {
+		if (connectedTrack.output.state === 'pending') {
 			throw new Error('Cannot call close before output has been started.');
 		}
 
@@ -86,7 +86,7 @@ export abstract class MediaSource {
 
 			this._closed = true;
 
-			if (connectedTrack.output._finalizing) {
+			if (connectedTrack.output.state === 'finalizing' || connectedTrack.output.state === 'finalized') {
 				return;
 			}
 

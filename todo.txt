@@ -3,4 +3,3 @@
 - is this fixed? https://github.com/Vanilagy/webm-muxer/issues/50
 - cross-track offset for streaming sources
 - configurable fragmented mp4 fragment size, like the mp4-muxer PR
-- cancel in convert causes error

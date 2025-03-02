@@ -18,14 +18,12 @@
 		const target = new Metamuxer.BufferTarget();
 		const outputFormat = new Metamuxer.WebMOutputFormat()
 
-		const abortController = new AbortController();
 		const button = document.createElement('button');
 		button.textContent = 'Cancel';
-		button.onclick = () => abortController.abort();
+		button.onclick = () => conversion.cancel();
 		document.body.append(button);
 
-		console.time()
-		const res = await Metamuxer.convert({
+		const conversion = await Metamuxer.Conversion.init({
 			input: new Metamuxer.Input({
 				formats: Metamuxer.ALL_FORMATS,	
 				source
@@ -77,13 +75,15 @@
 				start: 0,
 				end: 10
 			},
-			onProgress: (event) => {
-				progress.value = event.completion;
-			},
-			abortSignal: abortController.signal
+			computeProgress: true
 		});
+		console.log(conversion);
+
+		conversion.onProgress = () => progress.value = conversion.progress;
+
+		console.time();
+		await conversion.execute();
 		console.timeEnd()
-		console.log(res)
 
 		console.log("Done", target.buffer);
 

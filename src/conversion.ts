@@ -62,13 +62,66 @@ export type ConversionOptions = {
 		end: number;
 	};
 
-	onProgress?: (event: { completion: number }) => unknown;
-	abortSignal?: AbortSignal;
+	computeProgress?: boolean;
+};
+
+const FALLBACK_NUMBER_OF_CHANNELS = 2;
+const FALLBACK_SAMPLE_RATE = 48000;
+
+/** @public */
+export const convert = async (options: ConversionOptions) => {
+	const conversion = await Conversion.init(options);
+	await conversion.execute();
+	return conversion;
 };
 
 /** @public */
-export type ConversionInfo = {
-	utilizedTracks: InputTrack[];
+export class Conversion {
+	/** @internal */
+	_options: ConversionOptions;
+	/** @internal */
+	_input: Input;
+	/** @internal */
+	_output: Output;
+	/** @internal */
+	_startTimestamp: number;
+	/** @internal */
+	_endTimestamp: number;
+
+	/** @internal */
+	_addedCounts: Record<TrackType, number> = {
+		video: 0,
+		audio: 0,
+		subtitle: 0,
+	};
+
+	/** @internal */
+	_totalTrackCount = 0;
+
+	/** @internal */
+	_trackPromises: Promise<void>[] = [];
+
+	/** @internal */
+	_started: Promise<void>;
+	/** @internal */
+	_start: () => void;
+	/** @internal */
+	_executed = false;
+
+	/** @internal */
+	_synchronizer = new TrackSynchronizer();
+
+	/** @internal */
+	_totalDuration: number | null = null;
+	/** @internal */
+	_maxTimestamps = new Map<number, number>(); // Track ID -> timestamp
+
+	/** @internal */
+	_canceled = false;
+
+	progress = 0;
+	onProgress?: () => unknown = undefined;
+	utilizedTracks: InputTrack[] = [];
 	discardedTracks: {
 		track: InputTrack;
 		reason:
@@ -78,45 +131,16 @@ export type ConversionInfo = {
 			| 'unknownSourceCodec'
 			| 'undecodableSourceCodec'
 			| 'noEncodableTargetCodec';
-	}[];
-};
+	}[] = [];
 
-const FALLBACK_NUMBER_OF_CHANNELS = 2;
-const FALLBACK_SAMPLE_RATE = 48000;
+	static async init(options: ConversionOptions) {
+		const conversion = new Conversion(options);
+		await conversion._init();
 
-/** @public */
-export const convert = (options: ConversionOptions) => {
-	const conversion = new Conversion(options);
-	return conversion.execute();
-};
+		return conversion;
+	}
 
-class Conversion {
-	input: Input;
-	output: Output;
-	startTimestamp: number;
-	endTimestamp: number;
-
-	addedCounts: Record<TrackType, number> = {
-		video: 0,
-		audio: 0,
-		subtitle: 0,
-	};
-
-	totalTrackCount = 0;
-
-	trackPromises: Promise<void>[] = [];
-
-	started: Promise<void>;
-	start: () => void;
-
-	synchronizer = new TrackSynchronizer();
-
-	totalDuration: number | null = null;
-	maxTimestamps = new Map<number, number>(); // Track ID -> timestamp
-
-	result: ConversionInfo;
-
-	constructor(public options: ConversionOptions) {
+	private constructor(options: ConversionOptions) {
 		if (!options || typeof options !== 'object') {
 			throw new TypeError('options must be an object.');
 		}
@@ -223,50 +247,38 @@ class Conversion {
 			&& options.trim.start >= options.trim.end) {
 			throw new TypeError('options.trim.start must be less than options.trim.end.');
 		}
-		if (options.onProgress !== undefined && typeof options.onProgress !== 'function') {
-			throw new TypeError('options.onProgress, when provided, must be a function.');
-		}
-		if (options.abortSignal !== undefined && !(options.abortSignal instanceof AbortSignal)) {
-			throw new TypeError('options.abortSignal, when provided, must be an AbortSignal.');
+		if (options.computeProgress !== undefined && typeof options.computeProgress !== 'boolean') {
+			throw new TypeError('options.computeProgress, when provided, must be a boolean.');
 		}
 
-		this.input = options.input;
-		this.output = options.output;
+		this._options = options;
+		this._input = options.input;
+		this._output = options.output;
 
-		this.startTimestamp = options.trim?.start ?? 0;
-		this.endTimestamp = options.trim?.end ?? Infinity;
+		this._startTimestamp = options.trim?.start ?? 0;
+		this._endTimestamp = options.trim?.end ?? Infinity;
 
 		const { promise: started, resolve: start } = promiseWithResolvers();
-		this.started = started;
-		this.start = start;
-
-		this.result = {
-			utilizedTracks: [],
-			discardedTracks: [],
-		};
-
-		options.abortSignal?.addEventListener('abort', () => {
-			if (!this.output.isFinalizing) {
-				void this.output.cancel();
-			}
-		});
+		this._started = started;
+		this._start = start;
 	}
 
-	async execute() {
-		const inputTracks = await this.input.getTracks();
-		const outputTrackCounts = this.output.format.getSupportedTrackCounts();
+	/** @internal */
+	async _init() {
+		const inputTracks = await this._input.getTracks();
+		const outputTrackCounts = this._output.format.getSupportedTrackCounts();
 
 		for (const track of inputTracks) {
-			if (this.totalTrackCount === outputTrackCounts.total.max) {
-				this.result.discardedTracks.push({
+			if (this._totalTrackCount === outputTrackCounts.total.max) {
+				this.discardedTracks.push({
 					track,
 					reason: 'maxTrackCountReached',
 				});
 				continue;
 			}
 
-			if (this.addedCounts[track.type] === outputTrackCounts[track.type].max) {
-				this.result.discardedTracks.push({
+			if (this._addedCounts[track.type] === outputTrackCounts[track.type].max) {
+				this.discardedTracks.push({
 					track,
 					reason: 'maxTrackCountOfTypeReached',
 				});
@@ -274,52 +286,80 @@ class Conversion {
 			}
 
 			if (track.isVideoTrack()) {
-				if (this.options.video?.discard) {
-					this.result.discardedTracks.push({
+				if (this._options.video?.discard) {
+					this.discardedTracks.push({
 						track,
 						reason: 'discardedByUser',
 					});
 					continue;
 				}
 
-				await this.processVideoTrack(track);
+				await this._processVideoTrack(track);
 			} else if (track.isAudioTrack()) {
-				if (this.options.audio?.discard) {
-					this.result.discardedTracks.push({
+				if (this._options.audio?.discard) {
+					this.discardedTracks.push({
 						track,
 						reason: 'discardedByUser',
 					});
 					continue;
 				}
 
-				await this.processAudioTrack(track);
+				await this._processAudioTrack(track);
 			}
 		}
 
-		if (this.options.onProgress) {
-			this.totalDuration = Math.min(
-				await this.input.computeDuration() - this.startTimestamp,
-				this.endTimestamp - this.startTimestamp,
+		if (this._options.computeProgress) {
+			this._totalDuration = Math.min(
+				await this._input.computeDuration() - this._startTimestamp,
+				this._endTimestamp - this._startTimestamp,
 			);
-			this.options.onProgress({ completion: 0 });
+			this.onProgress?.();
 		}
-
-		await this.output.start();
-		this.start();
-
-		await Promise.all(this.trackPromises);
-
-		await this.output.finalize();
-
-		this.options.onProgress?.({ completion: 1 });
-
-		return this.result;
 	}
 
-	async processVideoTrack(track: InputVideoTrack) {
+	async execute() {
+		if (this._executed) {
+			throw new Error('Conversion cannot be executed twice.');
+		}
+
+		this._executed = true;
+
+		await this._output.start();
+		this._start();
+
+		await Promise.all(this._trackPromises);
+
+		if (this._canceled) {
+			await new Promise(() => {}); // Never resolve
+		}
+
+		await this._output.finalize();
+
+		if (this._options.computeProgress) {
+			this.progress = 1;
+			this.onProgress?.();
+		}
+	}
+
+	async cancel() {
+		if (this._output.state === 'finalizing' || this._output.state === 'finalized') {
+			return;
+		}
+
+		if (this._canceled) {
+			console.warn('Conversion already canceled.');
+			return;
+		}
+
+		this._canceled = true;
+		await this._output.cancel();
+	}
+
+	/** @internal */
+	async _processVideoTrack(track: InputVideoTrack) {
 		const sourceCodec = track.codec;
 		if (!sourceCodec) {
-			this.result.discardedTracks.push({
+			this.discardedTracks.push({
 				track,
 				reason: 'unknownSourceCodec',
 			});
@@ -328,8 +368,8 @@ class Conversion {
 
 		let videoSource: VideoSource;
 
-		const totalRotation = normalizeRotation(track.rotation + (this.options.video?.rotate ?? 0));
-		const outputSupportsRotation = this.output.format.supportsVideoRotationMetadata;
+		const totalRotation = normalizeRotation(track.rotation + (this._options.video?.rotate ?? 0));
+		const outputSupportsRotation = this._output.format.supportsVideoRotationMetadata;
 
 		const [originalWidth, originalHeight] = totalRotation % 180 === 0
 			? [track.codedWidth, track.codedHeight]
@@ -342,78 +382,78 @@ class Conversion {
 		// A lot of video encoders require that the dimensions be multiples of 2
 		const ceilToMultipleOfTwo = (value: number) => Math.ceil(value / 2) * 2;
 
-		if (this.options.video?.width !== undefined && this.options.video.height === undefined) {
-			width = ceilToMultipleOfTwo(this.options.video.width);
+		if (this._options.video?.width !== undefined && this._options.video.height === undefined) {
+			width = ceilToMultipleOfTwo(this._options.video.width);
 			height = ceilToMultipleOfTwo(Math.round(width / aspectRatio));
-		} else if (this.options.video?.width === undefined && this.options.video?.height !== undefined) {
-			height = ceilToMultipleOfTwo(this.options.video.height);
+		} else if (this._options.video?.width === undefined && this._options.video?.height !== undefined) {
+			height = ceilToMultipleOfTwo(this._options.video.height);
 			width = ceilToMultipleOfTwo(Math.round(height * aspectRatio));
-		} else if (this.options.video?.width !== undefined && this.options.video.height !== undefined) {
-			width = ceilToMultipleOfTwo(this.options.video.width);
-			height = ceilToMultipleOfTwo(this.options.video.height);
+		} else if (this._options.video?.width !== undefined && this._options.video.height !== undefined) {
+			width = ceilToMultipleOfTwo(this._options.video.width);
+			height = ceilToMultipleOfTwo(this._options.video.height);
 		}
 
 		const firstTimestamp = await track.getFirstTimestamp();
-		const needsReencode = !!this.options.video?.forceReencode || this.startTimestamp > 0 || firstTimestamp < 0;
+		const needsReencode = !!this._options.video?.forceReencode || this._startTimestamp > 0 || firstTimestamp < 0;
 		const needsRerender = width !== originalWidth
 			|| height !== originalHeight
 			|| (totalRotation !== 0 && !outputSupportsRotation);
 
-		let videoCodecs = this.output.format.getSupportedVideoCodecs();
+		let videoCodecs = this._output.format.getSupportedVideoCodecs();
 		if (
 			!needsReencode
-			&& !this.options.video?.bitrate
+			&& !this._options.video?.bitrate
 			&& !needsRerender
 			&& videoCodecs.includes(sourceCodec)
-			&& (!this.options.video?.codec || this.options.video?.codec === sourceCodec)
+			&& (!this._options.video?.codec || this._options.video?.codec === sourceCodec)
 		) {
 			// Fast path, we can simply copy over the encoded packets
 
 			const source = new EncodedVideoPacketSource(sourceCodec);
 			videoSource = source;
 
-			this.trackPromises.push((async () => {
-				await this.started;
+			this._trackPromises.push((async () => {
+				await this._started;
 
 				const sink = new EncodedPacketSink(track);
 				const decoderConfig = await track.getDecoderConfig();
 				const meta: EncodedVideoChunkMetadata = { decoderConfig: decoderConfig ?? undefined };
 
-				for await (const packet of sink.packets(undefined, this.endTimestamp)) {
-					if (this.synchronizer.shouldWait(track.id, packet.timestamp)) {
-						await this.synchronizer.wait(packet.timestamp);
+				for await (const packet of sink.packets(undefined, this._endTimestamp)) {
+					if (this._synchronizer.shouldWait(track.id, packet.timestamp)) {
+						await this._synchronizer.wait(packet.timestamp);
 					}
 
-					if (this.options.abortSignal?.aborted) {
+					if (this._canceled) {
 						return;
 					}
 
 					await source.add(packet, meta);
-					this.reportProgress(track.id, packet.timestamp + packet.duration);
+					this._reportProgress(track.id, packet.timestamp + packet.duration);
 				}
 
 				await source.close();
-				this.synchronizer.closeTrack(track.id);
+				this._synchronizer.closeTrack(track.id);
 			})());
 		} else {
 			// We need to decode & reencode the video
 
 			const canDecode = await track.canDecode();
 			if (!canDecode) {
-				this.result.discardedTracks.push({
+				this.discardedTracks.push({
 					track,
 					reason: 'undecodableSourceCodec',
 				});
 				return;
 			}
 
-			if (this.options.video?.codec) {
-				videoCodecs = videoCodecs.filter(codec => codec === this.options.video?.codec);
+			if (this._options.video?.codec) {
+				videoCodecs = videoCodecs.filter(codec => codec === this._options.video?.codec);
 			}
 
 			const encodableCodecs = await getEncodableVideoCodecs(videoCodecs, { width, height });
 			if (encodableCodecs.length === 0) {
-				this.result.discardedTracks.push({
+				this.discardedTracks.push({
 					track,
 					reason: 'noEncodableTargetCodec',
 				});
@@ -422,37 +462,37 @@ class Conversion {
 
 			const encodingConfig: VideoEncodingConfig = {
 				codec: encodableCodecs[0]!,
-				bitrate: this.options.video?.bitrate ?? QUALITY_HIGH,
-				onEncodedPacket: sample => this.reportProgress(track.id, sample.timestamp + sample.duration),
+				bitrate: this._options.video?.bitrate ?? QUALITY_HIGH,
+				onEncodedPacket: sample => this._reportProgress(track.id, sample.timestamp + sample.duration),
 			};
 
 			if (needsRerender) {
 				const source = new VideoFrameSource(encodingConfig);
 				videoSource = source;
 
-				this.trackPromises.push((async () => {
-					await this.started;
+				this._trackPromises.push((async () => {
+					await this._started;
 
 					const sink = new CanvasSink(track, {
 						width,
 						height,
-						fit: this.options.video?.fit ?? 'fill',
+						fit: this._options.video?.fit ?? 'fill',
 						rotation: totalRotation, // Bake the rotation into the output
 						poolSize: 1,
 					});
-					const iterator = sink.canvases(this.startTimestamp, this.endTimestamp);
+					const iterator = sink.canvases(this._startTimestamp, this._endTimestamp);
 
 					for await (const { canvas, timestamp, duration } of iterator) {
-						if (this.synchronizer.shouldWait(track.id, timestamp)) {
-							await this.synchronizer.wait(timestamp);
+						if (this._synchronizer.shouldWait(track.id, timestamp)) {
+							await this._synchronizer.wait(timestamp);
 						}
 
-						if (this.options.abortSignal?.aborted) {
+						if (this._canceled) {
 							return;
 						}
 
 						await source.add(new VideoFrame(canvas, {
-							timestamp: 1e6 * Math.max(timestamp - this.startTimestamp, 0),
+							timestamp: 1e6 * Math.max(timestamp - this._startTimestamp, 0),
 							duration: 1e6 * duration,
 						}));
 					}
@@ -461,21 +501,21 @@ class Conversion {
 				const source = new VideoFrameSource(encodingConfig);
 				videoSource = source;
 
-				this.trackPromises.push((async () => {
-					await this.started;
+				this._trackPromises.push((async () => {
+					await this._started;
 
 					const sink = new VideoFrameSink(track);
 
-					for await (const { frame, timestamp } of sink.frames(this.startTimestamp, this.endTimestamp)) {
-						if (this.synchronizer.shouldWait(track.id, timestamp)) {
-							await this.synchronizer.wait(timestamp);
+					for await (const { frame, timestamp } of sink.frames(this._startTimestamp, this._endTimestamp)) {
+						if (this._synchronizer.shouldWait(track.id, timestamp)) {
+							await this._synchronizer.wait(timestamp);
 						}
 
 						const clone = setVideoFrameTiming(frame, {
-							timestamp: Math.max(timestamp - this.startTimestamp, 0),
+							timestamp: Math.max(timestamp - this._startTimestamp, 0),
 						});
 
-						if (this.options.abortSignal?.aborted) {
+						if (this._canceled) {
 							return;
 						}
 
@@ -484,25 +524,26 @@ class Conversion {
 					}
 
 					await source.close();
-					this.synchronizer.closeTrack(track.id);
+					this._synchronizer.closeTrack(track.id);
 				})());
 			}
 		}
 
-		this.output.addVideoTrack(videoSource, {
+		this._output.addVideoTrack(videoSource, {
 			languageCode: track.languageCode,
 			rotation: needsRerender ? 0 : totalRotation, // Rerendering will bake the rotation into the output
 		});
-		this.addedCounts.video++;
-		this.totalTrackCount++;
+		this._addedCounts.video++;
+		this._totalTrackCount++;
 
-		this.result.utilizedTracks.push(track);
+		this.utilizedTracks.push(track);
 	}
 
-	async processAudioTrack(track: InputAudioTrack) {
+	/** @internal */
+	async _processAudioTrack(track: InputAudioTrack) {
 		const sourceCodec = track.codec;
 		if (!sourceCodec) {
-			this.result.discardedTracks.push({
+			this.discardedTracks.push({
 				track,
 				reason: 'unknownSourceCodec',
 			});
@@ -516,55 +557,55 @@ class Conversion {
 
 		const firstTimestamp = await track.getFirstTimestamp();
 
-		let numberOfChannels = this.options.audio?.numberOfChannels ?? originalNumberOfChannels;
-		let sampleRate = this.options.audio?.sampleRate ?? originalSampleRate;
+		let numberOfChannels = this._options.audio?.numberOfChannels ?? originalNumberOfChannels;
+		let sampleRate = this._options.audio?.sampleRate ?? originalSampleRate;
 		let needsResample = numberOfChannels !== originalNumberOfChannels
 			|| sampleRate !== originalSampleRate
-			|| this.startTimestamp > 0
+			|| this._startTimestamp > 0
 			|| firstTimestamp < 0;
 
-		let audioCodecs = this.output.format.getSupportedAudioCodecs();
+		let audioCodecs = this._output.format.getSupportedAudioCodecs();
 		if (
-			!this.options.audio?.forceReencode
-			&& !this.options.audio?.bitrate
+			!this._options.audio?.forceReencode
+			&& !this._options.audio?.bitrate
 			&& !needsResample
 			&& audioCodecs.includes(sourceCodec)
-			&& (!this.options.audio?.codec || this.options.audio.codec === sourceCodec)
+			&& (!this._options.audio?.codec || this._options.audio.codec === sourceCodec)
 		) {
 			// Fast path, we can simply copy over the encoded packets
 
 			const source = new EncodedAudioPacketSource(sourceCodec);
 			audioSource = source;
 
-			this.trackPromises.push((async () => {
-				await this.started;
+			this._trackPromises.push((async () => {
+				await this._started;
 
 				const sink = new EncodedPacketSink(track);
 				const decoderConfig = await track.getDecoderConfig();
 				const meta: EncodedAudioChunkMetadata = { decoderConfig: decoderConfig ?? undefined };
 
-				for await (const packet of sink.packets(undefined, this.endTimestamp)) {
-					if (this.synchronizer.shouldWait(track.id, packet.timestamp)) {
-						await this.synchronizer.wait(packet.timestamp);
+				for await (const packet of sink.packets(undefined, this._endTimestamp)) {
+					if (this._synchronizer.shouldWait(track.id, packet.timestamp)) {
+						await this._synchronizer.wait(packet.timestamp);
 					}
 
-					if (this.options.abortSignal?.aborted) {
+					if (this._canceled) {
 						return;
 					}
 
 					await source.add(packet, meta);
-					this.reportProgress(track.id, packet.timestamp + packet.duration);
+					this._reportProgress(track.id, packet.timestamp + packet.duration);
 				}
 
 				await source.close();
-				this.synchronizer.closeTrack(track.id);
+				this._synchronizer.closeTrack(track.id);
 			})());
 		} else {
 			// We need to decode & reencode the audio
 
 			const canDecode = await track.canDecode();
 			if (!canDecode) {
-				this.result.discardedTracks.push({
+				this.discardedTracks.push({
 					track,
 					reason: 'undecodableSourceCodec',
 				});
@@ -573,8 +614,8 @@ class Conversion {
 
 			let codecOfChoice: AudioCodec | null = null;
 
-			if (this.options.audio?.codec) {
-				audioCodecs = audioCodecs.filter(codec => codec === this.options.audio!.codec);
+			if (this._options.audio?.codec) {
+				audioCodecs = audioCodecs.filter(codec => codec === this._options.audio!.codec);
 			}
 
 			const encodableCodecs = await getEncodableAudioCodecs(audioCodecs, {
@@ -611,7 +652,7 @@ class Conversion {
 			}
 
 			if (codecOfChoice === null) {
-				this.result.discardedTracks.push({
+				this.discardedTracks.push({
 					track,
 					reason: 'noEncodableTargetCodec',
 				});
@@ -619,25 +660,25 @@ class Conversion {
 			}
 
 			if (needsResample) {
-				audioSource = this.resampleAudio(track, codecOfChoice, numberOfChannels, sampleRate);
+				audioSource = this._resampleAudio(track, codecOfChoice, numberOfChannels, sampleRate);
 			} else {
 				const source = new AudioDataSource({
 					codec: codecOfChoice,
-					bitrate: this.options.audio?.bitrate ?? QUALITY_HIGH,
-					onEncodedPacket: packet => this.reportProgress(track.id, packet.timestamp + packet.duration),
+					bitrate: this._options.audio?.bitrate ?? QUALITY_HIGH,
+					onEncodedPacket: packet => this._reportProgress(track.id, packet.timestamp + packet.duration),
 				});
 				audioSource = source;
 
-				this.trackPromises.push((async () => {
-					await this.started;
+				this._trackPromises.push((async () => {
+					await this._started;
 
 					const sink = new AudioDataSink(track);
-					for await (const { data, timestamp } of sink.data(undefined, this.endTimestamp)) {
-						if (this.synchronizer.shouldWait(track.id, timestamp)) {
-							await this.synchronizer.wait(timestamp);
+					for await (const { data, timestamp } of sink.data(undefined, this._endTimestamp)) {
+						if (this._synchronizer.shouldWait(track.id, timestamp)) {
+							await this._synchronizer.wait(timestamp);
 						}
 
-						if (this.options.abortSignal?.aborted) {
+						if (this._canceled) {
 							return;
 						}
 
@@ -646,25 +687,26 @@ class Conversion {
 					}
 
 					await source.close();
-					this.synchronizer.closeTrack(track.id);
+					this._synchronizer.closeTrack(track.id);
 				})());
 			}
 		}
 
-		this.output.addAudioTrack(audioSource, {
+		this._output.addAudioTrack(audioSource, {
 			languageCode: track.languageCode,
 		});
-		this.addedCounts.audio++;
-		this.totalTrackCount++;
+		this._addedCounts.audio++;
+		this._totalTrackCount++;
 
-		this.result.utilizedTracks.push(track);
+		this.utilizedTracks.push(track);
 	}
 
 	/**
 	 * Resamples the audio by decoding it, playing it onto an OfflineAudioContext and encoding the
 	 * resulting AudioBuffer.
+	 * @internal
 	 */
-	resampleAudio(
+	_resampleAudio(
 		track: InputAudioTrack,
 		codec: AudioCodec,
 		targetNumberOfChannels: number,
@@ -672,16 +714,16 @@ class Conversion {
 	) {
 		const source = new AudioBufferSource({
 			codec,
-			bitrate: this.options.audio?.bitrate ?? QUALITY_HIGH,
-			onEncodedPacket: packet => this.reportProgress(track.id, packet.timestamp + packet.duration),
+			bitrate: this._options.audio?.bitrate ?? QUALITY_HIGH,
+			onEncodedPacket: packet => this._reportProgress(track.id, packet.timestamp + packet.duration),
 		});
 
-		this.trackPromises.push((async () => {
-			await this.started;
+		this._trackPromises.push((async () => {
+			await this._started;
 
 			const trackDuration = Math.min(
-				await track.computeDuration() - this.startTimestamp,
-				this.endTimestamp - this.startTimestamp,
+				await track.computeDuration() - this._startTimestamp,
+				this._endTimestamp - this._startTimestamp,
 			);
 			const totalFrameCount = Math.round(trackDuration * targetSampleRate);
 			const maxChunkLength = 5 * targetSampleRate;
@@ -694,12 +736,14 @@ class Conversion {
 			});
 
 			const sink = new AudioBufferSink(track);
-			for await (const { buffer, timestamp, duration } of sink.buffers(this.startTimestamp, this.endTimestamp)) {
-				if (this.synchronizer.shouldWait(track.id, timestamp)) {
-					await this.synchronizer.wait(timestamp);
+			const iterator = sink.buffers(this._startTimestamp, this._endTimestamp);
+
+			for await (const { buffer, timestamp, duration } of iterator) {
+				if (this._synchronizer.shouldWait(track.id, timestamp)) {
+					await this._synchronizer.wait(timestamp);
 				}
 
-				const offsetTimestamp = timestamp - this.startTimestamp;
+				const offsetTimestamp = timestamp - this._startTimestamp;
 				const endTimestamp = offsetTimestamp + duration;
 
 				// while loop, as a single source buffer may span multiple audio contexts
@@ -725,7 +769,7 @@ class Conversion {
 						// Render the audio
 						const renderedBuffer = await currentContext.startRendering();
 
-						if (this.options.abortSignal?.aborted) {
+						if (this._canceled) {
 							return;
 						}
 
@@ -753,7 +797,7 @@ class Conversion {
 			if (currentContext) {
 				const renderedBuffer = await currentContext.startRendering();
 
-				if (this.options.abortSignal?.aborted) {
+				if (this._canceled) {
 					return;
 				}
 
@@ -761,30 +805,30 @@ class Conversion {
 			}
 
 			await source.close();
-			this.synchronizer.closeTrack(track.id);
+			this._synchronizer.closeTrack(track.id);
 		})());
 
 		return source;
 	}
 
-	reportProgress(trackId: number, endTimestamp: number) {
-		if (!this.options.onProgress) {
+	/** @internal */
+	_reportProgress(trackId: number, endTimestamp: number) {
+		if (!this._options.computeProgress) {
 			return;
 		}
-		assert(this.totalDuration !== null);
+		assert(this._totalDuration !== null);
 
-		this.maxTimestamps.set(trackId, Math.max(endTimestamp, this.maxTimestamps.get(trackId) ?? -Infinity));
+		this._maxTimestamps.set(trackId, Math.max(endTimestamp, this._maxTimestamps.get(trackId) ?? -Infinity));
 
 		let totalTimestamps = 0;
-		for (const [, timestamp] of this.maxTimestamps) {
+		for (const [, timestamp] of this._maxTimestamps) {
 			totalTimestamps += timestamp;
 		}
 
-		const averageTimestamp = totalTimestamps / this.totalTrackCount;
+		const averageTimestamp = totalTimestamps / this._totalTrackCount;
 
-		this.options.onProgress({
-			completion: 0.99 * clamp(averageTimestamp / this.totalDuration, 0, 1),
-		});
+		this.progress = 0.99 * clamp(averageTimestamp / this._totalDuration, 0, 1);
+		this.onProgress?.();
 	}
 }
 
