@@ -63,8 +63,12 @@ export const toUint8Array = (source: AllowSharedBufferSource): Uint8Array => {
 	}
 };
 
-export const toDataView = (bytes: Uint8Array) => {
-	return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+export const toDataView = (source: AllowSharedBufferSource) => {
+	if (source instanceof ArrayBuffer) {
+		return new DataView(source);
+	} else {
+		return new DataView(source.buffer, source.byteOffset, source.byteLength);
+	}
 };
 
 export const textEncoder = new TextEncoder();
@@ -356,20 +360,6 @@ export const clamp = (value: number, min: number, max: number) => {
 
 export const UNDETERMINED_LANGUAGE = 'und';
 
-/** @public */
-export const setVideoFrameTiming = (frame: VideoFrame, timing: {
-	timestamp?: number;
-	duration?: number;
-}) => {
-	const clone = new VideoFrame(frame, {
-		timestamp: timing.timestamp !== undefined ? 1e6 * timing.timestamp : undefined,
-		duration: timing.duration !== undefined ? 1e6 * timing.duration : undefined,
-	});
-	frame.close();
-
-	return clone;
-};
-
 export const roundToPrecision = (value: number, digits: number) => {
 	const factor = 10 ** digits;
 	return Math.round(value * factor) / factor;
@@ -393,5 +383,8 @@ export const isIso639Dash2LanguageCode = (x: string) => {
 	return ISO_639_2_REGEX.test(x);
 };
 
-// Since the result will be floored, add a bit of eps to compensate for floating point errors
+// Since the result will be truncated, add a bit of eps to compensate for floating point errors
 export const SECOND_TO_MICROSECOND_FACTOR = 1e6 * (1 + Number.EPSILON);
+
+/** @public */
+export type SetRequired<T, K extends keyof T> = T & Required<Pick<T, K>>;

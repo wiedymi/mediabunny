@@ -40,11 +40,11 @@ export class EncodedPacket {
 	}
 
 	get microsecondTimestamp() {
-		return Math.floor(SECOND_TO_MICROSECOND_FACTOR * this.timestamp);
+		return Math.trunc(SECOND_TO_MICROSECOND_FACTOR * this.timestamp);
 	}
 
 	get microsecondDuration() {
-		return Math.floor(SECOND_TO_MICROSECOND_FACTOR * this.duration);
+		return Math.trunc(SECOND_TO_MICROSECOND_FACTOR * this.duration);
 	}
 
 	toEncodedVideoChunk() {

@@ -26,6 +26,7 @@ import {
 	customAudioEncoders,
 } from './custom-coder';
 import { EncodedPacket } from './packet';
+import { AudioSample, VideoSample } from './sample';
 
 /** @public */
 export abstract class MediaSource {
@@ -194,33 +195,33 @@ class VideoEncoderWrapper {
 
 	constructor(private source: VideoSource, private encodingConfig: VideoEncodingConfig) {}
 
-	async add(videoFrame: VideoFrame, shouldClose: boolean, encodeOptions?: VideoEncoderEncodeOptions) {
+	async add(videoSample: VideoSample, shouldClose: boolean, encodeOptions?: VideoEncoderEncodeOptions) {
 		this.source._ensureValidAdd();
 
-		// Ensure video frame size remains constant
+		// Ensure video sample size remains constant
 		if (this.lastWidth !== null && this.lastHeight !== null) {
-			if (videoFrame.codedWidth !== this.lastWidth || videoFrame.codedHeight !== this.lastHeight) {
+			if (videoSample.codedWidth !== this.lastWidth || videoSample.codedHeight !== this.lastHeight) {
 				throw new Error(
-					`Video frame size must remain constant. Expected ${this.lastWidth}x${this.lastHeight},`
-					+ ` got ${videoFrame.codedWidth}x${videoFrame.codedHeight}.`,
+					`Video sample size must remain constant. Expected ${this.lastWidth}x${this.lastHeight},`
+					+ ` got ${videoSample.codedWidth}x${videoSample.codedHeight}.`,
 				);
 			}
 		} else {
-			this.lastWidth = videoFrame.codedWidth;
-			this.lastHeight = videoFrame.codedHeight;
+			this.lastWidth = videoSample.codedWidth;
+			this.lastHeight = videoSample.codedHeight;
 		}
 
 		if (!this.encoderInitialized) {
 			if (this.ensureEncoderPromise) {
 				await this.ensureEncoderPromise;
 			} else {
-				await this.ensureEncoder(videoFrame);
+				await this.ensureEncoder(videoSample);
 			}
 		}
 		assert(this.encoderInitialized);
 
 		const keyFrameInterval = this.encodingConfig.keyFrameInterval ?? 5;
-		const multipleOfKeyFrameInterval = Math.floor((videoFrame.timestamp / 1e6) / keyFrameInterval);
+		const multipleOfKeyFrameInterval = Math.floor(videoSample.timestamp / keyFrameInterval);
 
 		// Ensure a key frame every KEY_FRAME_INTERVAL seconds. It is important that all video tracks follow the same
 		// "key frame" rhythm, because aligned key frames are required to start new fragments in ISOBMFF or clusters
@@ -236,14 +237,14 @@ class VideoEncoderWrapper {
 		if (this.customEncoder) {
 			this.customEncoderQueueSize++;
 			this.lastCustomEncoderPromise = this.lastCustomEncoderPromise.then(() => {
-				return this.customEncoder!.encode(videoFrame, finalEncodeOptions);
+				return this.customEncoder!.encode(videoSample, finalEncodeOptions);
 			});
 
 			void this.lastCustomEncoderPromise.then(() => {
 				this.customEncoderQueueSize--;
 
 				if (shouldClose) {
-					videoFrame.close();
+					videoSample.close();
 				}
 			});
 
@@ -252,10 +253,12 @@ class VideoEncoderWrapper {
 			}
 		} else {
 			assert(this.encoder);
+			const videoFrame = videoSample.toVideoFrame();
 			this.encoder.encode(videoFrame, finalEncodeOptions);
+			videoFrame.close();
 
 			if (shouldClose) {
-				videoFrame.close();
+				videoSample.close();
 			}
 
 			// We need to do this after sending the frame to the encoder as the frame otherwise might be closed
@@ -267,7 +270,7 @@ class VideoEncoderWrapper {
 		await this.muxer!.mutex.currentPromise; // Allow the writer to apply backpressure
 	}
 
-	private async ensureEncoder(videoFrame: VideoFrame) {
+	private async ensureEncoder(videoSample: VideoSample) {
 		if (this.encoder) {
 			return;
 		}
@@ -275,8 +278,8 @@ class VideoEncoderWrapper {
 		const { promise, resolve } = promiseWithResolvers();
 		this.ensureEncoderPromise = promise;
 
-		const width = videoFrame.codedWidth;
-		const height = videoFrame.codedHeight;
+		const width = videoSample.codedWidth;
+		const height = videoSample.codedHeight;
 		const bitrate = this.encodingConfig.bitrate instanceof Quality
 			? this.encodingConfig.bitrate._toVideoBitrate(this.encodingConfig.codec, width, height)
 			: this.encodingConfig.bitrate;
@@ -365,7 +368,7 @@ class VideoEncoderWrapper {
 }
 
 /** @public */
-export class VideoFrameSource extends VideoSource {
+export class VideoSampleSource extends VideoSource {
 	/** @internal */
 	private _encoder: VideoEncoderWrapper;
 
@@ -376,12 +379,12 @@ export class VideoFrameSource extends VideoSource {
 		this._encoder = new VideoEncoderWrapper(this, encodingConfig);
 	}
 
-	add(videoFrame: VideoFrame, encodeOptions?: VideoEncoderEncodeOptions) {
-		if (!(videoFrame instanceof VideoFrame)) {
-			throw new TypeError('videoFrame must be a VideoFrame.');
+	add(videoSample: VideoSample, encodeOptions?: VideoEncoderEncodeOptions) {
+		if (!(videoSample instanceof VideoSample)) {
+			throw new TypeError('videoSample must be a VideoSample.');
 		}
 
-		return this._encoder.add(videoFrame, false, encodeOptions);
+		return this._encoder.add(videoSample, false, encodeOptions);
 	}
 
 	/** @internal */
@@ -419,13 +422,8 @@ export class CanvasSource extends VideoSource {
 			throw new TypeError('duration must be a non-negative number.');
 		}
 
-		const frame = new VideoFrame(this._canvas, {
-			timestamp: Math.round(1e6 * timestamp),
-			duration: Math.round(1e6 * duration) || undefined, // Drag 0 duration to undefined, glitches some codecs
-			alpha: 'discard',
-		});
-
-		return this._encoder.add(frame, true, encodeOptions);
+		const sample = new VideoSample(this._canvas, { timestamp, duration });
+		return this._encoder.add(sample, true, encodeOptions);
 	}
 
 	/** @internal */
@@ -475,7 +473,7 @@ export class MediaStreamVideoTrackSource extends VideoSource {
 					return;
 				}
 
-				void this._encoder.add(videoFrame, true);
+				void this._encoder.add(new VideoSample(videoFrame), true);
 			},
 		});
 
@@ -587,31 +585,31 @@ class AudioEncoderWrapper {
 
 	constructor(private source: AudioSource, private encodingConfig: AudioEncodingConfig) {}
 
-	async add(audioData: AudioData, shouldClose: boolean) {
+	async add(audioSample: AudioSample, shouldClose: boolean) {
 		this.source._ensureValidAdd();
 
 		// Ensure audio parameters remain constant
 		if (this.lastNumberOfChannels !== null && this.lastSampleRate !== null) {
 			if (
-				audioData.numberOfChannels !== this.lastNumberOfChannels
-				|| audioData.sampleRate !== this.lastSampleRate
+				audioSample.numberOfChannels !== this.lastNumberOfChannels
+				|| audioSample.sampleRate !== this.lastSampleRate
 			) {
 				throw new Error(
 					`Audio parameters must remain constant. Expected ${this.lastNumberOfChannels} channels at`
-					+ ` ${this.lastSampleRate} Hz, got ${audioData.numberOfChannels} channels at`
-					+ ` ${audioData.sampleRate} Hz.`,
+					+ ` ${this.lastSampleRate} Hz, got ${audioSample.numberOfChannels} channels at`
+					+ ` ${audioSample.sampleRate} Hz.`,
 				);
 			}
 		} else {
-			this.lastNumberOfChannels = audioData.numberOfChannels;
-			this.lastSampleRate = audioData.sampleRate;
+			this.lastNumberOfChannels = audioSample.numberOfChannels;
+			this.lastSampleRate = audioSample.sampleRate;
 		}
 
 		if (!this.encoderInitialized) {
 			if (this.ensureEncoderPromise) {
 				await this.ensureEncoderPromise;
 			} else {
-				await this.ensureEncoder(audioData);
+				await this.ensureEncoder(audioSample);
 			}
 		}
 		assert(this.encoderInitialized);
@@ -619,14 +617,14 @@ class AudioEncoderWrapper {
 		if (this.customEncoder) {
 			this.customEncoderQueueSize++;
 			this.lastCustomEncoderPromise = this.lastCustomEncoderPromise.then(() => {
-				return this.customEncoder!.encode(audioData);
+				return this.customEncoder!.encode(audioSample);
 			});
 
 			void this.lastCustomEncoderPromise.then(() => {
 				this.customEncoderQueueSize--;
 
 				if (shouldClose) {
-					audioData.close();
+					audioSample.close();
 				}
 			});
 
@@ -636,13 +634,15 @@ class AudioEncoderWrapper {
 
 			await this.muxer!.mutex.currentPromise; // Allow the writer to apply backpressure
 		} else if (this.isPcmEncoder) {
-			await this.doPcmEncoding(audioData, shouldClose);
+			await this.doPcmEncoding(audioSample, shouldClose);
 		} else {
 			assert(this.encoder);
+			const audioData = audioSample.toAudioData();
 			this.encoder.encode(audioData);
+			audioData.close();
 
 			if (shouldClose) {
-				audioData.close();
+				audioSample.close();
 			}
 
 			if (this.encoder.encodeQueueSize >= 4) {
@@ -653,12 +653,12 @@ class AudioEncoderWrapper {
 		}
 	}
 
-	private async doPcmEncoding(audioData: AudioData, shouldClose: boolean) {
+	private async doPcmEncoding(audioSample: AudioSample, shouldClose: boolean) {
 		assert(this.outputSampleSize);
 		assert(this.writeOutputValue);
 
 		// Need to extract data from the audio data before we close it
-		const { numberOfChannels, numberOfFrames, sampleRate, timestamp } = audioData;
+		const { numberOfChannels, numberOfFrames, sampleRate, timestamp } = audioSample;
 
 		const CHUNK_SIZE = 2048;
 		const outputs: {
@@ -668,7 +668,7 @@ class AudioEncoderWrapper {
 
 		// Prepare all of the output buffers, each being bounded by CHUNK_SIZE so we don't generate huge packets
 		for (let frame = 0; frame < numberOfFrames; frame += CHUNK_SIZE) {
-			const frameCount = Math.min(CHUNK_SIZE, audioData.numberOfFrames - frame);
+			const frameCount = Math.min(CHUNK_SIZE, audioSample.numberOfFrames - frame);
 			const outputSize = frameCount * numberOfChannels * this.outputSampleSize;
 			const outputBuffer = new ArrayBuffer(outputSize);
 			const outputView = new DataView(outputBuffer);
@@ -676,12 +676,11 @@ class AudioEncoderWrapper {
 			outputs.push({ frameCount, view: outputView });
 		}
 
-		// All user agents are required to support conversion to f32-planar
-		const allocationSize = audioData.allocationSize(({ planeIndex: 0, format: 'f32-planar' }));
+		const allocationSize = audioSample.allocationSize(({ planeIndex: 0, format: 'f32-planar' }));
 		const floats = new Float32Array(allocationSize / Float32Array.BYTES_PER_ELEMENT);
 
 		for (let i = 0; i < numberOfChannels; i++) {
-			audioData.copyTo(floats, { planeIndex: i, format: 'f32-planar' });
+			audioSample.copyTo(floats, { planeIndex: i, format: 'f32-planar' });
 
 			for (let j = 0; j < outputs.length; j++) {
 				const { frameCount, view } = outputs[j]!;
@@ -697,7 +696,7 @@ class AudioEncoderWrapper {
 		}
 
 		if (shouldClose) {
-			audioData.close();
+			audioSample.close();
 		}
 
 		const meta: EncodedAudioChunkMetadata = {
@@ -716,7 +715,7 @@ class AudioEncoderWrapper {
 			const packet = new EncodedPacket(
 				new Uint8Array(outputBuffer),
 				'key',
-				timestamp / 1e6 + startFrame / sampleRate,
+				timestamp + startFrame / sampleRate,
 				frameCount / sampleRate,
 			);
 
@@ -725,7 +724,7 @@ class AudioEncoderWrapper {
 		}
 	}
 
-	private async ensureEncoder(audioData: AudioData) {
+	private async ensureEncoder(audioSample: AudioSample) {
 		if (this.encoderInitialized) {
 			return;
 		}
@@ -733,7 +732,7 @@ class AudioEncoderWrapper {
 		const { promise, resolve } = promiseWithResolvers();
 		this.ensureEncoderPromise = promise;
 
-		const { numberOfChannels, sampleRate } = audioData;
+		const { numberOfChannels, sampleRate } = audioSample;
 		const bitrate = this.encodingConfig.bitrate instanceof Quality
 			? this.encodingConfig.bitrate._toAudioBitrate(this.encodingConfig.codec)
 			: this.encodingConfig.bitrate;
@@ -903,7 +902,7 @@ class AudioEncoderWrapper {
 }
 
 /** @public */
-export class AudioDataSource extends AudioSource {
+export class AudioSampleSource extends AudioSource {
 	/** @internal */
 	private _encoder: AudioEncoderWrapper;
 
@@ -914,12 +913,12 @@ export class AudioDataSource extends AudioSource {
 		this._encoder = new AudioEncoderWrapper(this, encodingConfig);
 	}
 
-	add(audioData: AudioData) {
-		if (!(audioData instanceof AudioData)) {
-			throw new TypeError('audioData must be an AudioData.');
+	add(audioSample: AudioSample) {
+		if (!(audioSample instanceof AudioSample)) {
+			throw new TypeError('audioSample must be an AudioSample.');
 		}
 
-		return this._encoder.add(audioData, false);
+		return this._encoder.add(audioSample, false);
 	}
 
 	/** @internal */
@@ -972,16 +971,16 @@ export class AudioBufferSource extends AudioSource {
 				);
 			}
 
-			const audioData = new AudioData({
+			const audioSample = new AudioSample({
 				format: 'f32-planar',
 				sampleRate,
 				numberOfFrames: framesToCopy,
 				numberOfChannels,
-				timestamp: (1e6 * (this._accumulatedFrameCount + currentRelativeFrame)) / sampleRate,
+				timestamp: (this._accumulatedFrameCount + currentRelativeFrame) / sampleRate,
 				data: chunkData,
 			});
 
-			promises.push(this._encoder.add(audioData, true));
+			promises.push(this._encoder.add(audioSample, true));
 
 			currentRelativeFrame += framesToCopy;
 			remainingFrames -= framesToCopy;
@@ -1033,7 +1032,7 @@ export class MediaStreamAudioTrackSource extends AudioSource {
 					return;
 				}
 
-				void this._encoder.add(audioData, true);
+				void this._encoder.add(new AudioSample(audioData), true);
 			},
 		});
 

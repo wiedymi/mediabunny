@@ -53,44 +53,6 @@ if (!(await audioTrack?.canDecode())) {
 	audioTrack = null;	
 }
 
-
-//const startTime2 = audioContext.currentTime + 0.2;
-//const sink = new Metamuxer.AudioDataSink(audioTrack);
-//for await (const { data } of sink.data(0)) {
-//	const sample = new Metamuxer.AudioSample(data)
-//
-//	console.log(sample.toAudioData())
-//
-//	const audioBuffer = sample.toAudioBuffer()
-//
-//	//console.log(sample, sample.allocationSize({ planeIndex: 7, format: 'u8-planar' }))
-//
-//	//break;
-//
-//	/*
-//	const audioBuffer = new AudioBuffer({
-//		numberOfChannels: sample.numberOfChannels,
-//		length: sample.numberOfFrames,
-//		sampleRate: sample.sampleRate,
-//	});
-//
-//	// All user agents are required to support conversion to f32-planar
-//	const dataBytes = new Uint8Array(sample.allocationSize({ planeIndex: 0, format: 'u8-planar' }));
-//
-//	for (let i = 0; i < sample.numberOfChannels; i++) {
-//		sample.copyTo(dataBytes, { planeIndex: i, format: 'u8-planar' });
-//		audioBuffer.copyToChannel(new Float32Array(dataBytes).map(x => (x - 128)/128), i);
-//	}
-//		*/
-//
-//	const node = audioContext.createBufferSource();	
-//	node.buffer = audioBuffer;	
-//	node.connect(audioContext.destination);	
-//	node.start(startTime2 + sample.timestamp);
-//}
-//
-//await new Promise(() => {})
-
 const canvas = document.querySelector('canvas');
 const context = canvas.getContext('2d');
 let videoRotation = 0;

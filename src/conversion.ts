@@ -13,24 +13,25 @@ import { Input } from './input';
 import { InputAudioTrack, InputTrack, InputVideoTrack } from './input-track';
 import {
 	AudioBufferSink,
-	AudioDataSink,
+	AudioSampleSink,
 	CanvasSink,
 	EncodedPacketSink,
-	VideoFrameSink,
+	VideoSampleSink,
 } from './media-sink';
 import {
 	AudioBufferSource,
-	AudioDataSource,
 	AudioEncodingConfig,
 	AudioSource,
 	EncodedVideoPacketSource,
 	EncodedAudioPacketSource,
 	VideoEncodingConfig,
-	VideoFrameSource,
 	VideoSource,
+	VideoSampleSource,
+	AudioSampleSource,
 } from './media-source';
-import { assert, clamp, normalizeRotation, promiseWithResolvers, Rotation, setVideoFrameTiming } from './misc';
+import { assert, clamp, normalizeRotation, promiseWithResolvers, Rotation } from './misc';
 import { Output, TrackType } from './output';
+import { VideoSample } from './sample';
 
 /** @public */
 export type ConversionOptions = {
@@ -467,7 +468,7 @@ export class Conversion {
 			};
 
 			if (needsRerender) {
-				const source = new VideoFrameSource(encodingConfig);
+				const source = new VideoSampleSource(encodingConfig);
 				videoSource = source;
 
 				this._trackPromises.push((async () => {
@@ -491,36 +492,37 @@ export class Conversion {
 							return;
 						}
 
-						await source.add(new VideoFrame(canvas, {
-							timestamp: 1e6 * Math.max(timestamp - this._startTimestamp, 0),
-							duration: 1e6 * duration,
-						}));
+						const sample = new VideoSample(canvas, {
+							timestamp: Math.max(timestamp - this._startTimestamp, 0),
+							duration,
+						});
+
+						await source.add(sample);
+						sample.close();
 					}
 				})());
 			} else {
-				const source = new VideoFrameSource(encodingConfig);
+				const source = new VideoSampleSource(encodingConfig);
 				videoSource = source;
 
 				this._trackPromises.push((async () => {
 					await this._started;
 
-					const sink = new VideoFrameSink(track);
+					const sink = new VideoSampleSink(track);
 
-					for await (const { frame, timestamp } of sink.frames(this._startTimestamp, this._endTimestamp)) {
-						if (this._synchronizer.shouldWait(track.id, timestamp)) {
-							await this._synchronizer.wait(timestamp);
+					for await (const sample of sink.samples(this._startTimestamp, this._endTimestamp)) {
+						if (this._synchronizer.shouldWait(track.id, sample.timestamp)) {
+							await this._synchronizer.wait(sample.timestamp);
 						}
 
-						const clone = setVideoFrameTiming(frame, {
-							timestamp: Math.max(timestamp - this._startTimestamp, 0),
-						});
+						sample.setTimestamp(Math.max(sample.timestamp - this._startTimestamp, 0));
 
 						if (this._canceled) {
 							return;
 						}
 
-						await source.add(clone);
-						clone.close();
+						await source.add(sample);
+						sample.close();
 					}
 
 					await source.close();
@@ -662,7 +664,7 @@ export class Conversion {
 			if (needsResample) {
 				audioSource = this._resampleAudio(track, codecOfChoice, numberOfChannels, sampleRate);
 			} else {
-				const source = new AudioDataSource({
+				const source = new AudioSampleSource({
 					codec: codecOfChoice,
 					bitrate: this._options.audio?.bitrate ?? QUALITY_HIGH,
 					onEncodedPacket: packet => this._reportProgress(track.id, packet.timestamp + packet.duration),
@@ -672,18 +674,18 @@ export class Conversion {
 				this._trackPromises.push((async () => {
 					await this._started;
 
-					const sink = new AudioDataSink(track);
-					for await (const { data, timestamp } of sink.data(undefined, this._endTimestamp)) {
-						if (this._synchronizer.shouldWait(track.id, timestamp)) {
-							await this._synchronizer.wait(timestamp);
+					const sink = new AudioSampleSink(track);
+					for await (const sample of sink.samples(undefined, this._endTimestamp)) {
+						if (this._synchronizer.shouldWait(track.id, sample.timestamp)) {
+							await this._synchronizer.wait(sample.timestamp);
 						}
 
 						if (this._canceled) {
 							return;
 						}
 
-						await source.add(data);
-						data.close();
+						await source.add(sample);
+						sample.close();
 					}
 
 					await source.close();

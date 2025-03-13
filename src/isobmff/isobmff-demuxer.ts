@@ -2200,10 +2200,10 @@ abstract class IsobmffTrackBacking implements InputTrackBacking {
 			// but can jump right into the correct fragment (or at least nearby).
 			const lookupEntryIndex = this.internalTrack.fragmentLookupTable
 				? binarySearchLessOrEqual(
-					this.internalTrack.fragmentLookupTable,
-					searchTimestamp,
-					x => x.timestamp,
-				)
+						this.internalTrack.fragmentLookupTable,
+						searchTimestamp,
+						x => x.timestamp,
+					)
 				: -1;
 			const lookupEntry = lookupEntryIndex !== -1
 				? this.internalTrack.fragmentLookupTable![lookupEntryIndex]!

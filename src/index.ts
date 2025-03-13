@@ -30,12 +30,12 @@ export {
 	MediaSource,
 	VideoSource,
 	EncodedVideoPacketSource,
-	VideoFrameSource,
+	VideoSampleSource,
 	CanvasSource,
 	MediaStreamVideoTrackSource,
 	AudioSource,
 	EncodedAudioPacketSource,
-	AudioDataSource,
+	AudioSampleSource,
 	AudioBufferSource,
 	MediaStreamAudioTrackSource,
 	SubtitleSource,
@@ -67,7 +67,7 @@ export {
 	getEncodableSubtitleCodecs,
 } from './codec';
 export { Target, BufferTarget, StreamTarget, StreamTargetChunk, StreamTargetOptions } from './target';
-export { Rotation, AnyIterable, setVideoFrameTiming } from './misc';
+export { Rotation, AnyIterable, SetRequired } from './misc';
 export { Source, BufferSource, StreamSource, StreamSourceOptions, BlobSource, UrlSource } from './source';
 export {
 	InputFormat,
@@ -92,20 +92,20 @@ export { Input, InputOptions } from './input';
 export { InputTrack, InputVideoTrack, InputAudioTrack, PacketStats } from './input-track';
 export { EncodedPacket, PacketType } from './packet';
 export {
+	VideoSample,
+	VideoSampleInit,
 	AudioSample,
 	AudioSampleInit,
 } from './sample';
 export {
 	PacketRetrievalOptions,
 	EncodedPacketSink,
-	BaseMediaFrameSink,
-	VideoFrameSink,
-	WrappedVideoFrame,
+	BaseMediaSampleSink,
+	VideoSampleSink,
 	CanvasSinkOptions,
 	CanvasSink,
 	WrappedCanvas,
-	AudioDataSink,
-	WrappedAudioData,
+	AudioSampleSink,
 	AudioBufferSink,
 	WrappedAudioBuffer,
 } from './media-sink';

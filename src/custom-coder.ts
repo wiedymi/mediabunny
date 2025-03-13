@@ -1,11 +1,12 @@
 import { AudioCodec, VideoCodec } from './codec';
 import { EncodedPacket } from './packet';
+import { AudioSample, VideoSample } from './sample';
 
 /** @public */
 export abstract class CustomVideoDecoder {
 	codec!: VideoCodec;
 	config!: VideoDecoderConfig;
-	onFrame!: (frame: VideoFrame) => unknown;
+	onSample!: (sample: VideoSample) => unknown;
 
 	// eslint-disable-next-line @typescript-eslint/no-unused-vars
 	static supports(codec: VideoCodec, config: VideoDecoderConfig): boolean {
@@ -22,7 +23,7 @@ export abstract class CustomVideoDecoder {
 export abstract class CustomAudioDecoder {
 	codec!: AudioCodec;
 	config!: AudioDecoderConfig;
-	onData!: (data: AudioData) => unknown;
+	onSample!: (sample: AudioSample) => unknown;
 
 	// eslint-disable-next-line @typescript-eslint/no-unused-vars
 	static supports(codec: AudioCodec, config: AudioDecoderConfig): boolean {
@@ -47,7 +48,7 @@ export abstract class CustomVideoEncoder {
 	}
 
 	abstract init(): void;
-	abstract encode(videoFrame: VideoFrame, options: VideoEncoderEncodeOptions): Promise<void> | void;
+	abstract encode(videoSample: VideoSample, options: VideoEncoderEncodeOptions): Promise<void> | void;
 	abstract flush(): Promise<void> | void;
 	abstract close(): Promise<void> | void;
 }
@@ -64,7 +65,7 @@ export abstract class CustomAudioEncoder {
 	}
 
 	abstract init(): void;
-	abstract encode(audioData: AudioData): Promise<void> | void;
+	abstract encode(audioSample: AudioSample): Promise<void> | void;
 	abstract flush(): Promise<void> | void;
 	abstract close(): Promise<void> | void;
 }
