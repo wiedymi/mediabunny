@@ -4,7 +4,10 @@ export function assert(x: unknown): asserts x {
 	}
 }
 
-/** @public */
+/**
+ * Represents a clockwise rotation in degrees.
+ * @public
+ */
 export type Rotation = 0 | 90 | 180 | 270;
 
 export const normalizeRotation = (rotation: number) => {
@@ -243,7 +246,10 @@ export const findLastIndex = <T>(arr: T[], predicate: (x: T) => boolean) => {
 	return -1;
 };
 
-/** @public */
+/**
+ * Sync or async iterable.
+ * @public
+ */
 export type AnyIterable<T> =
 	| Iterable<T>
 	| AsyncIterable<T>;
@@ -386,5 +392,8 @@ export const isIso639Dash2LanguageCode = (x: string) => {
 // Since the result will be truncated, add a bit of eps to compensate for floating point errors
 export const SECOND_TO_MICROSECOND_FACTOR = 1e6 * (1 + Number.EPSILON);
 
-/** @public */
+/**
+ * Sets all keys K of T to be required.
+ * @public
+ */
 export type SetRequired<T, K extends keyof T> = T & Required<Pick<T, K>>;

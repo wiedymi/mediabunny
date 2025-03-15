@@ -22,7 +22,7 @@ export {
 	WaveOutputFormat,
 	OggOutputFormat,
 	TrackCountLimits,
-	InclusiveRange,
+	InclusiveIntegerRange,
 } from './output-format';
 export {
 	VideoEncodingConfig,
@@ -96,6 +96,7 @@ export {
 	VideoSampleInit,
 	AudioSample,
 	AudioSampleInit,
+	AudioSampleCopyToOptions,
 } from './sample';
 export {
 	PacketRetrievalOptions,

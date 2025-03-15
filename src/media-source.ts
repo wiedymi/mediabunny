@@ -28,7 +28,10 @@ import {
 import { EncodedPacket } from './packet';
 import { AudioSample, VideoSample } from './sample';
 
-/** @public */
+/**
+ * Base class for media sources. Media sources are used to add media samples to an output file.
+ * @public
+ */
 export abstract class MediaSource {
 	/** @internal */
 	_connectedTrack: OutputTrack | null = null;
@@ -67,6 +70,11 @@ export abstract class MediaSource {
 	/** @internal */
 	async _flush() {}
 
+	/**
+	 * Closes this source. This prevents future samples from being added and signals to the output file that no further
+	 * samples will come in for this track. Calling `.close()` is optional but recommended after adding the
+	 * last sample - for improved performance and reduced memory usage.
+	 */
 	close() {
 		if (this._closingPromise) {
 			throw new Error('Source already closed.');
@@ -106,7 +114,10 @@ export abstract class MediaSource {
 	}
 }
 
-/** @public */
+/**
+ * Base class for video sources - sources for video tracks.
+ * @public
+ */
 export abstract class VideoSource extends MediaSource {
 	/** @internal */
 	override _connectedTrack: OutputVideoTrack | null = null;
@@ -124,12 +135,24 @@ export abstract class VideoSource extends MediaSource {
 	}
 }
 
-/** @public */
+/**
+ * The most basic video source; can be used to directly pipe encoded packets into the output file.
+ * @public
+ */
 export class EncodedVideoPacketSource extends VideoSource {
 	constructor(codec: VideoCodec) {
 		super(codec);
 	}
 
+	/**
+	 * Adds an encoded packet to the output video track.
+	 *
+	 * @param meta - Additional metadata from the encoder. You should pass this for the first call, including a valid
+	 * decoder config.
+	 *
+	 * @returns A Promise that resolves once the output is ready to receive more samples. You should await this Promise
+	 * to respect writer and encoder backpressure.
+	 */
 	add(packet: EncodedPacket, meta?: EncodedVideoChunkMetadata) {
 		if (!(packet instanceof EncodedPacket)) {
 			throw new TypeError('packet must be an EncodedPacket.');
@@ -143,13 +166,29 @@ export class EncodedVideoPacketSource extends VideoSource {
 	}
 }
 
-/** @public */
+/**
+ * Configuration object that controls video encoding. Can be used to set codec, quality, and more.
+ * @public
+ */
 export type VideoEncodingConfig = {
+	/** The video codec that should be used for encoding the video samples (frames). */
 	codec: VideoCodec;
+	/**
+	 * The target bitrate for the encoded video, in bits per second. Alternatively, a subjective Quality can
+	 * be provided.
+	 */
 	bitrate: number | Quality;
+	/** The latency mode used by the encoder; controls the performance-quality tradeoff. */
 	latencyMode?: VideoEncoderConfig['latencyMode'];
+	/**
+	 * The interval, in seconds, of how often frames are encoded as a key frame. The default is 5 seconds. Frequent key
+	 * frames improve seeking behavior but increase file size. When using multiple video tracks, you should give them
+	 * all the same key frame interval.
+	 */
 	keyFrameInterval?: number;
+	/** Called for each successfully encoded packet. Both the packet and the encoding metadata are passed. */
 	onEncodedPacket?: (packet: EncodedPacket, meta: EncodedVideoChunkMetadata | undefined) => unknown;
+	/** Called when an error occurs during encoding. */
 	onEncodingError?: (error: Error) => unknown;
 };
 
@@ -223,7 +262,7 @@ class VideoEncoderWrapper {
 		const keyFrameInterval = this.encodingConfig.keyFrameInterval ?? 5;
 		const multipleOfKeyFrameInterval = Math.floor(videoSample.timestamp / keyFrameInterval);
 
-		// Ensure a key frame every KEY_FRAME_INTERVAL seconds. It is important that all video tracks follow the same
+		// Ensure a key frame every keyFrameInterval seconds. It is important that all video tracks follow the same
 		// "key frame" rhythm, because aligned key frames are required to start new fragments in ISOBMFF or clusters
 		// in Matroska.
 		const finalEncodeOptions = {
@@ -367,7 +406,11 @@ class VideoEncoderWrapper {
 	}
 }
 
-/** @public */
+/**
+ * This source can be used to add raw, unencoded video samples (frames) to an output video track. These frames will
+ * automatically be encoded and then piped into the output.
+ * @public
+ */
 export class VideoSampleSource extends VideoSource {
 	/** @internal */
 	private _encoder: VideoEncoderWrapper;
@@ -379,6 +422,12 @@ export class VideoSampleSource extends VideoSource {
 		this._encoder = new VideoEncoderWrapper(this, encodingConfig);
 	}
 
+	/**
+	 * Encodes a video sample (frame) and then adds it to the output.
+	 *
+	 * @returns A Promise that resolves once the output is ready to receive more samples. You should await this Promise
+	 * to respect writer and encoder backpressure.
+	 */
 	add(videoSample: VideoSample, encodeOptions?: VideoEncoderEncodeOptions) {
 		if (!(videoSample instanceof VideoSample)) {
 			throw new TypeError('videoSample must be a VideoSample.');
@@ -393,7 +442,11 @@ export class VideoSampleSource extends VideoSource {
 	}
 }
 
-/** @public */
+/**
+ * This source can be used to add video frames to the output track from a fixed canvas element. Since canvases are often
+ * used for rendering, this source provides a convenient wrapper around VideoSampleSource.
+ * @public
+ */
 export class CanvasSource extends VideoSource {
 	/** @internal */
 	private _encoder: VideoEncoderWrapper;
@@ -414,6 +467,15 @@ export class CanvasSource extends VideoSource {
 		this._canvas = canvas;
 	}
 
+	/**
+	 * Captures the current canvas state as a video sample (frame), encodes it and adds it to the output.
+	 *
+	 * @param timestamp - The timestamp of the sample, in seconds.
+	 * @param duration - The duration of the sample, in seconds.
+	 *
+	 * @returns A Promise that resolves once the output is ready to receive more samples. You should await this Promise
+	 * to respect writer and encoder backpressure.
+	 */
 	add(timestamp: number, duration = 0, encodeOptions?: VideoEncoderEncodeOptions) {
 		if (!Number.isFinite(timestamp) || timestamp < 0) {
 			throw new TypeError('timestamp must be a non-negative number.');
@@ -432,7 +494,13 @@ export class CanvasSource extends VideoSource {
 	}
 }
 
-/** @public */
+/**
+ * Video source that encodes the frames of a MediaStreamVideoTrack and pipes them into the output. This is useful for
+ * capturing live or real-time data such as webcams or screen captures. Frames will automatically start being captured
+ * once the connected Output is started, and will keep being captured until the Output is finalized or this source
+ * is closed.
+ * @public
+ */
 export class MediaStreamVideoTrackSource extends VideoSource {
 	/** @internal */
 	private _encoder: VideoEncoderWrapper;
@@ -498,7 +566,10 @@ export class MediaStreamVideoTrackSource extends VideoSource {
 	}
 }
 
-/** @public */
+/**
+ * Base class for audio sources - sources for audio tracks.
+ * @public
+ */
 export abstract class AudioSource extends MediaSource {
 	/** @internal */
 	override _connectedTrack: OutputAudioTrack | null = null;
@@ -516,12 +587,24 @@ export abstract class AudioSource extends MediaSource {
 	}
 }
 
-/** @public */
+/**
+ * The most basic audio source; can be used to directly pipe encoded packets into the output file.
+ * @public
+ */
 export class EncodedAudioPacketSource extends AudioSource {
 	constructor(codec: AudioCodec) {
 		super(codec);
 	}
 
+	/**
+	 * Adds an encoded packet to the output audio track.
+	 *
+	 * @param meta - Additional metadata from the encoder. You should pass this for the first call, including a valid
+	 * decoder config.
+	 *
+	 * @returns A Promise that resolves once the output is ready to receive more samples. You should await this Promise
+	 * to respect writer and encoder backpressure.
+	 */
 	add(packet: EncodedPacket, meta?: EncodedAudioChunkMetadata) {
 		if (!(packet instanceof EncodedPacket)) {
 			throw new TypeError('packet must be an EncodedPacket.');
@@ -534,11 +617,22 @@ export class EncodedAudioPacketSource extends AudioSource {
 		return this._connectedTrack!.output._muxer.addEncodedAudioPacket(this._connectedTrack!, packet, meta);
 	}
 }
-/** @public */
+
+/**
+ * Configuration object that controls audio encoding. Can be used to set codec, quality, and more.
+ * @public
+ */
 export type AudioEncodingConfig = {
+	/** The audio codec that should be used for encoding the audio samples. */
 	codec: AudioCodec;
+	/**
+	 * The target bitrate for the encoded audio, in bits per second. Alternatively, a subjective Quality can
+	 * be provided. Required for compressed audio codecs, unused for PCM codecs.
+	 */
 	bitrate?: number | Quality;
+	/** Called for each successfully encoded packet. Both the packet and the encoding metadata are passed. */
 	onEncodedPacket?: (packet: EncodedPacket, meta: EncodedAudioChunkMetadata | undefined) => unknown;
+	/** Called when an error occurs during encoding. */
 	onEncodingError?: (error: Error) => unknown;
 };
 
@@ -901,7 +995,11 @@ class AudioEncoderWrapper {
 	}
 }
 
-/** @public */
+/**
+ * This source can be used to add raw, unencoded audio samples to an output audio track. These samples will
+ * automatically be encoded and then piped into the output.
+ * @public
+ */
 export class AudioSampleSource extends AudioSource {
 	/** @internal */
 	private _encoder: AudioEncoderWrapper;
@@ -913,6 +1011,12 @@ export class AudioSampleSource extends AudioSource {
 		this._encoder = new AudioEncoderWrapper(this, encodingConfig);
 	}
 
+	/**
+	 * Encodes an audio sample and then adds it to the output.
+	 *
+	 * @returns A Promise that resolves once the output is ready to receive more samples. You should await this Promise
+	 * to respect writer and encoder backpressure.
+	 */
 	add(audioSample: AudioSample) {
 		if (!(audioSample instanceof AudioSample)) {
 			throw new TypeError('audioSample must be an AudioSample.');
@@ -927,7 +1031,11 @@ export class AudioSampleSource extends AudioSource {
 	}
 }
 
-/** @public */
+/**
+ * This source can be used to add audio data from an AudioBuffer to the output track. This is useful when working with
+ * the Web Audio API.
+ * @public
+ */
 export class AudioBufferSource extends AudioSource {
 	/** @internal */
 	private _encoder: AudioEncoderWrapper;
@@ -941,6 +1049,14 @@ export class AudioBufferSource extends AudioSource {
 		this._encoder = new AudioEncoderWrapper(this, encodingConfig);
 	}
 
+	/**
+	 * Converts an AudioBuffer to audio samples, encodes them and adds them to the output. The first AudioBuffer will
+	 * be played at timestamp 0, and any subsequent AudioBuffer will have a timestamp equal to the total duration of
+	 * all previous AudioBuffers.
+	 *
+	 * @returns A Promise that resolves once the output is ready to receive more samples. You should await this Promise
+	 * to respect writer and encoder backpressure.
+	 */
 	add(audioBuffer: AudioBuffer) {
 		if (!(audioBuffer instanceof AudioBuffer)) {
 			throw new TypeError('audioBuffer must be an AudioBuffer.');
@@ -996,7 +1112,13 @@ export class AudioBufferSource extends AudioSource {
 	}
 }
 
-/** @public */
+/**
+ * Audio source that encodes the data of a MediaStreamAudioTrack and pipes it into the output. This is useful for
+ * capturing live or real-time audio such as microphones or audio from other media elements. Audio will automatically
+ * start being captured once the connected Output is started, and will keep being captured until the Output is
+ * finalized or this source is closed.
+ * @public
+ */
 export class MediaStreamAudioTrackSource extends AudioSource {
 	/** @internal */
 	private _encoder: AudioEncoderWrapper;
@@ -1057,7 +1179,10 @@ export class MediaStreamAudioTrackSource extends AudioSource {
 	}
 }
 
-/** @public */
+/**
+ * Base class for subtitle sources - sources for subtitle tracks.
+ * @public
+ */
 export abstract class SubtitleSource extends MediaSource {
 	/** @internal */
 	override _connectedTrack: OutputSubtitleTrack | null = null;
@@ -1075,7 +1200,10 @@ export abstract class SubtitleSource extends MediaSource {
 	}
 }
 
-/** @public */
+/**
+ * This source can be used to add subtitles from a subtitle text file.
+ * @public
+ */
 export class TextSubtitleSource extends SubtitleSource {
 	/** @internal */
 	private _parser: SubtitleParser;
@@ -1090,6 +1218,13 @@ export class TextSubtitleSource extends SubtitleSource {
 		});
 	}
 
+	/**
+	 * Parses the subtitle text according to the specified codec and adds it to the output track. You don't have to
+	 * add the entire subtitle file at once here; you can provide it in chunks.
+	 *
+	 * @returns A Promise that resolves once the output is ready to receive more samples. You should await this Promise
+	 * to respect writer and encoder backpressure.
+	 */
 	add(text: string) {
 		if (typeof text !== 'string') {
 			throw new TypeError('text must be a string.');

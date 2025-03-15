@@ -9,44 +9,72 @@ import {
 	SetRequired,
 } from './misc';
 
-/** @public */
+/**
+ * Metadata used for VideoSample initialization.
+ * @public
+ */
 export type VideoSampleInit = {
+	/** The internal pixel format in which the frame is stored. */
 	format?: VideoPixelFormat;
+	/** The width of the frame in pixels. */
 	codedWidth?: number;
+	/** The height of the frame in pixels. */
 	codedHeight?: number;
+	/** The rotation of the frame in degrees, clockwise. */
 	rotation?: Rotation;
+	/** The timestamp of the frame in seconds. */
 	timestamp?: number;
+	/** The duration of the frame in seconds. */
 	duration?: number;
+	/** The color space of the frame. */
 	colorSpace?: VideoColorSpaceInit;
 };
 
-/** @public */
+/**
+ * Represents a raw, unencoded video sample (frame). Mainly used as an expressive wrapper around WebCodecs API's
+ * VideoFrame, but can also be used standalone.
+ * @public
+ */
 export class VideoSample {
 	/** @internal */
 	_data!: VideoFrame | OffscreenCanvas | Uint8Array | null;
 	/** @internal */
 	_closed: boolean = false;
 
+	/** The internal pixel format in which the frame is stored. */
 	readonly format!: VideoPixelFormat | null;
+	/** The width of the frame in pixels. */
 	readonly codedWidth!: number;
+	/** The height of the frame in pixels. */
 	readonly codedHeight!: number;
+	/** The rotation of the frame in degrees, clockwise. */
 	readonly rotation!: Rotation;
+	/**
+	 * The timestamp of the frame in seconds. May be negative. Frames with negative end timestamps should not
+	 * be presented.
+	 */
 	readonly timestamp!: number;
+	/** The duration of the frame in seconds. */
 	readonly duration!: number;
+	/** The color space of the frame. */
 	readonly colorSpace!: VideoColorSpace;
 
+	/** The width of the frame in pixels after rotation. */
 	get displayWidth() {
 		return this.rotation % 180 === 0 ? this.codedWidth : this.codedHeight;
 	}
 
+	/** The height of the frame in pixels after rotation. */
 	get displayHeight() {
 		return this.rotation % 180 === 0 ? this.codedHeight : this.codedWidth;
 	}
 
+	/** The timestamp of the frame in microseconds. */
 	get microsecondTimestamp() {
 		return Math.trunc(SECOND_TO_MICROSECOND_FACTOR * this.timestamp);
 	}
 
+	/** The duration of the frame in microseconds. */
 	get microsecondDuration() {
 		return Math.trunc(SECOND_TO_MICROSECOND_FACTOR * this.duration);
 	}
@@ -188,6 +216,7 @@ export class VideoSample {
 		}
 	}
 
+	/** Clones this video sample. */
 	clone() {
 		if (this._closed) {
 			throw new Error('VideoSample is closed.');
@@ -218,6 +247,10 @@ export class VideoSample {
 		}
 	}
 
+	/**
+	 * Closes this video sample, releasing held resources. Video samples should be closed as soon as they are not
+	 * needed anymore.
+	 */
 	close() {
 		if (this._closed) {
 			return;
@@ -232,6 +265,7 @@ export class VideoSample {
 		this._closed = true;
 	}
 
+	/** Returns the number of bytes required to hold this video sample's pixel data. */
 	allocationSize() {
 		if (this._closed) {
 			throw new Error('VideoSample is closed.');
@@ -248,6 +282,7 @@ export class VideoSample {
 		}
 	}
 
+	/** Copies this video sample's pixel data to an ArrayBuffer or ArrayBufferView. */
 	async copyTo(destination: AllowSharedBufferSource) {
 		if (!isAllowSharedBufferSource(destination)) {
 			throw new TypeError('destination must be an ArrayBuffer or an ArrayBuffer view.');
@@ -275,6 +310,10 @@ export class VideoSample {
 		}
 	}
 
+	/**
+	 * Converts this video sample to a VideoFrame for use with the WebCodecs API. The VideoFrame returned by this
+	 * method *must* be closed separately from this video sample.
+	 */
 	toVideoFrame() {
 		if (this._closed) {
 			throw new Error('VideoSample is closed.');
@@ -304,6 +343,14 @@ export class VideoSample {
 		}
 	}
 
+	/**
+	 * Draws the video sample to a 2D canvas context. Rotation metadata will be taken into account.
+	 *
+	 * @param dx - The x-coordinate in the destination canvas at which to place the top-left corner of the source image.
+	 * @param dy - The y-coordinate in the destination canvas at which to place the top-left corner of the source image.
+	 * @param dWidth - The width to draw the image in the destination canvas. This allows scaling of the drawn image.
+	 * @param dHeight - The height to draw the image in the destination canvas. This allows scaling of the drawn image.
+	 */
 	draw(
 		context: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
 		dx: number,
@@ -364,6 +411,7 @@ export class VideoSample {
 		context.restore();
 	}
 
+	/** Converts this video sample to a CanvasImageSource for drawing to a canvas. */
 	toCanvasImageSource() {
 		if (this._closed) {
 			throw new Error('VideoSample is closed.');
@@ -379,6 +427,7 @@ export class VideoSample {
 		}
 	}
 
+	/** Sets the rotation metadata of this video sample. */
 	setRotation(newRotation: Rotation) {
 		if (![0, 90, 180, 270].includes(newRotation)) {
 			throw new TypeError('newRotation must be 0, 90, 180, or 270.');
@@ -388,6 +437,7 @@ export class VideoSample {
 		(this.rotation as Rotation) = newRotation;
 	}
 
+	/** Sets the timestamp of this video sample, in seconds. */
 	setTimestamp(newTimestamp: number) {
 		if (!Number.isFinite(newTimestamp)) {
 			throw new TypeError('newTimestamp must be a number.');
@@ -397,6 +447,7 @@ export class VideoSample {
 		(this.timestamp as number) = newTimestamp;
 	}
 
+	/** Sets the duration of this video sample, in seconds. */
 	setDuration(newDuration: number) {
 		if (!Number.isFinite(newDuration) || newDuration < 0) {
 			throw new TypeError('newDuration must be a non-negative number.');
@@ -415,33 +466,78 @@ const AUDIO_SAMPLE_FORMATS = new Set(
 	['f32', 'f32-planar', 's16', 's16-planar', 's32', 's32-planar', 'u8', 'u8-planar'],
 );
 
-/** @public */
+/**
+ * Metadata used for AudioSample initialization.
+ * @public
+ */
 export type AudioSampleInit = {
+	/** The audio data for this sample. */
 	data: AllowSharedBufferSource;
+	/** The audio sample format. */
 	format: AudioSampleFormat;
+	/** The number of audio channels. */
 	numberOfChannels: number;
+	/** The audio sample rate in hertz. */
 	sampleRate: number;
+	/** The timestamp of the sample in seconds. */
 	timestamp: number;
 };
 
-/** @public */
+/**
+ * Options used for copying audio sample data.
+ * @public
+ */
+export type AudioSampleCopyToOptions = {
+	/**
+	 * The index identifying the plane to copy from. This must be 0 if using a non-planar (interleaved) output format.
+	 */
+	planeIndex: number;
+	/** The output format for the destination data. Defaults to the AudioSample's format. */
+	format?: AudioSampleFormat;
+	/** An offset into the source plane data indicating which frame to begin copying from. Defaults to 0. */
+	frameOffset?: number;
+	/**
+	 * The number of frames to copy. If not provided, the copy will include all frames in the plane beginning
+	 * with frameOffset.
+	 */
+	frameCount?: number;
+};
+
+/**
+ * Represents a raw, unencoded audio sample. Mainly used as an expressive wrapper around WebCodecs API's AudioData,
+ * but can also be used standalone.
+ * @public
+ */
 export class AudioSample {
 	/** @internal */
 	_data: AudioData | Uint8Array;
 	/** @internal */
 	_closed: boolean = false;
 
+	/** The audio sample format. */
 	readonly format: AudioSampleFormat;
+	/** The audio sample rate in hertz. */
 	readonly sampleRate: number;
+	/**
+	 * The number of audio frames in the sample, per channel. In other words, the length of this audio sample in frames.
+	 */
 	readonly numberOfFrames: number;
+	/** The number of audio channels. */
 	readonly numberOfChannels: number;
+	/** The timestamp of the sample in seconds. */
 	readonly duration: number;
+	/**
+	 * The timestamp of the sample in seconds. May be negative. Samples with negative end timestamps should not
+	 * be presented.
+	 */
 	readonly timestamp: number;
 
+	/** The timestamp of the sample in microseconds. */
 	get microsecondTimestamp() {
 		return Math.trunc(SECOND_TO_MICROSECOND_FACTOR * this.timestamp);
 	}
 
+	/** The duration of the sample in microseconds. */
 	get microsecondDuration() {
 		return Math.trunc(SECOND_TO_MICROSECOND_FACTOR * this.duration);
 	}
@@ -510,12 +606,8 @@ export class AudioSample {
 		}
 	}
 
-	allocationSize(options: {
-		planeIndex: number;
-		format?: AudioSampleFormat;
-		frameOffset?: number;
-		frameCount?: number;
-	}) {
+	/** Returns the number of bytes required to hold the audio sample's data as specified by the given options. */
+	allocationSize(options: AudioSampleCopyToOptions) {
 		if (!options || typeof options !== 'object') {
 			throw new TypeError('options must be an object.');
 		}
@@ -563,15 +655,8 @@ export class AudioSample {
 		return elementCount * bytesPerSample;
 	}
 
-	copyTo(
-		destination: AllowSharedBufferSource,
-		options: {
-			planeIndex: number;
-			format?: AudioSampleFormat;
-			frameOffset?: number;
-			frameCount?: number;
-		},
-	) {
+	/** Copies the audio sample's data to an ArrayBuffer or ArrayBufferView as specified by the given options. */
+	copyTo(destination: AllowSharedBufferSource, options: AudioSampleCopyToOptions) {
 		if (!isAllowSharedBufferSource(destination)) {
 			throw new TypeError('destination must be an ArrayBuffer or an ArrayBuffer view.');
 		}
@@ -720,6 +805,7 @@ export class AudioSample {
 		}
 	}
 
+	/** Clones this audio sample. */
 	clone(): AudioSample {
 		if (this._closed) {
 			throw new Error('AudioSample is closed.');
@@ -740,6 +826,10 @@ export class AudioSample {
 		}
 	}
 
+	/**
+	 * Closes this audio sample, releasing held resources. Audio samples should be closed as soon as they are not
+	 * needed anymore.
+	 */
 	close(): void {
 		if (this._closed) {
 			return;
@@ -754,6 +844,10 @@ export class AudioSample {
 		this._closed = true;
 	}
 
+	/**
+	 * Converts this audio sample to an AudioData for use with the WebCodecs API. The AudioData returned by this
+	 * method *must* be closed separately from this audio sample.
+	 */
 	toAudioData() {
 		if (this._closed) {
 			throw new Error('AudioSample is closed.');
@@ -812,6 +906,7 @@ export class AudioSample {
 		}
 	}
 
+	/** Convert this audio sample to an AudioBuffer for use with the Web Audio API. */
 	toAudioBuffer() {
 		if (this._closed) {
 			throw new Error('AudioSample is closed.');
@@ -833,6 +928,7 @@ export class AudioSample {
 		return audioBuffer;
 	}
 
+	/** Sets the timestamp of this audio sample, in seconds. */
 	setTimestamp(newTimestamp: number) {
 		if (!Number.isFinite(newTimestamp)) {
 			throw new TypeError('newTimestamp must be a number.');

@@ -1,4 +1,7 @@
-/** @public */
+/**
+ * The source base class, representing a resource from which bytes can be read.
+ * @public
+ */
 export abstract class Source {
 	/** @internal */
 	abstract _read(start: number, end: number): Promise<Uint8Array>;
@@ -13,10 +16,19 @@ export abstract class Source {
 		return this._sizePromise ??= this._retrieveSize();
 	}
 
-	onread: ((range: { start: number; end: number }) => unknown) | null = null;
+	/** Called each time data is requested from the source. */
+	onread: ((range: {
+		/** The start byte offset (inclusive). */
+		start: number;
+		/** The end byte offset (exclusive). */
+		end: number;
+	}) => unknown) | null = null;
 }
 
-/** @public */
+/**
+ * A source backed by an ArrayBuffer or ArrayBufferView, with the entire file held in memory.
+ * @public
+ */
 export class BufferSource extends Source {
 	/** @internal */
 	_bytes: Uint8Array;
@@ -42,13 +54,21 @@ export class BufferSource extends Source {
 	}
 }
 
-/** @public */
+/**
+ * Options for defining a StreamSource.
+ * @public
+ */
 export type StreamSourceOptions = {
+	/** Called when data is requested. Should return or resolve to the bytes from the specified byte range. */
 	read: (start: number, end: number) => Uint8Array | Promise<Uint8Array>;
+	/** Called when the size of the entire file is requested. Should return or resolve to the size in bytes. */
 	getSize: () => number | Promise<number>;
 };
 
-/** @public */
+/**
+ * A general-purpose, callback-driven source that can get its data from anywhere.
+ * @public
+ */
 export class StreamSource extends Source {
 	/** @internal */
 	_options: StreamSourceOptions;
@@ -80,7 +100,10 @@ export class StreamSource extends Source {
 	}
 }
 
-/** @public */
+/**
+ * A source backed by a Blob. Since Files are also Blobs, this is the source to use when reading files off the disk.
+ * @public
+ */
 export class BlobSource extends Source {
 	/** @internal */
 	_blob: Blob;
@@ -108,7 +131,11 @@ export class BlobSource extends Source {
 	}
 }
 
-/** @public */
+/**
+ * A source backed by a URL. This is useful for reading data from the network. Be careful using this source however,
+ * as it typically comes with increased latency.
+ * @public
+ */
 export class UrlSource extends Source {
 	/** @internal */
 	private _url: string;
@@ -117,7 +144,13 @@ export class UrlSource extends Source {
 	/** @internal */
 	private _fullData: ArrayBuffer | null = null;
 
-	constructor(url: string, options: { withCredentials?: boolean } = {}) {
+	constructor(
+		url: string,
+		options: {
+			/** If credentials are to be included in a cross-origin request. */
+			withCredentials?: boolean;
+		} = {},
+	) {
 		if (typeof url !== 'string') {
 			throw new TypeError('url must be a string.');
 		}
@@ -202,32 +235,44 @@ export class UrlSource extends Source {
 		}
 
 		const xhr = new XMLHttpRequest();
-		xhr.open('HEAD', this._url, true);
+		xhr.open('GET', this._url, true);
+		xhr.responseType = 'arraybuffer';
 		xhr.withCredentials = this._withCredentials;
+		xhr.setRequestHeader('Range', 'bytes=0-0');
 
 		await new Promise<void>((resolve, reject) => {
 			xhr.onload = () => {
 				if (xhr.status >= 200 && xhr.status < 300) {
 					resolve();
 				} else {
-					reject(new Error(`Error fetching ${this._url} (HEAD): ${xhr.status} ${xhr.statusText}`));
+					reject(new Error(`Error fetching ${this._url} (Range): ${xhr.status} ${xhr.statusText}`));
 				}
 			};
 
 			xhr.onerror = () => {
-				resolve();
+				reject(new Error('Network error occurred.'));
 			};
 
 			xhr.send();
 		});
 
-		const contentLength = xhr.getResponseHeader('Content-Length');
-		if (!contentLength) {
-			// If Content-Length is not available, make a GET request to get the full size
-			const { response } = await this._makeRequest();
-			return response.byteLength;
+		// Check for Content-Range header (e.g., "bytes 0-0/1234" where 1234 is the total size)
+		const contentRange = xhr.getResponseHeader('Content-Range');
+		if (contentRange) {
+			const match = contentRange.match(/bytes \d+-\d+\/(\d+)/);
+			if (match && match[1]) {
+				return parseInt(match[1], 10);
+			}
 		}
 
-		return parseInt(contentLength, 10);
+		// If Content-Range is not available, check Content-Length
+		const contentLength = xhr.getResponseHeader('Content-Length');
+		if (contentLength) {
+			return parseInt(contentLength, 10);
+		}
+
+		// If neither header is available, make a full GET request
+		const { response } = await this._makeRequest();
+		return response.byteLength;
 	}
 }

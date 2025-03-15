@@ -33,50 +33,101 @@ import { assert, clamp, normalizeRotation, promiseWithResolvers, Rotation } from
 import { Output, TrackType } from './output';
 import { VideoSample } from './sample';
 
-/** @public */
+/**
+ * The options for media file conversion.
+ * @public
+ */
 export type ConversionOptions = {
+	/** The input file. */
 	input: Input;
+	/** The output file. */
 	output: Output;
 
+	/** Video-specific options. */
 	video?: {
+		/** If true, all video tracks will be discarded and will not be present in the output. */
 		discard?: boolean;
+		/** The desired output video codec. */
 		codec?: VideoCodec;
+		/** The desired bitrate of the output video. */
 		bitrate?: VideoEncodingConfig['bitrate'];
+		/**
+		 * The desired width of the output video, defaulting to the video's natural display width. If height is not set,
+		 * it will be deduced automatically based on aspect ratio.
+		 */
 		width?: number;
+		/**
+		 * The desired height of the output video, defaulting to the video's natural display height. If width is not
+		 * set, it will be deduced automatically based on aspect ratio.
+		 */
 		height?: number;
+		/**
+		 * The fitting algorithm in case both width and height are set.
+		 *
+		 * - 'fill' will stretch the image to fill the entire box, potentially altering aspect ratio.
+		 * - 'contain' will contain the entire image within the box while preserving aspect ratio. This may lead to
+		 * letterboxing.
+		 * - 'cover' will scale the image until the entire box is filled, while preserving aspect ratio.
+		 */
 		fit?: 'fill' | 'contain' | 'cover';
+		/**
+		 * The angle in degrees to rotate the input video by, clockwise. Rotation is applied before resizing. This
+		 * rotation is _in addition to_ the natural rotation of the input video as specified in input file's metadata.
+		 */
 		rotate?: Rotation;
+		/** When true, video will always be re-encoded instead of directly copying over the encoded samples. */
 		forceReencode?: boolean;
 	};
 
+	/** Audio-specific options. */
 	audio?: {
+		/** If true, all audio tracks will be discarded and will not be present in the output. */
 		discard?: boolean;
+		/** The desired output audio codec. */
 		codec?: AudioCodec;
+		/** The desired bitrate of the output audio. */
 		bitrate?: AudioEncodingConfig['bitrate'];
+		/** The desired channel count of the output audio. */
 		numberOfChannels?: number;
+		/** The desired sample rate of the output audio. */
 		sampleRate?: number;
+		/** When true, audio will always be re-encoded instead of directly copying over the encoded samples. */
 		forceReencode?: boolean;
 	};
 
+	/** Options to trim the input file. */
 	trim?: {
+		/** The time in the input file at which the output file should start. Must be less than `end`.  */
 		start: number;
+		/** The time in the input file at which the output file should end. Must be greater than `start`. */
 		end: number;
 	};
 
+	/**
+	 * When set to true, the current progress of the conversion will be computed and kept up to date in the `progress`
+	 * field of the Conversion instance.
+	 */
 	computeProgress?: boolean;
 };
 
 const FALLBACK_NUMBER_OF_CHANNELS = 2;
 const FALLBACK_SAMPLE_RATE = 48000;
 
-/** @public */
+/**
+ * Utility function to convert one media file into another. In addition to conversion, this function can be used to
+ * resize and rotate video, resample audio, drop tracks, or trim to a specific time range.
+ * @public
+ */
 export const convert = async (options: ConversionOptions) => {
 	const conversion = await Conversion.init(options);
 	await conversion.execute();
 	return conversion;
 };
 
-/** @public */
+/**
+ * Represents a media file conversion process.
+ * @public
+ */
 export class Conversion {
 	/** @internal */
 	_options: ConversionOptions;
@@ -120,11 +171,24 @@ export class Conversion {
 	/** @internal */
 	_canceled = false;
 
+	/**
+	 * A number between 0 and 1, indicating the completion of the conversion. If the `computeProgress` option is not
+	 * enabled, this value will be stuck at 0.
+	 */
 	progress = 0;
+	/**
+	 * A callback that is fired whenever the conversion progresses. Only called if the `computeProgress` option
+	 * is enabled.
+	 */
 	onProgress?: () => unknown = undefined;
+
+	/** The list of tracks that are included in the output file. */
 	utilizedTracks: InputTrack[] = [];
+	/** The list of tracks from the input file that have been discarded, alongside the discard reason. */
 	discardedTracks: {
+		/** The track that was discarded. */
 		track: InputTrack;
+		/** The reason for discarding the track. */
 		reason:
 			| 'discardedByUser'
 			| 'maxTrackCountReached'
@@ -134,6 +198,7 @@ export class Conversion {
 			| 'noEncodableTargetCodec';
 	}[] = [];
 
+	/** Initializes a new conversion process without starting the conversion. */
 	static async init(options: ConversionOptions) {
 		const conversion = new Conversion(options);
 		await conversion._init();
@@ -318,6 +383,7 @@ export class Conversion {
 		}
 	}
 
+	/** Starts the conversion process. */
 	async execute() {
 		if (this._executed) {
 			throw new Error('Conversion cannot be executed twice.');
@@ -342,6 +408,7 @@ export class Conversion {
 		}
 	}
 
+	/** Cancels the conversion process. Does nothing if the conversion is already complete. */
 	async cancel() {
 		if (this._output.state === 'finalizing' || this._output.state === 'finalized') {
 			return;

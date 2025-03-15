@@ -4,13 +4,21 @@ import { assert } from './misc';
 import { Reader } from './reader';
 import { Source } from './source';
 
-/** @public */
+/**
+ * The options for creating an Input object.
+ * @public
+ */
 export type InputOptions = {
+	/** A list of supported formats. If the source file is not of one of these formats, then it cannot be read. */
 	formats: InputFormat[];
+	/** The source from which data will be read. */
 	source: Source;
 };
 
-/** @public */
+/**
+ * Represents an input media file. This is the root object from which all media read operations start.
+ * @public
+ */
 export class Input {
 	/** @internal */
 	_source: Source;
@@ -56,42 +64,57 @@ export class Input {
 		})();
 	}
 
+	/**
+	 * Returns the format of the input file. You can compare this result directly to the InputFormat singletons or use
+	 * `instanceof` checks for subset-aware logic (for example, `format instanceof MatroskaInputFormat` is true for
+	 * both MKV and WebM).
+	 */
 	async getFormat() {
 		await this._getDemuxer();
 		assert(this._format!);
 		return this._format;
 	}
 
+	/**
+	 * Computes the duration of the longest track in this input file, in seconds. More precisely, returns the largest
+	 * end timestamp among all tracks.
+	 */
 	async computeDuration() {
 		const demuxer = await this._getDemuxer();
 		return demuxer.computeDuration();
 	}
 
+	/** Returns the list of all tracks of this input file. */
 	async getTracks() {
 		const demuxer = await this._getDemuxer();
 		return demuxer.getTracks();
 	}
 
+	/** Returns the list of all video tracks of this input file. */
 	async getVideoTracks() {
 		const tracks = await this.getTracks();
 		return tracks.filter(x => x.isVideoTrack());
 	}
 
+	/** Returns the primary video track of this input file, or null if there are no video tracks. */
 	async getPrimaryVideoTrack() {
 		const tracks = await this.getTracks();
 		return tracks.find(x => x.isVideoTrack()) ?? null;
 	}
 
+	/** Returns the list of all audio tracks of this input file. */
 	async getAudioTracks() {
 		const tracks = await this.getTracks();
 		return tracks.filter(x => x.isAudioTrack());
 	}
 
+	/** Returns the primary audio track of this input file, or null if there are no audio tracks. */
 	async getPrimaryAudioTrack() {
 		const tracks = await this.getTracks();
 		return tracks.find(x => x.isAudioTrack()) ?? null;
 	}
 
+	/** Returns the full MIME type of this input file, including track codecs. */
 	async getMimeType() {
 		const demuxer = await this._getDemuxer();
 		return demuxer.getMimeType();

@@ -190,7 +190,7 @@ export class MatroskaDemuxer extends Demuxer {
 
 		const tracks = await this.getTracks();
 		if (tracks.length > 0) {
-			const codecMimeTypes = await Promise.all(tracks.map(x => x.getCodecMimeType()));
+			const codecMimeTypes = await Promise.all(tracks.map(x => x.getCodecParameterString()));
 			const uniqueCodecMimeTypes = [...new Set(codecMimeTypes.filter(Boolean))];
 
 			string += `; codecs="${uniqueCodecMimeTypes.join(', ')}"`;
@@ -822,7 +822,7 @@ export class MatroskaDemuxer extends Demuxer {
 				if (this.currentTrack?.info?.type !== 'video') break;
 
 				const rotation = reader.readFloat(size);
-				const flippedRotation = -rotation; // Convert clockwise to counter-clockwise
+				const flippedRotation = -rotation; // Convert counter-clockwise to clockwise
 
 				try {
 					this.currentTrack.info.rotation = normalizeRotation(flippedRotation);

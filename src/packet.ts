@@ -2,17 +2,43 @@ import { SECOND_TO_MICROSECOND_FACTOR } from './misc';
 
 export const PLACEHOLDER_DATA = new Uint8Array(0);
 
-/** @public */
+/**
+ * The type of a packet. Key packets can be decoded without previous packets, while delta packets depend on previous
+ * packets.
+ * @public
+ */
 export type PacketType = 'key' | 'delta';
 
-/** @public */
+/**
+ * Represents an encoded chunk of media. Mainly used as an expressive wrapper around WebCodecs API's EncodedVideoChunk
+ * and EncodedAudioChunk, but can also be used standalone.
+ * @public
+ */
 export class EncodedPacket {
 	constructor(
+		/** The encoded data of this packet. */
 		public readonly data: Uint8Array,
+		/** The type of this packet. */
 		public readonly type: PacketType,
+		/**
+		 * The timestamp of this packet in seconds. May be negative. Samples with negative end timestamps should not
+		 * be presented.
+		 */
 		public readonly timestamp: number,
+		/** The duration of this packet in seconds. */
 		public readonly duration: number,
+		/**
+		 * The sequence number of this packet. The sequence number indicates the decode order of the packets. Packet A
+		 * must be decoded before packet B if A has a lower sequence number than B. If two packets have the same
+		 * sequence number, they are the same packet. Otherwise, sequence numbers are arbitrary and are not guaranteed
+		 * to have any meaning besides their relative ordering. Negative sequence numbers mean the sequence number
+		 * is undefined.
+		 */
 		public readonly sequenceNumber = -1,
+		/**
+		 * The actual byte length of the data in this packet. This field is useful for metadata-only packets where the
+		 * `data` field contains no bytes.
+		 */
 		public readonly byteLength = data.byteLength,
 	) {
 		if (!(data instanceof Uint8Array)) {
@@ -35,18 +61,22 @@ export class EncodedPacket {
 		}
 	}
 
+	/** If this packet is a metadata-only packet. Metadata-only packets don't contain their packet data. */
 	get isMetadataOnly() {
 		return this.data === PLACEHOLDER_DATA;
 	}
 
+	/** The timestamp of this packet in microseconds. */
 	get microsecondTimestamp() {
 		return Math.trunc(SECOND_TO_MICROSECOND_FACTOR * this.timestamp);
 	}
 
+	/** The duration of this packet in microseconds. */
 	get microsecondDuration() {
 		return Math.trunc(SECOND_TO_MICROSECOND_FACTOR * this.duration);
 	}
 
+	/** Converts this packet to an EncodedVideoChunk for use with the WebCodecs API. */
 	toEncodedVideoChunk() {
 		if (this.isMetadataOnly) {
 			throw new TypeError('Metadata-only packets cannot be converted to a video chunk.');
@@ -63,6 +93,7 @@ export class EncodedPacket {
 		});
 	}
 
+	/** Converts this packet to an EncodedAudioChunk for use with the WebCodecs API. */
 	toEncodedAudioChunk() {
 		if (this.isMetadataOnly) {
 			throw new TypeError('Metadata-only packets cannot be converted to an audio chunk.');
@@ -79,6 +110,10 @@ export class EncodedPacket {
 		});
 	}
 
+	/**
+	 * Creates an EncodedPacket from an EncodedVideoChunk or EncodedAudioChunk. This method is useful for converting
+	 * chunks from the WebCodecs API to EncodedPackets.
+	 */
 	static fromEncodedChunk(chunk: EncodedVideoChunk | EncodedAudioChunk): EncodedPacket {
 		if (!(chunk instanceof EncodedVideoChunk || chunk instanceof EncodedAudioChunk)) {
 			throw new TypeError('chunk must be an EncodedVideoChunk or EncodedAudioChunk.');
@@ -95,7 +130,13 @@ export class EncodedPacket {
 		);
 	}
 
-	clone(options?: { timestamp?: number; duration?: number }): EncodedPacket {
+	/** Clones this packet while optionally updating timing information. */
+	clone(options?: {
+		/** The timestamp of the cloned packet in seconds. */
+		timestamp?: number;
+		/** The duration of the cloned packet in seconds. */
+		duration?: number;
+	}): EncodedPacket {
 		if (options !== undefined && (typeof options !== 'object' || options === null)) {
 			throw new TypeError('options, when provided, must be an object.');
 		}

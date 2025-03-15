@@ -363,7 +363,7 @@ export class OggDemuxer extends Demuxer {
 		let string = 'audio/ogg';
 
 		if (this.tracks.length > 0) {
-			const codecMimeTypes = await Promise.all(this.tracks.map(x => x.getCodecMimeType()));
+			const codecMimeTypes = await Promise.all(this.tracks.map(x => x.getCodecParameterString()));
 			const uniqueCodecMimeTypes = [...new Set(codecMimeTypes.filter(Boolean))];
 
 			string += `; codecs="${uniqueCodecMimeTypes.join(', ')}"`;

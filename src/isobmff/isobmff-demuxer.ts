@@ -223,7 +223,7 @@ export class IsobmffDemuxer extends Demuxer {
 		let string = base + (this.isQuickTime ? 'quicktime' : 'mp4');
 
 		if (this.tracks.length > 0) {
-			const codecMimeTypes = await Promise.all(this.tracks.map(x => x.inputTrack!.getCodecMimeType()));
+			const codecMimeTypes = await Promise.all(this.tracks.map(x => x.inputTrack!.getCodecParameterString()));
 			const uniqueCodecMimeTypes = [...new Set(codecMimeTypes.filter(Boolean))];
 
 			string += `; codecs="${uniqueCodecMimeTypes.join(', ')}"`;
@@ -2549,6 +2549,6 @@ const extractRotationFromMatrix = (matrix: TransformationMatrix) => {
 	const cosTheta = m11 / scaleX;
 	const sinTheta = m21 / scaleX;
 
-	// Invert the rotation beacuse matrices are post-multiplied in ISOBMFF
+	// Invert the rotation because matrices are post-multiplied in ISOBMFF
 	return -Math.atan2(sinTheta, cosTheta) * (180 / Math.PI);
 };

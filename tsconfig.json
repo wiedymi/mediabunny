@@ -6,14 +6,8 @@
 		"noImplicitOverride": true,
 		"noUncheckedIndexedAccess": true,
 		"noPropertyAccessFromIndexSignature": true,
-		"rootDir": "src",
-		"outDir": "build",
-		"declaration": true,
-		"stripInternal": true,
 		"skipLibCheck": true,
-		"allowJs": true
-	},
-	"include": [
-		"src/**/*"
-	]
+		"allowJs": true,
+		"noEmit": true
+	}
 }

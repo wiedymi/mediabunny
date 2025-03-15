@@ -25,20 +25,20 @@ const esmConfig = {
 	format: 'esm',
 };
 
-let ctxUmd = await esbuild.context({
+const ctxUmd = await esbuild.context({
 	...umdConfig,
 	outfile: 'dist/metamuxer.js',
 });
-let ctxEsm = await esbuild.context({
+const ctxEsm = await esbuild.context({
 	...esmConfig,
 	outfile: 'dist/metamuxer.mjs',
 });
-let ctxUmdMinified = await esbuild.context({
+const ctxUmdMinified = await esbuild.context({
 	...umdConfig,
 	outfile: 'dist/metamuxer.min.js',
 	minify: true,
 });
-let ctxEsmMinified = await esbuild.context({
+const ctxEsmMinified = await esbuild.context({
 	...esmConfig,
 	outfile: 'dist/metamuxer.min.mjs',
 	minify: true,

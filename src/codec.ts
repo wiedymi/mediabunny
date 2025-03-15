@@ -13,9 +13,10 @@ import {
 } from './misc';
 import { SubtitleMetadata } from './subtitles';
 
-// Codecs are ordered by encoding preference:
-
-/** @public */
+/**
+ * List of known video codecs, ordered by encoding preference.
+ * @public
+ */
 export const VIDEO_CODECS = [
 	'avc',
 	'hevc',
@@ -23,7 +24,10 @@ export const VIDEO_CODECS = [
 	'av1',
 	'vp8',
 ] as const;
-/** @public */
+/**
+ * List of known PCM (uncompressed) audio codecs, ordered by encoding preference.
+ * @public
+ */
 export const PCM_AUDIO_CODECS = [
 	'pcm-s16', // We don't prefix 'le' so we're compatible with the WebCodecs-registered PCM codec strings
 	'pcm-s16be',
@@ -38,7 +42,10 @@ export const PCM_AUDIO_CODECS = [
 	'ulaw',
 	'alaw',
 ] as const;
-/** @public */
+/**
+ * List of known compressed audio codecs, ordered by encoding preference.
+ * @public
+ */
 export const NON_PCM_AUDIO_CODECS = [
 	'aac',
 	'opus',
@@ -46,24 +53,42 @@ export const NON_PCM_AUDIO_CODECS = [
 	'vorbis',
 	'flac',
 ] as const;
-/** @public */
+/**
+ * List of known audio codecs, ordered by encoding preference.
+ * @public
+ */
 export const AUDIO_CODECS = [
 	...NON_PCM_AUDIO_CODECS,
 	...PCM_AUDIO_CODECS,
 ] as const;
-/** @public */
+/**
+ * List of known subtitle codecs, ordered by encoding preference.
+ * @public
+ */
 export const SUBTITLE_CODECS = [
 	'webvtt',
 ] as const; // TODO add the rest
 
-/** @public */
+/**
+ * Union type of known video codecs.
+ * @public
+ */
 export type VideoCodec = typeof VIDEO_CODECS[number];
-/** @public */
+/**
+ * Union type of known audio codecs.
+ * @public
+ */
 export type AudioCodec = typeof AUDIO_CODECS[number];
 export type PcmAudioCodec = typeof PCM_AUDIO_CODECS[number];
-/** @public */
+/**
+ * Union type of known subtitle codecs.
+ * @public
+ */
 export type SubtitleCodec = typeof SUBTITLE_CODECS[number];
-/** @public */
+/**
+ * Union type of known media codecs.
+ * @public
+ */
 export type MediaCodec = VideoCodec | AudioCodec | SubtitleCodec;
 
 // https://en.wikipedia.org/wiki/Advanced_Video_Coding
@@ -1079,7 +1104,10 @@ export const getAudioEncoderConfigExtension = (codec: AudioCodec) => {
 	return {};
 };
 
-/** @public */
+/**
+ * Represents a subjective media quality level.
+ * @public
+ */
 export class Quality {
 	/** @internal */
 	_factor: number;
@@ -1159,15 +1187,30 @@ export class Quality {
 	}
 }
 
-/** @public */
+/**
+ * Represents a very low media quality.
+ * @public
+ */
 export const QUALITY_VERY_LOW = new Quality(0.4);
-/** @public */
+/**
+ * Represents a low media quality.
+ * @public
+ */
 export const QUALITY_LOW = new Quality(0.6);
-/** @public */
+/**
+ * Represents a medium media quality.
+ * @public
+ */
 export const QUALITY_MEDIUM = new Quality(1);
-/** @public */
+/**
+ * Represents a high media quality.
+ * @public
+ */
 export const QUALITY_HIGH = new Quality(2);
-/** @public */
+/**
+ * Represents a very high media quality.
+ * @public
+ */
 export const QUALITY_VERY_HIGH = new Quality(4);
 
 const VALID_VIDEO_CODEC_STRING_PREFIXES = ['avc1', 'avc3', 'hev1', 'hvc1', 'vp8', 'vp09', 'av01'];
@@ -1463,7 +1506,10 @@ export const validateSubtitleMetadata = (metadata: SubtitleMetadata | undefined)
 	}
 };
 
-/** @public */
+/**
+ * Checks if the browser is able to encode the given codec.
+ * @public
+ */
 export const canEncode = (codec: MediaCodec) => {
 	if ((VIDEO_CODECS as readonly string[]).includes(codec)) {
 		return canEncodeVideo(codec as VideoCodec);
@@ -1476,7 +1522,10 @@ export const canEncode = (codec: MediaCodec) => {
 	throw new TypeError(`Unknown codec '${codec}'.`);
 };
 
-/** @public */
+/**
+ * Checks if the browser is able to encode the given video codec with the given parameters.
+ * @public
+ */
 export const canEncodeVideo = async (codec: VideoCodec, { width = 1280, height = 720, bitrate = 1e6 }: {
 	width?: number;
 	height?: number;
@@ -1530,7 +1579,10 @@ export const canEncodeVideo = async (codec: VideoCodec, { width = 1280, height =
 	return support.supported === true;
 };
 
-/** @public */
+/**
+ * Checks if the browser is able to encode the given audio codec with the given parameters.
+ * @public
+ */
 export const canEncodeAudio = async (codec: AudioCodec, { numberOfChannels = 2, sampleRate = 48000, bitrate = 128e3 }: {
 	numberOfChannels?: number;
 	sampleRate?: number;
@@ -1587,7 +1639,10 @@ export const canEncodeAudio = async (codec: AudioCodec, { numberOfChannels = 2, 
 	return support.supported === true;
 };
 
-/** @public */
+/**
+ * Checks if the browser is able to encode the given subtitle codec.
+ * @public
+ */
 export const canEncodeSubtitles = async (codec: SubtitleCodec) => {
 	if (!SUBTITLE_CODECS.includes(codec)) {
 		return false;
@@ -1596,7 +1651,10 @@ export const canEncodeSubtitles = async (codec: SubtitleCodec) => {
 	return true;
 };
 
-/** @public */
+/**
+ * Returns the list of all media codecs that can be encoded by the browser.
+ * @public
+ */
 export const getEncodableCodecs = async (): Promise<MediaCodec[]> => {
 	const [videoCodecs, audioCodecs, subtitleCodecs] = await Promise.all([
 		getEncodableVideoCodecs(),
@@ -1607,7 +1665,10 @@ export const getEncodableCodecs = async (): Promise<MediaCodec[]> => {
 	return [...videoCodecs, ...audioCodecs, ...subtitleCodecs];
 };
 
-/** @public */
+/**
+ * Returns the list of all video codecs that can be encoded by the browser.
+ * @public
+ */
 export const getEncodableVideoCodecs = async (
 	checkedCodecs = VIDEO_CODECS as unknown as VideoCodec[],
 	options?: {
@@ -1620,7 +1681,10 @@ export const getEncodableVideoCodecs = async (
 	return checkedCodecs.filter((_, i) => bools[i]);
 };
 
-/** @public */
+/**
+ * Returns the list of all audio codecs that can be encoded by the browser.
+ * @public
+ */
 export const getEncodableAudioCodecs = async (
 	checkedCodecs = AUDIO_CODECS as unknown as AudioCodec[],
 	options?: {
@@ -1633,7 +1697,10 @@ export const getEncodableAudioCodecs = async (
 	return checkedCodecs.filter((_, i) => bools[i]);
 };
 
-/** @public */
+/**
+ * Returns the list of all subtitle codecs that can be encoded by the browser.
+ * @public
+ */
 export const getEncodableSubtitleCodecs = async (
 	checkedCodecs = SUBTITLE_CODECS as unknown as SubtitleCodec[],
 ): Promise<SubtitleCodec[]> => {

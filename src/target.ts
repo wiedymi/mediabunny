@@ -1,7 +1,10 @@
 import { BufferTargetWriter, ChunkedStreamTargetWriter, StreamTargetWriter, Writer } from './writer';
 import { Output } from './output';
 
-/** @public */
+/**
+ * Base class for targets, specifying where output files are written.
+ * @public
+ */
 export abstract class Target {
 	/** @internal */
 	_output: Output | null = null;
@@ -10,8 +13,13 @@ export abstract class Target {
 	abstract _createWriter(): Writer;
 }
 
-/** @public */
+/**
+ * A target that writes data directly into an ArrayBuffer in memory. Great for performance, but not suitable for very
+ * large files. The buffer will be available once the output has been finalized.
+ * @public
+ */
 export class BufferTarget extends Target {
+	/** Stores the final output buffer. Until the output is finalized, this will be null. */
 	buffer: ArrayBuffer | null = null;
 
 	/** @internal */
@@ -20,20 +28,40 @@ export class BufferTarget extends Target {
 	}
 }
 
-/** @public */
+/**
+ * A data chunk for StreamTarget.
+ * @public
+ */
 export type StreamTargetChunk = {
+	/** The operation type. */
 	type: 'write'; // This ensures automatic compatibility with FileSystemWritableFileStream
+	/** The data to write. */
 	data: Uint8Array;
+	/** The byte offset in the output file at which to write the data. */
 	position: number;
 };
 
-/** @public */
+/**
+ * Options for StreamTarget.
+ * @public
+ */
 export type StreamTargetOptions = {
+	/**
+	 * When setting this to true, data created by the output will first be accumulated and only written out
+	 * once it has reached sufficient size, using a default chunk size of 16 MiB. This is useful for reducing the total
+	 * amount of writes, at the cost of latency.
+	 */
 	chunked?: boolean;
+	/** When using `chunked: true`, this specifies the maximum size of each chunk. Defaults to 16 MiB. */
 	chunkSize?: number;
 };
 
-/** @public */
+/**
+ * This target writes data to a WritableStream, making it a general-purpose target for writing data anywhere. It is
+ * also compatible with FileSystemWritableFileStream for use with the File System Access API. The WritableStream can
+ * also apply backpressure, which will propagate to the output and throttle the encoders.
+ * @public
+ */
 export class StreamTarget extends Target {
 	/** @internal */
 	_writable: WritableStream<StreamTargetChunk>;

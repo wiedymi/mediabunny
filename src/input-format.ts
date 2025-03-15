@@ -11,7 +11,10 @@ import { OggReader } from './ogg/ogg-reader';
 import { RiffReader } from './wave/riff-reader';
 import { WaveDemuxer } from './wave/wave-demuxer';
 
-/** @public */
+/**
+ * Base class representing an input media file format.
+ * @public
+ */
 export abstract class InputFormat {
 	/** @internal */
 	abstract _canReadInput(input: Input): Promise<boolean>;
@@ -19,12 +22,18 @@ export abstract class InputFormat {
 	/** @internal */
 	abstract _createDemuxer(input: Input): Demuxer;
 
+	/** Returns the name of the input format. */
 	abstract getName(): string;
+	/** Returns the typical base MIME type of the input format. */
 	abstract getMimeType(): string;
 }
 
-/** @public */
+/**
+ * Format representing files compatible with the ISO base media file format (ISOBMFF), like MP4 or MOV files.
+ * @public
+ */
 export abstract class IsobmffInputFormat extends InputFormat {
+	/** @internal */
 	protected async _getMajorBrand(input: Input) {
 		const sourceSize = await input._mainReader.source._getSize();
 		if (sourceSize < 12) {
@@ -48,7 +57,10 @@ export abstract class IsobmffInputFormat extends InputFormat {
 	}
 }
 
-/** @public */
+/**
+ * MPEG-4 Part 14 (MP4) file format.
+ * @public
+ */
 export class Mp4InputFormat extends IsobmffInputFormat {
 	/** @internal */
 	async _canReadInput(input: Input) {
@@ -65,7 +77,10 @@ export class Mp4InputFormat extends IsobmffInputFormat {
 	}
 }
 
-/** @public */
+/**
+ * QuickTime File Format (QTFF), often called MOV.
+ * @public
+ */
 export class QuickTimeInputFormat extends IsobmffInputFormat {
 	/** @internal */
 	async _canReadInput(input: Input) {
@@ -82,7 +97,10 @@ export class QuickTimeInputFormat extends IsobmffInputFormat {
 	}
 }
 
-/** @public */
+/**
+ * Matroska file format.
+ * @public
+ */
 export class MatroskaInputFormat extends InputFormat {
 	/** @internal */
 	protected async isSupportedEBMLOfDocType(input: Input, desiredDocType: string) {
@@ -165,7 +183,10 @@ export class MatroskaInputFormat extends InputFormat {
 	}
 }
 
-/** @public */
+/**
+ * WebM file format, based on Matroska.
+ * @public
+ */
 export class WebMInputFormat extends MatroskaInputFormat {
 	/** @internal */
 	override _canReadInput(input: Input) {
@@ -181,8 +202,12 @@ export class WebMInputFormat extends MatroskaInputFormat {
 	}
 }
 
-/** @public */
+/**
+ * MP3 file format.
+ * @public
+ */
 export class Mp3InputFormat extends InputFormat {
+	/** @internal */
 	async _canReadInput(input: Input) {
 		const sourceSize = await input._mainReader.source._getSize();
 		if (sourceSize < 4) {
@@ -242,8 +267,12 @@ export class Mp3InputFormat extends InputFormat {
 	}
 }
 
-/** @public */
+/**
+ * WAVE file format, based on RIFF.
+ * @public
+ */
 export class WaveInputFormat extends InputFormat {
+	/** @internal */
 	async _canReadInput(input: Input) {
 		const sourceSize = await input._mainReader.source._getSize();
 		if (sourceSize < 12) {
@@ -275,8 +304,12 @@ export class WaveInputFormat extends InputFormat {
 	}
 }
 
-/** @public */
+/**
+ * Ogg file format.
+ * @public
+ */
 export class OggInputFormat extends InputFormat {
+	/** @internal */
 	async _canReadInput(input: Input) {
 		const sourceSize = await input._mainReader.source._getSize();
 		if (sourceSize < 4) {
@@ -301,20 +334,45 @@ export class OggInputFormat extends InputFormat {
 	}
 }
 
-/** @public */
+/**
+ * MP4 input format singleton.
+ * @public
+ */
 export const MP4 = new Mp4InputFormat();
-/** @public */
+/**
+ * QuickTime File Format input format singleton.
+ * @public
+ */
 export const QTFF = new QuickTimeInputFormat();
-/** @public */
+/**
+ * Matroska input format singleton.
+ * @public
+ */
 export const MATROSKA = new MatroskaInputFormat();
-/** @public */
+/**
+ * WebM input format singleton.
+ * @public
+ */
 export const WEBM = new WebMInputFormat();
-/** @public */
+/**
+ * MP3 input format singleton.
+ * @public
+ */
 export const MP3 = new Mp3InputFormat();
-/** @public */
+/**
+ * WAVE input format singleton.
+ * @public
+ */
 export const WAVE = new WaveInputFormat();
-/** @public */
+/**
+ * Ogg input format singleton.
+ * @public
+ */
 export const OGG = new OggInputFormat();
 
-/** @public */
+/**
+ * List of all input format singletons. If you don't need to support all input formats, you should specify the
+ * formats individually for better tree shaking.
+ * @public
+ */
 export const ALL_FORMATS: InputFormat[] = [MP4, QTFF, MATROSKA, WEBM, WAVE, OGG, MP3];

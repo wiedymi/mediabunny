@@ -31,5 +31,6 @@
         "logLevel": "warning"
       }
     }
-  }
+  },
+	"newlineKind": "lf"
 }

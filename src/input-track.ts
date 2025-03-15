@@ -5,10 +5,16 @@ import { assert, Rotation } from './misc';
 import { TrackType } from './output';
 import { EncodedPacket } from './packet';
 
-/** @public */
+/**
+ * Contains aggregate statistics about the encoded packets of a track.
+ * @public
+ */
 export type PacketStats = {
+	/** The total number of packets. */
 	packetCount: number;
+	/** The average number of packets per second. For video tracks, this will equal the average frame rate (FPS). */
 	averagePacketRate: number;
+	/** The average number of bits per second. */
 	averageBitrate: number;
 };
 
@@ -27,7 +33,10 @@ export interface InputTrackBacking {
 	getNextKeyPacket(packet: EncodedPacket, options: PacketRetrievalOptions): Promise<EncodedPacket | null>;
 }
 
-/** @public */
+/**
+ * Represents a media track in an input file.
+ * @public
+ */
 export abstract class InputTrack {
 	/** @internal */
 	_backing: InputTrackBacking;
@@ -37,39 +46,58 @@ export abstract class InputTrack {
 		this._backing = backing;
 	}
 
+	/** The type of the track. */
 	abstract get type(): TrackType;
+	/** The codec of the track's packets. */
 	abstract get codec(): MediaCodec | null;
-	abstract getCodecMimeType(): Promise<string | null>;
+	/** Returns the full codec parameter string for this track. */
+	abstract getCodecParameterString(): Promise<string | null>;
+	/** Checks if this track's packets can be decoded by the browser. */
 	abstract canDecode(): Promise<boolean>;
 
+	/** Returns true iff this track is a video track. */
 	isVideoTrack(): this is InputVideoTrack {
 		return this instanceof InputVideoTrack;
 	}
 
+	/** Returns true iff this track is an audio track. */
 	isAudioTrack(): this is InputAudioTrack {
 		return this instanceof InputAudioTrack;
 	}
 
+	/** The unique ID of this track in the input file. */
 	get id() {
 		return this._backing.getId();
 	}
 
+	/** The ISO 639-2 language code for this track. If the language is unknown, this field is 'und' (undetermined). */
 	get languageCode() {
 		return this._backing.getLanguageCode();
 	}
 
+	/**
+	 * A positive number x such that all timestamps and durations of all packets of this track are
+	 * integer multiples of 1/x.
+	 */
 	get timeResolution() {
 		return this._backing.getTimeResolution();
 	}
 
+	/**
+	 * Returns the start timestamp of the first packet of this track, in seconds. While often near zero, this value
+	 * may be positive or even negative. A negative starting timestamp means the track's timing has been offset. Samples
+	 * with a negative timestamp should not be presented.
+	 */
 	getFirstTimestamp() {
 		return this._backing.getFirstTimestamp();
 	}
 
+	/** Returns the end timestamp of the last packet of this track, in seconds. */
 	computeDuration() {
 		return this._backing.computeDuration();
 	}
 
+	/** Computes aggregate packet statistics for this track, such as average packet rate or bitrate. */
 	async computePacketStats(): Promise<PacketStats> {
 		const sink = new EncodedPacketSink(this);
 
@@ -107,7 +135,10 @@ export interface InputVideoTrackBacking extends InputTrackBacking {
 	getDecoderConfig(): Promise<VideoDecoderConfig | null>;
 }
 
-/** @public */
+/**
+ * Represents a video track in an input file.
+ * @public
+ */
 export class InputVideoTrack extends InputTrack {
 	/** @internal */
 	override _backing: InputVideoTrackBacking;
@@ -127,32 +158,39 @@ export class InputVideoTrack extends InputTrack {
 		return this._backing.getCodec();
 	}
 
+	/** The width of the track's coded samples, before any transformations or rotations. */
 	get codedWidth() {
 		return this._backing.getCodedWidth();
 	}
 
+	/** The height of the track's coded samples, before any transformations or rotations. */
 	get codedHeight() {
 		return this._backing.getCodedHeight();
 	}
 
+	/** The angle in degrees by which the track's frames should be rotated (clockwise). */
 	get rotation() {
 		return this._backing.getRotation();
 	}
 
+	/** The width of the track's frames after rotation. */
 	get displayWidth() {
 		const rotation = this._backing.getRotation();
 		return rotation % 180 === 0 ? this._backing.getCodedWidth() : this._backing.getCodedHeight();
 	}
 
+	/** The height of the track's frames after rotation. */
 	get displayHeight() {
 		const rotation = this._backing.getRotation();
 		return rotation % 180 === 0 ? this._backing.getCodedHeight() : this._backing.getCodedWidth();
 	}
 
+	/** Returns the color space of the track's samples. */
 	getColorSpace() {
 		return this._backing.getColorSpace();
 	}
 
+	/** Returns true iff the track's samples use a high dynamic range (HDR). */
 	async hasHighDynamicRange() {
 		const colorSpace = await this._backing.getColorSpace();
 
@@ -161,11 +199,12 @@ export class InputVideoTrack extends InputTrack {
 			|| (colorSpace.matrix as string) === 'bt2020-ncl';
 	}
 
+	/** Returns the decoder configuration for decoding the track's packets using a VideoDecoder. */
 	getDecoderConfig() {
 		return this._backing.getDecoderConfig();
 	}
 
-	async getCodecMimeType() {
+	async getCodecParameterString() {
 		const decoderConfig = await this._backing.getDecoderConfig();
 		return decoderConfig?.codec ?? null;
 	}
@@ -204,7 +243,10 @@ export interface InputAudioTrackBacking extends InputTrackBacking {
 	getDecoderConfig(): Promise<AudioDecoderConfig | null>;
 }
 
-/** @public */
+/**
+ * Represents an audio track in an input file.
+ * @public
+ */
 export class InputAudioTrack extends InputTrack {
 	/** @internal */
 	override _backing: InputAudioTrackBacking;
@@ -224,19 +266,22 @@ export class InputAudioTrack extends InputTrack {
 		return this._backing.getCodec();
 	}
 
+	/** The number of audio channels in the track. */
 	get numberOfChannels() {
 		return this._backing.getNumberOfChannels();
 	}
 
+	/** The track's audio sample rate in hertz. */
 	get sampleRate() {
 		return this._backing.getSampleRate();
 	}
 
+	/** Returns the decoder configuration for decoding the track's packets using an AudioDecoder. */
 	getDecoderConfig() {
 		return this._backing.getDecoderConfig();
 	}
 
-	async getCodecMimeType() {
+	async getCodecParameterString() {
 		const decoderConfig = await this._backing.getDecoderConfig();
 		return decoderConfig?.codec ?? null;
 	}

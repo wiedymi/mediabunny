@@ -1,22 +1,33 @@
-import { AsyncMutex, isIso639Dash2LanguageCode } from './misc';
+import { AsyncMutex, isIso639Dash2LanguageCode, Rotation } from './misc';
 import { Muxer } from './muxer';
 import { OutputFormat } from './output-format';
 import { AudioSource, MediaSource, SubtitleSource, VideoSource } from './media-source';
 import { Target } from './target';
 import { Writer } from './writer';
 
-/** @public */
+/**
+ * The options for creating an Output object.
+ * @public
+ */
 export type OutputOptions<
 	F extends OutputFormat = OutputFormat,
 	T extends Target = Target,
 > = {
+	/** The format of the output file. */
 	format: F;
+	/** The target to which the file will be written. */
 	target: T;
 };
 
-/** @public */
+/**
+ * List of all track types.
+ * @public
+ */
 export const ALL_TRACK_TYPES = ['video', 'audio', 'subtitle'] as const;
-/** @public */
+/**
+ * Union type of all track types.
+ * @public
+ */
 export type TrackType = typeof ALL_TRACK_TYPES[number];
 
 export type OutputTrack = {
@@ -41,19 +52,34 @@ export type OutputVideoTrack = OutputTrack & { type: 'video' };
 export type OutputAudioTrack = OutputTrack & { type: 'audio' };
 export type OutputSubtitleTrack = OutputTrack & { type: 'subtitle' };
 
-/** @public */
+/**
+ * Base track metadata, applicable to all tracks.
+ * @public
+ */
 export type BaseTrackMetadata = {
+	/** The three-letter, ISO 639-2 language code specifying the language of this track. */
 	languageCode?: string;
 };
 
-/** @public */
+/**
+ * Additional metadata for video tracks.
+ * @public
+ */
 export type VideoTrackMetadata = BaseTrackMetadata & {
-	rotation?: 0 | 90 | 180 | 270;
+	/** The angle in degrees by which the track's frames should be rotated (clockwise). */
+	rotation?: Rotation;
+	/** The expected video frame rate. You should not exceed the value you set here. */
 	frameRate?: number;
 };
-/** @public */
+/**
+ * Additional metadata for audio tracks.
+ * @public
+ */
 export type AudioTrackMetadata = BaseTrackMetadata & {};
-/** @public */
+/**
+ * Additional metadata for subtitle tracks.
+ * @public
+ */
 export type SubtitleTrackMetadata = BaseTrackMetadata & {};
 
 const validateBaseTrackMetadata = (metadata: BaseTrackMetadata) => {
@@ -65,13 +91,19 @@ const validateBaseTrackMetadata = (metadata: BaseTrackMetadata) => {
 	}
 };
 
-/** @public */
+/**
+ * Main class orchestrating the creation of a new media file.
+ * @public
+ */
 export class Output<
 	F extends OutputFormat = OutputFormat,
 	T extends Target = Target,
 > {
+	/** The format of the output file. */
 	format: F;
+	/** The target to which the file will be written. */
 	target: T;
+	/** The current state of the output. */
 	state: 'pending' | 'started' | 'canceled' | 'finalizing' | 'finalized' = 'pending';
 
 	/** @internal */
@@ -112,6 +144,7 @@ export class Output<
 		this._muxer = options.format._createMuxer(this);
 	}
 
+	/** Adds a video track to the output with the given source. Must be called before output is started. */
 	addVideoTrack(source: VideoSource, metadata: VideoTrackMetadata = {}) {
 		if (!(source instanceof VideoSource)) {
 			throw new TypeError('source must be a VideoSource.');
@@ -135,6 +168,7 @@ export class Output<
 		this._addTrack('video', source, metadata);
 	}
 
+	/** Adds an audio track to the output with the given source. Must be called before output is started. */
 	addAudioTrack(source: AudioSource, metadata: AudioTrackMetadata = {}) {
 		if (!(source instanceof AudioSource)) {
 			throw new TypeError('source must be an AudioSource.');
@@ -144,6 +178,7 @@ export class Output<
 		this._addTrack('audio', source, metadata);
 	}
 
+	/** Adds a subtitle track to the output with the given source. Must be called before output is started. */
 	addSubtitleTrack(source: SubtitleSource, metadata: SubtitleTrackMetadata = {}) {
 		if (!(source instanceof SubtitleSource)) {
 			throw new TypeError('source must be a SubtitleSource.');
@@ -244,6 +279,12 @@ export class Output<
 		source._connectedTrack = track;
 	}
 
+	/**
+	 * Starts the creation of the output file. This method should be called after all tracks have been added. Only after
+	 * the output has started can media samples be added to the tracks.
+	 *
+	 * @returns A promise that resolves when the output has successfully started and is ready to receive media samples.
+	 */
 	async start() {
 		// Verify minimum track count constraints
 		const supportedTrackCounts = this.format.getSupportedTrackCounts();
@@ -299,6 +340,12 @@ export class Output<
 		})();
 	}
 
+	/**
+	 * Cancels the creation of the output file, releasing internal resources like encoders and preventing further
+	 * samples from being added.
+	 *
+	 * @returns A promise that resolves once all internal resources have been released.
+	 */
 	async cancel() {
 		if (this._cancelPromise) {
 			console.warn('Output has already been canceled.');
@@ -322,6 +369,10 @@ export class Output<
 		})();
 	}
 
+	/**
+	 * Finalizes the output file. This method must be called after all media samples across all tracks have been added.
+	 * Once the Promise returned by this method completes, the output file is ready.
+	 */
 	async finalize() {
 		if (this.state === 'pending') {
 			throw new Error('Cannot finalize before starting.');

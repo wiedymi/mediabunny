@@ -19,8 +19,15 @@ import { EncodedPacket } from './packet';
 import { fromAlaw, fromUlaw } from './pcm';
 import { AudioSample, VideoSample } from './sample';
 
-/** @public */
+/**
+ * Additional options for controlling packet retrieval.
+ * @public
+ */
 export type PacketRetrievalOptions = {
+	/**
+	 * When set to true, only packet metadata (like timestamp) will be retrieved - the actual packet data will not
+	 * be loaded.
+	 */
 	metadataOnly?: boolean;
 };
 
@@ -39,7 +46,10 @@ const validateTimestamp = (timestamp: number) => {
 	}
 };
 
-/** @public */
+/**
+ * Sink for retrieving encoded packets from an input track.
+ * @public
+ */
 export class EncodedPacketSink {
 	/** @internal */
 	_track: InputTrack;
@@ -52,17 +62,33 @@ export class EncodedPacketSink {
 		this._track = track;
 	}
 
+	/**
+	 * Retrieves the track's first packet (in decode order), or null if it has no packets. The first packet is very
+	 * likely to be a key packet.
+	 */
 	getFirstPacket(options: PacketRetrievalOptions = {}) {
 		validatePacketRetrievalOptions(options);
 		return this._track._backing.getFirstPacket(options);
 	}
 
+	/**
+	 * Retrieves the packet corresponding to the given timestamp, in seconds. More specifically, returns the last packet
+	 * (in presentation order) with a start timestamp less than or equal to the given timestamp. This method can be
+	 * used to retrieve a track's last packet using `getPacket(Infinity)`. The method returns null if the timestamp
+	 * is before the first packet in the track.
+	 *
+	 * @param timestamp - The timestamp used for retrieval, in seconds.
+	 */
 	getPacket(timestamp: number, options: PacketRetrievalOptions = {}) {
 		validateTimestamp(timestamp);
 		validatePacketRetrievalOptions(options);
 		return this._track._backing.getPacket(timestamp, options);
 	}
 
+	/**
+	 * Retrieves the packet following the given packet (in decode order), or null if the given packet is the
+	 * last packet.
+	 */
 	getNextPacket(packet: EncodedPacket, options: PacketRetrievalOptions = {}) {
 		if (!(packet instanceof EncodedPacket)) {
 			throw new TypeError('packet must be an EncodedPacket.');
@@ -71,12 +97,25 @@ export class EncodedPacketSink {
 		return this._track._backing.getNextPacket(packet, options);
 	}
 
+	/**
+	 * Retrieves the key packet corresponding to the given timestamp, in seconds. More specifically, returns the last
+	 * key packet (in presentation order) with a start timestamp less than or equal to the given timestamp. A key packet
+	 * is a packet that doesn't require previous packets to be decoded. This method can be used to retrieve a track's
+	 * last key packet using `getKeyPacket(Infinity)`. The method returns null if the timestamp is before the first
+	 * key packet in the track.
+	 *
+	 * @param timestamp - The timestamp used for retrieval, in seconds.
+	 */
 	getKeyPacket(timestamp: number, options: PacketRetrievalOptions = {}) {
 		validateTimestamp(timestamp);
 		validatePacketRetrievalOptions(options);
 		return this._track._backing.getKeyPacket(timestamp, options);
 	}
 
+	/**
+	 * Retrieves the key packet following the given packet (in decode order), or null if the given packet is the last
+	 * key packet.
+	 */
 	getNextKeyPacket(packet: EncodedPacket, options: PacketRetrievalOptions = {}) {
 		if (!(packet instanceof EncodedPacket)) {
 			throw new TypeError('packet must be an EncodedPacket.');
@@ -85,6 +124,13 @@ export class EncodedPacketSink {
 		return this._track._backing.getNextKeyPacket(packet, options);
 	}
 
+	/**
+	 * Creates an async iterator that yields the packets in this track in decode order. To enable fast iteration, this
+	 * method will intelligently preload packets based on the speed of the consumer.
+	 *
+	 * @param startPacket - (optional) The packet from which iteration should begin. This packet will also be yielded.
+	 * @param endTimestamp - The timestamp in seconds at which to stop iteration. This timestamp is exclusive.
+	 */
 	packets(
 		startPacket?: EncodedPacket,
 		endTimestamp = Infinity,
@@ -195,7 +241,10 @@ abstract class DecoderWrapper<
 	abstract close(): void;
 }
 
-/** @public */
+/**
+ * Base class for decoded media sample sinks.
+ * @public
+ */
 export abstract class BaseMediaSampleSink<
 	MediaSample extends VideoSample | AudioSample,
 > {
@@ -688,7 +737,10 @@ class VideoDecoderWrapper extends DecoderWrapper<VideoSample> {
 	}
 }
 
-/** @public */
+/**
+ * A sink that retrieves decoded video samples (video frames) from a video track.
+ * @public
+ */
 export class VideoSampleSink extends BaseMediaSampleSink<VideoSample> {
 	/** @internal */
 	_videoTrack: InputVideoTrack;
@@ -729,6 +781,13 @@ export class VideoSampleSink extends BaseMediaSampleSink<VideoSample> {
 		return new EncodedPacketSink(this._videoTrack);
 	}
 
+	/**
+	 * Retrieves the video sample (frame) corresponding to the given timestamp, in seconds. More specifically, returns
+	 * the last video sample (in presentation order) with a start timestamp less than or equal to the given timestamp.
+	 * Returns null if the timestamp is before the track's first timestamp.
+	 *
+	 * @param timestamp - The timestamp used for retrieval, in seconds.
+	 */
 	async getSample(timestamp: number) {
 		validateTimestamp(timestamp);
 
@@ -738,32 +797,87 @@ export class VideoSampleSink extends BaseMediaSampleSink<VideoSample> {
 		throw new Error('Internal error: Iterator returned nothing.');
 	}
 
+	/**
+	 * Creates an async iterator that yields the video samples (frames) of this track in presentation order. This method
+	 * will intelligently pre-decode a few frames ahead to enable fast iteration.
+	 *
+	 * @param startTimestamp - The timestamp in seconds at which to start yielding samples (inclusive).
+	 * @param endTimestamp - The timestamp in seconds at which to stop yielding samples (exclusive).
+	 */
 	samples(startTimestamp = 0, endTimestamp = Infinity) {
 		return this.mediaSamplesInRange(startTimestamp, endTimestamp);
 	}
 
+	/**
+	 * Creates an async iterator that yields a video sample (frame) for each timestamp in the argument. This method
+	 * uses an optimized decoding pipeline if these timestamps are monotonically sorted, decoding each packet at most
+	 * once, and is therefore more efficient than manually getting the sample for every timestamp. The iterator may
+	 * yield null if no frame is available for a given timestamp.
+	 *
+	 * @param timestamps - An iterable or async iterable of timestamps in seconds.
+	 */
 	samplesAtTimestamps(timestamps: AnyIterable<number>) {
 		return this.mediaSamplesAtTimestamps(timestamps);
 	}
 }
 
-/** @public */
+/**
+ * A canvas with additional timing information (timestamp & duration).
+ * @public
+ */
 export type WrappedCanvas = {
+	/** A canvas element or offscreen canvas. */
 	canvas: HTMLCanvasElement | OffscreenCanvas;
+	/** The timestamp of the corresponding video sample, in seconds. */
 	timestamp: number;
+	/** The duration of the corresponding video sample, in seconds. */
 	duration: number;
 };
 
-/** @public */
+/**
+ * Options for constructing a CanvasSink.
+ * @public
+ */
 export type CanvasSinkOptions = {
+	/**
+	 * The width of the output canvas, defaulting to the display width of the video track. If height is not set, it
+	 * will be deduced automatically based on aspect ratio.
+	 */
 	width?: number;
+	/**
+	 * The height of the output canvas, defaulting to the display height of the video track. If width is not set, it
+	 * will be deduced automatically based on aspect ratio.
+	 */
 	height?: number;
+	/**
+	 * The fitting algorithm in case both width and height are set.
+	 *
+	 * - 'fill' will stretch the image to fill the entire box, potentially altering aspect ratio.
+	 * - 'contain' will contain the entire image within the box while preserving aspect ratio. This may lead to
+	 * letterboxing.
+	 * - 'cover' will scale the image until the entire box is filled, while preserving aspect ratio.
+	 */
 	fit?: 'fill' | 'contain' | 'cover';
+	/**
+	 * The clockwise rotation by which to rotate the raw video frame. Defaults to the rotation set in the file metadata.
+	 * Rotation is applied before resizing.
+	 */
 	rotation?: Rotation;
+	/**
+	 * When set, specifies the number of canvases in the pool. These canvases will be reused in a ring buffer /
+	 * round-robin type fashion. This keeps the amount of allocated VRAM constant and relieves the browser from
+	 * constantly allocating/deallocating canvases. A pool size of 0 or `undefined` disables the pool and means a new
+	 * canvas is created each time.
+	 */
 	poolSize?: number;
 };
 
-/** @public */
+/**
+ * A sink that renders video samples (frames) of the given video track to canvases. This is often more useful than
+ * directly retrieving frames, as it comes with common preprocessing steps such as resizing or applying rotation
+ * metadata.
+ * @public
+ */
 export class CanvasSink {
 	/** @internal */
 	_videoTrack: InputVideoTrack;
@@ -917,6 +1031,13 @@ export class CanvasSink {
 		return result;
 	}
 
+	/**
+	 * Retrieves a canvas with the video frame corresponding to the given timestamp, in seconds. More specifically,
+	 * returns the last video frame (in presentation order) with a start timestamp less than or equal to the given
+	 * timestamp. Returns null if the timestamp is before the track's first timestamp.
+	 *
+	 * @param timestamp - The timestamp used for retrieval, in seconds.
+	 */
 	async getCanvas(timestamp: number) {
 		validateTimestamp(timestamp);
 
@@ -924,6 +1045,13 @@ export class CanvasSink {
 		return sample && this._videoSampleToWrappedCanvas(sample);
 	}
 
+	/**
+	 * Creates an async iterator that yields canvases with the video frames of this track in presentation order. This
+	 * method will intelligently pre-decode a few frames ahead to enable fast iteration.
+	 *
+	 * @param startTimestamp - The timestamp in seconds at which to start yielding canvases (inclusive).
+	 * @param endTimestamp - The timestamp in seconds at which to stop yielding canvases (exclusive).
+	 */
 	canvases(startTimestamp = 0, endTimestamp = Infinity) {
 		return mapAsyncGenerator(
 			this._videoSampleSink.samples(startTimestamp, endTimestamp),
@@ -931,6 +1059,14 @@ export class CanvasSink {
 		);
 	}
 
+	/**
+	 * Creates an async iterator that yields a canvas for each timestamp in the argument. This method uses an optimized
+	 * decoding pipeline if these timestamps are monotonically sorted, decoding each packet at most once, and is
+	 * therefore more efficient than manually getting the canvas for every timestamp. The iterator may yield null if
+	 * no frame is available for a given timestamp.
+	 *
+	 * @param timestamps - An iterable or async iterable of timestamps in seconds.
+	 */
 	canvasesAtTimestamps(timestamps: AnyIterable<number>) {
 		return mapAsyncGenerator(
 			this._videoSampleSink.samplesAtTimestamps(timestamps),
@@ -1187,7 +1323,10 @@ class PcmAudioDecoderWrapper extends DecoderWrapper<AudioSample> {
 	}
 }
 
-/** @public */
+/**
+ * Sink for retrieving decoded audio samples from an audio track.
+ * @public
+ */
 export class AudioSampleSink extends BaseMediaSampleSink<AudioSample> {
 	/** @internal */
 	_audioTrack: InputAudioTrack;
@@ -1230,6 +1369,13 @@ export class AudioSampleSink extends BaseMediaSampleSink<AudioSample> {
 		return new EncodedPacketSink(this._audioTrack);
 	}
 
+	/**
+	 * Retrieves the audio sample corresponding to the given timestamp, in seconds. More specifically, returns
+	 * the last audio sample (in presentation order) with a start timestamp less than or equal to the given timestamp.
+	 * Returns null if the timestamp is before the track's first timestamp.
+	 *
+	 * @param timestamp - The timestamp used for retrieval, in seconds.
+	 */
 	async getSample(timestamp: number) {
 		validateTimestamp(timestamp);
 
@@ -1239,23 +1385,48 @@ export class AudioSampleSink extends BaseMediaSampleSink<AudioSample> {
 		throw new Error('Internal error: Iterator returned nothing.');
 	}
 
+	/**
+	 * Creates an async iterator that yields the audio samples of this track in presentation order. This method
+	 * will intelligently pre-decode a few samples ahead to enable fast iteration.
+	 *
+	 * @param startTimestamp - The timestamp in seconds at which to start yielding samples (inclusive).
+	 * @param endTimestamp - The timestamp in seconds at which to stop yielding samples (exclusive).
+	 */
 	samples(startTimestamp = 0, endTimestamp = Infinity) {
 		return this.mediaSamplesInRange(startTimestamp, endTimestamp);
 	}
 
+	/**
+	 * Creates an async iterator that yields an audio sample for each timestamp in the argument. This method
+	 * uses an optimized decoding pipeline if these timestamps are monotonically sorted, decoding each packet at most
+	 * once, and is therefore more efficient than manually getting the sample for every timestamp. The iterator may
+	 * yield null if no sample is available for a given timestamp.
+	 *
+	 * @param timestamps - An iterable or async iterable of timestamps in seconds.
+	 */
 	samplesAtTimestamps(timestamps: AnyIterable<number>) {
 		return this.mediaSamplesAtTimestamps(timestamps);
 	}
 }
 
-/** @public */
+/**
+ * An AudioBuffer with additional timing information (timestamp & duration).
+ * @public
+ */
 export type WrappedAudioBuffer = {
+	/** An AudioBuffer. */
 	buffer: AudioBuffer;
+	/** The timestamp of the corresponding audio sample, in seconds. */
 	timestamp: number;
+	/** The duration of the corresponding audio sample, in seconds. */
 	duration: number;
 };
 
-/** @public */
+/**
+ * A sink that retrieves decoded audio samples from an audio track and converts them to AudioBuffers. This is often
+ * more useful than directly retrieving audio samples, as AudioBuffers can be directly used with the Web Audio API.
+ * @public
+ */
 export class AudioBufferSink {
 	/** @internal */
 	_audioSampleSink: AudioSampleSink;
@@ -1277,6 +1448,13 @@ export class AudioBufferSink {
 		};
 	}
 
+	/**
+	 * Retrieves the audio buffer corresponding to the given timestamp, in seconds. More specifically, returns
+	 * the last audio buffer (in presentation order) with a start timestamp less than or equal to the given timestamp.
+	 * Returns null if the timestamp is before the track's first timestamp.
+	 *
+	 * @param timestamp - The timestamp used for retrieval, in seconds.
+	 */
 	async getBuffer(timestamp: number) {
 		validateTimestamp(timestamp);
 
@@ -1284,6 +1462,13 @@ export class AudioBufferSink {
 		return data && this._audioSampleToWrappedArrayBuffer(data);
 	}
 
+	/**
+	 * Creates an async iterator that yields audio buffers of this track in presentation order. This method
+	 * will intelligently pre-decode a few buffers ahead to enable fast iteration.
+	 *
+	 * @param startTimestamp - The timestamp in seconds at which to start yielding buffers (inclusive).
+	 * @param endTimestamp - The timestamp in seconds at which to stop yielding buffers (exclusive).
+	 */
 	buffers(startTimestamp = 0, endTimestamp = Infinity) {
 		return mapAsyncGenerator(
 			this._audioSampleSink.samples(startTimestamp, endTimestamp),
@@ -1291,6 +1476,14 @@ export class AudioBufferSink {
 		);
 	}
 
+	/**
+	 * Creates an async iterator that yields an audio buffer for each timestamp in the argument. This method
+	 * uses an optimized decoding pipeline if these timestamps are monotonically sorted, decoding each packet at most
+	 * once, and is therefore more efficient than manually getting the buffer for every timestamp. The iterator may
+	 * yield null if no buffer is available for a given timestamp.
+	 *
+	 * @param timestamps - An iterable or async iterable of timestamps in seconds.
+	 */
 	buffersAtTimestamps(timestamps: AnyIterable<number>) {
 		return mapAsyncGenerator(
 			this._audioSampleSink.samplesAtTimestamps(timestamps),
