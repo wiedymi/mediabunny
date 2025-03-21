@@ -42,6 +42,7 @@
 	format = new Metamuxer.Mp4OutputFormat({ fastStart: 'fragmented' }); // new Metamuxer.MkvOutputFormat();// new Metamuxer.Mp4OutputFormat({ fastStart: false });
 	format = new Metamuxer.OggOutputFormat();
 	format = new Metamuxer.Mp4OutputFormat();
+	format = new Metamuxer.WebMOutputFormat();
 	let target = new Metamuxer.BufferTarget();
 
 	/*
@@ -85,10 +86,12 @@
 	download(new Blob([target.buffer]), 'test.mkv');
 	*/
 
+	/*
 	let videoSource = new Metamuxer.CanvasSource(canvas, {
 		codec: 'av1',
 		bitrate: 1e6
-	});
+	});*/
+	let videoSource = new Metamuxer.EncodedVideoPacketSource('av1');
 	let audioSource = new Metamuxer.AudioBufferSource({
 		codec: 'opus',
 		bitrate: 128e3,
@@ -159,11 +162,22 @@ Testing... <00:17.350>One... <00:18.125>Two...
 	//subtitleSource.add(simpleWebvttFile);
 	//subtitleSource.close();
 
+	/*
 	for (let i = 0; i < 100; i++) {
 		context.fillStyle = ['red', 'green', 'blue', 'yellow'][i % 4];
 		context.fillRect(canvas.width * Math.random(), canvas.height * Math.random(), canvas.width * Math.random(), canvas.height * Math.random());
 
 		await videoSource.add(i / 10, 1 / 10);
+	}
+	*/
+	for (let i = 0; i < 40; i += 0.1) {
+		await videoSource.add(new Metamuxer.EncodedPacket(new Uint8Array(1234), i === 0 ? 'key' : 'delta', i, 0.1), {
+			decoderConfig: {
+				codec: 'vp09.00.10.08',	
+				codedWidth: 64,
+				codedHeight: 64
+			}
+		});
 	}
 
 	let audioContext = new AudioContext();
@@ -176,5 +190,5 @@ Testing... <00:17.350>One... <00:18.125>Two...
 	await output.finalize();
 
 	console.log(target);
-	download(new Blob([target.buffer]), 'test' + format.getFileExtension());
+	download(new Blob([target.buffer]), 'test' + format.fileExtension);
 </script>

@@ -4,3 +4,4 @@
 - cross-track offset for streaming sources
 - configurable fragmented mp4 fragment size, like the mp4-muxer PR
 - textsubtitlesource, chunked piping
+- for matroska demuxing, don't blindly pipe codecPrivate into description. This should be if-else'd on a per-codec basis, for the codecs that actually need it

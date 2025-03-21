@@ -46,7 +46,8 @@ import { Muxer } from '../muxer';
 import { Writer } from '../writer';
 import { EncodedPacket } from '../packet';
 
-const MAX_CHUNK_LENGTH_MS = 2 ** 15;
+const MIN_CLUSTER_TIMESTAMP_MS = -(2 ** 15);
+const MAX_CLUSTER_TIMESTAMP_MS = 2 ** 15 - 1;
 const APP_NAME = 'https://github.com/Vanilagy/webm-muxer'; // TODO
 const SEGMENT_SIZE_BYTES = 6;
 const CLUSTER_SIZE_BYTES = 5;
@@ -661,7 +662,8 @@ export class MatroskaMuxer extends Muxer {
 		}
 
 		const msTimestamp = Math.round(1000 * chunk.timestamp);
-		// We can only finalize this cluster (and begin a new one) if we know that each track will be able to
+
+		// We wanna only finalize this cluster (and begin a new one) if we know that each track will be able to
 		// start the new one with a key frame.
 		const keyFrameQueuedEverywhere = this.trackDatas.every((otherTrackData) => {
 			if (trackData === otherTrackData) {
@@ -676,33 +678,37 @@ export class MatroskaMuxer extends Muxer {
 			return otherTrackData.track.source._closed;
 		});
 
-		if (
-			!this.currentCluster
-			|| (
+		let shouldCreateNewCluster = false;
+		if (!this.currentCluster) {
+			shouldCreateNewCluster = true;
+		} else {
+			assert(this.currentClusterStartMsTimestamp !== null);
+			assert(this.currentClusterMaxMsTimestamp !== null);
+
+			const relativeTimestamp = msTimestamp - this.currentClusterStartMsTimestamp;
+
+			shouldCreateNewCluster = (
 				keyFrameQueuedEverywhere
 				// This check is required because that means there is already a block with this timestamp in the
-				// CURRENT chunk, meaning that starting the next cluster at the same timestamp is forbidden (since the
-				// already-written block would belong into it instead).
-				&& msTimestamp > this.currentClusterMaxMsTimestamp!
-				&& msTimestamp - this.currentClusterStartMsTimestamp! >= 1000
+				// CURRENT chunk, meaning that starting the next cluster at the same timestamp is forbidden (since
+				// the already-written block would belong into it instead).
+				&& msTimestamp > this.currentClusterMaxMsTimestamp
+				&& relativeTimestamp >= 1000
 			)
-		) {
+			// The cluster would exceed its maximum allowed length. This puts us in an unfortunate position and forces
+			// us to begin the next cluster with a delta frame. Although this is undesirable, it is not forbidden by the
+			// spec and is supported by players.
+			|| relativeTimestamp > MAX_CLUSTER_TIMESTAMP_MS;
+		}
+
+		if (shouldCreateNewCluster) {
 			this.createNewCluster(msTimestamp);
 		}
 
 		const relativeTimestamp = msTimestamp - this.currentClusterStartMsTimestamp!;
-		if (relativeTimestamp < -(2 ** 15)) {
+		if (relativeTimestamp < MIN_CLUSTER_TIMESTAMP_MS) {
 			// The block lies too far in the past, it's not representable within this cluster
 			return;
-		}
-
-		const clusterIsTooLong = relativeTimestamp >= MAX_CHUNK_LENGTH_MS;
-		if (clusterIsTooLong) {
-			throw new Error(
-				`Current Matroska cluster exceeded its maximum allowed length of ${MAX_CHUNK_LENGTH_MS} `
-				+ `milliseconds. In order to produce a correct WebM file, you must pass in a key frame at least every `
-				+ `${MAX_CHUNK_LENGTH_MS} milliseconds.`,
-			);
 		}
 
 		const prelude = new Uint8Array(4);

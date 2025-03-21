@@ -3,6 +3,7 @@ import {
 	AudioCodec,
 	Av1CodecInfo,
 	extractAudioCodecString,
+	extractAv1CodecInfoFromFrame,
 	extractVideoCodecString,
 	extractVp9CodecInfoFromFrame,
 	MediaCodec,
@@ -2349,6 +2350,9 @@ class IsobmffVideoTrackBacking extends IsobmffTrackBacking implements InputVideo
 			if (this.internalTrack.info.codec === 'vp9' && !this.internalTrack.info.vp9CodecInfo) {
 				const firstPacket = await this.getFirstPacket({});
 				this.internalTrack.info.vp9CodecInfo = firstPacket && extractVp9CodecInfoFromFrame(firstPacket.data);
+			} else if (this.internalTrack.info.codec === 'av1' && !this.internalTrack.info.av1CodecInfo) {
+				const firstPacket = await this.getFirstPacket({});
+				this.internalTrack.info.av1CodecInfo = firstPacket && extractAv1CodecInfoFromFrame(firstPacket.data);
 			}
 
 			return {
