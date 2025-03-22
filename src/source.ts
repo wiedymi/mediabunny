@@ -1,3 +1,5 @@
+import { mergeObjectsDeeply, retriedFetch } from './misc';
+
 /**
  * The source base class, representing a resource from which bytes can be read.
  * @public
@@ -132,82 +134,92 @@ export class BlobSource extends Source {
 }
 
 /**
+ * Options for UrlSource.
+ * @public
+ */
+export type UrlSourceOptions = {
+	/**
+	 * The RequestInit used by the Fetch API. Can be used to further control the requests, such as setting
+	 * custom headers.
+	 */
+	requestInit?: RequestInit;
+
+	/**
+	 * A function that returns the delay (in seconds) before retrying a failed request. The function is called
+	 * with the number of previous, unsuccessful attempts. If the function returns `null`, no more retries will be made.
+	 */
+	getRetryDelay?: (previousAttempts: number) => number | null;
+};
+
+/**
  * A source backed by a URL. This is useful for reading data from the network. Be careful using this source however,
  * as it typically comes with increased latency.
  * @public
  */
 export class UrlSource extends Source {
 	/** @internal */
-	private _url: string;
+	private _url: string | URL;
 	/** @internal */
-	private _withCredentials: boolean;
+	private _options: UrlSourceOptions;
 	/** @internal */
 	private _fullData: ArrayBuffer | null = null;
 
 	constructor(
-		url: string,
-		options: {
-			/** If credentials are to be included in a cross-origin request. */
-			withCredentials?: boolean;
-		} = {},
+		url: string | URL,
+		options: UrlSourceOptions = {},
 	) {
-		if (typeof url !== 'string') {
-			throw new TypeError('url must be a string.');
+		if (typeof url !== 'string' && !(url instanceof URL)) {
+			throw new TypeError('url must be a string or URL.');
 		}
 		if (!options || typeof options !== 'object') {
 			throw new TypeError('options must be an object.');
 		}
-		if (options.withCredentials !== undefined && typeof options.withCredentials !== 'boolean') {
-			throw new TypeError('options.withCredentials, when specified, must be a boolean.');
+		if (options.requestInit !== undefined && (!options.requestInit || typeof options.requestInit !== 'object')) {
+			throw new TypeError('options.requestInit, when provided, must be an object.');
+		}
+		if (options.getRetryDelay !== undefined && typeof options.getRetryDelay !== 'function') {
+			throw new TypeError('options.getRetryDelay, when provided, must be a function.');
 		}
 
 		super();
 
 		this._url = url;
-		this._withCredentials = options.withCredentials ?? false;
+		this._options = options;
 	}
 
 	/** @internal */
-	private _makeRequest(
+	private async _makeRequest(
 		range?: { start: number; end: number },
 	): Promise<{ response: ArrayBuffer; statusCode: number }> {
-		return new Promise((resolve, reject) => {
-			const xhr = new XMLHttpRequest(); // We use XMLHttpRequest instead of fetch since it supports more protocols
-			xhr.open('GET', this._url, true);
-			xhr.responseType = 'arraybuffer';
-			xhr.withCredentials = this._withCredentials;
+		const headers: HeadersInit = {};
 
-			if (range) {
-				xhr.setRequestHeader('Range', `bytes=${range.start}-${range.end - 1}`);
-			}
+		if (range) {
+			headers['Range'] = `bytes=${range.start}-${range.end - 1}`;
+		}
 
-			xhr.onload = () => {
-				if (xhr.status >= 200 && xhr.status < 300) {
-					const buffer = xhr.response as ArrayBuffer;
+		const response = await retriedFetch(
+			this._url,
+			mergeObjectsDeeply(this._options.requestInit ?? {}, {
+				method: 'GET',
+				headers,
+			}),
+			this._options.getRetryDelay ?? (() => null),
+		);
 
-					if (!range) {
-						this._fullData = buffer;
-					}
+		if (!response.ok) {
+			throw new Error(`Error fetching ${this._url}: ${response.status} ${response.statusText}`);
+		}
 
-					resolve({
-						response: buffer,
-						statusCode: xhr.status,
-					});
-				} else {
-					reject(new Error(`Error fetching ${this._url}: ${xhr.status} ${xhr.statusText}`));
-				}
-			};
+		const buffer = await response.arrayBuffer();
 
-			xhr.onerror = () => {
-				reject(new Error('Network error occurred.'));
-			};
+		if (!range) {
+			this._fullData = buffer;
+		}
 
-			xhr.ontimeout = () => {
-				reject(new Error('Request timed out.'));
-			};
-
-			xhr.send();
-		});
+		return {
+			response: buffer,
+			statusCode: response.status,
+		};
 	}
 
 	/** @internal */
@@ -234,44 +246,27 @@ export class UrlSource extends Source {
 			return this._fullData.byteLength;
 		}
 
-		const xhr = new XMLHttpRequest();
-		xhr.open('GET', this._url, true);
-		xhr.responseType = 'arraybuffer';
-		xhr.withCredentials = this._withCredentials;
-		xhr.setRequestHeader('Range', 'bytes=0-0');
+		// Try a range request to get the Content-Range header
+		const rangeResponse = await retriedFetch(
+			this._url,
+			mergeObjectsDeeply(this._options.requestInit ?? {}, {
+				method: 'GET',
+				headers: { Range: 'bytes=0-0' },
+			}),
+			this._options.getRetryDelay ?? (() => null),
+		);
 
-		await new Promise<void>((resolve, reject) => {
-			xhr.onload = () => {
-				if (xhr.status >= 200 && xhr.status < 300) {
-					resolve();
-				} else {
-					reject(new Error(`Error fetching ${this._url} (Range): ${xhr.status} ${xhr.statusText}`));
+		if (rangeResponse.status === 206) {
+			const contentRange = rangeResponse.headers.get('Content-Range');
+			if (contentRange) {
+				const match = contentRange.match(/bytes \d+-\d+\/(\d+)/);
+				if (match && match[1]) {
+					return parseInt(match[1], 10);
 				}
-			};
-
-			xhr.onerror = () => {
-				reject(new Error('Network error occurred.'));
-			};
-
-			xhr.send();
-		});
-
-		// Check for Content-Range header (e.g., "bytes 0-0/1234" where 1234 is the total size)
-		const contentRange = xhr.getResponseHeader('Content-Range');
-		if (contentRange) {
-			const match = contentRange.match(/bytes \d+-\d+\/(\d+)/);
-			if (match && match[1]) {
-				return parseInt(match[1], 10);
 			}
 		}
 
-		// If Content-Range is not available, check Content-Length
-		const contentLength = xhr.getResponseHeader('Content-Length');
-		if (contentLength) {
-			return parseInt(contentLength, 10);
-		}
-
-		// If neither header is available, make a full GET request
+		// If the range request didn't provide the size, make a full GET request
 		const { response } = await this._makeRequest();
 		return response.byteLength;
 	}

@@ -68,7 +68,15 @@ export {
 } from './codec';
 export { Target, BufferTarget, StreamTarget, StreamTargetChunk, StreamTargetOptions } from './target';
 export { Rotation, AnyIterable, SetRequired } from './misc';
-export { Source, BufferSource, StreamSource, StreamSourceOptions, BlobSource, UrlSource } from './source';
+export {
+	Source,
+	BufferSource,
+	StreamSource,
+	StreamSourceOptions,
+	BlobSource,
+	UrlSource,
+	UrlSourceOptions,
+} from './source';
 export {
 	InputFormat,
 	IsobmffInputFormat,

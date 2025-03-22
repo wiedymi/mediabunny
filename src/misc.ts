@@ -397,3 +397,56 @@ export const SECOND_TO_MICROSECOND_FACTOR = 1e6 * (1 + Number.EPSILON);
  * @public
  */
 export type SetRequired<T, K extends keyof T> = T & Required<Pick<T, K>>;
+
+export const mergeObjectsDeeply = <T extends object, S extends object>(a: T, b: S): T & S => {
+	const result = { ...a } as T & S;
+
+	for (const key in b) {
+		if (
+			typeof a[key as unknown as keyof T] === 'object'
+			&& a[key as unknown as keyof T] !== null
+			&& typeof b[key] === 'object'
+			&& b[key] !== null
+		) {
+			result[key] = mergeObjectsDeeply(
+				a[key as unknown as keyof T] as object,
+				b[key],
+			) as (T & S)[Extract<keyof S, string>];
+		} else {
+			result[key] = b[key] as (T & S)[Extract<keyof S, string>];
+		}
+	}
+
+	return result;
+};
+
+export const retriedFetch = async (
+	url: string | URL,
+	requestInit: RequestInit,
+	getRetryDelay: (previousAttempts: number) => number | null,
+) => {
+	let attempts = 0;
+
+	while (true) {
+		try {
+			return await fetch(url, requestInit);
+		} catch (error) {
+			console.error('Retrying failed fetch. Error:', error);
+
+			attempts++;
+
+			const retryDelayInSeconds = getRetryDelay(attempts);
+			if (retryDelayInSeconds === null) {
+				throw error;
+			}
+
+			if (!Number.isFinite(retryDelayInSeconds) || retryDelayInSeconds < 0) {
+				throw new TypeError('Retry delay must be a non-negative finite number.');
+			}
+
+			if (retryDelayInSeconds > 0) {
+				await new Promise(resolve => setTimeout(resolve, 1000 * retryDelayInSeconds));
+			}
+		}
+	}
+};
