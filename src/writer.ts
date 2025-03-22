@@ -19,6 +19,66 @@ export abstract class Writer {
 	abstract finalize(): Promise<void>;
 	/** Closes the writer. */
 	abstract close(): Promise<void>;
+
+	private trackedWrites: Uint8Array | null = null;
+	private trackedStart = -1;
+	private trackedEnd = -1;
+
+	protected maybeTrackWrites(data: Uint8Array) {
+		if (!this.trackedWrites) {
+			return;
+		}
+
+		// Handle negative relative write positions
+		let pos = this.getPos();
+		if (pos < this.trackedStart) {
+			if (pos + data.byteLength <= this.trackedStart) {
+				return;
+			}
+
+			data = data.subarray(this.trackedStart - pos);
+			pos = 0;
+		}
+
+		const neededSize = pos + data.byteLength - this.trackedStart;
+		let newLength = this.trackedWrites.byteLength;
+		while (newLength < neededSize) {
+			newLength *= 2;
+		}
+
+		// Check if we need to resize the buffer
+		if (newLength !== this.trackedWrites.byteLength) {
+			const copy = new Uint8Array(newLength);
+			copy.set(this.trackedWrites, 0);
+			this.trackedWrites = copy;
+		}
+
+		this.trackedWrites.set(data, pos - this.trackedStart);
+		this.trackedEnd = Math.max(this.trackedEnd, pos + data.byteLength);
+	}
+
+	startTrackingWrites() {
+		this.trackedWrites = new Uint8Array(2 ** 10);
+		this.trackedStart = this.getPos();
+		this.trackedEnd = this.trackedStart;
+	}
+
+	stopTrackingWrites() {
+		if (!this.trackedWrites) {
+			throw new Error('Internal error: Can\'t get tracked writes since nothing was tracked.');
+		}
+
+		const slice = this.trackedWrites.subarray(0, this.trackedEnd - this.trackedStart);
+		const result = {
+			data: slice,
+			start: this.trackedStart,
+			end: this.trackedEnd,
+		};
+
+		this.trackedWrites = null;
+
+		return result;
+	}
 }
 
 const ARRAY_BUFFER_INITIAL_SIZE = 2 ** 16;
@@ -83,6 +143,8 @@ export class BufferTargetWriter extends Writer {
 	}
 
 	write(data: Uint8Array) {
+		this.maybeTrackWrites(data);
+
 		this.ensureSize(this.pos + data.byteLength);
 
 		this.bytes.set(data, this.pos);
@@ -139,6 +201,8 @@ export class StreamTargetWriter extends Writer {
 	}
 
 	write(data: Uint8Array) {
+		this.maybeTrackWrites(data);
+
 		this.sections.push({
 			data: data.slice(),
 			start: this.pos,
@@ -273,6 +337,8 @@ export class ChunkedStreamTargetWriter extends Writer {
 	}
 
 	write(data: Uint8Array) {
+		this.maybeTrackWrites(data);
+
 		this.writeDataIntoChunks(data, this.pos);
 		this.queueChunksForFlush();
 

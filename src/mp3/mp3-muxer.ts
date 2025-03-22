@@ -1,21 +1,24 @@
 import { assert, toDataView } from '../misc';
 import { Muxer } from '../muxer';
 import { Output, OutputAudioTrack } from '../output';
+import { Mp3OutputFormat } from '../output-format';
 import { EncodedPacket } from '../packet';
 import { Writer } from '../writer';
 import { getXingOffset, INFO, readFrameHeader, XING } from './mp3-misc';
 import { Mp3Writer, XingFrameData } from './mp3-writer';
 
 export class Mp3Muxer extends Muxer {
+	private format: Mp3OutputFormat;
 	private writer: Writer;
 	private mp3Writer: Mp3Writer;
 	private xingFrameData: XingFrameData | null = null;
 	private frameCount = 0;
 	private framePositions: number[] = [];
 
-	constructor(output: Output) {
+	constructor(output: Output, format: Mp3OutputFormat) {
 		super(output);
 
+		this.format = format;
 		this.writer = output._writer;
 		this.mp3Writer = new Mp3Writer(output._writer);
 	}
@@ -120,7 +123,16 @@ export class Mp3Muxer extends Muxer {
 		this.xingFrameData.fileSize = endPos;
 		this.xingFrameData.toc = toc;
 
+		if (this.format._options.onXingFrame) {
+			this.writer.startTrackingWrites();
+		}
+
 		this.mp3Writer.writeXingFrame(this.xingFrameData);
+
+		if (this.format._options.onXingFrame) {
+			const { data, start } = this.writer.stopTrackingWrites();
+			this.format._options.onXingFrame(data, start);
+		}
 
 		this.writer.seek(endPos);
 

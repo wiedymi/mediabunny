@@ -11,6 +11,7 @@ import {
 } from './codec';
 import { IsobmffMuxer } from './isobmff/isobmff-muxer';
 import { MatroskaMuxer } from './matroska/matroska-muxer';
+import { MediaSource } from './media-source';
 import { Mp3Muxer } from './mp3/mp3-muxer';
 import { Muxer } from './muxer';
 import { OggMuxer } from './ogg/ogg-muxer';
@@ -84,7 +85,7 @@ export abstract class OutputFormat {
 }
 
 /**
- * Options controlling the format of an output ISOBMFF file.
+ * ISOBMFF-specific output options.
  * @public
  */
 export type IsobmffOutputFormatOptions = {
@@ -116,6 +117,41 @@ export type IsobmffOutputFormatOptions = {
 	 * New fragments will only be created when the current fragment is longer than this value. Defaults to 1 second.
 	 */
 	minimumFragmentDuration?: number;
+
+	/**
+	 * Will be called once the ftyp (File Type) box of the output file has been written.
+	 *
+	 * @param data - The raw bytes.
+	 * @param position - The byte offset of the data in the file.
+	 */
+	onFtyp?: (data: Uint8Array, position: number) => unknown;
+
+	/**
+	 * Will be called once the moov (Movie) box of the output file has been written.
+	 *
+	 * @param data - The raw bytes.
+	 * @param position - The byte offset of the data in the file.
+	 */
+	onMoov?: (data: Uint8Array, position: number) => unknown;
+
+	/**
+	 * Will be called for each finalized mdat (Media Data) box of the output file. Usage of this callback is not
+	 * recommended when not using `fastStart: 'fragmented'`, as there will be one monolithic mdat box which might
+	 * require large amounts of memory.
+	 *
+	 * @param data - The raw bytes.
+	 * @param position - The byte offset of the data in the file.
+	 */
+	onMdat?: (data: Uint8Array, position: number) => unknown;
+
+	/**
+	 * Will be called for each finalized moof (Movie Fragment) box of the output file.
+	 *
+	 * @param data - The raw bytes.
+	 * @param position - The byte offset of the data in the file.
+	 * @param timestamp - The start timestamp of the fragment in seconds.
+	 */
+	onMoof?: (data: Uint8Array, position: number, timestamp: number) => unknown;
 };
 
 /**
@@ -138,6 +174,18 @@ export abstract class IsobmffOutputFormat extends OutputFormat {
 			&& (!Number.isFinite(options.minimumFragmentDuration) || options.minimumFragmentDuration < 0)
 		) {
 			throw new TypeError('options.minimumFragmentDuration, when provided, must be a non-negative number.');
+		}
+		if (options.onFtyp !== undefined && typeof options.onFtyp !== 'function') {
+			throw new TypeError('options.onFtyp, when provided, must be a function.');
+		}
+		if (options.onMoov !== undefined && typeof options.onMoov !== 'function') {
+			throw new TypeError('options.onMoov, when provided, must be a function.');
+		}
+		if (options.onMdat !== undefined && typeof options.onMdat !== 'function') {
+			throw new TypeError('options.onMdat, when provided, must be a function.');
+		}
+		if (options.onMoof !== undefined && typeof options.onMoof !== 'function') {
+			throw new TypeError('options.onMoof, when provided, must be a function.');
 		}
 
 		super();
@@ -228,7 +276,7 @@ export class MovOutputFormat extends IsobmffOutputFormat {
 }
 
 /**
- * Options controlling the format of an output Matroska file.
+ * Matroska-specific output options.
  * @public
  */
 export type MkvOutputFormatOptions = {
@@ -244,6 +292,32 @@ export type MkvOutputFormatOptions = {
 	 * when the current cluster is longer than this value. Defaults to 1 second.
 	 */
 	minimumClusterDuration?: number;
+
+	/**
+	 * Will be called once the EBML header of the output file has been written.
+	 *
+	 * @param data - The raw bytes.
+	 * @param position - The byte offset of the data in the file.
+	 */
+	onEbmlHeader?: (data: Uint8Array, position: number) => void;
+
+	/**
+	 * Will be called once the header part of the Matroska Segment element has been written. The header data includes
+	 * the Segment element and everything inside it, up to (but excluding) the first Matroska Cluster.
+	 *
+	 * @param data - The raw bytes.
+	 * @param position - The byte offset of the data in the file.
+	 */
+	onSegmentHeader?: (data: Uint8Array, position: number) => unknown;
+
+	/**
+	 * Will be called for each finalized Matroska Cluster of the output file.
+	 *
+	 * @param data - The raw bytes.
+	 * @param position - The byte offset of the data in the file.
+	 * @param timestamp - The start timestamp of the cluster in seconds.
+	 */
+	onCluster?: (data: Uint8Array, position: number, timestamp: number) => unknown;
 };
 
 /**
@@ -266,6 +340,15 @@ export class MkvOutputFormat extends OutputFormat {
 			&& (!Number.isFinite(options.minimumClusterDuration) || options.minimumClusterDuration < 0)
 		) {
 			throw new TypeError('options.minimumClusterDuration, when provided, must be a non-negative number.');
+		}
+		if (options.onEbmlHeader !== undefined && typeof options.onEbmlHeader !== 'function') {
+			throw new TypeError('options.onEbmlHeader, when provided, must be a function.');
+		}
+		if (options.onSegmentHeader !== undefined && typeof options.onSegmentHeader !== 'function') {
+			throw new TypeError('options.onHeader, when provided, must be a function.');
+		}
+		if (options.onCluster !== undefined && typeof options.onCluster !== 'function') {
+			throw new TypeError('options.onCluster, when provided, must be a function.');
 		}
 
 		super();
@@ -312,7 +395,7 @@ export class MkvOutputFormat extends OutputFormat {
 }
 
 /**
- * Options controlling the format of an output WebM file.
+ * WebM-specific output options.
  * @public
  */
 export type WebMOutputFormatOptions = MkvOutputFormatOptions;
@@ -350,13 +433,43 @@ export class WebMOutputFormat extends MkvOutputFormat {
 }
 
 /**
+ * MP3-specific output options.
+ * @public
+ */
+export type Mp3OutputFormatOptions = {
+	/**
+	 * Will be called once the Xing metadata frame is finalized.
+	 *
+	 * @param data - The raw bytes.
+	 * @param position - The byte offset of the data in the file.
+	 */
+	onXingFrame?: (data: Uint8Array, position: number) => unknown;
+};
+
+/**
  * MP3 file format.
  * @public
  */
 export class Mp3OutputFormat extends OutputFormat {
 	/** @internal */
+	_options: Mp3OutputFormatOptions;
+
+	constructor(options: Mp3OutputFormatOptions = {}) {
+		if (!options || typeof options !== 'object') {
+			throw new TypeError('options must be an object.');
+		}
+		if (options.onXingFrame !== undefined && typeof options.onXingFrame !== 'function') {
+			throw new TypeError('options.onXingFrame, when provided, must be a function.');
+		}
+
+		super();
+
+		this._options = options;
+	}
+
+	/** @internal */
 	_createMuxer(output: Output) {
-		return new Mp3Muxer(output);
+		return new Mp3Muxer(output, this);
 	}
 
 	/** @internal */
@@ -387,13 +500,41 @@ export class Mp3OutputFormat extends OutputFormat {
 }
 
 /**
+ * WAVE-specific output options.
+ * @public
+ */
+export type WaveOutputFormatOptions = {
+	/**
+	 * Will be called once the file header is written. The header consists of the RIFF header, the format chunk, and the
+	 * start of the data chunk (with a placeholder size of 0).
+	 */
+	onHeader?: (data: Uint8Array, position: number) => unknown;
+};
+
+/**
  * WAVE file format, based on RIFF.
  * @public
  */
 export class WaveOutputFormat extends OutputFormat {
 	/** @internal */
+	_options: WaveOutputFormatOptions;
+
+	constructor(options: WaveOutputFormatOptions = {}) {
+		if (!options || typeof options !== 'object') {
+			throw new TypeError('options must be an object.');
+		}
+		if (options.onHeader !== undefined && typeof options.onHeader !== 'function') {
+			throw new TypeError('options.onHeader, when provided, must be a function.');
+		}
+
+		super();
+
+		this._options = options;
+	}
+
+	/** @internal */
 	_createMuxer(output: Output) {
-		return new WaveMuxer(output);
+		return new WaveMuxer(output, this);
 	}
 
 	/** @internal */
@@ -428,13 +569,44 @@ export class WaveOutputFormat extends OutputFormat {
 }
 
 /**
+ * Ogg-specific output options.
+ * @public
+ */
+export type OggOutputFormatOptions = {
+	/**
+	 * Will be called for each Ogg page that is written.
+	 *
+	 * @param data - The raw bytes.
+	 * @param position - The byte offset of the data in the file.
+	 * @param source - The media source backing the page's logical bitstream (track).
+	 */
+	onPage?: (data: Uint8Array, position: number, source: MediaSource) => unknown;
+};
+
+/**
  * Ogg file format.
  * @public
  */
 export class OggOutputFormat extends OutputFormat {
 	/** @internal */
+	_options: OggOutputFormatOptions;
+
+	constructor(options: OggOutputFormatOptions = {}) {
+		if (!options || typeof options !== 'object') {
+			throw new TypeError('options must be an object.');
+		}
+		if (options.onPage !== undefined && typeof options.onPage !== 'function') {
+			throw new TypeError('options.onPage, when provided, must be a function.');
+		}
+
+		super();
+
+		this._options = options;
+	}
+
+	/** @internal */
 	_createMuxer(output: Output) {
-		return new OggMuxer(output);
+		return new OggMuxer(output, this);
 	}
 
 	/** @internal */

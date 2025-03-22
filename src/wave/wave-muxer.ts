@@ -5,16 +5,19 @@ import { WaveFormat } from './wave-demuxer';
 import { RiffWriter } from './riff-writer';
 import { Writer } from '../writer';
 import { EncodedPacket } from '../packet';
+import { WaveOutputFormat } from '../output-format';
 
 export class WaveMuxer extends Muxer {
+	private format: WaveOutputFormat;
 	private writer: Writer;
 	private riffWriter: RiffWriter;
 	private headerWritten = false;
 	private dataSize = 0;
 
-	constructor(output: Output) {
+	constructor(output: Output, format: WaveOutputFormat) {
 		super(output);
 
+		this.format = format;
 		this.writer = output._writer;
 		this.riffWriter = new RiffWriter(output._writer);
 	}
@@ -60,6 +63,10 @@ export class WaveMuxer extends Muxer {
 	}
 
 	private writeHeader(track: OutputAudioTrack, config: AudioDecoderConfig) {
+		if (this.format._options.onHeader) {
+			this.writer.startTrackingWrites();
+		}
+
 		let format: WaveFormat;
 
 		const codec = track.source._codec;
@@ -97,6 +104,11 @@ export class WaveMuxer extends Muxer {
 		// data chunk
 		this.riffWriter.writeAscii('data');
 		this.riffWriter.writeU32(0); // Data size placeholder
+
+		if (this.format._options.onHeader) {
+			const { data, start } = this.writer.stopTrackingWrites();
+			this.format._options.onHeader(data, start);
+		}
 	}
 
 	async finalize() {

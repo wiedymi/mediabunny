@@ -168,6 +168,10 @@ export class MatroskaMuxer extends Muxer {
 	}
 
 	private writeEBMLHeader() {
+		if (this.format._options.onEbmlHeader) {
+			this.writer.startTrackingWrites();
+		}
+
 		const ebmlHeader: EBML = { id: EBMLId.EBML, data: [
 			{ id: EBMLId.EBMLVersion, data: 1 },
 			{ id: EBMLId.EBMLReadVersion, data: 1 },
@@ -178,6 +182,11 @@ export class MatroskaMuxer extends Muxer {
 			{ id: EBMLId.DocTypeReadVersion, data: 2 },
 		] };
 		this.ebmlWriter.writeEBML(ebmlHeader);
+
+		if (this.format._options.onEbmlHeader) {
+			const { data, start } = this.writer.stopTrackingWrites(); // start should be 0
+			this.format._options.onEbmlHeader(data, start);
+		}
 	}
 
 	/**
@@ -365,14 +374,16 @@ export class MatroskaMuxer extends Muxer {
 		};
 		this.segment = segment;
 
+		if (this.format._options.onSegmentHeader) {
+			this.writer.startTrackingWrites();
+		}
+
 		this.ebmlWriter.writeEBML(segment);
 
-		/*
-		if (this.#writer instanceof BaseStreamTargetWriter && this.#writer.target.options.onHeader) {
-			let { data, start } = this.#writer.getTrackedWrites(); // start should be 0
-			this.#writer.target.options.onHeader(data, start);
+		if (this.format._options.onSegmentHeader) {
+			const { data, start } = this.writer.stopTrackingWrites();
+			this.format._options.onSegmentHeader(data, start);
 		}
-		*/
 	}
 
 	private createCues() {
@@ -776,15 +787,13 @@ export class MatroskaMuxer extends Muxer {
 
 	/** Creates a new Cluster element to contain media chunks. */
 	private createNewCluster(msTimestamp: number) {
-		if (this.currentCluster && !this.format._options.streamable) {
+		if (this.currentCluster) {
 			this.finalizeCurrentCluster();
 		}
 
-		/*
-		if (this.#writer instanceof BaseStreamTargetWriter && this.#writer.target.options.onCluster) {
-			this.#writer.startTrackingWrites();
+		if (this.format._options.onCluster) {
+			this.writer.startTrackingWrites();
 		}
-		*/
 
 		this.currentCluster = {
 			id: EBMLId.Cluster,
@@ -802,20 +811,23 @@ export class MatroskaMuxer extends Muxer {
 
 	private finalizeCurrentCluster() {
 		assert(this.currentCluster);
-		const clusterSize = this.writer.getPos() - this.ebmlWriter.dataOffsets.get(this.currentCluster)!;
-		const endPos = this.writer.getPos();
 
-		// Write the size now that we know it
-		this.writer.seek(this.ebmlWriter.offsets.get(this.currentCluster)! + 4);
-		this.ebmlWriter.writeVarInt(clusterSize, CLUSTER_SIZE_BYTES);
-		this.writer.seek(endPos);
+		if (!this.format._options.streamable) {
+			const clusterSize = this.writer.getPos() - this.ebmlWriter.dataOffsets.get(this.currentCluster)!;
+			const endPos = this.writer.getPos();
 
-		/*
-		if (this.#writer instanceof BaseStreamTargetWriter && this.#writer.target.options.onCluster) {
-			let { data, start } = this.#writer.getTrackedWrites();
-			this.#writer.target.options.onCluster(data, start, this.#currentClusterTimestamp);
+			// Write the size now that we know it
+			this.writer.seek(this.ebmlWriter.offsets.get(this.currentCluster)! + 4);
+			this.ebmlWriter.writeVarInt(clusterSize, CLUSTER_SIZE_BYTES);
+			this.writer.seek(endPos);
 		}
-		*/
+
+		if (this.format._options.onCluster) {
+			assert(this.currentClusterStartMsTimestamp !== null);
+
+			const { data, start } = this.writer.stopTrackingWrites();
+			this.format._options.onCluster(data, start, this.currentClusterStartMsTimestamp / 1000);
+		}
 
 		const clusterOffsetFromSegment
 			= this.ebmlWriter.offsets.get(this.currentCluster)! - this.segmentDataOffset;
@@ -869,7 +881,7 @@ export class MatroskaMuxer extends Muxer {
 		// Flush any remaining queued chunks to the file
 		await this.interleaveChunks(true);
 
-		if (!this.format._options.streamable && this.currentCluster) {
+		if (this.currentCluster) {
 			this.finalizeCurrentCluster();
 		}
 

@@ -16,9 +16,9 @@
 
 		const source = new Metamuxer.BlobSource(file);
 		const target = new Metamuxer.BufferTarget();
-		const outputFormat = new Metamuxer.Mp4OutputFormat({
-			fastStart: 'fragmented'
-		})
+		const outputFormat = new Metamuxer.OggOutputFormat({
+			onPage: console.log
+		});
 
 		const button = document.createElement('button');
 		button.textContent = 'Cancel';
@@ -75,13 +75,22 @@
 			},
 			trim: {
 				start: 0,
-				end: 10
+				end: 60
 			},
 			computeProgress: true
 		});
 		console.log(conversion);
 
-		conversion.onProgress = () => progress.value = conversion.progress;
+		function updateProgress() {
+			progress.value = conversion.progress;
+
+			if (conversion.progress === 1) {
+				return;
+			}
+
+			setTimeout(updateProgress, 1000/60);
+		}
+		updateProgress();
 
 		console.time();
 		await conversion.execute();

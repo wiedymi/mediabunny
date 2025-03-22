@@ -21,8 +21,8 @@ export class EncodedPacket {
 		/** The type of this packet. */
 		public readonly type: PacketType,
 		/**
-		 * The timestamp of this packet in seconds. May be negative. Samples with negative end timestamps should not
-		 * be presented.
+		 * The presentation timestamp of this packet in seconds. May be negative. Samples with negative end timestamps
+		 * should not be presented.
 		 */
 		public readonly timestamp: number,
 		/** The duration of this packet in seconds. */

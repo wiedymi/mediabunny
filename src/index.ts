@@ -19,8 +19,11 @@ export {
 	WebMOutputFormat,
 	WebMOutputFormatOptions,
 	Mp3OutputFormat,
+	Mp3OutputFormatOptions,
 	WaveOutputFormat,
+	WaveOutputFormatOptions,
 	OggOutputFormat,
+	OggOutputFormatOptions,
 	TrackCountLimits,
 	InclusiveIntegerRange,
 } from './output-format';

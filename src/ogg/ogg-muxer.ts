@@ -2,6 +2,7 @@ import { OPUS_INTERNAL_SAMPLE_RATE, parseOpusIdentificationHeader } from '../cod
 import { assert, setInt64, toDataView, toUint8Array } from '../misc';
 import { Muxer } from '../muxer';
 import { Output, OutputAudioTrack } from '../output';
+import { OggOutputFormat } from '../output-format';
 import { EncodedPacket } from '../packet';
 import { Writer } from '../writer';
 import {
@@ -40,6 +41,7 @@ type Packet = {
 };
 
 export class OggMuxer extends Muxer {
+	private format: OggOutputFormat;
 	private writer: Writer;
 
 	private trackDatas: OggTrackData[] = [];
@@ -48,9 +50,10 @@ export class OggMuxer extends Muxer {
 	private pageBytes = new Uint8Array(MAX_PAGE_SIZE);
 	private pageView = new DataView(this.pageBytes.buffer);
 
-	constructor(output: Output) {
+	constructor(output: Output, format: OggOutputFormat) {
 		super(output);
 
+		this.format = format;
 		this.writer = output._writer;
 	}
 
@@ -399,7 +402,16 @@ export class OggMuxer extends Muxer {
 		trackData.currentPageSize = 27;
 		trackData.currentPageStartsWithFreshPacket = true;
 
+		if (this.format._options.onPage) {
+			this.writer.startTrackingWrites();
+		}
+
 		this.writer.write(slice);
+
+		if (this.format._options.onPage) {
+			const { data, start } = this.writer.stopTrackingWrites();
+			this.format._options.onPage(data, start, trackData.track.source);
+		}
 	}
 
 	// eslint-disable-next-line @typescript-eslint/no-misused-promises

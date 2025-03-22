@@ -1,4 +1,4 @@
-import { Box, free, ftyp, IsobmffBoxWriter, mdat, mfra, moof, moov, vtta, vttc, vtte } from './isobmff-boxes';
+import { Box, ftyp, IsobmffBoxWriter, mdat, mfra, moof, moov, vtta, vttc, vtte } from './isobmff-boxes';
 import { Muxer } from '../muxer';
 import { Output, OutputAudioTrack, OutputSubtitleTrack, OutputTrack, OutputVideoTrack } from '../output';
 import { BufferTargetWriter, Writer } from '../writer';
@@ -97,6 +97,7 @@ export const intoTimescale = (timeInSeconds: number, timescale: number, round = 
 };
 
 export class IsobmffMuxer extends Muxer {
+	private format: IsobmffOutputFormat;
 	private writer: Writer;
 	private boxWriter: IsobmffBoxWriter;
 	private isMov: boolean;
@@ -107,7 +108,6 @@ export class IsobmffMuxer extends Muxer {
 	private auxWriter = this.auxTarget._createWriter();
 	private auxBoxWriter = new IsobmffBoxWriter(this.auxWriter);
 
-	private ftypSize: number | null = null;
 	private mdat: Box | null = null;
 
 	private trackDatas: IsobmffTrackData[] = [];
@@ -123,6 +123,7 @@ export class IsobmffMuxer extends Muxer {
 	constructor(output: Output, format: IsobmffOutputFormat) {
 		super(output);
 
+		this.format = format;
 		this.writer = output._writer;
 		this.boxWriter = new IsobmffBoxWriter(this.writer);
 
@@ -147,19 +148,32 @@ export class IsobmffMuxer extends Muxer {
 		const holdsAvc = this.output._tracks.some(x => x.type === 'video' && x.source._codec === 'avc');
 
 		// Write the header
-		this.boxWriter.writeBox(ftyp({
-			isMov: this.isMov,
-			holdsAvc: holdsAvc,
-			fragmented: this.isFragmented,
-		}));
+		{
+			if (this.format._options.onFtyp) {
+				this.writer.startTrackingWrites();
+			}
 
-		this.ftypSize = this.writer.getPos();
+			this.boxWriter.writeBox(ftyp({
+				isMov: this.isMov,
+				holdsAvc: holdsAvc,
+				fragmented: this.isFragmented,
+			}));
+
+			if (this.format._options.onFtyp) {
+				const { data, start } = this.writer.stopTrackingWrites();
+				this.format._options.onFtyp(data, start);
+			}
+		}
 
 		if (this.fastStart === 'in-memory') {
 			this.mdat = mdat(false);
 		} else if (this.isFragmented) {
 			// We write the moov box once we write out the first fragment to make sure we get the decoder configs
 		} else {
+			if (this.format._options.onMdat) {
+				this.writer.startTrackingWrites();
+			}
+
 			this.mdat = mdat(true); // Reserve large size by default, can refine this when finalizing.
 			this.boxWriter.writeBox(this.mdat);
 		}
@@ -802,59 +816,82 @@ export class IsobmffMuxer extends Muxer {
 		const fragmentNumber = this.nextFragmentNumber++;
 
 		if (fragmentNumber === 1) {
+			if (this.format._options.onMoov) {
+				this.writer.startTrackingWrites();
+			}
+
 			// Write the moov box now that we have all decoder configs
 			const movieBox = moov(this.trackDatas, this.creationTime, true);
 			this.boxWriter.writeBox(movieBox);
+
+			if (this.format._options.onMoov) {
+				const { data, start } = this.writer.stopTrackingWrites();
+				this.format._options.onMoov(data, start);
+			}
 		}
 
 		// Not all tracks need to be present in every fragment
 		const tracksInFragment = this.trackDatas.filter(x => x.currentChunk);
 
-		// Write out an initial moof box; will be overwritten later once actual chunk offsets are known
-		const moofOffset = this.writer.getPos();
+		// Create an initial moof box and measure it; we need this to know where the following mdat box will begin
 		const moofBox = moof(fragmentNumber, tracksInFragment);
-		this.boxWriter.writeBox(moofBox);
+		const moofOffset = this.writer.getPos();
+		const mdatStartPos = moofOffset + this.boxWriter.measureBox(moofBox);
 
-		// Create the mdat box
-		{
-			const mdatBox = mdat(false); // Initially assume the fragment is not larger than 4 GiB
-			let totalTrackSampleSize = 0;
+		// Header with large size. We always reserve 16 bytes for it even if we don't end up using the large size.
+		const mdatHeaderSize = 16;
 
-			// Compute the size of the mdat box
-			for (const trackData of tracksInFragment) {
-				for (const sample of trackData.currentChunk!.samples) {
-					totalTrackSampleSize += sample.size;
-				}
+		let currentPos = mdatStartPos + mdatHeaderSize;
+		let fragmentStartTimestamp = Infinity;
+		for (const trackData of tracksInFragment) {
+			trackData.currentChunk!.offset = currentPos;
+			trackData.currentChunk!.moofOffset = moofOffset;
+
+			for (const sample of trackData.currentChunk!.samples) {
+				currentPos += sample.size;
 			}
 
-			let mdatSize = this.boxWriter.measureBox(mdatBox) + totalTrackSampleSize;
-			if (mdatSize >= 2 ** 32) {
-				// Fragment is larger than 4 GiB, we need to use the large size
-				mdatBox.largeSize = true;
-				mdatSize = this.boxWriter.measureBox(mdatBox) + totalTrackSampleSize;
-			}
-
-			mdatBox.size = mdatSize;
-			this.boxWriter.writeBox(mdatBox);
+			fragmentStartTimestamp = Math.min(fragmentStartTimestamp, trackData.currentChunk!.startTimestamp);
 		}
+
+		const mdatSize = currentPos - mdatStartPos;
+
+		if (this.format._options.onMoof) {
+			this.writer.startTrackingWrites();
+		}
+
+		const newMoofBox = moof(fragmentNumber, tracksInFragment);
+		this.boxWriter.writeBox(newMoofBox);
+
+		if (this.format._options.onMoof) {
+			const { data, start } = this.writer.stopTrackingWrites();
+			this.format._options.onMoof(data, start, fragmentStartTimestamp);
+		}
+
+		assert(this.writer.getPos() === mdatStartPos);
+
+		if (this.format._options.onMdat) {
+			this.writer.startTrackingWrites();
+		}
+
+		const mdatBox = mdat(mdatSize >= 2 ** 32);
+		mdatBox.size = mdatSize;
+		this.boxWriter.writeBox(mdatBox);
+
+		this.writer.seek(mdatStartPos + mdatHeaderSize);
 
 		// Write sample data
 		for (const trackData of tracksInFragment) {
-			trackData.currentChunk!.offset = this.writer.getPos();
-			trackData.currentChunk!.moofOffset = moofOffset;
-
 			for (const sample of trackData.currentChunk!.samples) {
 				this.writer.write(sample.data!);
 				sample.data = null; // Can be GC'd
 			}
 		}
 
-		// Now that we set the actual chunk offsets, fix the moof box
-		const endPos = this.writer.getPos();
-		this.writer.seek(this.boxWriter.offsets.get(moofBox)!);
-		const newMoofBox = moof(fragmentNumber, tracksInFragment);
-		this.boxWriter.writeBox(newMoofBox);
-		this.writer.seek(endPos);
+		if (this.format._options.onMdat) {
+			const { data, start } = this.writer.stopTrackingWrites();
+			this.format._options.onMdat(data, start);
+		}
 
 		for (const trackData of tracksInFragment) {
 			trackData.finalizedChunks.push(trackData.currentChunk!);
@@ -937,8 +974,21 @@ export class IsobmffMuxer extends Muxer {
 				if (mdatSize >= 2 ** 32) this.mdat.largeSize = true;
 			}
 
+			if (this.format._options.onMoov) {
+				this.writer.startTrackingWrites();
+			}
+
 			const movieBox = moov(this.trackDatas, this.creationTime);
 			this.boxWriter.writeBox(movieBox);
+
+			if (this.format._options.onMoov) {
+				const { data, start } = this.writer.stopTrackingWrites();
+				this.format._options.onMoov(data, start);
+			}
+
+			if (this.format._options.onMdat) {
+				this.writer.startTrackingWrites();
+			}
 
 			this.mdat.size = mdatSize!;
 			this.boxWriter.writeBox(this.mdat);
@@ -949,6 +999,11 @@ export class IsobmffMuxer extends Muxer {
 					this.writer.write(sample.data);
 					sample.data = null;
 				}
+			}
+
+			if (this.format._options.onMdat) {
+				const { data, start } = this.writer.stopTrackingWrites();
+				this.format._options.onMdat(data, start);
 			}
 		} else if (this.isFragmented) {
 			// Append the mfra box to the end of the file for better random access
@@ -962,7 +1017,6 @@ export class IsobmffMuxer extends Muxer {
 			this.boxWriter.writeU32(mfraBoxSize);
 		} else {
 			assert(this.mdat);
-			assert(this.ftypSize !== null);
 
 			const mdatPos = this.boxWriter.offsets.get(this.mdat);
 			assert(mdatPos !== undefined);
@@ -971,16 +1025,21 @@ export class IsobmffMuxer extends Muxer {
 			this.mdat.largeSize = mdatSize >= 2 ** 32; // Only use the large size if we need it
 			this.boxWriter.patchBox(this.mdat);
 
+			if (this.format._options.onMdat) {
+				const { data, start } = this.writer.stopTrackingWrites();
+				this.format._options.onMdat(data, start);
+			}
+
+			if (this.format._options.onMoov) {
+				this.writer.startTrackingWrites();
+			}
+
 			const movieBox = moov(this.trackDatas, this.creationTime);
+			this.boxWriter.writeBox(movieBox);
 
-			if (typeof this.fastStart === 'object') {
-				this.writer.seek(this.ftypSize);
-				this.boxWriter.writeBox(movieBox);
-
-				const remainingBytes = mdatPos - this.writer.getPos();
-				this.boxWriter.writeBox(free(remainingBytes));
-			} else {
-				this.boxWriter.writeBox(movieBox);
+			if (this.format._options.onMoov) {
+				const { data, start } = this.writer.stopTrackingWrites();
+				this.format._options.onMoov(data, start);
 			}
 		}
 

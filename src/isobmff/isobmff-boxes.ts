@@ -317,9 +317,6 @@ export const ftyp = (details: {
 /** Movie Sample Data Box. Contains the actual frames/samples of the media. */
 export const mdat = (reserveLargeSize: boolean): Box => ({ type: 'mdat', largeSize: reserveLargeSize });
 
-/** Free Space Box: A box that designates unused space in the movie data file. */
-export const free = (size: number): Box => ({ type: 'free', size });
-
 /**
  * Movie Box: Used to specify the information that defines a movie - that is, the information that allows
  * an application to interpret the sample data that is stored elsewhere.

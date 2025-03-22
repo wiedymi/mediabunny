@@ -374,6 +374,12 @@ export class Conversion {
 			}
 		}
 
+		const unintentionallyDiscardedTracks = this.discardedTracks.filter(x => x.reason !== 'discardedByUser');
+		if (unintentionallyDiscardedTracks.length > 0) {
+			// Let's give the user a notice/warning about discarded tracks so they aren't confused
+			console.warn('Some tracks had to be discarded from the conversion:', unintentionallyDiscardedTracks);
+		}
+
 		if (this._options.computeProgress) {
 			this._totalDuration = Math.min(
 				await this._input.computeDuration() - this._startTimestamp,

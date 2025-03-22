@@ -22,7 +22,7 @@ export type VideoSampleInit = {
 	codedHeight?: number;
 	/** The rotation of the frame in degrees, clockwise. */
 	rotation?: Rotation;
-	/** The timestamp of the frame in seconds. */
+	/** The presentation timestamp of the frame in seconds. */
 	timestamp?: number;
 	/** The duration of the frame in seconds. */
 	duration?: number;
@@ -50,8 +50,8 @@ export class VideoSample {
 	/** The rotation of the frame in degrees, clockwise. */
 	readonly rotation!: Rotation;
 	/**
-	 * The timestamp of the frame in seconds. May be negative. Frames with negative end timestamps should not
-	 * be presented.
+	 * The presentation timestamp of the frame in seconds. May be negative. Frames with negative end timestamps should
+	 * not be presented.
 	 */
 	readonly timestamp!: number;
 	/** The duration of the frame in seconds. */
@@ -69,7 +69,7 @@ export class VideoSample {
 		return this.rotation % 180 === 0 ? this.codedHeight : this.codedWidth;
 	}
 
-	/** The timestamp of the frame in microseconds. */
+	/** The presentation timestamp of the frame in microseconds. */
 	get microsecondTimestamp() {
 		return Math.trunc(SECOND_TO_MICROSECOND_FACTOR * this.timestamp);
 	}
@@ -437,7 +437,7 @@ export class VideoSample {
 		(this.rotation as Rotation) = newRotation;
 	}
 
-	/** Sets the timestamp of this video sample, in seconds. */
+	/** Sets the presentation timestamp of this video sample, in seconds. */
 	setTimestamp(newTimestamp: number) {
 		if (!Number.isFinite(newTimestamp)) {
 			throw new TypeError('newTimestamp must be a number.');
@@ -479,7 +479,7 @@ export type AudioSampleInit = {
 	numberOfChannels: number;
 	/** The audio sample rate in hertz. */
 	sampleRate: number;
-	/** The timestamp of the sample in seconds. */
+	/** The presentation timestamp of the sample in seconds. */
 	timestamp: number;
 };
 
@@ -527,12 +527,12 @@ export class AudioSample {
 	/** The timestamp of the sample in seconds. */
 	readonly duration: number;
 	/**
-	 * The timestamp of the sample in seconds. May be negative. Samples with negative end timestamps should not
-	 * be presented.
+	 * The presentation timestamp of the sample in seconds. May be negative. Samples with negative end timestamps should
+	 * not be presented.
 	 */
 	readonly timestamp: number;
 
-	/** The timestamp of the sample in microseconds. */
+	/** The presentation timestamp of the sample in microseconds. */
 	get microsecondTimestamp() {
 		return Math.trunc(SECOND_TO_MICROSECOND_FACTOR * this.timestamp);
 	}
@@ -928,7 +928,7 @@ export class AudioSample {
 		return audioBuffer;
 	}
 
-	/** Sets the timestamp of this audio sample, in seconds. */
+	/** Sets the presentation timestamp of this audio sample, in seconds. */
 	setTimestamp(newTimestamp: number) {
 		if (!Number.isFinite(newTimestamp)) {
 			throw new TypeError('newTimestamp must be a number.');
