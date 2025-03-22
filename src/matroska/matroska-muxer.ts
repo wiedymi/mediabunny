@@ -36,6 +36,7 @@ import {
 	PCM_AUDIO_CODECS,
 	PcmAudioCodec,
 	generateAv1CodecConfigurationFromCodecString,
+	generateVp9CodecConfigurationFromCodecString,
 	parseOpusIdentificationHeader,
 	parsePcmCodec,
 	validateAudioChunkMetadata,
@@ -408,7 +409,16 @@ export class MatroskaMuxer extends Muxer {
 			lastWrittenMsTimestamp: null,
 		};
 
-		if (track.source._codec === 'av1') {
+		if (track.source._codec === 'vp9') {
+			// https://www.webmproject.org/docs/container specifies that VP9 "SHOULD" make use of the CodecPrivate
+			// field. Since WebCodecs makes no use of the description field for VP9, we need to derive it ourselves:
+			newTrackData.info.decoderConfig = {
+				...newTrackData.info.decoderConfig,
+				description: new Uint8Array(
+					generateVp9CodecConfigurationFromCodecString(newTrackData.info.decoderConfig.codec),
+				),
+			};
+		} else if (track.source._codec === 'av1') {
 			// Per https://github.com/ietf-wg-cellar/matroska-specification/blob/master/codec/av1.md, AV1 requires
 			// CodecPrivate to be set, but WebCodecs makes no use of the description field for AV1. Thus, let's derive
 			// it ourselves:

@@ -121,6 +121,7 @@ type InternalTrack = {
 			height: number;
 			rotation: Rotation;
 			codec: VideoCodec | null;
+			codecDescription: Uint8Array | null;
 			colorSpace: VideoColorSpaceInit | null;
 		}
 		| {
@@ -129,6 +130,7 @@ type InternalTrack = {
 			sampleRate: number;
 			bitDepth: number;
 			codec: AudioCodec | null;
+			codecDescription: Uint8Array | null;
 			aacCodecInfo: AacCodecInfo | null;
 		};
 };
@@ -620,8 +622,10 @@ export class MatroskaDemuxer extends Demuxer {
 					) {
 						if (this.currentTrack.codecId === CODEC_STRING_MAP.avc) {
 							this.currentTrack.info.codec = 'avc';
+							this.currentTrack.info.codecDescription = this.currentTrack.codecPrivate;
 						} else if (this.currentTrack.codecId === CODEC_STRING_MAP.hevc) {
 							this.currentTrack.info.codec = 'hevc';
+							this.currentTrack.info.codecDescription = this.currentTrack.codecPrivate;
 						} else if (codecIdWithoutSuffix === CODEC_STRING_MAP.vp8) {
 							this.currentTrack.info.codec = 'vp8';
 						} else if (codecIdWithoutSuffix === CODEC_STRING_MAP.vp9) {
@@ -644,14 +648,18 @@ export class MatroskaDemuxer extends Demuxer {
 							this.currentTrack.info.aacCodecInfo = {
 								isMpeg2: this.currentTrack.codecId.includes('MPEG2'),
 							};
+							this.currentTrack.info.codecDescription = this.currentTrack.codecPrivate;
 						} else if (this.currentTrack.codecId === CODEC_STRING_MAP.mp3) {
 							this.currentTrack.info.codec = 'mp3';
 						} else if (codecIdWithoutSuffix === CODEC_STRING_MAP.opus) {
 							this.currentTrack.info.codec = 'opus';
+							this.currentTrack.info.codecDescription = this.currentTrack.codecPrivate;
 						} else if (codecIdWithoutSuffix === CODEC_STRING_MAP.vorbis) {
 							this.currentTrack.info.codec = 'vorbis';
+							this.currentTrack.info.codecDescription = this.currentTrack.codecPrivate;
 						} else if (codecIdWithoutSuffix === CODEC_STRING_MAP.flac) {
 							this.currentTrack.info.codec = 'flac';
+							this.currentTrack.info.codecDescription = this.currentTrack.codecPrivate;
 						} else if (this.currentTrack.codecId === 'A_PCM/INT/LIT') {
 							if (this.currentTrack.info.bitDepth === 8) {
 								this.currentTrack.info.codec = 'pcm-u8';
@@ -705,6 +713,7 @@ export class MatroskaDemuxer extends Demuxer {
 						height: -1,
 						rotation: 0,
 						codec: null,
+						codecDescription: null,
 						colorSpace: null,
 					};
 				} else if (type === 2) {
@@ -714,6 +723,7 @@ export class MatroskaDemuxer extends Demuxer {
 						sampleRate: -1,
 						bitDepth: -1,
 						codec: null,
+						codecDescription: null,
 						aacCodecInfo: null,
 					};
 				}
@@ -1484,7 +1494,7 @@ class MatroskaVideoTrackBacking extends MatroskaTrackBacking implements InputVid
 					width: this.internalTrack.info.width,
 					height: this.internalTrack.info.height,
 					codec: this.internalTrack.info.codec,
-					codecDescription: this.internalTrack.codecPrivate,
+					codecDescription: this.internalTrack.info.codecDescription,
 					colorSpace: this.internalTrack.info.colorSpace,
 					vp9CodecInfo: this.internalTrack.info.codec === 'vp9' && firstPacket
 						? extractVp9CodecInfoFromFrame(firstPacket.data)
@@ -1495,7 +1505,7 @@ class MatroskaVideoTrackBacking extends MatroskaTrackBacking implements InputVid
 				}),
 				codedWidth: this.internalTrack.info.width,
 				codedHeight: this.internalTrack.info.height,
-				description: this.internalTrack.codecPrivate ?? undefined,
+				description: this.internalTrack.info.codecDescription ?? undefined,
 				colorSpace: this.internalTrack.info.colorSpace ?? undefined,
 			};
 		})();
@@ -1531,12 +1541,12 @@ class MatroskaAudioTrackBacking extends MatroskaTrackBacking implements InputAud
 		return this.decoderConfig ??= {
 			codec: extractAudioCodecString({
 				codec: this.internalTrack.info.codec,
-				codecDescription: this.internalTrack.codecPrivate,
+				codecDescription: this.internalTrack.info.codecDescription,
 				aacCodecInfo: this.internalTrack.info.aacCodecInfo,
 			}),
 			numberOfChannels: this.internalTrack.info.numberOfChannels,
 			sampleRate: this.internalTrack.info.sampleRate,
-			description: this.internalTrack.codecPrivate ?? undefined,
+			description: this.internalTrack.info.codecDescription ?? undefined,
 		};
 	}
 }

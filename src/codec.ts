@@ -253,6 +253,24 @@ export const buildVideoCodecString = (codec: VideoCodec, width: number, height: 
 	throw new TypeError(`Unhandled codec '${codec}'.`);
 };
 
+export const generateVp9CodecConfigurationFromCodecString = (codecString: string) => {
+	// Reference: https://www.webmproject.org/docs/container/#vp9-codec-feature-metadata-codecprivate
+
+	const parts = codecString.split('.'); // We can derive the required values from the codec string
+
+	const profile = Number(parts[1]);
+	const level = Number(parts[2]);
+	const bitDepth = Number(parts[3]);
+	const chromaSubsampling = parts[4] ? Number(parts[4]) : 1;
+
+	return [
+		1, 1, profile,
+		2, 1, level,
+		3, 1, bitDepth,
+		4, 1, chromaSubsampling,
+	];
+};
+
 export const generateAv1CodecConfigurationFromCodecString = (codecString: string) => {
 	// Reference: https://aomediacodec.github.io/av1-isobmff/
 
