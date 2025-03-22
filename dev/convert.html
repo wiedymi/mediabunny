@@ -16,7 +16,9 @@
 
 		const source = new Metamuxer.BlobSource(file);
 		const target = new Metamuxer.BufferTarget();
-		const outputFormat = new Metamuxer.WebMOutputFormat()
+		const outputFormat = new Metamuxer.Mp4OutputFormat({
+			fastStart: 'fragmented'
+		})
 
 		const button = document.createElement('button');
 		button.textContent = 'Cancel';

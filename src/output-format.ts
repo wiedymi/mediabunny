@@ -110,6 +110,12 @@ export type IsobmffOutputFormatOptions = {
 	 * the type of output target used.
 	 */
 	fastStart?: false | 'in-memory' | 'fragmented';
+
+	/**
+	 * When using `fastStart: 'fragmented'`, this field controls the minimum duration of each fragment, in seconds.
+	 * New fragments will only be created when the current fragment is longer than this value. Defaults to 1 second.
+	 */
+	minimumFragmentDuration?: number;
 };
 
 /**
@@ -126,6 +132,12 @@ export abstract class IsobmffOutputFormat extends OutputFormat {
 		}
 		if (options.fastStart !== undefined && ![false, 'in-memory', 'fragmented'].includes(options.fastStart)) {
 			throw new TypeError('options.fastStart, when provided, must be false, "in-memory", or "fragmented".');
+		}
+		if (
+			options.minimumFragmentDuration !== undefined
+			&& (!Number.isFinite(options.minimumFragmentDuration) || options.minimumFragmentDuration < 0)
+		) {
+			throw new TypeError('options.minimumFragmentDuration, when provided, must be a non-negative number.');
 		}
 
 		super();
@@ -226,6 +238,12 @@ export type MkvOutputFormatOptions = {
 	 * option when you want to write out a file for later use.
 	 */
 	streamable?: boolean;
+
+	/**
+	 * This field controls the minimum duration of each Matroska cluster, in seconds. New clusters will only be created
+	 * when the current cluster is longer than this value. Defaults to 1 second.
+	 */
+	minimumClusterDuration?: number;
 };
 
 /**
@@ -242,6 +260,12 @@ export class MkvOutputFormat extends OutputFormat {
 		}
 		if (options.streamable !== undefined && typeof options.streamable !== 'boolean') {
 			throw new TypeError('options.streamable, when provided, must be a boolean.');
+		}
+		if (
+			options.minimumClusterDuration !== undefined
+			&& (!Number.isFinite(options.minimumClusterDuration) || options.minimumClusterDuration < 0)
+		) {
+			throw new TypeError('options.minimumClusterDuration, when provided, must be a non-negative number.');
 		}
 
 		super();

@@ -703,7 +703,7 @@ export class MatroskaMuxer extends Muxer {
 				// CURRENT chunk, meaning that starting the next cluster at the same timestamp is forbidden (since
 				// the already-written block would belong into it instead).
 				&& msTimestamp > this.currentClusterMaxMsTimestamp
-				&& relativeTimestamp >= 1000
+				&& relativeTimestamp >= 1000 * (this.format._options.minimumClusterDuration ?? 1)
 			)
 			// The cluster would exceed its maximum allowed length. This puts us in an unfortunate position and forces
 			// us to begin the next cluster with a delta frame. Although this is undesirable, it is not forbidden by the

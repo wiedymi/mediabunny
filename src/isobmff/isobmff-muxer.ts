@@ -118,6 +118,7 @@ export class IsobmffMuxer extends Muxer {
 	private nextFragmentNumber = 1;
 	// Only relevant for fragmented files, to make sure new fragments start with the highest timestamp seen so far
 	private maxWrittenTimestamp = -Infinity;
+	private minimumFragmentDuration: number;
 
 	constructor(output: Output, format: IsobmffOutputFormat) {
 		super(output);
@@ -136,6 +137,8 @@ export class IsobmffMuxer extends Muxer {
 		if (this.fastStart === 'in-memory' || this.isFragmented) {
 			this.writer.ensureMonotonicity = true;
 		}
+
+		this.minimumFragmentDuration = format._options.minimumFragmentDuration ?? 1;
 	}
 
 	async start() {
@@ -683,7 +686,7 @@ export class IsobmffMuxer extends Muxer {
 				});
 
 				if (
-					currentChunkDuration >= 1.0
+					currentChunkDuration >= this.minimumFragmentDuration
 					&& keyFrameQueuedEverywhere
 					&& sample.timestamp > this.maxWrittenTimestamp
 				) {
