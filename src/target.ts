@@ -1,4 +1,4 @@
-import { BufferTargetWriter, ChunkedStreamTargetWriter, StreamTargetWriter, Writer } from './writer';
+import { BufferTargetWriter, StreamTargetWriter, Writer } from './writer';
 import { Output } from './output';
 
 /**
@@ -93,6 +93,6 @@ export class StreamTarget extends Target {
 
 	/** @internal */
 	_createWriter() {
-		return this._options.chunked ? new ChunkedStreamTargetWriter(this) : new StreamTargetWriter(this);
+		return new StreamTargetWriter(this);
 	}
 }
