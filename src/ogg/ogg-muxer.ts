@@ -55,6 +55,8 @@ export class OggMuxer extends Muxer {
 
 		this.format = format;
 		this.writer = output._writer;
+
+		this.writer.ensureMonotonicity = true; // Ogg is always monotonically written!
 	}
 
 	async start() {

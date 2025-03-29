@@ -305,10 +305,6 @@ export class StreamTargetWriter extends Writer {
 				}
 			}
 
-			if (this.ensureMonotonicity && chunk.start !== this.lastFlushEnd) {
-				throw new Error('Internal error: Monotonicity violation.');
-			}
-
 			if (this.writer.desiredSize !== null && this.writer.desiredSize <= 0) {
 				await this.writer.ready; // Allow the writer to apply backpressure
 			}
@@ -318,15 +314,19 @@ export class StreamTargetWriter extends Writer {
 				this.writeDataIntoChunks(chunk.data, chunk.start);
 				this.tryToFlushChunks();
 			} else {
+				if (this.ensureMonotonicity && chunk.start !== this.lastFlushEnd) {
+					throw new Error('Internal error: Monotonicity violation.');
+				}
+
 				// Write out the data immediately
 				void this.writer.write({
 					type: 'write',
 					data: chunk.data,
 					position: chunk.start,
 				});
-			}
 
-			this.lastFlushEnd = chunk.start + chunk.data.byteLength;
+				this.lastFlushEnd = chunk.start + chunk.data.byteLength;
+			}
 		}
 
 		this.sections.length = 0;
@@ -420,11 +420,18 @@ export class StreamTargetWriter extends Writer {
 			if (!chunk.shouldFlush && !force) continue;
 
 			for (const section of chunk.written) {
+				const position = chunk.start + section.start;
+				if (this.ensureMonotonicity && position !== this.lastFlushEnd) {
+					throw new Error('Internal error: Monotonicity violation.');
+				}
+
 				void this.writer.write({
 					type: 'write',
 					data: chunk.data.subarray(section.start, section.end),
-					position: chunk.start + section.start,
+					position,
 				});
+
+				this.lastFlushEnd = chunk.start + section.end;
 			}
 
 			this.chunks.splice(i--, 1);
