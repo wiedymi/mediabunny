@@ -1,0 +1,300 @@
+# Writing overview
+
+Mediakit enables you to create media files with very fine levels of control. You can add an arbitrary number of video, audio and subtitle tracks to a media file, and precisely control the timing of media data. This library supports [many output file formats](./output-formats). Using [output targets](#output-targets), you can decide if you want to build up the entire file in memory or stream it out in chunks as it's being created—allowing you to create very large files.
+
+Mediakit provides many ways to supply media data for output tracks, nicely integrating with the WebCodecs API, but also allowing you to use your own encoding stack if you wish. These [media sources](./media-sources) come in multiple levels of abstraction, enabling easy use for common use cases while still giving you fine-grained control if you need it.
+
+## Creating a new output
+
+Media file creation in Mediakit revolves around a central class, `Output`. One instance of `Output` represents one media file we want to create.
+
+Start by creating a new instance of `Output` using the desired configuration of the file you want to create:
+```ts
+import { Output, Mp4OutputFormat, BufferTarget } from 'mediakit';
+
+// In this example, we'll be creating an MP4 file in memory:
+const output = new Output({
+	format: new Mp4OutputFormat(),
+	target: new BufferTarget(),
+});
+```
+
+See [Output formats](./output-formats) for a full list of available output formats.\
+See [Output targets](#output-targets) for a full list of available output targets.
+
+You can always access `format` and `target` on the output:
+```ts
+output.format; // => Mp4OutputFormat	
+output.target; // => BufferTarget
+```
+
+## Adding tracks
+
+There are a couple of methods on an `Output` that you can use to add tracks to it:
+
+```ts
+output.addVideoTrack(videoSource);
+output.addAudioTrack(audioSource);
+output.addSubtitleTrack(subtitleSource);
+```
+
+For each track you want to add, you'll need to create a unique [media source](./media-source) for it. You'll be able to add media data to the output via these media sources. A media source can only ever be used for one output track.
+
+Optionally, you can specify additional track metadata when adding tracks:
+```ts
+// This specifies that the video track should be rotated by 90 degrees clockwise
+// before being displayed by video players, and that a frame rate of 30 FPS is
+// expected.
+output.addVideoTrack(videoSource, {
+	rotation: 90, // Clockwise rotation in degrees
+	frameRate: 30,
+});
+
+// This adds two audio tracks; one in English and one in German.
+output.addAudioTrack(audioSourceEng, {
+	language: 'eng', // ISO 639-2/T language code
+});
+output.addAudioTrack(audioSourceGer, {
+	language: 'ger',
+});
+
+// This adds multiple subtitle tracks, all for different languages.
+output.addSubtitleTrack(subtitleSourceEng, { language: 'eng' });
+output.addSubtitleTrack(subtitleSourceGer, { language: 'ger' });
+output.addSubtitleTrack(subtitleSourceSpa, { language: 'spa' });
+output.addSubtitleTrack(subtitleSourceFre, { language: 'fre' });
+output.addSubtitleTrack(subtitleSourceIta, { language: 'ita' });
+```
+
+As an example, let's add two tracks to our output:
+- A video track driven by the contents of a `<canvas>` element, encoded using AVC
+- An audio track driven by the user's microphone input, encoded using AAC
+
+```ts
+import { CanvasSource, MediaStreamAudioTrackSource } from 'mediakit';
+
+// Assuming `canvasElement` exists
+const videoSource = new CanvasSource(canvasElement, {
+	codec: 'avc',
+	bitrate: 1e6, // 1 Mbps	
+});
+
+const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+const audioStreamTrack = stream.getAudioTracks()[0];
+const audioSource = new MediaStreamAudioTrackSource(audioStreamTrack, {
+	codec: 'aac',
+	bitrate: 128e3, // 128 kbps
+});
+
+output.addVideoTrack(videoSource, { frameRate: 30 });
+output.addAudioTrack(audioSource);
+```
+
+::: warning
+Adding tracks to an `Output` will throw if the track is not compatible with the output format. Be sure to respect the [properties](./output-formats#format-properties) of the output format when adding tracks.
+:::
+
+## Starting the output
+
+After all tracks have been added to the `Output`, you need to *start* it. Starting an output spins up the writing process, allowing you to now start sending media data to the output file. It also prevents you from adding any new tracks to it.
+
+```ts
+await output.start(); // Resolves once the output is ready to receive media data
+```
+
+## Adding media data
+
+After starting an `Output`, you can use the media sources you used to add tracks to pipe media data to the output file. The API for this is different for each [media source](./media-source), but it typically looks something like this:
+```ts
+mediaSource.add(...);
+```
+
+In our example, as soon as we called `start`, the user's microphone input will be piped to the output file. However, we still need to add the data from our canvas. We might do something like this:
+```ts
+let framesAdded = 0;
+const intervalId = setInterval(() => {
+	const timestampInSeconds = framesAdded / 30;
+	const durationInSeconds = 1 / 30;
+
+	// Captures the canvas state at the time of calling `add`:
+	videoSource.add(timestampInSeconds, durationInSeconds);
+	framesAdded++;
+}, 1000 / 30);
+```
+
+And then we'll let this run for as long as we want to capture media data.
+
+## Finalizing the output
+
+Once all media data has been added, the `Output` needs to be *finalized*. Finalization finishes all remaining encoding
+work and writes the remaining data to create the final, playable media file.
+```ts
+await output.finalize(); // Resolves once the output is finalized
+```
+
+::: warning
+After calling `finalize`, adding more media data to the output results in an error.
+:::
+
+In our example, we'll need to do this:
+```ts
+clearInterval(intervalId); // Stops the canvas loop
+audioStreamTrack.stop(); // Stops capturing the user's microphone
+
+await output.finalize();
+
+const file = output.target.buffer; // => Uint8Array
+```
+
+## Canceling an output
+
+Sometimes, you may want to cancel the ongoing creation of an output file. For this, use the `cancel` method:
+```ts
+await output.cancel(); // Resolves once the output is canceled
+```
+
+This automatically frees up all resources used by the output process, such as closing all encoders or releasing the
+writer.
+
+::: warning
+After calling `cancel`, adding more media data to the output results in an error.
+:::
+
+In our example, we would do this:
+```ts	
+clearInterval(intervalId); // Stops the canvas loop
+audioStreamTrack.stop(); // Stops capturing the user's microphone
+
+await output.cancel();
+
+// The output is canceled
+```	
+
+## Checking output state
+
+You can always check the current state the output is in using its `state` property:
+```ts
+output.state; // => 'pending' | 'started' | 'canceled' | 'finalizing' | 'finalized'
+```
+
+- `'pending'` - The output hasn't been started or canceled yet; new tracks can be added.
+- `'started'` - The output has been started and is ready to receive media data; tracks can no longer be added. 
+- `'finalizing'` - `finalize` has been called but hasn't resolved yet; no more media data can be added.
+- `'finalized'` - The output has been finalized and is done writing the file.
+- `'canceled'` - The output has been canceled.
+
+## Output targets
+
+The _output target_ determines where the data created by the `Output` will be written. This library offers two targets:
+
+### `BufferTarget`
+
+This target writes all data to a single, contiguous, in-memory `ArrayBuffer`. This buffer will automatically grow as the file becomes larger. Usage is straightforward:
+```ts
+import { Output, BufferTarget } from 'mediakit';
+
+const output = new Output({
+	target: new BufferTarget(),
+	// ...
+});
+
+// ...
+
+output.target.buffer; // => null
+await output.finalize();
+output.target.buffer; // => Uint8Array
+```
+
+This target is a great choice for small-ish files (< 100 MB), but since all data will be kept in memory, using it for large files is suboptimal. If the output gets very large, the page might crash due to memory exhaustion. For these cases, using `StreamTarget` is recommended.
+
+### `StreamTarget`
+
+This target passes you the data written by the `Output` in small chunks, requiring you to pipe that data elsewhere to manually assemble the final file. Example use cases include writing the file directly to disk, or uploading it to a server over the network.
+
+`StreamTarget` makes use of the Streams API, meaning you'll need to pass it an instance of `WritableStream`:
+```ts
+import { Output, StreamTarget, StreamTargetChunk } from 'mediakit';
+
+const writable = new WritableStream({
+	write(chunk: StreamTargetChunk) {
+		chunk.data; // => Uint8Array
+		chunk.position; // => number
+
+		// Do something with the data...
+	}
+});
+
+const output = new Output({
+	target: new StreamTarget(writable),
+	// ...
+});
+```
+
+Each chunk written to the `WritableStream` represents a contiguous chunk of bytes of the output file, `data`, that is expected to be written at the given byte offset, `position`. The `WritableStream` will automatically be closed when `finalize` or `cancel` are called on the `Output`.
+
+::: warning
+Note that some byte regions in the output file may be written to multiple times. It is therefore **incorrect** to construct the final file by simply concatenating all `Uint8Array`s together - you **must** write each chunk of data at the specified byte offset position _in the order_ in which the chunks arrived. If you don't do this, your output file will likely be invalid or corrupted.
+
+Some [output formats](./output-formats) have "monotonic" writing modes in which the byte offset of a written chunk will always be equal to the total number of bytes in all previously written chunks. In other words, when writing is monotonic, simply concatening all `Uint8Array`s yields the correct result. Some APIs (like `appendBuffer` of Media Source Extensions) require this, so make sure to configure your output format accordingly for those cases.
+:::
+
+#### Chunked mode
+
+By default, data will be emitted by the `StreamTarget` as soon as it is available. In some formats, these may lead to hundreds of write events per second. If you want to reduce the frequency of writes, `StreamTarget` offers an alternative "chunked mode" in which data will first be accumulated into large chunks of a given size in memory, and then only be emitted once a chunk is completely full.
+
+```ts
+new StreamTarget(writable, {
+	chunked: true,
+	chunkSize: 2**20, // Optional; defaults to 16 MiB
+}),
+```
+
+#### Applying backpressure
+
+Sometimes, the `Output` may produce new data faster than you are able to write it. In this case, you want to communicate to the `Output` that it should "chill out" and slow down to match the pace that the `WritableStream` is able to handle. When using `StreamTarget`, the `Output` will automatically respect the backpressure applied by the `WritableStream`. For this, it is useful to understand the [Stream API concepts](https://developer.mozilla.org/en-US/docs/Web/API/Streams_API/Concepts) of how to apply backpressure.
+
+For example, the writable may apply backpressure by returning a promise in `write`:
+```ts
+const writable = new WritableStream({
+	write(chunk: StreamTargetChunk) {
+		// Pretend writing out data takes 10 milliseconds:
+		return new Promise(resolve => setTimeout(resolve, 10));
+	}
+});
+```
+
+::: info
+In order for the writable's backpressure to ripple through the entire pipeline, you must make sure to correctly respect the [backpressure applied by media sources](./media-sources#backpressure).
+:::
+
+#### Usage with the File System API
+
+`StreamTargetChunk` is designed such that it is compatible with the File System API's `FileSystemWritableFileStream`. This means, if you want to write data directly to disk, you can simply do something like this:
+
+```ts
+const handle = await window.showSaveFilePicker();
+const writableStream = await handle.createWritable();
+
+const output = new Output({
+	target: new StreamTarget(writableStream),
+	// ...
+});
+
+// ...
+
+await output.finalize(); // Will automatically close the writable stream
+```
+
+## Packet buffering
+
+Some [output formats](./output-formats) require *packet buffering* for multi-track outputs. Packet buffering occurs because the `Output` must wait for data from all tracks for a given timestamp to continue writing data. For example, should you first encode all your video frames and then encode the audio afterward, the `Output` will have to hold all of the video frames in memory until the audio packets start coming in. This might lead to memory exhaustion should your video be very long. When there is only one media track, this issue does not arise.
+
+Check the [Output formats](./output-formats) page to see which format configurations require packet buffering.
+
+---
+
+If your output format configuration requires packet buffering, make sure to add media data in a somewhat interleaved way to keep memory usage low. For example, if you're creating a 5-minute file, add your data in chunks—10 seconds of video, then 10 seconds of audio, then repeat—instead of first adding all 300 seconds of video followed by all 300 seconds of audio.
+
+::: info
+If this kind of chunking isn't possible for your use case, try adding the media with the overall smaller data footprint first: First add the 300 seconds of audio, then add the 300 seconds of video.
+:::

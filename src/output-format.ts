@@ -100,12 +100,13 @@ export type IsobmffOutputFormatOptions = {
 	 * finalized. This produces a high-quality and compact output at the cost of a more expensive finalization step and
 	 * higher memory requirements. Data will be written monotonically (in order) when this option is set.
 	 *
-	 * Use `'fragmented'` to place metadata at the start of the file by creating a fragmented file. In a
+	 * Use `'fragmented'` to place metadata at the start of the file by creating a fragmented file (fMP4). In a
 	 * fragmented file, chunks of media and their metadata are written to the file in "fragments", eliminating the need
-	 * to put all metadata in one place. Fragmented files are useful for streaming, as they allow for better random
-	 * access. Furthermore, they remain lightweight to create even for very large files, as they don't require all media
-	 * to be kept in memory. However, fragmented files are not as widely and wholly supported as regular MP4/MOV files.
-	 * Data will be written monotonically (in order) when this option is set.
+	 * to put all metadata in one place. Fragmented files are useful for streaming contexts, as each fragment can be
+	 * played individually without requiring knowledge of the other fragments. Furthermore, they remain lightweight to
+	 * create even for very large files, as they don't require all media to be kept in memory. However, fragmented files
+	 * are not as widely and wholly supported as regular MP4/MOV files. Data will be written monotonically (in order)
+	 * when this option is set.
 	 *
 	 * When this field is not defined, either `false` or `'in-memory'` will be used, automatically determined based on
 	 * the type of output target used.
@@ -503,7 +504,7 @@ export class Mp3OutputFormat extends OutputFormat {
  * WAVE-specific output options.
  * @public
  */
-export type WaveOutputFormatOptions = {
+export type WavOutputFormatOptions = {
 	/**
 	 * Will be called once the file header is written. The header consists of the RIFF header, the format chunk, and the
 	 * start of the data chunk (with a placeholder size of 0).
@@ -515,11 +516,11 @@ export type WaveOutputFormatOptions = {
  * WAVE file format, based on RIFF.
  * @public
  */
-export class WaveOutputFormat extends OutputFormat {
+export class WavOutputFormat extends OutputFormat {
 	/** @internal */
-	_options: WaveOutputFormatOptions;
+	_options: WavOutputFormatOptions;
 
-	constructor(options: WaveOutputFormatOptions = {}) {
+	constructor(options: WavOutputFormatOptions = {}) {
 		if (!options || typeof options !== 'object') {
 			throw new TypeError('options must be an object.');
 		}

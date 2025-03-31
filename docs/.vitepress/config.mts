@@ -10,7 +10,7 @@ export default defineConfig({
 		// https://vitepress.dev/reference/default-theme-config
 		nav: [
 			{ text: 'Home', link: '/' },
-			{ text: 'Guide', link: '/guide/introduction' },
+			{ text: 'Guide', link: '/guide/introduction', activeMatch: '/guide' },
 		],
 
 		sidebar: [
@@ -31,7 +31,7 @@ export default defineConfig({
 			{
 				text: 'Writing media files',
 				items: [
-					{ text: 'Writing basics', link: '/guide/writing' },
+					{ text: 'Writing overview', link: '/guide/writing-overview' },
 					{ text: 'Media sources', link: '/guide/media-sources' },
 					{ text: 'Output formats', link: '/guide/output-formats' },
 				],
@@ -39,8 +39,8 @@ export default defineConfig({
 			{
 				text: 'Miscellaneous',
 				items: [
-					{ text: 'Supported formats & codecs', link: 'guide/supported-formats-and-codecs' },
-					{ text: 'Custom coders', link: 'guide/custom-coders' },
+					{ text: 'Supported formats & codecs', link: '/guide/supported-formats-and-codecs' },
+					{ text: 'Custom coders', link: '/guide/custom-coders' },
 				],
 			},
 		],
@@ -48,6 +48,14 @@ export default defineConfig({
 		socialLinks: [
 			{ icon: 'github', link: 'https://github.com/vuejs/vitepress' },
 		],
+
+		search: {
+			provider: 'local',
+		},
+
+		outline: {
+			level: [2, 3],
+		},
 	},
 	markdown: {
 		config(md) {

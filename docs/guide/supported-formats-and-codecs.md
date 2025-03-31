@@ -1,6 +1,4 @@
 # Supported formats & codecs
-
-Mediakit supports many container formats and media codecs.
  
 ## Container formats
 
@@ -16,9 +14,9 @@ Mediakit supports many commonly used media container formats, all of which are s
 
 ## Codecs
 
-Mediakit supports a wide range of video, audio and subtitle codecs. More specifically, it supports all codecs specified by the WebCodecs API and a few additional PCM codecs out of the box.
+Mediakit supports a wide range of video, audio, and subtitle codecs. More specifically, it supports all codecs specified by the WebCodecs API and a few additional PCM codecs out of the box.
 
-The availability of the codecs provided by the WebCodecs API depends on the browser and cannot be guaranteed by this library. Mediakit provides [special utility functions](#querying-codec-encodability) to check which codecs are able to encoded. You can also specify [custom coders](./custom-coders) to provide your own encoder/decoder implementation if the browser doesn't support the codec natively.
+The availability of the codecs provided by the WebCodecs API depends on the browser and cannot be guaranteed by this library. Mediakit provides [special utility functions](#querying-codec-encodability) to check which codecs are able to be encoded. You can also specify [custom coders](./custom-coders) to provide your own encoder/decoder implementation if the browser doesn't support the codec natively.
 
 ### Video codecs
 

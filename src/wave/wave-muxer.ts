@@ -5,16 +5,16 @@ import { WaveFormat } from './wave-demuxer';
 import { RiffWriter } from './riff-writer';
 import { Writer } from '../writer';
 import { EncodedPacket } from '../packet';
-import { WaveOutputFormat } from '../output-format';
+import { WavOutputFormat } from '../output-format';
 
 export class WaveMuxer extends Muxer {
-	private format: WaveOutputFormat;
+	private format: WavOutputFormat;
 	private writer: Writer;
 	private riffWriter: RiffWriter;
 	private headerWritten = false;
 	private dataSize = 0;
 
-	constructor(output: Output, format: WaveOutputFormat) {
+	constructor(output: Output, format: WavOutputFormat) {
 		super(output);
 
 		this.format = format;
