@@ -188,8 +188,8 @@ export type VideoEncodingConfig = {
 	 */
 	keyFrameInterval?: number;
 	/**
-	 * The full codec string as specified in the WebCodecs API Codec Registry. When not specified, a fitting codec
-	 * string will be constructed automatically by the library.
+	 * The full codec string as specified in the WebCodecs API Codec Registry. This string must match the codec
+	 * specified in `codec`. When not set, a fitting codec string will be constructed automatically by the library.
 	 */
 	fullCodecString?: string;
 
@@ -653,8 +653,8 @@ export type AudioEncodingConfig = {
 	 */
 	bitrate?: number | Quality;
 	/**
-	 * The full codec string as specified in the WebCodecs API Codec Registry. When not specified, a fitting codec
-	 * string will be constructed automatically by the library.
+	 * The full codec string as specified in the WebCodecs API Codec Registry. This string must match the codec
+	 * specified in `codec`. When not set, a fitting codec string will be constructed automatically by the library.
 	 */
 	fullCodecString?: string;
 

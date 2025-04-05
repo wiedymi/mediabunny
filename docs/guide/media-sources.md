@@ -53,13 +53,17 @@ type VideoEncodingConfig = {
 	bitrate: number | Quality;
 	latencyMode?: 'quality' | 'realtime';
 	keyFrameInterval?: number;
+	fullCodecString?: string;
 
 	onEncodedPacket?: (
 		packet: EncodedPacket,
 		meta: EncodedVideoChunkMetadata | undefined
 	) => unknown;
-	onEncodingError?: (
+	onEncoderError?: (
 		error: Error
+	) => unknown;
+	onEncoderConfig?: (
+		config: AudioEncoderConfig
 	) => unknown;
 };
 ```
@@ -67,8 +71,10 @@ type VideoEncodingConfig = {
 - `bitrate`: The target number of bits per second. Alternatively, this can be a [subjective quality](#subjective-qualities).
 - `latencyMode`: The latency mode as specified by the WebCodecs API. Media stream-driven video sources will automatically use the `realtime` setting.
 - `keyFrameInterval`: The maximum interval in seconds between two adjacent key frames. Defaults to 5 seconds. More frequent key frames improve seeking behavior but increase file size. When using multiple video tracks, this value should be set to the same value for all tracks.
+- `fullCodecString`: Allows you to optionally specify the full codec string used by the video encoder, as specified in the [WebCodecs API Codec Registry](https://www.w3.org/TR/webcodecs-codec-registry/). For example, you may set it to `'avc1.42001f'` when using AVC. Keep in mind that the codec string must still match the codec specified in `codec`. If you don't set this field, a codec string will be generated automatically.
 - `onEncodedPacket`: Called for each successfully encoded packet. Useful for determining encoding progress.
-- `onEncodingError`: Called when an error occurs during encoding.
+- `onEncoderError`: Called when an error occurs within [VideoEncoder](https://developer.mozilla.org/en-US/docs/Web/API/VideoEncoder).
+- `onEncoderConfig`: Called when the internal encoder config, as used by the WebCodecs API, is created. You can use this to introspect the full codec string.
 
 ### Audio encoding config
 
@@ -77,20 +83,26 @@ All audio sources that handle encoding internally require you to specify an `Aud
 type AudioEncodingConfig = {
 	codec: AudioCodec;
 	bitrate?: number | Quality;
+	fullCodecString?: string;
 
 	onEncodedPacket?: (
 		packet: EncodedPacket,
 		meta: EncodedAudioChunkMetadata | undefined
 	) => unknown;
-	onEncodingError?: (
+	onEncoderError?: (
 		error: Error
+	) => unknown;
+	onEncoderConfig?: (
+		config: AudioEncoderConfig
 	) => unknown;
 };
 ```
 - `codec`: The [audio codec](./supported-formats-and-codecs/#audio-codecs) used for encoding. Can be omitted for uncompressed PCM codecs.
-- `bitrate`: The target number of bits per second. Alternatively, this can be a [subjective quality](#subjective-qualities).	
+- `bitrate`: The target number of bits per second. Alternatively, this can be a [subjective quality](#subjective-qualities).
+- `fullCodecString`: Allows you to optionally specify the full codec string used by the audio encoder, as specified in the [WebCodecs API Codec Registry](https://www.w3.org/TR/webcodecs-codec-registry/). For example, you may set it to `'mp4a.40.2'` when using AAC. Keep in mind that the codec string must still match the codec specified in `codec`. If you don't set this field, a codec string will be generated automatically.
 - `onEncodedPacket`: Called for each successfully encoded packet. Useful for determining encoding progress.	
-- `onEncodingError`: Called when an error occurs during encoding.	
+- `onEncoderError`: Called when an error occurs within [AudioEncoder](https://developer.mozilla.org/en-US/docs/Web/API/AudioEncoder).	
+- `onEncoderConfig`: Called when the internal encoder config, as used by the WebCodecs API, is created. You can use this to introspect the full codec string.
 
 ### Subjective qualities
 
