@@ -1058,6 +1058,7 @@ export const parseOpusTocByte = (packet: Uint8Array) => {
 };
 
 const PCM_CODEC_REGEX = /^pcm-([usf])(\d+)+(be)?$/;
+
 export const parsePcmCodec = (codec: PcmAudioCodec) => {
 	assert(PCM_AUDIO_CODECS.includes(codec));
 
@@ -1084,6 +1085,52 @@ export const parsePcmCodec = (codec: PcmAudioCodec) => {
 	const silentValue = codec === 'pcm-u8' ? 2 ** 7 : 0;
 
 	return { dataType, sampleSize, littleEndian, silentValue };
+};
+
+export const inferCodecFromCodecString = (codecString: string): MediaCodec | null => {
+	// Video codecs
+	if (codecString.startsWith('avc1') || codecString.startsWith('avc3')) {
+		return 'avc';
+	} else if (codecString.startsWith('hev1') || codecString.startsWith('hvc1')) {
+		return 'hevc';
+	} else if (codecString === 'vp8') {
+		return 'vp8';
+	} else if (codecString.startsWith('vp09')) {
+		return 'vp9';
+	} else if (codecString.startsWith('av01')) {
+		return 'av1';
+	}
+
+	// Audio codecs
+	if (codecString.startsWith('mp4a.40') || codecString === 'mp4a.67') {
+		return 'aac';
+	} else if (
+		codecString === 'mp3'
+		|| codecString === 'mp4a.69'
+		|| codecString === 'mp4a.6B'
+		|| codecString === 'mp4a.6b'
+	) {
+		return 'mp3';
+	} else if (codecString === 'opus') {
+		return 'opus';
+	} else if (codecString === 'vorbis') {
+		return 'vorbis';
+	} else if (codecString === 'flac') {
+		return 'flac';
+	} else if (codecString === 'ulaw') {
+		return 'ulaw';
+	} else if (codecString === 'alaw') {
+		return 'alaw';
+	} else if (PCM_CODEC_REGEX.test(codecString)) {
+		return codecString as PcmAudioCodec;
+	}
+
+	// Subtitle codecs
+	if (codecString === 'webvtt') {
+		return 'webvtt';
+	}
+
+	return null;
 };
 
 export const getVideoEncoderConfigExtension = (codec: VideoCodec) => {
@@ -1423,7 +1470,13 @@ export const validateAudioChunkMetadata = (metadata: EncodedAudioChunkMetadata |
 	}
 
 	// AAC-specific validation
-	if (metadata.decoderConfig.codec.startsWith('mp4a')) {
+	if (
+		metadata.decoderConfig.codec.startsWith('mp4a')
+		// These three refer to MP3:
+		&& metadata.decoderConfig.codec !== 'mp4a.69'
+		&& metadata.decoderConfig.codec !== 'mp4a.6B'
+		&& metadata.decoderConfig.codec !== 'mp4a.6b'
+	) {
 		const validStrings = ['mp4a.40.2', 'mp4a.40.02', 'mp4a.40.5', 'mp4a.40.05', 'mp4a.40.29', 'mp4a.67'];
 		if (!validStrings.includes(metadata.decoderConfig.codec)) {
 			throw new TypeError(
@@ -1441,14 +1494,22 @@ export const validateAudioChunkMetadata = (metadata: EncodedAudioChunkMetadata |
 	}
 
 	// MP3-specific validation
-	if (metadata.decoderConfig.codec === 'mp3') {
-		if (metadata.decoderConfig.codec !== 'mp3') {
-			throw new TypeError('Audio chunk metadata decoder configuration codec string for MP3 must be "mp3".');
+	if (metadata.decoderConfig.codec.startsWith('mp3') || metadata.decoderConfig.codec.startsWith('mp4a')) {
+		if (
+			metadata.decoderConfig.codec !== 'mp3'
+			&& metadata.decoderConfig.codec !== 'mp4a.69'
+			&& metadata.decoderConfig.codec !== 'mp4a.6B'
+			&& metadata.decoderConfig.codec !== 'mp4a.6b'
+		) {
+			throw new TypeError(
+				'Audio chunk metadata decoder configuration codec string for MP3 must be "mp3", "mp4a.69" or'
+				+ ' "mp4a.6B".',
+			);
 		}
 	}
 
 	// Opus-specific validation
-	if (metadata.decoderConfig.codec === 'opus') {
+	if (metadata.decoderConfig.codec.startsWith('opus')) {
 		if (metadata.decoderConfig.codec !== 'opus') {
 			throw new TypeError('Audio chunk metadata decoder configuration codec string for Opus must be "opus".');
 		}
@@ -1463,7 +1524,7 @@ export const validateAudioChunkMetadata = (metadata: EncodedAudioChunkMetadata |
 	}
 
 	// Vorbis-specific validation
-	if (metadata.decoderConfig.codec === 'vorbis') {
+	if (metadata.decoderConfig.codec.startsWith('vorbis')) {
 		if (metadata.decoderConfig.codec !== 'vorbis') {
 			throw new TypeError('Audio chunk metadata decoder configuration codec string for Vorbis must be "vorbis".');
 		}
@@ -1477,7 +1538,7 @@ export const validateAudioChunkMetadata = (metadata: EncodedAudioChunkMetadata |
 	}
 
 	// FLAC-specific validation
-	if (metadata.decoderConfig.codec === 'flac') {
+	if (metadata.decoderConfig.codec.startsWith('flac')) {
 		if (metadata.decoderConfig.codec !== 'flac') {
 			throw new TypeError('Audio chunk metadata decoder configuration codec string for FLAC must be "flac".');
 		}

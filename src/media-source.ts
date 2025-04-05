@@ -5,6 +5,7 @@ import {
 	buildVideoCodecString,
 	getAudioEncoderConfigExtension,
 	getVideoEncoderConfigExtension,
+	inferCodecFromCodecString,
 	parsePcmCodec,
 	PCM_AUDIO_CODECS,
 	PcmAudioCodec,
@@ -186,10 +187,16 @@ export type VideoEncodingConfig = {
 	 * all the same key frame interval.
 	 */
 	keyFrameInterval?: number;
+	/**
+	 * The full codec string as specified in the WebCodecs API Codec Registry. When not specified, a fitting codec
+	 * string will be constructed automatically by the library.
+	 */
+	fullCodecString?: string;
+
 	/** Called for each successfully encoded packet. Both the packet and the encoding metadata are passed. */
 	onEncodedPacket?: (packet: EncodedPacket, meta: EncodedVideoChunkMetadata | undefined) => unknown;
-	/** Called when an error occurs during encoding. */
-	onEncodingError?: (error: Error) => unknown;
+	/** Called when an error occurs within VideoEncoder. */
+	onEncoderError?: (error: Error) => unknown;
 	/** Called when the internal encoder config, as used by the WebCodecs API, is created. */
 	onEncoderConfig?: (config: VideoEncoderConfig) => unknown;
 };
@@ -213,11 +220,23 @@ const validateVideoEncodingConfig = (config: VideoEncodingConfig) => {
 	) {
 		throw new TypeError('config.keyFrameInterval, when provided, must be a non-negative number.');
 	}
+	if (config.fullCodecString !== undefined && typeof config.fullCodecString !== 'string') {
+		throw new TypeError('config.fullCodecString, when provided, must be a string.');
+	}
+	if (config.fullCodecString !== undefined && inferCodecFromCodecString(config.fullCodecString) !== config.codec) {
+		throw new TypeError(
+			`config.fullCodecString, when provided, must be a string that matches the specified codec`
+			+ ` (${config.codec}).`,
+		);
+	}
 	if (config.onEncodedPacket !== undefined && typeof config.onEncodedPacket !== 'function') {
 		throw new TypeError('config.onEncodedChunk, when provided, must be a function.');
 	}
-	if (config.onEncodingError !== undefined && typeof config.onEncodingError !== 'function') {
+	if (config.onEncoderError !== undefined && typeof config.onEncoderError !== 'function') {
 		throw new TypeError('config.onEncodingError, when provided, must be a function.');
+	}
+	if (config.onEncoderConfig !== undefined && typeof config.onEncoderConfig !== 'function') {
+		throw new TypeError('config.onEncoderConfig, when provided, must be a function.');
 	}
 };
 
@@ -326,7 +345,7 @@ class VideoEncoderWrapper {
 			: this.encodingConfig.bitrate;
 
 		const encoderConfig: VideoEncoderConfig = {
-			codec: buildVideoCodecString(
+			codec: this.encodingConfig.fullCodecString ?? buildVideoCodecString(
 				this.encodingConfig.codec,
 				width,
 				height,
@@ -377,7 +396,7 @@ class VideoEncoderWrapper {
 					this.encodingConfig.onEncodedPacket?.(packet, meta);
 					void this.muxer!.addEncodedVideoPacket(this.source._connectedTrack!, packet, meta);
 				},
-				error: this.encodingConfig.onEncodingError ?? (error => console.error('VideoEncoder error:', error)),
+				error: this.encodingConfig.onEncoderError ?? (error => console.error('VideoEncoder error:', error)),
 			});
 			this.encoder.configure(encoderConfig);
 		}
@@ -633,10 +652,16 @@ export type AudioEncodingConfig = {
 	 * be provided. Required for compressed audio codecs, unused for PCM codecs.
 	 */
 	bitrate?: number | Quality;
+	/**
+	 * The full codec string as specified in the WebCodecs API Codec Registry. When not specified, a fitting codec
+	 * string will be constructed automatically by the library.
+	 */
+	fullCodecString?: string;
+
 	/** Called for each successfully encoded packet. Both the packet and the encoding metadata are passed. */
 	onEncodedPacket?: (packet: EncodedPacket, meta: EncodedAudioChunkMetadata | undefined) => unknown;
-	/** Called when an error occurs during encoding. */
-	onEncodingError?: (error: Error) => unknown;
+	/** Called when an error occurs within AudioEncoder. */
+	onEncoderError?: (error: Error) => unknown;
 	/** Called when the internal encoder config, as used by the WebCodecs API, is created. */
 	onEncoderConfig?: (config: AudioEncoderConfig) => unknown;
 };
@@ -661,8 +686,23 @@ const validateAudioEncodingConfig = (config: AudioEncodingConfig) => {
 	) {
 		throw new TypeError('config.bitrate, when provided, must be a positive integer or a quality.');
 	}
-	if (config.onEncodingError !== undefined && typeof config.onEncodingError !== 'function') {
+	if (config.fullCodecString !== undefined && typeof config.fullCodecString !== 'string') {
+		throw new TypeError('config.fullCodecString, when provided, must be a string.');
+	}
+	if (config.fullCodecString !== undefined && inferCodecFromCodecString(config.fullCodecString) !== config.codec) {
+		throw new TypeError(
+			`config.fullCodecString, when provided, must be a string that matches the specified codec`
+			+ ` (${config.codec}).`,
+		);
+	}
+	if (config.onEncodedPacket !== undefined && typeof config.onEncodedPacket !== 'function') {
+		throw new TypeError('config.onEncodedChunk, when provided, must be a function.');
+	}
+	if (config.onEncoderError !== undefined && typeof config.onEncoderError !== 'function') {
 		throw new TypeError('config.onEncodingError, when provided, must be a function.');
+	}
+	if (config.onEncoderConfig !== undefined && typeof config.onEncoderConfig !== 'function') {
+		throw new TypeError('config.onEncoderConfig, when provided, must be a function.');
 	}
 };
 
@@ -837,7 +877,7 @@ class AudioEncoderWrapper {
 			: this.encodingConfig.bitrate;
 
 		const encoderConfig: AudioEncoderConfig = {
-			codec: buildAudioCodecString(
+			codec: this.encodingConfig.fullCodecString ?? buildAudioCodecString(
 				this.encodingConfig.codec,
 				numberOfChannels,
 				sampleRate,
@@ -887,7 +927,7 @@ class AudioEncoderWrapper {
 					this.encodingConfig.onEncodedPacket?.(packet, meta);
 					void this.muxer!.addEncodedAudioPacket(this.source._connectedTrack!, packet, meta);
 				},
-				error: this.encodingConfig.onEncodingError ?? (error => console.error('AudioEncoder error:', error)),
+				error: this.encodingConfig.onEncoderError ?? (error => console.error('AudioEncoder error:', error)),
 			});
 			this.encoder.configure(encoderConfig);
 		}

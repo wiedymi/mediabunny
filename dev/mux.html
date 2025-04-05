@@ -42,7 +42,7 @@
 	format = new Metamuxer.Mp4OutputFormat({ fastStart: 'fragmented' }); // new Metamuxer.MkvOutputFormat();// new Metamuxer.Mp4OutputFormat({ fastStart: false });
 	format = new Metamuxer.OggOutputFormat();
 	format = new Metamuxer.Mp4OutputFormat({ fastStart: 'fragmented', minimumFragmentDuration: 2 });
-	format = new Metamuxer.WebMOutputFormat({ minimumClusterDuration: 2 });
+	format = new Metamuxer.MkvOutputFormat({ minimumClusterDuration: 2 });
 	let target = new Metamuxer.BufferTarget();
 
 	/*
@@ -87,7 +87,8 @@
 	*/
 
 	let videoSource = new Metamuxer.CanvasSource(canvas, {
-		codec: 'av1',
+		codec: 'avc',
+		fullCodecString: 'avc1.42001f',
 		bitrate: 1e6
 	});
 	let audioSource = new Metamuxer.AudioBufferSource({
