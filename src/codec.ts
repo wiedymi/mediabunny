@@ -1364,8 +1364,9 @@ export const validateVideoChunkMetadata = (metadata: EncodedVideoChunkMetadata |
 		}
 	}
 
-	// AVC-specific validation
 	if (metadata.decoderConfig.codec.startsWith('avc1') || metadata.decoderConfig.codec.startsWith('avc3')) {
+		// AVC-specific validation
+
 		if (!AVC_CODEC_STRING_REGEX.test(metadata.decoderConfig.codec)) {
 			throw new TypeError(
 				'Video chunk metadata decoder configuration codec string for AVC must be a valid AVC codec string as'
@@ -1379,10 +1380,9 @@ export const validateVideoChunkMetadata = (metadata: EncodedVideoChunkMetadata |
 				+ ' an AVCDecoderConfigurationRecord as specified in ISO 14496-15.',
 			);
 		}
-	}
+	} else if (metadata.decoderConfig.codec.startsWith('hev1') || metadata.decoderConfig.codec.startsWith('hvc1')) {
+		// HEVC-specific validation
 
-	// HEVC-specific validation
-	if (metadata.decoderConfig.codec.startsWith('hev1') || metadata.decoderConfig.codec.startsWith('hvc1')) {
 		if (!HEVC_CODEC_STRING_REGEX.test(metadata.decoderConfig.codec)) {
 			throw new TypeError(
 				'Video chunk metadata decoder configuration codec string for HEVC must be a valid HEVC codec string as'
@@ -1396,27 +1396,24 @@ export const validateVideoChunkMetadata = (metadata: EncodedVideoChunkMetadata |
 				+ ' be an HEVCDecoderConfigurationRecord as specified in ISO 14496-15.',
 			);
 		}
-	}
+	} else if (metadata.decoderConfig.codec.startsWith('vp8')) {
+		// VP8-specific validation
 
-	// VP8-specific validation
-	if (metadata.decoderConfig.codec.startsWith('vp8')) {
 		if (metadata.decoderConfig.codec !== 'vp8') {
 			throw new TypeError('Video chunk metadata decoder configuration codec string for VP8 must be "vp8".');
 		}
-	}
+	} else if (metadata.decoderConfig.codec.startsWith('vp09')) {
+		// VP9-specific validation
 
-	// VP9-specific validation
-	if (metadata.decoderConfig.codec.startsWith('vp09')) {
 		if (!VP9_CODEC_STRING_REGEX.test(metadata.decoderConfig.codec)) {
 			throw new TypeError(
 				'Video chunk metadata decoder configuration codec string for VP9 must be a valid VP9 codec string as'
 				+ ' specified in Section "Codecs Parameter String" of https://www.webmproject.org/vp9/mp4/.',
 			);
 		}
-	}
+	} else if (metadata.decoderConfig.codec.startsWith('av01')) {
+		// AV1-specific validation
 
-	// AV1-specific validation
-	if (metadata.decoderConfig.codec.startsWith('av01')) {
 		if (!AV1_CODEC_STRING_REGEX.test(metadata.decoderConfig.codec)) {
 			throw new TypeError(
 				'Video chunk metadata decoder configuration codec string for AV1 must be a valid AV1 codec string as'
@@ -1469,7 +1466,6 @@ export const validateAudioChunkMetadata = (metadata: EncodedAudioChunkMetadata |
 		}
 	}
 
-	// AAC-specific validation
 	if (
 		metadata.decoderConfig.codec.startsWith('mp4a')
 		// These three refer to MP3:
@@ -1477,6 +1473,8 @@ export const validateAudioChunkMetadata = (metadata: EncodedAudioChunkMetadata |
 		&& metadata.decoderConfig.codec !== 'mp4a.6B'
 		&& metadata.decoderConfig.codec !== 'mp4a.6b'
 	) {
+		// AAC-specific validation
+
 		const validStrings = ['mp4a.40.2', 'mp4a.40.02', 'mp4a.40.5', 'mp4a.40.05', 'mp4a.40.29', 'mp4a.67'];
 		if (!validStrings.includes(metadata.decoderConfig.codec)) {
 			throw new TypeError(
@@ -1491,10 +1489,9 @@ export const validateAudioChunkMetadata = (metadata: EncodedAudioChunkMetadata |
 				+ ' an AudioSpecificConfig as specified in ISO 14496-3.',
 			);
 		}
-	}
+	} else if (metadata.decoderConfig.codec.startsWith('mp3') || metadata.decoderConfig.codec.startsWith('mp4a')) {
+		// MP3-specific validation
 
-	// MP3-specific validation
-	if (metadata.decoderConfig.codec.startsWith('mp3') || metadata.decoderConfig.codec.startsWith('mp4a')) {
 		if (
 			metadata.decoderConfig.codec !== 'mp3'
 			&& metadata.decoderConfig.codec !== 'mp4a.69'
@@ -1506,10 +1503,9 @@ export const validateAudioChunkMetadata = (metadata: EncodedAudioChunkMetadata |
 				+ ' "mp4a.6B".',
 			);
 		}
-	}
+	} else if (metadata.decoderConfig.codec.startsWith('opus')) {
+		// Opus-specific validation
 
-	// Opus-specific validation
-	if (metadata.decoderConfig.codec.startsWith('opus')) {
 		if (metadata.decoderConfig.codec !== 'opus') {
 			throw new TypeError('Audio chunk metadata decoder configuration codec string for Opus must be "opus".');
 		}
@@ -1521,10 +1517,9 @@ export const validateAudioChunkMetadata = (metadata: EncodedAudioChunkMetadata |
 				+ ' Identification Header as specified in Section 5.1 of RFC 7845.',
 			);
 		}
-	}
+	} else if (metadata.decoderConfig.codec.startsWith('vorbis')) {
+		// Vorbis-specific validation
 
-	// Vorbis-specific validation
-	if (metadata.decoderConfig.codec.startsWith('vorbis')) {
 		if (metadata.decoderConfig.codec !== 'vorbis') {
 			throw new TypeError('Audio chunk metadata decoder configuration codec string for Vorbis must be "vorbis".');
 		}
@@ -1535,10 +1530,9 @@ export const validateAudioChunkMetadata = (metadata: EncodedAudioChunkMetadata |
 				+ ' adhere to the format described in https://www.w3.org/TR/webcodecs-vorbis-codec-registration/.',
 			);
 		}
-	}
+	} else if (metadata.decoderConfig.codec.startsWith('flac')) {
+		// FLAC-specific validation
 
-	// FLAC-specific validation
-	if (metadata.decoderConfig.codec.startsWith('flac')) {
 		if (metadata.decoderConfig.codec !== 'flac') {
 			throw new TypeError('Audio chunk metadata decoder configuration codec string for FLAC must be "flac".');
 		}
@@ -1550,14 +1544,13 @@ export const validateAudioChunkMetadata = (metadata: EncodedAudioChunkMetadata |
 				+ ' adhere to the format described in https://www.w3.org/TR/webcodecs-flac-codec-registration/.',
 			);
 		}
-	}
-
-	// PCM-specific validation
-	if (
+	} else if (
 		metadata.decoderConfig.codec.startsWith('pcm')
 		|| metadata.decoderConfig.codec.startsWith('ulaw')
 		|| metadata.decoderConfig.codec.startsWith('alaw')
 	) {
+		// PCM-specific validation
+
 		if (!(PCM_AUDIO_CODECS as readonly string[]).includes(metadata.decoderConfig.codec)) {
 			throw new TypeError(
 				'Audio chunk metadata decoder configuration codec string for PCM must be one of the supported PCM'

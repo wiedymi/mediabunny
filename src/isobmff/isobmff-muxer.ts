@@ -335,8 +335,6 @@ export class IsobmffMuxer extends Muxer {
 	async addEncodedAudioPacket(track: OutputAudioTrack, packet: EncodedPacket, meta?: EncodedAudioChunkMetadata) {
 		const release = await this.mutex.acquire();
 
-		console.log(meta);
-
 		try {
 			const trackData = this.getAudioTrackData(track, meta);
 

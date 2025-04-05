@@ -21,7 +21,7 @@
 			chunked: true,
 			chunkSize: 2**20
 		});
-		const outputFormat = new Metamuxer.WebMOutputFormat({
+		const outputFormat = new Metamuxer.Mp4OutputFormat({
 			//streamable: true
 			//fastStart: 'fragmented'
 		});
@@ -42,6 +42,7 @@
 			}),
 			audio: {
 				//discard: true
+				forceReencode: true,
 			},
 			/*
 			video: {
