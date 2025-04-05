@@ -39,6 +39,7 @@ export default tseslint.config(
 			'build.mjs',
 			'append-namespace.mjs',
 			'eslint.config.mjs',
+			'docs/.vitepress/cache',
 		]
 	}
 );

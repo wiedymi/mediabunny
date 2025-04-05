@@ -190,6 +190,8 @@ export type VideoEncodingConfig = {
 	onEncodedPacket?: (packet: EncodedPacket, meta: EncodedVideoChunkMetadata | undefined) => unknown;
 	/** Called when an error occurs during encoding. */
 	onEncodingError?: (error: Error) => unknown;
+	/** Called when the internal encoder config, as used by the WebCodecs API, is created. */
+	onEncoderConfig?: (config: VideoEncoderConfig) => unknown;
 };
 
 const validateVideoEncodingConfig = (config: VideoEncodingConfig) => {
@@ -337,6 +339,7 @@ class VideoEncoderWrapper {
 			latencyMode: this.encodingConfig.latencyMode,
 			...getVideoEncoderConfigExtension(this.encodingConfig.codec),
 		};
+		this.encodingConfig.onEncoderConfig?.(encoderConfig);
 
 		const MatchingCustomEncoder = customVideoEncoders.find(x => x.supports(
 			this.encodingConfig.codec,
@@ -634,6 +637,8 @@ export type AudioEncodingConfig = {
 	onEncodedPacket?: (packet: EncodedPacket, meta: EncodedAudioChunkMetadata | undefined) => unknown;
 	/** Called when an error occurs during encoding. */
 	onEncodingError?: (error: Error) => unknown;
+	/** Called when the internal encoder config, as used by the WebCodecs API, is created. */
+	onEncoderConfig?: (config: AudioEncoderConfig) => unknown;
 };
 
 const validateAudioEncodingConfig = (config: AudioEncodingConfig) => {
@@ -842,6 +847,7 @@ class AudioEncoderWrapper {
 			bitrate,
 			...getAudioEncoderConfigExtension(this.encodingConfig.codec),
 		};
+		this.encodingConfig.onEncoderConfig?.(encoderConfig);
 
 		const MatchingCustomEncoder = customAudioEncoders.find(x => x.supports(
 			this.encodingConfig.codec,
