@@ -264,7 +264,6 @@ export abstract class BaseMediaSampleSink<
 		validateTimestamp(startTimestamp);
 		validateTimestamp(endTimestamp);
 
-		const MAX_QUEUE_SIZE = 8;
 		const sampleQueue: MediaSample[] = [];
 		let firstSampleQueued = false;
 		let lastSample: MediaSample | null = null;
@@ -355,7 +354,8 @@ export abstract class BaseMediaSampleSink<
 			await packets.next(); // Skip the start packet as we already have it
 
 			while (currentPacket && !ended) {
-				if (sampleQueue.length + decoder.getDecodeQueueSize() > MAX_QUEUE_SIZE) {
+				const maxQueueSize = computeMaxQueueSize(sampleQueue.length);
+				if (sampleQueue.length + decoder.getDecodeQueueSize() > maxQueueSize) {
 					({ promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers());
 					await queueDequeue;
 					continue;
@@ -438,7 +438,6 @@ export abstract class BaseMediaSampleSink<
 		const timestampIterator = toAsyncIterator(timestamps);
 		const timestampsOfInterest: number[] = [];
 
-		const MAX_QUEUE_SIZE = 8;
 		const sampleQueue: (MediaSample | null)[] = [];
 		let { promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers();
 		let { promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers();
@@ -499,7 +498,8 @@ export abstract class BaseMediaSampleSink<
 			for await (const timestamp of timestampIterator) {
 				validateTimestamp(timestamp);
 
-				while (sampleQueue.length + decoder.getDecodeQueueSize() > MAX_QUEUE_SIZE && !terminated) {
+				const maxQueueSize = computeMaxQueueSize(sampleQueue.length);
+				while (sampleQueue.length + decoder.getDecodeQueueSize() > maxQueueSize && !terminated) {
 					({ promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers());
 					await queueDequeue;
 				}
@@ -617,6 +617,13 @@ export abstract class BaseMediaSampleSink<
 		};
 	}
 }
+
+const computeMaxQueueSize = (decodedSampleQueueSize: number) => {
+	// If we have decoded samples lying around, limit the total queue size to a small value (decoded samples can use up
+	// a lot of memory). If not, we're fine with a much bigger queue of encoded packets waiting to be decoded. In fact,
+	// some decoders only start flushing out decoded chunks when the packet queue is large enough.
+	return decodedSampleQueueSize === 0 ? 40 : 8;
+};
 
 class VideoDecoderWrapper extends DecoderWrapper<VideoSample> {
 	decoder: VideoDecoder | null = null;
