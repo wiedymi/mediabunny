@@ -65,6 +65,14 @@ export class Input {
 	}
 
 	/**
+	 * Returns the source from which this input file reads its data. This is the same source that was passed to there
+	 * constructor.
+	 */
+	get source() {
+		return this._source;
+	}
+
+	/**
 	 * Returns the format of the input file. You can compare this result directly to the InputFormat singletons or use
 	 * `instanceof` checks for subset-aware logic (for example, `format instanceof MatroskaInputFormat` is true for
 	 * both MKV and WebM).

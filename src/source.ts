@@ -13,8 +13,11 @@ export abstract class Source {
 	/** @internal */
 	_sizePromise: Promise<number> | null = null;
 
-	/** @internal */
-	_getSize() {
+	/**
+	 * Returns promise that resolves with the size of the file.
+	 * If the size is not known, it will be retrieved from the source.
+	 */
+	getSize() {
 		return this._sizePromise ??= this._retrieveSize();
 	}
 

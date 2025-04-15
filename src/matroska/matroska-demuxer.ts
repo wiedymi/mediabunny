@@ -165,7 +165,7 @@ export class MatroskaDemuxer extends Demuxer {
 		this.metadataReader = new EBMLReader(input._mainReader);
 
 		// Max 64 MiB of stored clusters
-		this.clusterReader = new EBMLReader(new Reader(input._source, 64 * 2 ** 20));
+		this.clusterReader = new EBMLReader(new Reader(input.source, 64 * 2 ** 20));
 	}
 
 	override async computeDuration() {
@@ -211,7 +211,7 @@ export class MatroskaDemuxer extends Demuxer {
 		return this.readMetadataPromise ??= (async () => {
 			this.metadataReader.pos = 0;
 
-			const fileSize = await this.input._source._getSize();
+			const fileSize = await this.input.source.getSize();
 
 			while (this.metadataReader.pos < fileSize - MIN_HEADER_SIZE) {
 				await this.metadataReader.reader.loadRange(
@@ -258,7 +258,7 @@ export class MatroskaDemuxer extends Demuxer {
 
 			dataStartPos: segmentDataStart,
 			elementEndPos: dataSize === -1
-				? (await this.input._source._getSize() - MIN_HEADER_SIZE)
+				? (await this.input.source.getSize() - MIN_HEADER_SIZE)
 				: segmentDataStart + dataSize,
 			clusterSeekStartPos: segmentDataStart,
 

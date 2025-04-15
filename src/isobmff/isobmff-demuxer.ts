@@ -198,7 +198,7 @@ export class IsobmffDemuxer extends Demuxer {
 		super(input);
 
 		this.metadataReader = new IsobmffReader(input._mainReader);
-		this.chunkReader = new IsobmffReader(new Reader(input._source, 64 * 2 ** 20)); // Max 64 MiB of stored chunks
+		this.chunkReader = new IsobmffReader(new Reader(input.source, 64 * 2 ** 20)); // Max 64 MiB of stored chunks
 	}
 
 	override async computeDuration() {
@@ -235,7 +235,7 @@ export class IsobmffDemuxer extends Demuxer {
 
 	readMetadata() {
 		return this.metadataPromise ??= (async () => {
-			const sourceSize = await this.metadataReader.reader.source._getSize();
+			const sourceSize = await this.metadataReader.reader.source.getSize();
 
 			while (this.metadataReader.pos < sourceSize) {
 				await this.metadataReader.reader.loadRange(
@@ -2191,7 +2191,7 @@ abstract class IsobmffTrackBacking implements InputTrackBacking {
 			}
 
 			const metadataReader = demuxer.metadataReader;
-			const sourceSize = await metadataReader.reader.source._getSize();
+			const sourceSize = await metadataReader.reader.source.getSize();
 
 			let prevFragment: Fragment | null = null;
 			let bestFragmentIndex = fragmentIndex;

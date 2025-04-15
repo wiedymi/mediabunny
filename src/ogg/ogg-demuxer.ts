@@ -38,12 +38,12 @@ export class OggDemuxer extends Demuxer {
 		super(input);
 
 		// We don't need a persistent metadata reader as we read all metadata once at the start and then never again
-		this.reader = new OggReader(new Reader(input._source, 64 * 2 ** 20));
+		this.reader = new OggReader(new Reader(input.source, 64 * 2 ** 20));
 	}
 
 	async readMetadata() {
 		return this.metadataPromise ??= (async () => {
-			this.fileSize = await this.input._source._getSize();
+			this.fileSize = await this.input.source.getSize();
 
 			while (this.reader.pos < this.fileSize - MIN_PAGE_HEADER_SIZE) {
 				await this.reader.reader.loadRange(
