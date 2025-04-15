@@ -8,20 +8,20 @@ import { Source } from './source';
  * The options for creating an Input object.
  * @public
  */
-export type InputOptions = {
+export type InputOptions<S extends Source = Source> = {
 	/** A list of supported formats. If the source file is not of one of these formats, then it cannot be read. */
 	formats: InputFormat[];
 	/** The source from which data will be read. */
-	source: Source;
+	source: S;
 };
 
 /**
  * Represents an input media file. This is the root object from which all media read operations start.
  * @public
  */
-export class Input {
+export class Input<S extends Source = Source> {
 	/** @internal */
-	_source: Source;
+	_source: S;
 	/** @internal */
 	_formats: InputFormat[];
 	/** @internal */
@@ -31,7 +31,7 @@ export class Input {
 	/** @internal */
 	_format: InputFormat | null = null;
 
-	constructor(options: InputOptions) {
+	constructor(options: InputOptions<S>) {
 		if (!options || typeof options !== 'object') {
 			throw new TypeError('options must be an object.');
 		}
@@ -65,7 +65,7 @@ export class Input {
 	}
 
 	/**
-	 * Returns the source from which this input file reads its data. This is the same source that was passed to there
+	 * Returns the source from which this input file reads its data. This is the same source that was passed to the
 	 * constructor.
 	 */
 	get source() {

@@ -14,8 +14,8 @@ export abstract class Source {
 	_sizePromise: Promise<number> | null = null;
 
 	/**
-	 * Returns promise that resolves with the size of the file.
-	 * If the size is not known, it will be retrieved from the source.
+	 * Resolves with the total size of the file in bytes. This function is memoized, meaning only the first call
+	 * will retrieve the size.
 	 */
 	getSize() {
 		return this._sizePromise ??= this._retrieveSize();
