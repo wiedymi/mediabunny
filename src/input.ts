@@ -20,7 +20,8 @@ export type InputOptions = {
  * @public
  */
 export class Input {
-	source: Source;
+	/** @internal */
+	_source: Source;
 	/** @internal */
 	_formats: InputFormat[];
 	/** @internal */
@@ -42,7 +43,7 @@ export class Input {
 		}
 
 		this._formats = options.formats;
-		this.source = options.source;
+		this._source = options.source;
 		this._mainReader = new Reader(options.source);
 	}
 
@@ -61,6 +62,14 @@ export class Input {
 
 			throw new Error('Input has an unsupported or unrecognizable format.');
 		})();
+	}
+
+	/**
+	 * Returns the source from which this input file reads its data. This is the same source that was passed to there
+	 * constructor.
+	 */
+	get source() {
+		return this._source;
 	}
 
 	/**
