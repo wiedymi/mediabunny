@@ -13,8 +13,7 @@ export abstract class Source {
 	/** @internal */
 	_sizePromise: Promise<number> | null = null;
 
-	/** @internal */
-	_getSize() {
+	getSize() {
 		return this._sizePromise ??= this._retrieveSize();
 	}
 

@@ -32,7 +32,7 @@ export class Mp3Demuxer extends Demuxer {
 
 	async readMetadata() {
 		return this.metadataPromise ??= (async () => {
-			const fileSize = await this.input._source._getSize();
+			const fileSize = await this.input.source.getSize();
 			this.reader.fileSize = fileSize;
 
 			// Just load the entire file. Primitive, but the only way to actually ensure 100% correct timestamps.

@@ -35,7 +35,7 @@ export abstract class InputFormat {
 export abstract class IsobmffInputFormat extends InputFormat {
 	/** @internal */
 	protected async _getMajorBrand(input: Input) {
-		const sourceSize = await input._mainReader.source._getSize();
+		const sourceSize = await input._mainReader.source.getSize();
 		if (sourceSize < 12) {
 			return null;
 		}
@@ -104,7 +104,7 @@ export class QuickTimeInputFormat extends IsobmffInputFormat {
 export class MatroskaInputFormat extends InputFormat {
 	/** @internal */
 	protected async isSupportedEBMLOfDocType(input: Input, desiredDocType: string) {
-		const sourceSize = await input._mainReader.source._getSize();
+		const sourceSize = await input._mainReader.source.getSize();
 		if (sourceSize < 8) {
 			return false;
 		}
@@ -209,7 +209,7 @@ export class WebMInputFormat extends MatroskaInputFormat {
 export class Mp3InputFormat extends InputFormat {
 	/** @internal */
 	async _canReadInput(input: Input) {
-		const sourceSize = await input._mainReader.source._getSize();
+		const sourceSize = await input._mainReader.source.getSize();
 		if (sourceSize < 4) {
 			return false;
 		}
@@ -274,7 +274,7 @@ export class Mp3InputFormat extends InputFormat {
 export class WaveInputFormat extends InputFormat {
 	/** @internal */
 	async _canReadInput(input: Input) {
-		const sourceSize = await input._mainReader.source._getSize();
+		const sourceSize = await input._mainReader.source.getSize();
 		if (sourceSize < 12) {
 			return false;
 		}
@@ -311,7 +311,7 @@ export class WaveInputFormat extends InputFormat {
 export class OggInputFormat extends InputFormat {
 	/** @internal */
 	async _canReadInput(input: Input) {
-		const sourceSize = await input._mainReader.source._getSize();
+		const sourceSize = await input._mainReader.source.getSize();
 		if (sourceSize < 4) {
 			return false;
 		}

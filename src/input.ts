@@ -20,8 +20,7 @@ export type InputOptions = {
  * @public
  */
 export class Input {
-	/** @internal */
-	_source: Source;
+	source: Source;
 	/** @internal */
 	_formats: InputFormat[];
 	/** @internal */
@@ -43,7 +42,7 @@ export class Input {
 		}
 
 		this._formats = options.formats;
-		this._source = options.source;
+		this.source = options.source;
 		this._mainReader = new Reader(options.source);
 	}
 
