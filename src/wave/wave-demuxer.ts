@@ -37,7 +37,7 @@ export class WaveDemuxer extends Demuxer {
 		super(input);
 
 		this.metadataReader = new RiffReader(input._mainReader);
-		this.chunkReader = new RiffReader(new Reader(input._source, 64 * 2 ** 20));
+		this.chunkReader = new RiffReader(new Reader(input.source, 64 * 2 ** 20));
 	}
 
 	async readMetadata() {

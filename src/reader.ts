@@ -25,7 +25,7 @@ export class Reader {
 	constructor(public source: Source, public maxStorableBytes = Infinity) {}
 
 	async loadRange(start: number, end: number) {
-		end = Math.min(end, await this.source._getSize());
+		end = Math.min(end, await this.source.getSize());
 
 		if (start >= end) {
 			return;
