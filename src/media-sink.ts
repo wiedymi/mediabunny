@@ -129,13 +129,24 @@ export class EncodedPacketSink {
 	 * method will intelligently preload packets based on the speed of the consumer.
 	 *
 	 * @param startPacket - (optional) The packet from which iteration should begin. This packet will also be yielded.
-	 * @param endTimestamp - The timestamp in seconds at which to stop iteration. This timestamp is exclusive.
+	 * @param endTimestamp - (optional) The timestamp at which iteration should end. This packet will _not_ be yielded.
 	 */
 	packets(
 		startPacket?: EncodedPacket,
-		endTimestamp = Infinity,
-		options?: PacketRetrievalOptions,
+		endPacket?: EncodedPacket,
+		options: PacketRetrievalOptions = {},
 	): AsyncGenerator<EncodedPacket, void, unknown> {
+		if (startPacket !== undefined && !(startPacket instanceof EncodedPacket)) {
+			throw new TypeError('startPacket must be an EncodedPacket.');
+		}
+		if (startPacket !== undefined && startPacket.isMetadataOnly && !options?.metadataOnly) {
+			throw new TypeError('startPacket can only be metadata-only if options.metadataOnly is enabled.');
+		}
+		if (endPacket !== undefined && !(endPacket instanceof EncodedPacket)) {
+			throw new TypeError('endPacket must be an EncodedPacket.');
+		}
+		validatePacketRetrievalOptions(options);
+
 		const packetQueue: EncodedPacket[] = [];
 
 		let { promise: queueNotEmpty, resolve: onQueueNotEmpty } = promiseWithResolvers();
@@ -157,7 +168,7 @@ export class EncodedPacketSink {
 			let packet = startPacket ?? await this.getFirstPacket(options);
 
 			while (packet && !terminated) {
-				if (packet.timestamp >= endTimestamp) {
+				if (endPacket && packet.sequenceNumber >= endPacket?.sequenceNumber) {
 					break;
 				}
 
@@ -332,25 +343,25 @@ export abstract class BaseMediaSampleSink<
 
 			let currentPacket: EncodedPacket | null = keyPacket;
 
-			let packetsEndTimestamp = Infinity;
+			let endPacket: EncodedPacket | undefined = undefined;
 			if (endTimestamp < Infinity) {
 				// When an end timestamp is set, we cannot simply use that for the packet iterator due to out-of-order
 				// frames (B-frames). Instead, we'll need to keep decoding packets until we get a frame that exceeds
 				// this end time. However, we can still put a bound on it: Since key frames are by definition never
 				// out of order, we can stop at the first key frame after the end timestamp.
-				const endPacket = await packetSink.getPacket(endTimestamp);
-				const endKeyPacket = !endPacket
+				const packet = await packetSink.getPacket(endTimestamp);
+				const keyPacket = !packet
 					? null
-					: endPacket.type === 'key' && endPacket.timestamp === endTimestamp
-						? endPacket
-						: await packetSink.getNextKeyPacket(endPacket);
+					: packet.type === 'key' && packet.timestamp === endTimestamp
+						? packet
+						: await packetSink.getNextKeyPacket(packet);
 
-				if (endKeyPacket) {
-					packetsEndTimestamp = endKeyPacket.timestamp;
+				if (keyPacket) {
+					endPacket = keyPacket;
 				}
 			}
 
-			const packets = packetSink.packets(keyPacket, packetsEndTimestamp);
+			const packets = packetSink.packets(keyPacket, endPacket);
 			await packets.next(); // Skip the start packet as we already have it
 
 			while (currentPacket && !ended) {
@@ -847,13 +858,13 @@ export type WrappedCanvas = {
  */
 export type CanvasSinkOptions = {
 	/**
-	 * The width of the output canvas, defaulting to the display width of the video track. If height is not set, it
-	 * will be deduced automatically based on aspect ratio.
+	 * The width of the output canvas in pixels, defaulting to the display width of the video track. If height is not
+	 * set, it will be deduced automatically based on aspect ratio.
 	 */
 	width?: number;
 	/**
-	 * The height of the output canvas, defaulting to the display height of the video track. If width is not set, it
-	 * will be deduced automatically based on aspect ratio.
+	 * The height of the output canvas in pixels, defaulting to the display height of the video track. If width is not
+	 * set, it will be deduced automatically based on aspect ratio.
 	 */
 	height?: number;
 	/**

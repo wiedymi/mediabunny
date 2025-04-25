@@ -393,15 +393,14 @@ export class EBMLReader {
 		const { view, offset } = this.reader.getViewAndOffset(this.pos, this.pos + 1);
 		const firstByte = view.getUint8(offset);
 
-		// Find the position of the first set bit, which determines the width
+		// Find the position of VINT_MARKER, which determines the width
 		let width = 1;
-		let mask = 0x80;
+		let mask = 1 << 7;
 		while ((firstByte & mask) === 0 && width < MAX_VAR_INT_SIZE) {
 			width++;
 			mask >>= 1;
 		}
 
-		// Read all bytes
 		const { view: fullView, offset: fullOffset } = this.reader.getViewAndOffset(this.pos, this.pos + width);
 
 		// First byte's value needs the marker bit cleared
@@ -409,7 +408,8 @@ export class EBMLReader {
 
 		// Read remaining bytes
 		for (let i = 1; i < width; i++) {
-			value = (value << 8) | fullView.getUint8(fullOffset + i);
+			value *= 1 << 8;
+			value += fullView.getUint8(fullOffset + i);
 		}
 
 		this.pos += width;
@@ -426,7 +426,8 @@ export class EBMLReader {
 
 		// Read bytes from most significant to least significant
 		for (let i = 0; i < width; i++) {
-			value = (value << 8) | view.getUint8(offset + i);
+			value *= 1 << 8;
+			value += view.getUint8(offset + i);
 		}
 
 		this.pos += width;

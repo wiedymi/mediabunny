@@ -348,8 +348,8 @@ export class VideoSample {
 	 *
 	 * @param dx - The x-coordinate in the destination canvas at which to place the top-left corner of the source image.
 	 * @param dy - The y-coordinate in the destination canvas at which to place the top-left corner of the source image.
-	 * @param dWidth - The width to draw the image in the destination canvas. This allows scaling of the drawn image.
-	 * @param dHeight - The height to draw the image in the destination canvas. This allows scaling of the drawn image.
+	 * @param dWidth - The width in pixels with which to draw the image in the destination canvas.
+	 * @param dHeight - The height in pixels with which to draw the image in the destination canvas.
 	 */
 	draw(
 		context: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,

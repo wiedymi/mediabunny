@@ -52,13 +52,13 @@ export type ConversionOptions = {
 		/** The desired bitrate of the output video. */
 		bitrate?: VideoEncodingConfig['bitrate'];
 		/**
-		 * The desired width of the output video, defaulting to the video's natural display width. If height is not set,
-		 * it will be deduced automatically based on aspect ratio.
+		 * The desired width of the output video in pixels, defaulting to the video's natural display width. If height
+		 * is not set, it will be deduced automatically based on aspect ratio.
 		 */
 		width?: number;
 		/**
-		 * The desired height of the output video, defaulting to the video's natural display height. If width is not
-		 * set, it will be deduced automatically based on aspect ratio.
+		 * The desired height of the output video in pixels, defaulting to the video's natural display height. If width
+		 * is not set, it will be deduced automatically based on aspect ratio.
 		 */
 		height?: number;
 		/**
@@ -492,8 +492,11 @@ export class Conversion {
 				const sink = new EncodedPacketSink(track);
 				const decoderConfig = await track.getDecoderConfig();
 				const meta: EncodedVideoChunkMetadata = { decoderConfig: decoderConfig ?? undefined };
+				const endPacket = Number.isFinite(this._endTimestamp)
+					? await sink.getPacket(this._endTimestamp, { metadataOnly: true }) ?? undefined
+					: undefined;
 
-				for await (const packet of sink.packets(undefined, this._endTimestamp)) {
+				for await (const packet of sink.packets(undefined, endPacket)) {
 					if (this._synchronizer.shouldWait(track.id, packet.timestamp)) {
 						await this._synchronizer.wait(packet.timestamp);
 					}
@@ -658,8 +661,11 @@ export class Conversion {
 				const sink = new EncodedPacketSink(track);
 				const decoderConfig = await track.getDecoderConfig();
 				const meta: EncodedAudioChunkMetadata = { decoderConfig: decoderConfig ?? undefined };
+				const endPacket = Number.isFinite(this._endTimestamp)
+					? await sink.getPacket(this._endTimestamp, { metadataOnly: true }) ?? undefined
+					: undefined;
 
-				for await (const packet of sink.packets(undefined, this._endTimestamp)) {
+				for await (const packet of sink.packets(undefined, endPacket)) {
 					if (this._synchronizer.shouldWait(track.id, packet.timestamp)) {
 						await this._synchronizer.wait(packet.timestamp);
 					}

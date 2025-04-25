@@ -19,12 +19,7 @@ export abstract class Source {
 	}
 
 	/** Called each time data is requested from the source. */
-	onread: ((range: {
-		/** The start byte offset (inclusive). */
-		start: number;
-		/** The end byte offset (exclusive). */
-		end: number;
-	}) => unknown) | null = null;
+	onread: ((start: number, end: number) => unknown) | null = null;
 }
 
 /**

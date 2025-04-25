@@ -15,7 +15,7 @@
 		const file = fileInput.files[0];
 
 		const source = new Metamuxer.BlobSource(file);
-		const target = new Metamuxer.StreamTarget(new WritableStream({
+		const target = new Metamuxer.BufferTarget() ?? new Metamuxer.StreamTarget(new WritableStream({
 			write: console.log
 		}), {
 			chunked: true,
@@ -41,8 +41,8 @@
 				target
 			}),
 			audio: {
-				//discard: true
-				forceReencode: true,
+				discard: true
+				//forceReencode: true,
 			},
 			/*
 			video: {
@@ -73,16 +73,16 @@
 				//rotate: 90
 				//width: 720 ?? 2160,
 				//height: 1280 ?? 3840,
-				fit: 'contain',
-				rotate: 90,
-				width: 512,
-				height: 512,
+				//fit: 'contain',
+				//rotate: 90,
+				//width: 512,
+				//height: 512,
 				//width: 200,
 				//height: 100,
 			},
 			trim: {
 				start: 0,
-				//end: 60
+				end: 30
 			},
 			computeProgress: true
 		});

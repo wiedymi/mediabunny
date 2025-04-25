@@ -158,12 +158,12 @@ export class InputVideoTrack extends InputTrack {
 		return this._backing.getCodec();
 	}
 
-	/** The width of the track's coded samples, before any transformations or rotations. */
+	/** The width in pixels of the track's coded samples, before any transformations or rotations. */
 	get codedWidth() {
 		return this._backing.getCodedWidth();
 	}
 
-	/** The height of the track's coded samples, before any transformations or rotations. */
+	/** The height in pixels of the track's coded samples, before any transformations or rotations. */
 	get codedHeight() {
 		return this._backing.getCodedHeight();
 	}
@@ -173,13 +173,13 @@ export class InputVideoTrack extends InputTrack {
 		return this._backing.getRotation();
 	}
 
-	/** The width of the track's frames after rotation. */
+	/** The width in pixels of the track's frames after rotation. */
 	get displayWidth() {
 		const rotation = this._backing.getRotation();
 		return rotation % 180 === 0 ? this._backing.getCodedWidth() : this._backing.getCodedHeight();
 	}
 
-	/** The height of the track's frames after rotation. */
+	/** The height in pixels of the track's frames after rotation. */
 	get displayHeight() {
 		const rotation = this._backing.getRotation();
 		return rotation % 180 === 0 ? this._backing.getCodedHeight() : this._backing.getCodedWidth();
@@ -190,7 +190,7 @@ export class InputVideoTrack extends InputTrack {
 		return this._backing.getColorSpace();
 	}
 
-	/** Returns true iff the track's samples use a high dynamic range (HDR). */
+	/** If this method returns true, the track's samples use a high dynamic range (HDR). */
 	async hasHighDynamicRange() {
 		const colorSpace = await this._backing.getColorSpace();
 
