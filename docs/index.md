@@ -36,3 +36,4 @@ things the guide needs to cover:
 - supported containers / codecs
 - samples & packets
 - conversion
+- do a part that "frameRate" must be an integer. and make sure to document numbers that can only be integer in the docblocks

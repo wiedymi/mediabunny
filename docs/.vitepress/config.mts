@@ -1,8 +1,8 @@
-import { defineConfig } from 'vitepress';
+import { withMermaid } from 'vitepress-plugin-mermaid';
 import footnote from 'markdown-it-footnote';
 
 // https://vitepress.dev/reference/site-config
-export default defineConfig({
+export default withMermaid({
 	title: 'Mediakit',
 	description: 'A VitePress Site',
 	cleanUrls: true,
@@ -23,7 +23,7 @@ export default defineConfig({
 			{
 				text: 'Reading media files',
 				items: [
-					{ text: 'Reading basics', link: '/guide/reading' },
+					{ text: 'Reading overview', link: '/guide/reading-overview' },
 					{ text: 'Media sinks', link: '/guide/media-sinks' },
 					{ text: 'Input formats', link: '/guide/input-formats' },
 				],
@@ -39,6 +39,7 @@ export default defineConfig({
 			{
 				text: 'Miscellaneous',
 				items: [
+					{ text: 'Packets & samples', link: '/guide/packets-and-samples' },
 					{ text: 'Supported formats & codecs', link: '/guide/supported-formats-and-codecs' },
 					{ text: 'Custom coders', link: '/guide/custom-coders' },
 				],
@@ -58,6 +59,7 @@ export default defineConfig({
 		},
 	},
 	markdown: {
+		math: true,
 		config(md) {
 			md.use(footnote);
 		},

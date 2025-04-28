@@ -18,6 +18,10 @@ Mediakit supports a wide range of video, audio, and subtitle codecs. More specif
 
 The availability of the codecs provided by the WebCodecs API depends on the browser and cannot be guaranteed by this library. Mediakit provides [special utility functions](#querying-codec-encodability) to check which codecs are able to be encoded. You can also specify [custom coders](./custom-coders) to provide your own encoder/decoder implementation if the browser doesn't support the codec natively.
 
+::: info
+Mediakit ships with built-in decoders and encoders for all audio PCM codecs, meaning they are always supported.
+:::
+
 ### Video codecs
 
 - `'avc'` - Advanced Video Coding (AVC) / H.264
@@ -141,4 +145,4 @@ getEncodableVideoCodecs(
 
 ## Querying codec decodability
 
-TODO link to input track
+Whether a codec can be decoded depends on the specific codec configuration of an `InputTrack`; you can use its [`canDecode`](./reading-overview#codec-information) method to check if it is decodable.

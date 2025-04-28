@@ -1,0 +1,82 @@
+# Input formats
+
+Mediakit supports a wide variety of commonly used container formats for reading input files. These *input formats* are used in two ways:
+- When creating an `Input`, they are used to specify the list of supported container formats. See [Creating a new input](./reading-overview#creating-a-new-input) for more.
+- Given an existing `Input`, its `getFormat` method returns the *actual* format of the file as an `InputFormat`.
+
+## Input format singletons
+
+Since input formats don't require any additional configuration, each input format is directly available as an exported singleton instance:
+```ts
+import {
+	MP4, // MP4 input format singleton
+	QTFF, // QuickTime File Format input format singleton
+	MATROSKA, // Matroska input format singleton
+	WEBM, // WebM input format singleton
+	MP3, // MP3 input format singleton
+	WAVE, // WAVE input format singleton
+	OGG, // Ogg input format singleton
+} from 'mediakit';
+```
+
+You can use these singletons when creating an input:
+```ts
+import { Input, MP3, WAVE, OGG } from 'mediakit';
+
+const input = new Input({
+	formats: [MP3, WAVE, OGG],
+	// ...
+});
+```
+
+You can also use them for checking the actual format of an `Input`:
+```ts
+import { MP3 } from 'mediakit';
+
+const isMp3 = input.getFormat() === MP3;
+```
+
+There is a special `ALL_FORMATS` constant exported by Mediakit which contains every input format singleton. Use this constant if you want to support as many formats as possible:
+```ts
+import { Input, ALL_FORMATS } from 'mediakit';
+
+const input = new Input({
+	formats: ALL_FORMATS,
+	// ...
+});
+```
+
+::: info
+Using `ALL_FORMATS` means [demuxers](https://en.wikipedia.org/wiki/Demultiplexer_(media_file)) for all formats must be included in the bundle, which can increase the bundle size significantly. Use it only if you need to support all formats.
+:::
+
+## Input format class hierarchy
+
+In addition to singletons, input format classes are structured hierarchically:
+- `InputFormat` (abstract)
+	- `IsobmffInputFormat` (abstract)
+		- `Mp4InputFormat`
+		- `QuickTimeInputFormat`
+	- `MatroskaInputFormat`
+		- `WebMInputFormat`
+	- `Mp3InputFormat`
+	- `WaveInputFormat`
+	- `OggInputFormat`
+
+This means you can also perform input format checks using `instanceof` instead of `===` comparisons. For example:
+```ts
+import { Mp3InputFormat } from 'mediakit';
+
+// Check if the file is MP3:
+input.getFormat() instanceof Mp3InputFormat;
+
+// Check if the file is Matroska (MKV + WebM):
+input.getFormat() instanceof MatroskaInputFormat;
+
+// Check if the file is MP4 or QuickTime:
+input.getFormat() instanceof IsobmffInputFormat;
+```
+
+::: info
+Well, actually 🤓☝️, the QuickTime File Format is technically not an instance of the ISO Base Media File Format (ISOBMFF) - instead, ISOBMFF is a standard originally inspired by QTFF. However, as the two are extremely similar and are used in the same way, we consider QTFF an instance of `IsobmffInputFormat` for convenience.
+:::

@@ -17,8 +17,8 @@
     "dist"
   ],
   "scripts": {
-    "build": "node build.mjs && npm run lint && tsc -p src && api-extractor run && ts-node scripts/append-namespace.ts",
-    "build-local": "node build.mjs && npm run lint && tsc -p src && api-extractor run --local --verbose && ts-node scripts/append-namespace.ts",
+    "build": "node build.mjs && tsc -p src && api-extractor run && npm run check-docblocks && ts-node scripts/append-namespace.ts",
+    "build-local": "node build.mjs && tsc -p src && api-extractor run --local --verbose && npm run check-docblocks && ts-node scripts/append-namespace.ts",
     "watch": "node build.mjs --watch",
     "lint": "eslint .",
     "check": "tsc -p src --noEmit && tsc -p scripts --noEmit",
@@ -42,9 +42,12 @@
     "esbuild": "^0.25.1",
     "eslint": "^9.22.0",
     "markdown-it-footnote": "^4.0.0",
+    "markdown-it-mathjax3": "^4.3.2",
+    "mermaid": "^11.6.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.8.2",
     "typescript-eslint": "^8.26.1",
-    "vitepress": "^1.6.3"
+    "vitepress": "^1.6.3",
+    "vitepress-plugin-mermaid": "^2.0.17"
   }
 }
