@@ -70,7 +70,7 @@ export abstract class InputTrack {
 		return this._backing.getId();
 	}
 
-	/** The ISO 639-2 language code for this track. If the language is unknown, this field is 'und' (undetermined). */
+	/** The ISO 639-2/T language code for this track. If the language is unknown, this field is 'und' (undetermined). */
 	get languageCode() {
 		return this._backing.getLanguageCode();
 	}

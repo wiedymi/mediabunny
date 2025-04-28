@@ -42,11 +42,13 @@ For each track you want to add, you'll need to create a unique [media source](./
 
 Optionally, you can specify additional track metadata when adding tracks:
 ```ts
-// This specifies that the video track should be rotated by 90 degrees clockwise
-// before being displayed by video players, and that a frame rate of 30 FPS is
-// expected.
+// This specifies that the video track should be rotated by 90 degrees
+// clockwise before being displayed by video players, and that a frame rate
+// of 30 FPS is expected.
 output.addVideoTrack(videoSource, {
-	rotation: 90, // Clockwise rotation in degrees
+	// Clockwise rotation in degrees
+	rotation: 90,
+	// Expected frame rate in hertz
 	frameRate: 30,
 });
 
@@ -65,6 +67,15 @@ output.addSubtitleTrack(subtitleSourceSpa, { language: 'spa' });
 output.addSubtitleTrack(subtitleSourceFre, { language: 'fre' });
 output.addSubtitleTrack(subtitleSourceIta, { language: 'ita' });
 ```
+
+::: info
+The optional `frameRate` video track metadata option specifies the expected frame rate of the video. All timestamps and durations of frames that will be added to this track will be snapped to the specified frame rate. You should avoid adding frames more often than the rate permits, as this will lead to multiple frames having the same timestamp.
+
+To precisely achieve common fractional frame rates, make sure to use their exact fractional forms:
+$23.976 \rightarrow 24000/1001$\
+$29.97 \rightarrow 30000/1001$\
+$59.94 \rightarrow 60000/1001$
+:::
 
 As an example, let's add two tracks to our output:
 - A video track driven by the contents of a `<canvas>` element, encoded using AVC

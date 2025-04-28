@@ -2,7 +2,7 @@ import { Box, ftyp, IsobmffBoxWriter, mdat, mfra, moof, moov, vtta, vttc, vtte }
 import { Muxer } from '../muxer';
 import { Output, OutputAudioTrack, OutputSubtitleTrack, OutputTrack, OutputVideoTrack } from '../output';
 import { BufferTargetWriter, Writer } from '../writer';
-import { assert, last } from '../misc';
+import { assert, computeRationalApproximation, last } from '../misc';
 import { IsobmffOutputFormatOptions, IsobmffOutputFormat, MovOutputFormat } from '../output-format';
 import { inlineTimestampRegex, SubtitleConfig, SubtitleCue, SubtitleMetadata } from '../subtitles';
 import {
@@ -196,6 +196,11 @@ export class IsobmffMuxer extends Muxer {
 		assert(meta.decoderConfig.codedWidth !== undefined);
 		assert(meta.decoderConfig.codedHeight !== undefined);
 
+		// The frame rate set by the user may not be an integer. Since timescale is an integer, we'll approximate the
+		// frame time (inverse of frame rate) with a rational number, then use that approximation's denominator
+		// as the timescale.
+		const timescale = computeRationalApproximation(1 / (track.metadata.frameRate ?? 57600), 1e6).denominator;
+
 		const newTrackData: IsobmffVideoTrackData = {
 			track,
 			type: 'video',
@@ -204,7 +209,7 @@ export class IsobmffMuxer extends Muxer {
 				height: meta.decoderConfig.codedHeight,
 				decoderConfig: meta.decoderConfig,
 			},
-			timescale: track.metadata.frameRate ?? 57600,
+			timescale,
 			samples: [],
 			sampleQueue: [],
 			timestampProcessingQueue: [],

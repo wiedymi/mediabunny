@@ -450,3 +450,47 @@ export const retriedFetch = async (
 		}
 	}
 };
+
+export const computeRationalApproximation = (x: number, maxDenominator: number) => {
+	// Handle negative numbers
+	const sign = x < 0 ? -1 : 1;
+	x = Math.abs(x);
+
+	let prevNumerator = 0, prevDenominator = 1;
+	let currNumerator = 1, currDenominator = 0;
+
+	// Continued fraction algorithm
+	let remainder = x;
+
+	while (true) {
+		const integer = Math.floor(remainder);
+
+		// Calculate next convergent
+		const nextNumerator = integer * currNumerator + prevNumerator;
+		const nextDenominator = integer * currDenominator + prevDenominator;
+
+		if (nextDenominator > maxDenominator) {
+			return {
+				numerator: sign * currNumerator,
+				denominator: currDenominator,
+			};
+		}
+
+		prevNumerator = currNumerator;
+		prevDenominator = currDenominator;
+		currNumerator = nextNumerator;
+		currDenominator = nextDenominator;
+
+		remainder = 1 / (remainder - integer);
+
+		// Guard against precision issues
+		if (!isFinite(remainder)) {
+			break;
+		}
+	}
+
+	return {
+		numerator: sign * currNumerator,
+		denominator: currDenominator,
+	};
+};

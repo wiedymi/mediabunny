@@ -45,11 +45,11 @@
 			a.download = filename;
 			a.click();
 			URL.revokeObjectURL(url);
-		}	
-		
+		}
+
 		console.log(output.target.buffer)
-		download(new Blob([output.target.buffer]), 'converted.mp3');	
-	
+		download(new Blob([output.target.buffer]), 'converted.mp3');
+
 
 		/*
 		const videoTrack = await input.getPrimaryVideoTrack();
@@ -184,7 +184,7 @@
 		}
 		*/
 
-		
+
 
 		/*
 		const videoTrack = await input.getPrimaryVideoTrack();
@@ -245,7 +245,7 @@
 		*/
 
 		//chunks.return();
-		
+
 		//console.log("Done")
 
 		/*
@@ -441,31 +441,31 @@
 		const drain = new Metamuxer.VideoFrameDrain(videoTrack);
 
 		for await (const frame of drain.frames()) {
-            // ...
-        }
+			// ...
+		}
 
 		console.log(await videoTrack.getDuration());
 		*/
 
 		/*
-        const drain = new Metamuxer.VideoFrameDrain(videoTrack);
+		const drain = new Metamuxer.VideoFrameDrain(videoTrack);
 
 		
-        const width = await videoTrack.getWidth();
-        const height = await videoTrack.getHeight();
+		const width = await videoTrack.getWidth();
+		const height = await videoTrack.getHeight();
 
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        document.body.append(canvas);
+		const canvas = document.createElement('canvas');
+		canvas.width = width;
+		canvas.height = height;
+		document.body.append(canvas);
 
-        const context = canvas.getContext('2d');
+		const context = canvas.getContext('2d');
 
-        // Top-level for await loop inside the event listener
-        for await (const frame of drain.frames()) {
-            context.drawImage(frame, 0, 0, width, height);
-            frame.close();
-        }
+		// Top-level for await loop inside the event listener
+		for await (const frame of drain.frames()) {
+			context.drawImage(frame, 0, 0, width, height);
+			frame.close();
+		}
 		*/
 
 		/*

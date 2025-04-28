@@ -57,7 +57,7 @@ export type OutputSubtitleTrack = OutputTrack & { type: 'subtitle' };
  * @public
  */
 export type BaseTrackMetadata = {
-	/** The three-letter, ISO 639-2 language code specifying the language of this track. */
+	/** The three-letter, ISO 639-2/T language code specifying the language of this track. */
 	languageCode?: string;
 };
 
@@ -68,7 +68,11 @@ export type BaseTrackMetadata = {
 export type VideoTrackMetadata = BaseTrackMetadata & {
 	/** The angle in degrees by which the track's frames should be rotated (clockwise). */
 	rotation?: Rotation;
-	/** The expected video frame rate. You should not exceed the value you set here. */
+	/**
+	 * The expected video frame rate in hertz. If set, all timestamps and durations of this track will be snapped to
+	 * this frame rate. You should avoid adding more frames than the rate allows, as this will lead to multiple frames
+	 * with the same timestamp.
+	 */
 	frameRate?: number;
 };
 /**
@@ -87,7 +91,7 @@ const validateBaseTrackMetadata = (metadata: BaseTrackMetadata) => {
 		throw new TypeError('metadata must be an object.');
 	}
 	if (metadata.languageCode !== undefined && !isIso639Dash2LanguageCode(metadata.languageCode)) {
-		throw new TypeError('metadata.languageCode must be a three-letter, ISO 639-2 language code.');
+		throw new TypeError('metadata.languageCode must be a three-letter, ISO 639-2/T language code.');
 	}
 };
 
@@ -158,10 +162,10 @@ export class Output<
 		}
 		if (
 			metadata.frameRate !== undefined
-			&& (!Number.isInteger(metadata.frameRate) || metadata.frameRate <= 0)
+			&& (!Number.isFinite(metadata.frameRate) || metadata.frameRate <= 0)
 		) {
 			throw new TypeError(
-				`Invalid video frame rate: ${metadata.frameRate}. Must be a positive integer.`,
+				`Invalid video frame rate: ${metadata.frameRate}. Must be a positive number.`,
 			);
 		}
 

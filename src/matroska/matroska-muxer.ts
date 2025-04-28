@@ -7,6 +7,7 @@ import {
 	colorSpaceIsComplete,
 	normalizeRotation,
 	readBits,
+	roundToMultiple,
 	textEncoder,
 	toUint8Array,
 	writeBits,
@@ -510,8 +511,16 @@ export class MatroskaMuxer extends Muxer {
 			const trackData = this.getVideoTrackData(track, meta);
 
 			const isKeyFrame = packet.type === 'key';
-			const timestamp = this.validateAndNormalizeTimestamp(trackData.track, packet.timestamp, isKeyFrame);
-			const videoChunk = this.createInternalChunk(packet.data, timestamp, packet.duration, packet.type);
+			let timestamp = this.validateAndNormalizeTimestamp(trackData.track, packet.timestamp, isKeyFrame);
+			let duration = packet.duration;
+
+			if (track.metadata.frameRate !== undefined) {
+				// Constrain the time values to the frame rate
+				timestamp = roundToMultiple(timestamp, 1 / track.metadata.frameRate);
+				duration = roundToMultiple(duration, 1 / track.metadata.frameRate);
+			}
+
+			const videoChunk = this.createInternalChunk(packet.data, timestamp, duration, packet.type);
 			if (track.source._codec === 'vp9') this.fixVP9ColorSpace(trackData, videoChunk);
 
 			trackData.chunkQueue.push(videoChunk);
