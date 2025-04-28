@@ -179,6 +179,10 @@ const videoTrackSource = new MediaStreamVideoTrackSource(videoTrack, {
 
 This source requires no additional method calls; data will automatically be captured and piped to the output file as soon as `start()` is called on the `Output`. Make sure to `stop()` on `videoTrack` after finalizing the `Output` if you don't need the user's media anymore.
 
+::: info
+If this source is the only MediaStreamTrack source in the `Output`, then the first video sample added by it starts at timestamp 0. If there are multiple, then the earliest media sample across all tracks starts at timestamp 0, and all tracks will be perfectly synchronized with each other.
+:::
+
 ### `EncodedVideoPacketSource`
 
 The most barebones of all video sources, this source can be used to directly pipe [encoded packets](TODO) of video data to the output. This source requires that you take care of the encoding process yourself, which enables you to use the WebCodecs API manually or to plug in your own encoding stack. Alternatively, you may retrieve the encoded packets directly by reading them from another media file, allowing you to skip decoding and reencoding video data.
@@ -323,6 +327,10 @@ const audioTrackSource = new MediaStreamAudioTrackSource(audioTrack, {
 ```
 
 This source requires no additional method calls; data will automatically be captured and piped to the output file as soon as `start()` is called on the `Output`. Make sure to `stop()` on `audioTrack` after finalizing the `Output` if you don't need the user's media anymore.
+
+::: info
+If this source is the only MediaStreamTrack source in the `Output`, then the first audio sample added by it starts at timestamp 0. If there are multiple, then the earliest media sample across all tracks starts at timestamp 0, and all tracks will be perfectly synchronized with each other.
+:::
 
 ### `EncodedAudioPacketSource`
 
