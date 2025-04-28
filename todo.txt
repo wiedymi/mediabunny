@@ -2,4 +2,3 @@
 - cross-track offset for streaming sources
 - textsubtitlesource, chunked piping
 - More efficient MP3 loading when reading sequentially
-- Validate types returned by custom coders

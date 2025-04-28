@@ -494,3 +494,11 @@ export const computeRationalApproximation = (x: number, maxDenominator: number) 
 		denominator: currDenominator,
 	};
 };
+
+export class CallSerializer {
+	currentPromise = Promise.resolve();
+
+	call(fn: () => Promise<void> | void) {
+		return this.currentPromise = this.currentPromise.then(fn);
+	}
+}

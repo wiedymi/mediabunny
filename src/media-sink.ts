@@ -5,6 +5,7 @@ import {
 	AnyIterable,
 	assert,
 	binarySearchLessOrEqual,
+	CallSerializer,
 	getInt24,
 	getUint24,
 	last,
@@ -640,7 +641,7 @@ class VideoDecoderWrapper extends DecoderWrapper<VideoSample> {
 	decoder: VideoDecoder | null = null;
 
 	customDecoder: CustomVideoDecoder | null = null;
-	lastCustomDecoderPromise = Promise.resolve();
+	customDecoderCallSerializer = new CallSerializer();
 	customDecoderQueueSize = 0;
 
 	sampleQueue: VideoSample[] = [];
@@ -683,9 +684,15 @@ class VideoDecoderWrapper extends DecoderWrapper<VideoSample> {
 			this.customDecoder = new MatchingCustomDecoder() as CustomVideoDecoder;
 			this.customDecoder.codec = codec;
 			this.customDecoder.config = decoderConfig;
-			this.customDecoder.onSample = sampleHandler;
+			this.customDecoder.onSample = (sample) => {
+				if (!(sample instanceof VideoSample)) {
+					throw new TypeError('The argument passed to onSample must be a VideoSample.');
+				}
 
-			this.customDecoder.init();
+				sampleHandler(sample);
+			};
+
+			void this.customDecoderCallSerializer.call(() => this.customDecoder!.init());
 		} else {
 			this.decoder = new VideoDecoder({
 				output: frame => sampleHandler(new VideoSample(frame)),
@@ -715,11 +722,9 @@ class VideoDecoderWrapper extends DecoderWrapper<VideoSample> {
 	decode(packet: EncodedPacket) {
 		if (this.customDecoder) {
 			this.customDecoderQueueSize++;
-			this.lastCustomDecoderPromise = this.lastCustomDecoderPromise.then(() => {
-				return this.customDecoder!.decode(packet);
-			});
-
-			void this.lastCustomDecoderPromise.then(() => this.customDecoderQueueSize--);
+			void this.customDecoderCallSerializer
+				.call(() => this.customDecoder!.decode(packet))
+				.then(() => this.customDecoderQueueSize--);
 		} else {
 			assert(this.decoder);
 			this.decoder.decode(packet.toEncodedVideoChunk());
@@ -728,7 +733,7 @@ class VideoDecoderWrapper extends DecoderWrapper<VideoSample> {
 
 	async flush() {
 		if (this.customDecoder) {
-			await this.lastCustomDecoderPromise.then(() => this.customDecoder!.flush());
+			await this.customDecoderCallSerializer.call(() => this.customDecoder!.flush());
 		} else {
 			assert(this.decoder);
 			await this.decoder.flush();
@@ -742,7 +747,7 @@ class VideoDecoderWrapper extends DecoderWrapper<VideoSample> {
 
 	close() {
 		if (this.customDecoder) {
-			void this.lastCustomDecoderPromise.then(() => this.customDecoder!.close());
+			void this.customDecoderCallSerializer.call(() => this.customDecoder!.close());
 		} else {
 			assert(this.decoder);
 			this.decoder.close();
@@ -1097,7 +1102,7 @@ class AudioDecoderWrapper extends DecoderWrapper<AudioSample> {
 	decoder: AudioDecoder | null = null;
 
 	customDecoder: CustomAudioDecoder | null = null;
-	lastCustomDecoderPromise = Promise.resolve();
+	customDecoderCallSerializer = new CallSerializer();
 	customDecoderQueueSize = 0;
 
 	constructor(
@@ -1123,9 +1128,15 @@ class AudioDecoderWrapper extends DecoderWrapper<AudioSample> {
 			this.customDecoder = new MatchingCustomDecoder() as CustomAudioDecoder;
 			this.customDecoder.codec = codec;
 			this.customDecoder.config = decoderConfig;
-			this.customDecoder.onSample = sampleHandler;
+			this.customDecoder.onSample = (sample) => {
+				if (!(sample instanceof AudioSample)) {
+					throw new TypeError('The argument passed to onSample must be an AudioSample.');
+				}
 
-			this.customDecoder.init();
+				sampleHandler(sample);
+			};
+
+			void this.customDecoderCallSerializer.call(() => this.customDecoder!.init());
 		} else {
 			this.decoder = new AudioDecoder({
 				output: data => sampleHandler(new AudioSample(data)),
@@ -1147,11 +1158,9 @@ class AudioDecoderWrapper extends DecoderWrapper<AudioSample> {
 	decode(packet: EncodedPacket) {
 		if (this.customDecoder) {
 			this.customDecoderQueueSize++;
-			this.lastCustomDecoderPromise = this.lastCustomDecoderPromise.then(() => {
-				return this.customDecoder!.decode(packet);
-			});
-
-			void this.lastCustomDecoderPromise.then(() => this.customDecoderQueueSize--);
+			void this.customDecoderCallSerializer
+				.call(() => this.customDecoder!.decode(packet))
+				.then(() => this.customDecoderQueueSize--);
 		} else {
 			assert(this.decoder);
 			this.decoder.decode(packet.toEncodedAudioChunk());
@@ -1160,7 +1169,7 @@ class AudioDecoderWrapper extends DecoderWrapper<AudioSample> {
 
 	flush() {
 		if (this.customDecoder) {
-			return this.lastCustomDecoderPromise.then(() => this.customDecoder!.flush());
+			return this.customDecoderCallSerializer.call(() => this.customDecoder!.flush());
 		} else {
 			assert(this.decoder);
 			return this.decoder.flush();
@@ -1169,7 +1178,7 @@ class AudioDecoderWrapper extends DecoderWrapper<AudioSample> {
 
 	close() {
 		if (this.customDecoder) {
-			void this.lastCustomDecoderPromise.then(() => this.customDecoder!.close());
+			void this.customDecoderCallSerializer.call(() => this.customDecoder!.close());
 		} else {
 			assert(this.decoder);
 			this.decoder.close();

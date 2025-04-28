@@ -21,10 +21,7 @@
 			chunked: true,
 			chunkSize: 2**20
 		});
-		const outputFormat = new Metamuxer.Mp4OutputFormat({
-			//streamable: true
-			//fastStart: 'fragmented'
-		});
+		const outputFormat = new Metamuxer.OggOutputFormat();
 
 		const button = document.createElement('button');
 		button.textContent = 'Cancel';
@@ -41,7 +38,7 @@
 				target
 			}),
 			audio: {
-				discard: true
+				//discard: true
 				//forceReencode: true,
 			},
 			/*

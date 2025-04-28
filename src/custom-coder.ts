@@ -22,7 +22,7 @@ export abstract class CustomVideoDecoder {
 	}
 
 	/** Called after decoder creation; can be used for custom initialization logic. */
-	abstract init(): void;
+	abstract init(): Promise<void> | void;
 	/** Decodes the provided encoded packet. */
 	abstract decode(packet: EncodedPacket): Promise<void> | void;
 	/** Decodes all remaining packets and then resolves. */
@@ -51,7 +51,7 @@ export abstract class CustomAudioDecoder {
 	}
 
 	/** Called after decoder creation; can be used for custom initialization logic. */
-	abstract init(): void;
+	abstract init(): Promise<void> | void;
 	/** Decodes the provided encoded packet. */
 	abstract decode(packet: EncodedPacket): Promise<void> | void;
 	/** Decodes all remaining packets and then resolves. */
@@ -80,7 +80,7 @@ export abstract class CustomVideoEncoder {
 	}
 
 	/** Called after encoder creation; can be used for custom initialization logic. */
-	abstract init(): void;
+	abstract init(): Promise<void> | void;
 	/** Encodes the provided video sample. */
 	abstract encode(videoSample: VideoSample, options: VideoEncoderEncodeOptions): Promise<void> | void;
 	/** Encodes all remaining video samples and then resolves. */
@@ -109,7 +109,7 @@ export abstract class CustomAudioEncoder {
 	}
 
 	/** Called after encoder creation; can be used for custom initialization logic. */
-	abstract init(): void;
+	abstract init(): Promise<void> | void;
 	/** Encodes the provided audio sample. */
 	abstract encode(audioSample: AudioSample): Promise<void> | void;
 	/** Encodes all remaining audio samples and then resolves. */

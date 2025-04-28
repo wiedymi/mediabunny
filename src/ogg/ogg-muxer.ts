@@ -1,4 +1,4 @@
-import { OPUS_INTERNAL_SAMPLE_RATE, parseOpusIdentificationHeader } from '../codec';
+import { OPUS_INTERNAL_SAMPLE_RATE, parseOpusIdentificationHeader, validateAudioChunkMetadata } from '../codec';
 import { assert, setInt64, toDataView, toUint8Array } from '../misc';
 import { Muxer } from '../muxer';
 import { Output, OutputAudioTrack } from '../output';
@@ -81,9 +81,10 @@ export class OggMuxer extends Muxer {
 
 		assert(track.source._codec === 'vorbis' || track.source._codec === 'opus');
 
+		validateAudioChunkMetadata(meta);
+
 		assert(meta);
 		assert(meta.decoderConfig);
-		assert(meta.decoderConfig.sampleRate);
 
 		const newTrackData: OggTrackData = {
 			track,

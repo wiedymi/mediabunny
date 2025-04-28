@@ -16,7 +16,7 @@ import {
 	VideoCodec,
 } from './codec';
 import { OutputAudioTrack, OutputSubtitleTrack, OutputTrack, OutputVideoTrack } from './output';
-import { assert, clamp, promiseWithResolvers, setInt24, setUint24 } from './misc';
+import { assert, CallSerializer, clamp, promiseWithResolvers, setInt24, setUint24 } from './misc';
 import { Muxer } from './muxer';
 import { SubtitleParser } from './subtitles';
 import { toAlaw, toUlaw } from './pcm';
@@ -69,7 +69,7 @@ export abstract class MediaSource {
 	/** @internal */
 	_start() {}
 	/** @internal */
-	async _flush() {}
+	async _flushAndClose() {}
 
 	/**
 	 * Closes this source. This prevents future samples from being added and signals to the output file that no further
@@ -92,7 +92,7 @@ export abstract class MediaSource {
 		}
 
 		return this._closingPromise = (async () => {
-			await this._flush();
+			await this._flushAndClose();
 
 			this._closed = true;
 
@@ -110,7 +110,7 @@ export abstract class MediaSource {
 			// Since closing also flushes, we don't want to do it twice
 			return this._closingPromise;
 		} else {
-			return this._flush();
+			return this._flushAndClose();
 		}
 	}
 }
@@ -160,6 +160,9 @@ export class EncodedVideoPacketSource extends VideoSource {
 		}
 		if (packet.isMetadataOnly) {
 			throw new TypeError('Metadata-only packets cannot be added.');
+		}
+		if (meta !== undefined && (!meta || typeof meta !== 'object')) {
+			throw new TypeError('meta, when provided, must be an object.');
 		}
 
 		this._ensureValidAdd();
@@ -250,7 +253,7 @@ class VideoEncoderWrapper {
 	private lastHeight: number | null = null;
 
 	private customEncoder: CustomVideoEncoder | null = null;
-	private lastCustomEncoderPromise = Promise.resolve();
+	private customEncoderCallSerializer = new CallSerializer();
 	private customEncoderQueueSize = 0;
 
 	constructor(private source: VideoSource, private encodingConfig: VideoEncodingConfig) {}
@@ -296,20 +299,18 @@ class VideoEncoderWrapper {
 
 		if (this.customEncoder) {
 			this.customEncoderQueueSize++;
-			this.lastCustomEncoderPromise = this.lastCustomEncoderPromise.then(() => {
-				return this.customEncoder!.encode(videoSample, finalEncodeOptions);
-			});
+			const promise = this.customEncoderCallSerializer
+				.call(() => this.customEncoder!.encode(videoSample, finalEncodeOptions))
+				.then(() => {
+					this.customEncoderQueueSize--;
 
-			void this.lastCustomEncoderPromise.then(() => {
-				this.customEncoderQueueSize--;
-
-				if (shouldClose) {
-					videoSample.close();
-				}
-			});
+					if (shouldClose) {
+						videoSample.close();
+					}
+				});
 
 			if (this.customEncoderQueueSize >= 4) {
-				await this.lastCustomEncoderPromise;
+				await promise;
 			}
 		} else {
 			assert(this.encoder);
@@ -371,11 +372,18 @@ class VideoEncoderWrapper {
 			this.customEncoder.codec = this.encodingConfig.codec;
 			this.customEncoder.config = encoderConfig;
 			this.customEncoder.onPacket = (packet, meta) => {
+				if (!(packet instanceof EncodedPacket)) {
+					throw new TypeError('The first argument passed to onPacket must be an EncodedPacket.');
+				}
+				if (meta !== undefined && (!meta || typeof meta !== 'object')) {
+					throw new TypeError('The second argument passed to onPacket must be an object or undefined.');
+				}
+
 				this.encodingConfig.onEncodedPacket?.(packet, meta);
 				void this.muxer!.addEncodedVideoPacket(this.source._connectedTrack!, packet, meta);
 			};
 
-			this.customEncoder.init();
+			await this.customEncoder.init();
 		} else {
 			if (typeof VideoEncoder === 'undefined') {
 				throw new Error('VideoEncoder is not supported by this browser.');
@@ -409,9 +417,10 @@ class VideoEncoderWrapper {
 		resolve();
 	}
 
-	async flush() {
+	async flushAndClose() {
 		if (this.customEncoder) {
-			await this.lastCustomEncoderPromise.then(() => this.customEncoder!.flush());
+			void this.customEncoderCallSerializer.call(() => this.customEncoder!.flush());
+			await this.customEncoderCallSerializer.call(() => this.customEncoder!.close());
 		} else if (this.encoder) {
 			await this.encoder.flush();
 			this.encoder.close();
@@ -459,8 +468,8 @@ export class VideoSampleSource extends VideoSource {
 	}
 
 	/** @internal */
-	override _flush() {
-		return this._encoder.flush();
+	override _flushAndClose() {
+		return this._encoder.flushAndClose();
 	}
 }
 
@@ -511,8 +520,8 @@ export class CanvasSource extends VideoSource {
 	}
 
 	/** @internal */
-	override _flush() {
-		return this._encoder.flush();
+	override _flushAndClose() {
+		return this._encoder.flushAndClose();
 	}
 }
 
@@ -578,13 +587,13 @@ export class MediaStreamVideoTrackSource extends VideoSource {
 	}
 
 	/** @internal */
-	override async _flush() {
+	override async _flushAndClose() {
 		if (this._abortController) {
 			this._abortController.abort();
 			this._abortController = null;
 		}
 
-		await this._encoder.flush();
+		await this._encoder.flushAndClose();
 	}
 }
 
@@ -633,6 +642,9 @@ export class EncodedAudioPacketSource extends AudioSource {
 		}
 		if (packet.isMetadataOnly) {
 			throw new TypeError('Metadata-only packets cannot be added.');
+		}
+		if (meta !== undefined && (!meta || typeof meta !== 'object')) {
+			throw new TypeError('meta, when provided, must be an object.');
 		}
 
 		this._ensureValidAdd();
@@ -719,7 +731,7 @@ class AudioEncoderWrapper {
 	private writeOutputValue: ((view: DataView, byteOffset: number, value: number) => void) | null = null;
 
 	private customEncoder: CustomAudioEncoder | null = null;
-	private lastCustomEncoderPromise = Promise.resolve();
+	private customEncoderCallSerializer = new CallSerializer();
 	private customEncoderQueueSize = 0;
 
 	constructor(private source: AudioSource, private encodingConfig: AudioEncodingConfig) {}
@@ -755,20 +767,18 @@ class AudioEncoderWrapper {
 
 		if (this.customEncoder) {
 			this.customEncoderQueueSize++;
-			this.lastCustomEncoderPromise = this.lastCustomEncoderPromise.then(() => {
-				return this.customEncoder!.encode(audioSample);
-			});
+			const promise = this.customEncoderCallSerializer
+				.call(() => this.customEncoder!.encode(audioSample))
+				.then(() => {
+					this.customEncoderQueueSize--;
 
-			void this.lastCustomEncoderPromise.then(() => {
-				this.customEncoderQueueSize--;
-
-				if (shouldClose) {
-					audioSample.close();
-				}
-			});
+					if (shouldClose) {
+						audioSample.close();
+					}
+				});
 
 			if (this.customEncoderQueueSize >= 4) {
-				await this.lastCustomEncoderPromise;
+				await promise;
 			}
 
 			await this.muxer!.mutex.currentPromise; // Allow the writer to apply backpressure
@@ -900,11 +910,18 @@ class AudioEncoderWrapper {
 			this.customEncoder.codec = this.encodingConfig.codec;
 			this.customEncoder.config = encoderConfig;
 			this.customEncoder.onPacket = (packet, meta) => {
+				if (!(packet instanceof EncodedPacket)) {
+					throw new TypeError('The first argument passed to onPacket must be an EncodedPacket.');
+				}
+				if (meta !== undefined && (!meta || typeof meta !== 'object')) {
+					throw new TypeError('The second argument passed to onPacket must be an object or undefined.');
+				}
+
 				this.encodingConfig.onEncodedPacket?.(packet, meta);
 				void this.muxer!.addEncodedAudioPacket(this.source._connectedTrack!, packet, meta);
 			};
 
-			this.customEncoder.init();
+			await this.customEncoder.init();
 		} else if ((PCM_AUDIO_CODECS as readonly string[]).includes(this.encodingConfig.codec)) {
 			this.initPcmEncoder();
 		} else {
@@ -1020,9 +1037,10 @@ class AudioEncoderWrapper {
 		}
 	}
 
-	async flush() {
+	async flushAndClose() {
 		if (this.customEncoder) {
-			await this.lastCustomEncoderPromise.then(() => this.customEncoder!.flush());
+			void this.customEncoderCallSerializer.call(() => this.customEncoder!.flush());
+			await this.customEncoderCallSerializer.call(() => this.customEncoder!.close());
 		} else if (this.encoder) {
 			await this.encoder.flush();
 			this.encoder.close();
@@ -1072,8 +1090,8 @@ export class AudioSampleSource extends AudioSource {
 	}
 
 	/** @internal */
-	override _flush() {
-		return this._encoder.flush();
+	override _flushAndClose() {
+		return this._encoder.flushAndClose();
 	}
 }
 
@@ -1153,8 +1171,8 @@ export class AudioBufferSource extends AudioSource {
 	}
 
 	/** @internal */
-	override _flush() {
-		return this._encoder.flush();
+	override _flushAndClose() {
+		return this._encoder.flushAndClose();
 	}
 }
 
@@ -1215,13 +1233,13 @@ export class MediaStreamAudioTrackSource extends AudioSource {
 	}
 
 	/** @internal */
-	override async _flush() {
+	override async _flushAndClose() {
 		if (this._abortController) {
 			this._abortController.abort();
 			this._abortController = null;
 		}
 
-		await this._encoder.flush();
+		await this._encoder.flushAndClose();
 	}
 }
 

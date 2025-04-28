@@ -1,11 +1,12 @@
 import { Muxer } from '../muxer';
 import { Output, OutputAudioTrack } from '../output';
-import { parsePcmCodec, PcmAudioCodec } from '../codec';
+import { parsePcmCodec, PcmAudioCodec, validateAudioChunkMetadata } from '../codec';
 import { WaveFormat } from './wave-demuxer';
 import { RiffWriter } from './riff-writer';
 import { Writer } from '../writer';
 import { EncodedPacket } from '../packet';
 import { WavOutputFormat } from '../output-format';
+import { assert } from '../misc';
 
 export class WaveMuxer extends Muxer {
 	private format: WavOutputFormat;
@@ -39,9 +40,10 @@ export class WaveMuxer extends Muxer {
 
 		try {
 			if (!this.headerWritten) {
-				if (!meta?.decoderConfig) {
-					throw new Error('Decoder config is required for first audio sample.');
-				}
+				validateAudioChunkMetadata(meta);
+
+				assert(meta);
+				assert(meta.decoderConfig);
 
 				this.writeHeader(track, meta.decoderConfig);
 				this.headerWritten = true;
