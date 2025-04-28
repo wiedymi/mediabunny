@@ -1,4 +1,3 @@
 - https://github.com/Vanilagy/mp4-muxer/issues/83 tell him it's possible now
-- cross-track offset for streaming sources
 - textsubtitlesource, chunked piping
 - More efficient MP3 loading when reading sequentially

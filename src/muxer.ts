@@ -7,6 +7,13 @@ export abstract class Muxer {
 	output: Output;
 	mutex = new AsyncMutex();
 
+	/**
+	 * This field is used to synchronize multiple MediaStreamTracks. They use the same time coordinate system across
+	 * tracks, and to ensure correct audio-video sync, we must use the same offset for all of them. The reason an offset
+	 * is needed at all is because the timestamps typically don't start at zero.
+	 */
+	firstMediaStreamTimestamp: number | null = null;
+
 	constructor(output: Output) {
 		this.output = output;
 	}
@@ -29,12 +36,13 @@ export abstract class Muxer {
 	onTrackClose(track: OutputTrack) {}
 
 	private trackTimestampInfo = new WeakMap<OutputTrack, {
-		timestampOffset: number;
 		maxTimestamp: number;
 		maxTimestampBeforeLastKeyFrame: number;
 	}>();
 
 	protected validateAndNormalizeTimestamp(track: OutputTrack, timestampInSeconds: number, isKeyFrame: boolean) {
+		timestampInSeconds += track.source._timestampOffset;
+
 		let timestampInfo = this.trackTimestampInfo.get(track);
 		if (!timestampInfo) {
 			if (!isKeyFrame) {
@@ -42,15 +50,10 @@ export abstract class Muxer {
 			}
 
 			timestampInfo = {
-				timestampOffset: timestampInSeconds,
-				maxTimestamp: track.source._offsetTimestamps ? 0 : timestampInSeconds,
-				maxTimestampBeforeLastKeyFrame: track.source._offsetTimestamps ? 0 : timestampInSeconds,
+				maxTimestamp: timestampInSeconds,
+				maxTimestampBeforeLastKeyFrame: timestampInSeconds,
 			};
 			this.trackTimestampInfo.set(track, timestampInfo);
-		}
-
-		if (track.source._offsetTimestamps) {
-			timestampInSeconds -= timestampInfo.timestampOffset;
 		}
 
 		if (timestampInSeconds < 0) {

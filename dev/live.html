@@ -1,0 +1,50 @@
+<button>Go</button>
+
+<script src="../dist/metamuxer.js"></script>
+
+<script type="module">
+    function download(blob, filename) {
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = filename;
+		a.click();
+		URL.revokeObjectURL(url);
+	}
+
+    const button = document.querySelector('button');
+    button.addEventListener('click', async () => {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        const videoTrack = stream.getVideoTracks()[0];
+        const audioTrack = stream.getAudioTracks()[0];
+
+        const output = new Metamuxer.Output({
+            target: new Metamuxer.BufferTarget(),
+            format: new Metamuxer.Mp4OutputFormat(),
+        });
+        if (videoTrack) {
+            output.addVideoTrack(new Metamuxer.MediaStreamVideoTrackSource(videoTrack, {
+                codec: 'avc',
+                bitrate: Metamuxer.QUALITY_MEDIUM
+            }));
+        }
+        if (audioTrack) {
+            output.addAudioTrack(new Metamuxer.MediaStreamAudioTrackSource(audioTrack, {
+                codec: 'aac',
+                bitrate: Metamuxer.QUALITY_MEDIUM
+            }));
+        }
+
+        await output.start();
+
+        await new Promise(resolve => setTimeout(resolve, 3000));
+
+        await output.finalize();
+
+        console.log(output.target.buffer);
+        download(new Blob([output.target.buffer]), 'livetest' + output.format.fileExtension);
+
+        videoTrack?.stop();
+        audioTrack?.stop();
+    });
+</script>
