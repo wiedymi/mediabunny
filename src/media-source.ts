@@ -567,18 +567,8 @@ export class MediaStreamVideoTrackSource extends VideoSource {
 		const processor = new MediaStreamTrackProcessor({ track: this._track });
 		const consumer = new WritableStream<VideoFrame>({
 			write: (videoFrame) => {
-				const timestampInSeconds = videoFrame.timestamp / 1e6;
-
-				assert(this._connectedTrack);
-				const muxer = this._connectedTrack.output._muxer;
-				if (muxer.firstMediaStreamTimestamp === null) {
-					// We're the first MediaStreamTrack of this output to receive data
-					muxer.firstMediaStreamTimestamp = timestampInSeconds;
-				}
-
 				if (!frameReceived) {
-					// Math.min to ensure the timestamps can't get negative
-					this._timestampOffset = -Math.min(muxer.firstMediaStreamTimestamp, timestampInSeconds);
+					setMediaStreamTimestampOffset(this, videoFrame);
 					frameReceived = true;
 				}
 
@@ -1226,18 +1216,8 @@ export class MediaStreamAudioTrackSource extends AudioSource {
 		const processor = new MediaStreamTrackProcessor({ track: this._track });
 		const consumer = new WritableStream<AudioData>({
 			write: (audioData) => {
-				const timestampInSeconds = audioData.timestamp / 1e6;
-
-				assert(this._connectedTrack);
-				const muxer = this._connectedTrack.output._muxer;
-				if (muxer.firstMediaStreamTimestamp === null) {
-					// We're the first MediaStreamTrack of this output to receive data
-					muxer.firstMediaStreamTimestamp = timestampInSeconds;
-				}
-
 				if (!dataReceived) {
-					// Math.min to ensure the timestamps can't get negative
-					this._timestampOffset = -Math.min(muxer.firstMediaStreamTimestamp, timestampInSeconds);
+					setMediaStreamTimestampOffset(this, audioData);
 					dataReceived = true;
 				}
 
@@ -1271,6 +1251,20 @@ export class MediaStreamAudioTrackSource extends AudioSource {
 		await this._encoder.flushAndClose();
 	}
 }
+
+const setMediaStreamTimestampOffset = (source: MediaSource, sample: VideoFrame | AudioData) => {
+	const timestampInSeconds = sample.timestamp / 1e6;
+
+	assert(source._connectedTrack);
+	const muxer = source._connectedTrack.output._muxer;
+	if (muxer.firstMediaStreamTimestamp === null) {
+		// We're the first MediaStreamTrack of this output to receive data
+		muxer.firstMediaStreamTimestamp = timestampInSeconds;
+	}
+
+	// Math.min to ensure the timestamps can't get negative
+	source._timestampOffset = -Math.min(muxer.firstMediaStreamTimestamp, timestampInSeconds);
+};
 
 /**
  * Base class for subtitle sources - sources for subtitle tracks.
