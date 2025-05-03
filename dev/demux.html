@@ -16,6 +16,72 @@
 			source
 		});
 
+		/*
+		const timestamps = [
+			4.16,
+			4.266666666666667,
+			4.373333333333333,
+			4.48,
+			4.586666666666667,
+			4.693333333333333,
+			4.8,
+			4.906666666666666,
+			5.013333333333334,
+			5.12,
+			5.226666666666667,
+			5.333333333333333,
+			5.4399999999999995,
+			5.546666666666667,
+			5.653333333333333,
+			5.76,
+			5.866666666666666,
+			5.973333333333333,
+			6.08,
+			6.186666666666666,
+			6.293333333333333,
+			6.4,
+			6.506666666666666,
+			6.613333333333333,
+			6.72,
+			6.826666666666666,
+			6.933333333333334,
+			7.039999999999999,
+			7.1466666666666665,
+			7.253333333333333
+		];
+		*/
+		const timestamps = [];
+		const videoTrack = await input.getPrimaryVideoTrack();
+
+		const packetSink = new Metamuxer.EncodedPacketSink(videoTrack);
+		for await (const packet of packetSink.packets()) {
+			if (packet.timestamp >= 1) {
+				break;
+			}
+
+			timestamps.push(packet.timestamp);
+		}
+
+		timestamps.sort((a, b) => a-b)
+
+		console.log(timestamps);
+		//return;
+		/*
+		const sink = new Metamuxer.EncodedPacketSink(videoTrack);
+		for await (const packet of sink.packets()) {
+			console.log(packet.sequenceNumber);
+		}
+		*/
+
+		
+		const sink = new Metamuxer.CanvasSink(videoTrack, { width: 320 });
+
+		for await (const wrappedCanvas of sink.canvasesAtTimestamps(timestamps)) {
+			console.log(wrappedCanvas);
+		}
+			
+
+		/*
 		const output = new Metamuxer.Output({
 			format: new Metamuxer.Mp3OutputFormat(),
 			target: new Metamuxer.BufferTarget()
@@ -49,6 +115,7 @@
 
 		console.log(output.target.buffer)
 		download(new Blob([output.target.buffer]), 'converted.mp3');
+		*/
 
 
 		/*

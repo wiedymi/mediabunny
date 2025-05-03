@@ -526,6 +526,8 @@ export abstract class BaseMediaSampleSink<
 					continue;
 				}
 
+				// console.log('target', targetPacket);
+
 				const keyPacket = await packetSink.getKeyPacket(timestamp);
 				if (!keyPacket) {
 					pushToQueue(null);
@@ -533,15 +535,17 @@ export abstract class BaseMediaSampleSink<
 				}
 
 				if (lastPacket && targetPacket.sequenceNumber < lastPacket.sequenceNumber) {
-					// We're going back in time with this one, let's flush and reset to an clean state
+					// console.log('FLUSH?', lastPacket, targetPacket.sequenceNumber, lastPacket.sequenceNumber);
+					// We're going back in time with this one, let's flush and reset to a clean state
 					await decoder.flush();
 					timestampsOfInterest.length = 0;
 				}
 
 				if (
 					lastKeyPacket
-					&& keyPacket.sequenceNumber === lastKeyPacket.sequenceNumber
-					&& targetPacket.timestamp >= lastPacket!.timestamp
+					&& keyPacket.sequenceNumber === lastKeyPacket.sequenceNumber // => they're the same packet
+					// && targetPacket.timestamp >= lastPacket!.timestamp
+					&& targetPacket.sequenceNumber >= lastPacket!.sequenceNumber
 				) {
 					assert(lastPacket);
 
@@ -558,6 +562,7 @@ export abstract class BaseMediaSampleSink<
 						timestampsOfInterest.push(targetPacket.timestamp);
 					}
 				} else {
+					// console.log('==== RESET');
 					// The key packet has changed
 					lastKeyPacket = keyPacket;
 					lastPacket = keyPacket;
