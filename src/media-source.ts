@@ -278,10 +278,16 @@ class VideoEncoderWrapper {
 		}
 
 		if (!this.encoderInitialized) {
-			if (this.ensureEncoderPromise) {
+			if (!this.ensureEncoderPromise) {
+				void this.ensureEncoder(videoSample);
+			}
+
+			// No, this "if" statement is not useless. Sometimes, the above call to `ensureEncoder` might have
+			// synchronously completed and the encoder is already initialized. In this case, we don't need to await the
+			// promise anymore. This also fixes nasty async race condition bugs when multiple code paths are calling
+			// this method: It's important that the call that initialized the encoder go through this code first.
+			if (!this.encoderInitialized) {
 				await this.ensureEncoderPromise;
-			} else {
-				await this.ensureEncoder(videoSample);
 			}
 		}
 		assert(this.encoderInitialized);
@@ -763,10 +769,16 @@ class AudioEncoderWrapper {
 		}
 
 		if (!this.encoderInitialized) {
-			if (this.ensureEncoderPromise) {
+			if (!this.ensureEncoderPromise) {
+				void this.ensureEncoder(audioSample);
+			}
+
+			// No, this "if" statement is not useless. Sometimes, the above call to `ensureEncoder` might have
+			// synchronously completed and the encoder is already initialized. In this case, we don't need to await the
+			// promise anymore. This also fixes nasty async race condition bugs when multiple code paths are calling
+			// this method: It's important that the call that initialized the encoder go through this code first.
+			if (!this.encoderInitialized) {
 				await this.ensureEncoderPromise;
-			} else {
-				await this.ensureEncoder(audioSample);
 			}
 		}
 		assert(this.encoderInitialized);

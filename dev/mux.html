@@ -43,6 +43,7 @@
 	format = new Metamuxer.OggOutputFormat();
 	format = new Metamuxer.Mp4OutputFormat({ fastStart: 'fragmented', minimumFragmentDuration: 2 });
 	format = new Metamuxer.MkvOutputFormat({ minimumClusterDuration: 2 });
+	format = new Metamuxer.WavOutputFormat();
 	let target = new Metamuxer.BufferTarget();
 
 	/*
@@ -56,6 +57,30 @@
 	*/
 
 	let output = new Metamuxer.Output({ format, target });
+
+	let sourcy = new Metamuxer.AudioBufferSource({
+		codec: 'pcm-s16',
+		bitrate: Metamuxer.QUALITY_HIGH
+	});
+	output.addAudioTrack(sourcy);
+
+	await output.start();
+
+	for (let i = 0; i < 1000; i++) {
+		let buf = new AudioBuffer({
+			length: 1024,
+			sampleRate: 48000,
+			numberOfChannels: 2
+		});
+		sourcy.add(buf);
+	}
+
+	console.log("Done")
+
+	
+	await output.finalize();
+
+	await new Promise(() => {});
 
 	/*
 	let videoSource = new Metamuxer.EncodedVideoChunkSource('avc');
