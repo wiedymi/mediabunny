@@ -225,7 +225,10 @@ export class VideoSample {
 		assert(this._data !== null);
 
 		if (isVideoFrame(this._data)) {
-			return new VideoSample(this._data.clone());
+			return new VideoSample(this._data.clone(), {
+				timestamp: this.timestamp,
+				duration: this.duration,
+			});
 		} else if (this._data instanceof Uint8Array) {
 			return new VideoSample(this._data.slice(), {
 				format: this.format!,
@@ -812,10 +815,12 @@ export class AudioSample {
 		}
 
 		if (isAudioData(this._data)) {
-			return new AudioSample(this._data.clone());
+			const sample = new AudioSample(this._data.clone());
+			sample.setTimestamp(this.timestamp); // Make sure the timestamp is precise (beyond microsecond accuracy)
+
+			return sample;
 		} else {
 			return new AudioSample({
-
 				format: this.format,
 				sampleRate: this.sampleRate,
 				numberOfFrames: this.numberOfFrames,

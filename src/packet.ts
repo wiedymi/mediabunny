@@ -28,11 +28,10 @@ export class EncodedPacket {
 		/** The duration of this packet in seconds. */
 		public readonly duration: number,
 		/**
-		 * The sequence number of this packet. The sequence number indicates the decode order of the packets. Packet A
-		 * must be decoded before packet B if A has a lower sequence number than B. If two packets have the same
-		 * sequence number, they are the same packet. Otherwise, sequence numbers are arbitrary and are not guaranteed
-		 * to have any meaning besides their relative ordering. Negative sequence numbers mean the sequence number
-		 * is undefined.
+		 * The sequence number indicates the decode order of the packets. Packet A  must be decoded before packet B if A
+		 * has a lower sequence number than B. If two packets have the same sequence number, they are the same packet.
+		 * Otherwise, sequence numbers are arbitrary and are not guaranteed to have any meaning besides their relative
+		 * ordering. Negative sequence numbers mean the sequence number is undefined.
 		 */
 		public readonly sequenceNumber = -1,
 		/**

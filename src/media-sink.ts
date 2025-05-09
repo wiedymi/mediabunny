@@ -504,83 +504,103 @@ export abstract class BaseMediaSampleSink<
 			});
 
 			const packetSink = this._createPacketSink();
-			let lastKeyPacket: EncodedPacket | null = null;
 			let lastPacket: EncodedPacket | null = null;
+			let lastKeyPacket: EncodedPacket | null = null;
+
+			// The end sequence number (inclusive) in the next batch of packets that will be decoded. The batch starts
+			// at the last key frame and goes until this sequence number.
+			let maxSequenceNumber = -1;
+
+			const decodePackets = async () => {
+				assert(lastKeyPacket);
+
+				// Start at the current key packet
+				let currentPacket = lastKeyPacket;
+				decoder.decode(currentPacket);
+
+				while (currentPacket.sequenceNumber < maxSequenceNumber) {
+					const maxQueueSize = computeMaxQueueSize(sampleQueue.length);
+					while (sampleQueue.length + decoder.getDecodeQueueSize() > maxQueueSize && !terminated) {
+						({ promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers());
+						await queueDequeue;
+					}
+
+					if (terminated) {
+						break;
+					}
+
+					const nextPacket = await packetSink.getNextPacket(currentPacket);
+					assert(nextPacket);
+
+					currentPacket = nextPacket;
+					decoder.decode(nextPacket);
+				}
+
+				maxSequenceNumber = -1;
+			};
+
+			const flushDecoder = async () => {
+				await decoder.flush();
+
+				// We don't expect this list to have any elements in it anymore, but in case it does, let's emit
+				// nulls for every remaining element, then clear it.
+				for (let i = 0; i < timestampsOfInterest.length; i++) {
+					pushToQueue(null);
+				}
+				timestampsOfInterest.length = 0;
+			};
 
 			for await (const timestamp of timestampIterator) {
 				validateTimestamp(timestamp);
-
-				const maxQueueSize = computeMaxQueueSize(sampleQueue.length);
-				while (sampleQueue.length + decoder.getDecodeQueueSize() > maxQueueSize && !terminated) {
-					({ promise: queueDequeue, resolve: onQueueDequeue } = promiseWithResolvers());
-					await queueDequeue;
-				}
 
 				if (terminated) {
 					break;
 				}
 
 				const targetPacket = await packetSink.getPacket(timestamp);
-				if (!targetPacket) {
-					pushToQueue(null);
-					continue;
-				}
+				const keyPacket = targetPacket && await packetSink.getKeyPacket(timestamp);
 
-				// console.log('target', targetPacket);
-
-				const keyPacket = await packetSink.getKeyPacket(timestamp);
 				if (!keyPacket) {
+					if (maxSequenceNumber !== -1) {
+						await decodePackets();
+						await flushDecoder();
+					}
+
 					pushToQueue(null);
+					lastPacket = null;
 					continue;
 				}
 
-				if (lastPacket && targetPacket.sequenceNumber < lastPacket.sequenceNumber) {
-					// console.log('FLUSH?', lastPacket, targetPacket.sequenceNumber, lastPacket.sequenceNumber);
-					// We're going back in time with this one, let's flush and reset to a clean state
-					await decoder.flush();
-					timestampsOfInterest.length = 0;
-				}
-
+				// Check if the key packet has changed or if we're going back in time
 				if (
-					lastKeyPacket
-					&& keyPacket.sequenceNumber === lastKeyPacket.sequenceNumber // => they're the same packet
-					// && targetPacket.timestamp >= lastPacket!.timestamp
-					&& targetPacket.sequenceNumber >= lastPacket!.sequenceNumber
+					lastPacket
+					&& (
+						keyPacket.sequenceNumber !== lastKeyPacket!.sequenceNumber
+						|| targetPacket.timestamp < lastPacket.timestamp
+					)
 				) {
-					assert(lastPacket);
+					await decodePackets();
 
-					if (
-						targetPacket.sequenceNumber === lastPacket.sequenceNumber
-						&& timestampsOfInterest.length === 0
-					) {
-						// Special case: We have a repeat packet, but the sample for that packet has already been
-						// decoded. Therefore, we need to push the sample here instead of in the decoder callback.
-						if (lastUsedSample) {
-							pushToQueue(lastUsedSample.clone() as MediaSample);
-						}
-					} else {
-						timestampsOfInterest.push(targetPacket.timestamp);
+					if (targetPacket.timestamp < lastPacket.timestamp) {
+						// We're going back in time with this one, let's flush and reset to a clean state
+						await flushDecoder();
 					}
-				} else {
-					// console.log('==== RESET');
-					// The key packet has changed
-					lastKeyPacket = keyPacket;
-					lastPacket = keyPacket;
-					decoder.decode(keyPacket);
-					timestampsOfInterest.push(targetPacket.timestamp);
 				}
 
-				while (lastPacket.sequenceNumber < targetPacket.sequenceNumber) {
-					const nextPacket = await packetSink.getNextPacket(lastPacket);
-					assert(nextPacket);
+				timestampsOfInterest.push(targetPacket.timestamp);
+				maxSequenceNumber = Math.max(targetPacket.sequenceNumber, maxSequenceNumber);
 
-					lastPacket = nextPacket;
-					decoder.decode(nextPacket);
-				}
+				lastPacket = targetPacket;
+				lastKeyPacket = keyPacket;
 			}
 
 			if (!terminated) {
-				await decoder.flush();
+				if (maxSequenceNumber !== -1) {
+					// We still need to decode packets
+					await decodePackets();
+				}
+
+				await flushDecoder();
 				lastUsedSample?.close();
 			}
 			decoder.close();

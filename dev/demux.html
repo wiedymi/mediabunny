@@ -16,8 +16,21 @@
 			source
 		});
 
-		/*
-		const timestamps = [
+		let timestamps = [];
+		const videoTrack = await input.getPrimaryVideoTrack();
+
+		const packetSink = new Metamuxer.EncodedPacketSink(videoTrack);
+		for await (const packet of packetSink.packets()) {
+			if (packet.timestamp >= 1) {
+				break;
+			}
+
+			timestamps.push(packet.timestamp);
+		}
+		timestamps.push(11);
+
+		timestamps.sort((a, b) => a-b)
+		timestamps = [
 			4.16,
 			4.266666666666667,
 			4.373333333333333,
@@ -49,20 +62,6 @@
 			7.1466666666666665,
 			7.253333333333333
 		];
-		*/
-		const timestamps = [];
-		const videoTrack = await input.getPrimaryVideoTrack();
-
-		const packetSink = new Metamuxer.EncodedPacketSink(videoTrack);
-		for await (const packet of packetSink.packets()) {
-			if (packet.timestamp >= 1) {
-				break;
-			}
-
-			timestamps.push(packet.timestamp);
-		}
-
-		timestamps.sort((a, b) => a-b)
 
 		console.log(timestamps);
 		//return;
@@ -73,12 +72,38 @@
 		}
 		*/
 
-		
-		const sink = new Metamuxer.CanvasSink(videoTrack, { width: 320 });
+		const sink = new Metamuxer.VideoSampleSink(videoTrack);
+		for await (const sample of sink.samplesAtTimestamps(timestamps)) {
+			console.log("wee", sample.timestamp);
+			sample.close();
+		}
+		console.log("don")
 
+		/*
+		const sink = new Metamuxer.CanvasSink(videoTrack, { width: 320 });
 		for await (const wrappedCanvas of sink.canvasesAtTimestamps(timestamps)) {
 			console.log(wrappedCanvas);
 		}
+		console.log("don")
+		*/
+
+		
+		/*
+		
+
+		for (let i = 0; i < 1000; i++) {
+			const count = Math.floor(50 * Math.random());
+			const timestamps = Array.from({ length: count }, () => Math.random() * 20).sort((a, b) => a-b);
+
+			for await (const wrappedCanvas of sink.canvasesAtTimestamps(timestamps)) {
+				//console.log(wrappedCanvas);
+			}
+			console.log("don")
+		}
+
+		console.log("DONE!")
+		*/
+		
 			
 
 		/*
