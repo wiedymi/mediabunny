@@ -41,7 +41,6 @@ export default withMermaid({
 				items: [
 					{ text: 'Packets & samples', link: '/guide/packets-and-samples' },
 					{ text: 'Supported formats & codecs', link: '/guide/supported-formats-and-codecs' },
-					{ text: 'Custom coders', link: '/guide/custom-coders' },
 				],
 			},
 		],

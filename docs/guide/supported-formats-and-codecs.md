@@ -16,7 +16,7 @@ Mediakit supports many commonly used media container formats, all of which are s
 
 Mediakit supports a wide range of video, audio, and subtitle codecs. More specifically, it supports all codecs specified by the WebCodecs API and a few additional PCM codecs out of the box.
 
-The availability of the codecs provided by the WebCodecs API depends on the browser and cannot be guaranteed by this library. Mediakit provides [special utility functions](#querying-codec-encodability) to check which codecs are able to be encoded. You can also specify [custom coders](./custom-coders) to provide your own encoder/decoder implementation if the browser doesn't support the codec natively.
+The availability of the codecs provided by the WebCodecs API depends on the browser and thus cannot be guaranteed by this library. Mediakit provides [special utility functions](#querying-codec-encodability) to check which codecs are able to be encoded. You can also specify [custom coders](#custom-coders) to provide your own encoder/decoder implementation if the browser doesn't support the codec natively.
 
 ::: info
 Mediakit ships with built-in decoders and encoders for all audio PCM codecs, meaning they are always supported.
@@ -85,7 +85,7 @@ Not all codecs can be used with all containers. The following table specifies th
 | `'webvtt'`[^3] |   (✓)    |       |  (✓)  |    (✓)    |       |       |       |
 
 
-[^1]: PCM audio codecs are not supported by MP4. If somebody were to include PCM audio in an MP4 anyway, this library would still be able to read it.
+[^1]: PCM audio codecs are not supported by MP4. However, if PCM audio is included in an MP4 nonetheless, this library would still be able to read it.
 [^2]: WebM only supports a small subset of the codecs supported by Matroska. However, this library can technically read all codecs from a WebM that are supported by Matroska.
 [^3]: WebVTT can only be written, not read.
 
@@ -94,7 +94,7 @@ Not all codecs can be used with all containers. The following table specifies th
 Mediakit provides utility functions that you can use to check if the browser can encode a given codec. Additionally, you
 can check if a codec is encodable with a specific _configuration_.
 
-`canEncode` is a general-purpose function that can be called with all codecs and tests encodability using commonly used configurations:
+`canEncode` tests whether a codec can be encoded using typical settings:
 ```ts
 import { canEncode } from 'mediakit';
 
@@ -136,13 +136,152 @@ These functions also accept optional configuration options:
 ```ts
 import { getEncodableVideoCodecs } from 'mediakit';
 
-// Checks only which of AVC, HEVC and VP8 can be encoded at 1280x720 @10Mbps:
+// Checks only which of AVC, HEVC and VP8 can be encoded at 1920x1080 @10Mbps:
 getEncodableVideoCodecs(
 	['avc', 'hevc', 'vp8'],
 	{ width: 1920, height: 1080, bitrate: 1e7 },
 ); // => Promise<VideoCodec[]>
 ```
 
+::: info
+These checks also take [custom encoders](#custom-encoders) into account.
+:::
+
 ## Querying codec decodability
 
-Whether a codec can be decoded depends on the specific codec configuration of an `InputTrack`; you can use its [`canDecode`](./reading-overview#codec-information) method to check if it is decodable.
+Whether a codec can be decoded depends on the specific codec configuration of an `InputTrack`; you can use its [`canDecode`](./reading-overview#codec-information) method to check.
+
+## Custom coders
+
+Mediakit allows you to register your own custom encoders and decoders—useful if you want to polyfill a codec that's not supported in all browsers, or want to use Mediakit outside of an environment with WebCodecs (such as Node.js).
+
+Encoders and decoders can be registered for [all video and audio codecs](#codecs) supported by the library. It is not possible to add new codecs.
+
+::: warning
+Mediakit requires customs encoders and decoders to follow very specific implementation rules. Pay special attention to the parts labeled with "**must**" to ensure compatibility.
+:::
+
+### Custom encoders
+
+To create a custom video or audio encoder, you'll need to create a class which extends `CustomVideoEncoder` or `CustomAudioEncoder`. Then, you **must** register this class using `registerEncoder`:
+```ts
+import { CustomAudioEncoder, registerEncoder } from 'mediakit';
+
+class MyAwesomeMp3Encoder extends CustomAudioEncoder {
+	// ...
+}
+registerEncoder(MyAwesomeMp3Encoder);
+```
+
+The following properties are available on each encoder instance and are set by the library:
+```ts
+class {
+	// For video encoders:
+	codec: VideoCodec;
+	config: VideoEncoderConfig;
+	onPacket: (packet: EncodedPacket, meta?: EncodedVideoChunkMetadata) => unknown;
+
+	// For audio encoders:
+	codec: AudioCodec;
+	config: AudioEncoderConfig;
+	onPacket: (packet: EncodedPacket, meta?: EncodedAudioChunkMetadata) => unknown;
+}
+```
+
+`codec` and `config` specify the concrete codec configuration to use, and `onPacket` is a method that your code **must** call for each encoded packet it creates.
+
+You **must** implement the following methods in your custom encoder class:
+```ts
+class {
+	// For video encoders:
+	static supports(codec: VideoCodec, config: VideoEncoderConfig): boolean;
+	// For audio encoders:
+	static supports(codec: AudioCodec, config: AudioEncoderConfig): boolean;
+
+	init(): Promise<void> | void;
+	encode(sample: VideoSample, options: VideoEncoderEncodeOptions): Promise<void> | void; // For video
+	encode(sample: AudioSample): Promise<void> | void; // For audio
+	flush(): Promise<void> | void;
+	close(): Promise<void> | void;
+}
+```
+- `supports`\
+	This is a *static* method that **must** return `true` if the encoder is able to encode the specified codec, and `false` if not. If it returns `true`, a new instance of your encoder class will be created by the library and will be used for encoding, taking precedence over the default encoders.
+- `init`\
+	Called by the library after your class is instantiated. Place any initialization logic here.
+- `encode`\
+	Called for each sample that is to be encoded. The resulting encoded packet **must** then be passed to the `onPacket` method.
+- `flush`\
+	Called when the encoder is expected to finish the encoding process for all remaining samples that haven't finished encoding yet. This method **must** return/resolve only once all samples passed to `encode` have been fully encoded. It **must** then reset its own internal state to be ready for the next encoding batch.
+- `close`\
+	Called when the encoder is no longer needed and can release its internal resources.
+
+::: info
+All instance methods of the class can return promises. In this case, the library will make sure to *serialize* all method calls such that no two methods ever run concurrently.
+:::
+
+::: warning
+The packets passed to `onPacket` **must** be in [decode order](./media-sinks.md#decode-vs-presentation-order).
+:::
+
+### Custom decoders
+
+To create a custom video or audio decoder, you'll need to create a class which extends `CustomVideoDecoder` or `CustomAudioDecoder`. Then, you **must** register this class using `registerDecoder`:
+```ts
+import { CustomAudioDecoder, registerDecoder } from 'mediakit';
+
+class MyAwesomeMp3Decoder extends CustomAudioDecoder {
+	// ...
+}
+registerDecoder(MyAwesomeMp3Decoder);
+```
+
+The following properties are available on each decoder instance and are set by the library:
+```ts
+class {
+	// For video decoders:
+	codec: VideoCodec;
+	config: VideoDecoderConfig;
+	onSample: (sample: VideoSample) => unknown;
+
+	// For audio decoders:
+	codec: AudioCodec;
+	config: AudioDecoderConfig;
+	onSample: (sample: AudioSample) => unknown;
+}
+```
+
+`codec` and `config` specify the concrete codec configuration to use, and `onSample` is a method that your code **must** call for each video/audio sample it creates.
+
+You **must** implement the following methods in your custom decoder class:
+```ts
+class {
+	// For video decoders:
+	static supports(codec: VideoCodec, config: VideoDecoderConfig): boolean;
+	// For audio decoders:
+	static supports(codec: AudioCodec, config: AudioDecoderConfig): boolean;
+
+	init(): Promise<void> | void;
+	decode(packet: EncodedPacket): Promise<void> | void;
+	flush(): Promise<void> | void;
+	close(): Promise<void> | void;
+}
+```
+- `supports`\
+	This is a *static* method that **must** return `true` if the decoder is able to decode the specified codec, and `false` if not. If it returns `true`, a new instance of your decoder class will be created by the library and will be used for decoding, taking precedence over the default decoders.
+- `init`\
+	Called by the library after your class is instantiated. Place any initialization logic here.
+- `decode`\
+	Called for each `EncodedPacket` that is to be decoded. The resulting video or audio sample **must** then be passed to the `onSample` method.
+- `flush`\
+	Called when the decoder is expected to finish the decoding process for all remaining packets that haven't finished decoding yet. This method **must** return/resolve only once all packets passed to `decode` have been fully decoded. It **must** then reset its own internal state to be ready for the next decoding batch.
+- `close`\
+	Called when the decoder is no longer needed and can release its internal resources.
+
+::: info
+All instance methods of the class can return promises. In this case, the library will make sure to *serialize* all method calls such that no two methods ever run concurrently.
+:::
+
+::: warning
+The samples passed to `onSample` **must** be sorted by increasing timestamp. This especially means if the decoder is decoding a video stream that makes use of [B-frames](./media-sources.md#b-frames), the decoder **must** internally hold on to these frames so it can emit them sorted by presentation timestamp. This strict sorting requirement is reset each time `flush` is called.
+:::

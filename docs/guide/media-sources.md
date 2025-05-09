@@ -124,7 +124,7 @@ Video sources feed data to video tracks on an `Output`. They all extend the abst
 
 ### `VideoSampleSource`
 
-This source takes [video samples](TODO), encodes them, and passes the encoded data to the output.
+This source takes [video samples](./packets-and-samples#videosample), encodes them, and passes the encoded data to the output.
 
 ```ts
 import { VideoSampleSource } from 'mediakit';
@@ -185,7 +185,7 @@ If this source is the only MediaStreamTrack source in the `Output`, then the fir
 
 ### `EncodedVideoPacketSource`
 
-The most barebones of all video sources, this source can be used to directly pipe [encoded packets](TODO) of video data to the output. This source requires that you take care of the encoding process yourself, which enables you to use the WebCodecs API manually or to plug in your own encoding stack. Alternatively, you may retrieve the encoded packets directly by reading them from another media file, allowing you to skip decoding and reencoding video data.
+The most barebones of all video sources, this source can be used to directly pipe [encoded packets](./packets-and-samples#encodedpacket) of video data to the output. This source requires that you take care of the encoding process yourself, which enables you to use the WebCodecs API manually or to plug in your own encoding stack. Alternatively, you may retrieve the encoded packets directly by reading them from another media file, allowing you to skip decoding and reencoding video data.
 
 ```ts
 import { EncodedVideoPacketSource } from 'mediakit';
@@ -279,7 +279,7 @@ Audio sources feed data to audio tracks on an `Output`. They all extend the abst
 
 ### `AudioSampleSource`
 
-This source takes [audio samples](TODO), encodes them, and passes the encoded data to the output.
+This source takes [audio samples](./packets-and-samples#audiosample), encodes them, and passes the encoded data to the output.
 
 ```ts
 import { AudioSampleSource } from 'mediakit';
@@ -334,7 +334,7 @@ If this source is the only MediaStreamTrack source in the `Output`, then the fir
 
 ### `EncodedAudioPacketSource`
 
-The most barebones of all audio sources, this source can be used to directly pipe [encoded packets](TODO) of audio data to the output. This source requires that you take care of the encoding process yourself, which enables you to use the WebCodecs API manually or to plug in your own encoding stack. Alternatively, you may retrieve the encoded packets directly by reading them from another media file, allowing you to skip decoding and reencoding audio data.
+The most barebones of all audio sources, this source can be used to directly pipe [encoded packets](./packets-and-samples#encodedpacket) of audio data to the output. This source requires that you take care of the encoding process yourself, which enables you to use the WebCodecs API manually or to plug in your own encoding stack. Alternatively, you may retrieve the encoded packets directly by reading them from another media file, allowing you to skip decoding and reencoding audio data.
 
 ```ts
 import { EncodedAudioPacketSource } from 'mediakit';

@@ -40,7 +40,7 @@ Packets and samples in Mediakit correspond directly with concepts of the [WebCod
 	-> `AudioData`
 
 Since Mediakit makes heavy use of WebCodecs API, its own classes are typically used as wrappers around the WebCodecs classes. However, this wrapping comes with a few benefits:
-1. **Independence:** This library remains functional even if the WebCodecs API isn't available. Encoders and decoders can be polyfilled using [custom coders](TODO), and the library can run in non-browser contexts such as Node.js.
+1. **Independence:** This library remains functional even if the WebCodecs API isn't available. Encoders and decoders can be polyfilled using [custom coders](./supported-formats-and-codecs#custom-coders), and the library can run in non-browser contexts such as Node.js.
 1. **Extensibility:** The wrappers serve as a namespace for additional operations, such as `toAudioBuffer()` on `AudioSample`, or `draw()` on `VideoSample`.
 1. **Consistency:** While WebCodecs uses integer microsecond timestamps, Mediakit uses floating-point second timestamps everywhere. With these wrappers, all timing information is always in seconds and the user doesn't need to think about unit conversions.
 

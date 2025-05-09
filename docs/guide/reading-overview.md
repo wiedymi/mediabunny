@@ -118,7 +118,7 @@ await track.canDecode(); // => boolean
 ```
 
 ::: info
-This check also takes [custom decoders](TODO) into account.
+This check also takes [custom decoders](./supported-formats-and-codecs#custom-decoders) into account.
 :::
 
 #### Track timing info

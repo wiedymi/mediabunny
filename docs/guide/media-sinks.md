@@ -78,7 +78,7 @@ There is one media sink which can be used with any `InputTrack`:
 
 ### `EncodedPacketSink`
 
-This sink can be used to extract raw, [encoded packets](TODO) from media files and is the most elementary media sink. `EncodedPacketSink` is useful if you don't care about the decoded media data (for example, you're only interested in timestamps), or if you want to roll your own decoding logic.
+This sink can be used to extract raw, [encoded packets](./packets-and-samples#encodedpacket) from media files and is the most elementary media sink. `EncodedPacketSink` is useful if you don't care about the decoded media data (for example, you're only interested in timestamps), or if you want to roll your own decoding logic.
 
 Start by constructing the sink from any `InputTrack`:
 ```ts
@@ -161,7 +161,7 @@ These sinks can only be used with an `InputVideoTrack`.
 
 ### `VideoSampleSink`
 
-Use this sink to extract decoded [video samples](TODO) (frames) from a video track. The sink will automatically handle the decoding internally.
+Use this sink to extract decoded [video samples](./packets-and-samples#videosample) (frames) from a video track. The sink will automatically handle the decoding internally.
 
 ::: info
 All operations of this sink use [presentation order](#decode-vs-presentation-order).
@@ -410,7 +410,7 @@ These sinks can only be used with an `InputAudioTrack`.
 
 ### `AudioSampleSink`
 
-Use this sink to extract decoded [audio samples](TODO) from an audio track. The sink will automatically handle the decoding internally.
+Use this sink to extract decoded [audio samples](./packets-and-samples#audiosample) from an audio track. The sink will automatically handle the decoding internally.
 
 Create the sink like so:
 ```ts
@@ -427,7 +427,7 @@ The methods for retrieving samples are analogous to those on `VideoSampleSink`.
 - `samplesAtTimestamps`\
   	Iterates over samples at specific timestamps; see [Sparse iteration](#sparse-iteration).
 
-These methods yield [`AudioSample`](TODO) instances.
+These methods yield [`AudioSample`](./packets-and-samples#audiosample) instances.
 
 For example, let's use this sink to calculate the average loudness of an audio track using [root mean square](https://en.wikipedia.org/wiki/Root_mean_square):
 ```ts
