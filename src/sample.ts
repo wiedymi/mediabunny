@@ -414,7 +414,12 @@ export class VideoSample {
 		context.restore();
 	}
 
-	/** Converts this video sample to a CanvasImageSource for drawing to a canvas. */
+	/**
+	 * Converts this video sample to a CanvasImageSource for drawing to a canvas.
+	 *
+	 * You must use the value returned by this method immediately, as any VideoFrame created internally will
+	 * automatically be closed in the next microtask.
+	 */
 	toCanvasImageSource() {
 		if (this._closed) {
 			throw new Error('VideoSample is closed.');
@@ -424,7 +429,10 @@ export class VideoSample {
 
 		if (this._data instanceof Uint8Array) {
 			// Requires VideoFrame to be defined
-			return this.toVideoFrame();
+			const videoFrame = this.toVideoFrame();
+			queueMicrotask(() => videoFrame.close()); // Let's automatically close the frame in the next microtask
+
+			return videoFrame;
 		} else {
 			return this._data;
 		}

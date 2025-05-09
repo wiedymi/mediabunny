@@ -461,7 +461,6 @@ export abstract class BaseMediaSampleSink<
 		// the consumer.
 		let outOfBandError = null as Error | null;
 
-		let lastUsedSample = null as MediaSample | null;
 		const pushToQueue = (sample: MediaSample | null) => {
 			sampleQueue.push(sample);
 			onQueueNotEmpty();
@@ -479,19 +478,20 @@ export abstract class BaseMediaSampleSink<
 					return;
 				}
 
-				let sampleUsed = false;
+				let sampleUses = 0;
 				while (
 					timestampsOfInterest.length > 0
 					&& sample.timestamp - timestampsOfInterest[0]! > -1e-10 // Give it a little epsilon
 				) {
-					pushToQueue(sample.clone() as MediaSample);
+					sampleUses++;
 					timestampsOfInterest.shift();
-					sampleUsed = true;
 				}
 
-				if (sampleUsed) {
-					lastUsedSample?.close();
-					lastUsedSample = sample;
+				if (sampleUses > 0) {
+					for (let i = 0; i < sampleUses; i++) {
+						// Clone the sample if we need to emit it multiple times
+						pushToQueue((i < sampleUses - 1 ? sample.clone() : sample) as MediaSample);
+					}
 				} else {
 					sample.close();
 				}
@@ -601,7 +601,6 @@ export abstract class BaseMediaSampleSink<
 				}
 
 				await flushDecoder();
-				lastUsedSample?.close();
 			}
 			decoder.close();
 
@@ -641,7 +640,6 @@ export abstract class BaseMediaSampleSink<
 				for (const sample of sampleQueue) {
 					sample?.close();
 				}
-				lastUsedSample?.close();
 
 				return { value: undefined, done: true };
 			},

@@ -328,6 +328,10 @@ videoSample.toCanvasImageSource(); // => VideoFrame | OffscreenCanvas;
 
 This method returns a valid `CanvasImageSource` you can use with [drawImage](https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/drawImage).
 
+::: warning
+If this method returns a `VideoFrame`, you should use that frame immediately. This is because any internally-created video frames will automatically be closed in the next microtask.
+:::
+
 ---
 
 Sometimes you may want direct access to the underlying pixel data. To do this, `VideoSample` allows you to copy this data into an `ArrayBuffer`.
