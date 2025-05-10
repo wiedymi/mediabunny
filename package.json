@@ -2,6 +2,7 @@
   "name": "metamuxer",
   "version": "0.1.0",
   "description": "TODO",
+  "type": "module",
   "main": "./dist/metamuxer.js",
   "module": "./dist/metamuxer.mjs",
   "types": "./dist/metamuxer.d.ts",
@@ -17,15 +18,17 @@
     "dist"
   ],
   "scripts": {
-    "build": "node build.mjs && tsc -p src && api-extractor run && npm run check-docblocks && ts-node scripts/append-namespace.ts",
-    "build-local": "node build.mjs && tsc -p src && api-extractor run --local --verbose && npm run check-docblocks && ts-node scripts/append-namespace.ts",
+    "build": "node build.mjs && tsc -p src && api-extractor run && npm run check-docblocks && tsx scripts/append-namespace.ts",
+    "build-local": "node build.mjs && tsc -p src && api-extractor run --local --verbose && npm run check-docblocks && tsx scripts/append-namespace.ts",
     "watch": "node build.mjs --watch",
     "lint": "eslint .",
     "check": "tsc -p src --noEmit && tsc -p scripts --noEmit",
-    "check-docblocks": "ts-node scripts/check-docblocks dist/metamuxer.d.ts",
+    "check-docblocks": "tsx scripts/check-docblocks.ts dist/metamuxer.d.ts",
     "docs:dev": "vitepress dev docs",
-    "docs:build": "vitepress build docs",
-    "docs:preview": "vitepress preview docs"
+    "docs:build": "vitepress build docs && npm run examples:build",
+    "docs:preview": "vitepress preview docs",
+    "dev": "vite",
+    "examples:build": "vite build"
   },
   "author": "",
   "license": "MIT",
@@ -44,9 +47,10 @@
     "markdown-it-footnote": "^4.0.0",
     "markdown-it-mathjax3": "^4.3.2",
     "mermaid": "^11.6.0",
-    "ts-node": "^10.9.2",
+    "tsx": "^4.19.4",
     "typescript": "^5.8.2",
     "typescript-eslint": "^8.26.1",
+    "vite": "^6.3.5",
     "vitepress": "^1.6.3",
     "vitepress-plugin-mermaid": "^2.0.17"
   }

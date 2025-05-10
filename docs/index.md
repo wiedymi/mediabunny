@@ -24,15 +24,24 @@ features:
 ---
 
 things the guide needs to cover:
-- writing files
-	- output usage
-	- all output formats
-	- all media sources
-- reading files
-	- input usage
-	- all input formats
-	- all media sinks
-- utility functions
-- supported containers / codecs
-- samples & packets
+- writing files ✅
+	- output usage ✅
+	- all output formats ✅
+	- all media sources ✅
+- reading files ✅
+	- input usage ✅
+	- all input formats ✅
+	- all media sinks ✅
+- utility functions ✅
+- supported containers / codecs ✅
+- samples & packets ✅
 - conversion
+
+Examples:
+- Extracting media file metadata
+- Rendering thumbnails for a video / extracting a wave form?
+- Media player
+- Conversion demo: File compressor
+- Procedurally generated video (faster than real time)
+- Video generated from live sources
+- Live streaming demo?

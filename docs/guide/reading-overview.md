@@ -407,7 +407,13 @@ fileInput.addEventListener('change', (event) => {
 });
 ```
 
-### `UrlSource`
+### `UrlSource` <Badge type="warning" text="beta" />
+
+::: warning
+This is a **beta** feature. `UrlSource` tends to make tons of requests and is potentially slow. This is something that will be fixed in the near future.
+
+It still works, but keep in mind it's going to be much higher-latency than reading directly from disk or from memory.
+:::
 
 This source fetches data from a URL. This is useful for reading files over the network.
 ```ts
@@ -417,9 +423,7 @@ const source = new UrlSource('https://example.com/bigbuckbunny.mp4');
 ```
 
 ::: warning
-Keep in mind that reading data over the network is typically much higher-latency than reading directly from disk or from memory.
-
-Also, if you're using this source in the browser and the URL is on a different origin, make sure [CORS](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS) is properly configured.
+If you're using this source in the browser and the URL is on a different origin, make sure [CORS](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS) is properly configured.
 :::
 
 `UrlSource` accepts a few options as its second parameter:

@@ -152,7 +152,7 @@ export type UrlSourceOptions = {
 /**
  * A source backed by a URL. This is useful for reading data from the network. Be careful using this source however,
  * as it typically comes with increased latency.
- * @public
+ * @beta
  */
 export class UrlSource extends Source {
 	/** @internal */

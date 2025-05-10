@@ -63,4 +63,5 @@ export default withMermaid({
 			md.use(footnote);
 		},
 	},
+	outDir: '../dist-docs',
 });

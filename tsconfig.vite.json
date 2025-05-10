@@ -1,0 +1,16 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"moduleResolution": "nodenext",
+		"module": "NodeNext",
+		"composite": true,
+		"noEmit": false,
+		"paths": {
+			"mediakit": ["./dist/metamuxer.d.ts"],
+		},
+	},
+	"include": [
+		"./vite.config.ts",
+		"./examples/**/*.ts",
+	]
+}

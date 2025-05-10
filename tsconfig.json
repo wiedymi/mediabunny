@@ -9,5 +9,8 @@
 		"skipLibCheck": true,
 		"allowJs": true,
 		"noEmit": true
-	}
+	},
+	"references": [
+		{ "path": "./tsconfig.vite.json" }
+	]
 }

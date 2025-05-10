@@ -38,7 +38,7 @@ output.addAudioTrack(audioSource);
 output.addSubtitleTrack(subtitleSource);
 ```
 
-For each track you want to add, you'll need to create a unique [media source](./media-source) for it. You'll be able to add media data to the output via these media sources. A media source can only ever be used for one output track.
+For each track you want to add, you'll need to create a unique [media source](./media-sources) for it. You'll be able to add media data to the output via these media sources. A media source can only ever be used for one output track.
 
 Optionally, you can specify additional track metadata when adding tracks:
 ```ts
@@ -115,7 +115,7 @@ await output.start(); // Resolves once the output is ready to receive media data
 
 ## Adding media data
 
-After starting an `Output`, you can use the media sources you used to add tracks to pipe media data to the output file. The API for this is different for each [media source](./media-source), but it typically looks something like this:
+After starting an `Output`, you can use the media sources you used to add tracks to pipe media data to the output file. The API for this is different for each [media source](./media-sources), but it typically looks something like this:
 ```ts
 mediaSource.add(...);
 ```

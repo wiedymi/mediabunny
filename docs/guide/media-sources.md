@@ -25,7 +25,7 @@ Closing sources manually is _technically_ not required and will happen automatic
 
 ### Backpressure
 
-Media sources are the means by which backpressure is propagated from the output pipeline into your application logic. The `Output` may want to apply backpressure if the encoders or the [StreamTarget](./writing-overview/#streamtarget)'s writable can't keep up.
+Media sources are the means by which backpressure is propagated from the output pipeline into your application logic. The `Output` may want to apply backpressure if the encoders or the [StreamTarget](./writing-overview#streamtarget)'s writable can't keep up.
 
 Backpressure is communicated by media sources via promises. All media sources with an `add` method return a promise:
 ```ts
@@ -67,7 +67,7 @@ type VideoEncodingConfig = {
 	) => unknown;
 };
 ```
-- `codec`: The [video codec](./supported-formats-and-codecs/#video-codecs) used for encoding.
+- `codec`: The [video codec](./supported-formats-and-codecs#video-codecs) used for encoding.
 - `bitrate`: The target number of bits per second. Alternatively, this can be a [subjective quality](#subjective-qualities).
 - `latencyMode`: The latency mode as specified by the WebCodecs API. Media stream-driven video sources will automatically use the `realtime` setting.
 - `keyFrameInterval`: The maximum interval in seconds between two adjacent key frames. Defaults to 5 seconds. More frequent key frames improve seeking behavior but increase file size. When using multiple video tracks, this value should be set to the same value for all tracks.
@@ -97,7 +97,7 @@ type AudioEncodingConfig = {
 	) => unknown;
 };
 ```
-- `codec`: The [audio codec](./supported-formats-and-codecs/#audio-codecs) used for encoding. Can be omitted for uncompressed PCM codecs.
+- `codec`: The [audio codec](./supported-formats-and-codecs#audio-codecs) used for encoding. Can be omitted for uncompressed PCM codecs.
 - `bitrate`: The target number of bits per second. Alternatively, this can be a [subjective quality](#subjective-qualities).
 - `fullCodecString`: Allows you to optionally specify the full codec string used by the audio encoder, as specified in the [WebCodecs Codec Registry](https://www.w3.org/TR/webcodecs-codec-registry/). For example, you may set it to `'mp4a.40.2'` when using AAC. Keep in mind that the codec string must still match the codec specified in `codec`. If you don't set this field, a codec string will be generated automatically.
 - `onEncodedPacket`: Called for each successfully encoded packet. Useful for determining encoding progress.	
