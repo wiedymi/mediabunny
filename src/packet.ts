@@ -15,6 +15,12 @@ export type PacketType = 'key' | 'delta';
  * @public
  */
 export class EncodedPacket {
+	/**
+	 * The actual byte length of the data in this packet. This field is useful for metadata-only packets where the
+	 * `data` field contains no bytes.
+	 */
+	readonly byteLength: number;
+
 	constructor(
 		/** The encoded data of this packet. */
 		public readonly data: Uint8Array,
@@ -34,12 +40,18 @@ export class EncodedPacket {
 		 * ordering. Negative sequence numbers mean the sequence number is undefined.
 		 */
 		public readonly sequenceNumber = -1,
-		/**
-		 * The actual byte length of the data in this packet. This field is useful for metadata-only packets where the
-		 * `data` field contains no bytes.
-		 */
-		public readonly byteLength = data.byteLength,
+		byteLength?: number,
 	) {
+		if (data === PLACEHOLDER_DATA && byteLength === undefined) {
+			throw new Error(
+				'Internal error: byteLength must be explicitly provided when constructing metadata-only packets.',
+			);
+		}
+
+		if (byteLength === undefined) {
+			byteLength = data.byteLength;
+		}
+
 		if (!(data instanceof Uint8Array)) {
 			throw new TypeError('data must be a Uint8Array.');
 		}
@@ -58,6 +70,8 @@ export class EncodedPacket {
 		if (!Number.isInteger(byteLength) || byteLength < 0) {
 			throw new TypeError('byteLength must be a non-negative integer.');
 		}
+
+		this.byteLength = byteLength;
 	}
 
 	/** If this packet is a metadata-only packet. Metadata-only packets don't contain their packet data. */

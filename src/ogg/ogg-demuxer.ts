@@ -479,6 +479,7 @@ class OggAudioTrackBacking implements InputAudioTrackBacking {
 			Math.max(0, additional.timestampInSamples) / this.internalSampleRate,
 			durationInSamples / this.internalSampleRate,
 			packet.endPage.headerStartPos + packet.endSegmentIndex,
+			packet.data.byteLength,
 		);
 
 		this.encodedPacketToMetadata.set(encodedPacket, {
