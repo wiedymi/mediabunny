@@ -931,8 +931,7 @@ export const stsc = (trackData: IsobmffTrackData) => {
 
 /** Sample Size Box: Specifies the byte size of each sample in the media. */
 export const stsz = (trackData: IsobmffTrackData) => {
-	if (trackData.requiresPcmTransformation) {
-		assert(trackData.type === 'audio');
+	if (trackData.type === 'audio' && trackData.info.requiresPcmTransformation) {
 		const { sampleSize } = parsePcmCodec(trackData.track.source._codec as PcmAudioCodec);
 
 		// With PCM, every sample has the same size

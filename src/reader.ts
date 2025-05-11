@@ -69,6 +69,31 @@ export class Reader {
 		this.insertIntoLoadedSegments(start, bytes);
 	}
 
+	rangeIsLoaded(start: number, end: number) {
+		if (end <= start) {
+			return true;
+		}
+
+		const index = binarySearchLessOrEqual(this.loadedSegments, start, x => x.start);
+		if (index === -1) {
+			return false;
+		}
+
+		for (let i = index; i < this.loadedSegments.length; i++) {
+			const segment = this.loadedSegments[i]!;
+			if (segment.start > start) {
+				break;
+			}
+
+			const segmentEncasesRequestedRange = segment.end >= end;
+			if (segmentEncasesRequestedRange) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	private insertIntoLoadedSegments(start: number, bytes: Uint8Array) {
 		const segment: ReadSegment = {
 			start,

@@ -1,3 +1,4 @@
+import { extractAvcDecoderConfigurationRecord } from '../avc';
 import {
 	AacCodecInfo,
 	AudioCodec,
@@ -37,7 +38,15 @@ import {
 } from '../misc';
 import { EncodedPacket, PLACEHOLDER_DATA } from '../packet';
 import { Reader } from '../reader';
-import { CODEC_STRING_MAP, EBMLId, EBMLReader, MAX_HEADER_SIZE, MIN_HEADER_SIZE } from './ebml';
+import {
+	assertDefinedSize,
+	CODEC_STRING_MAP,
+	EBMLId,
+	EBMLReader,
+	LEVEL_0_AND_1_EBML_IDS,
+	MAX_HEADER_SIZE,
+	MIN_HEADER_SIZE,
+} from './ebml';
 
 type Segment = {
 	seekHeadSeen: boolean;
@@ -201,12 +210,6 @@ export class MatroskaDemuxer extends Demuxer {
 		return string;
 	}
 
-	assertDefinedSize(size: number) {
-		if (size === -1) {
-			throw new Error('Undefined element size is used in a place where it is not supported.');
-		}
-	}
-
 	readMetadata() {
 		return this.readMetadataPromise ??= (async () => {
 			this.metadataReader.pos = 0;
@@ -223,24 +226,27 @@ export class MatroskaDemuxer extends Demuxer {
 				const startPos = this.metadataReader.pos;
 
 				if (id === EBMLId.EBML) {
+					assertDefinedSize(size);
+
 					await this.metadataReader.reader.loadRange(this.metadataReader.pos, this.metadataReader.pos + size);
 					this.readContiguousElements(this.metadataReader, size);
 				} else if (id === EBMLId.Segment) { // Segment found!
 					await this.readSegment(size);
 
-					if (size === -1) {
-						// Stop searching for other segments if this is the case
+					if (size === null) {
+						// Segment sizes can be undefined (common in livestreamed files), so assume this is the last
+						// and only segment
 						break;
 					}
 				}
 
-				this.assertDefinedSize(size);
+				assertDefinedSize(size);
 				this.metadataReader.pos = startPos + size;
 			}
 		})();
 	}
 
-	async readSegment(dataSize: number) {
+	async readSegment(dataSize: number | null) {
 		const segmentDataStart = this.metadataReader.pos;
 
 		this.currentSegment = {
@@ -257,8 +263,8 @@ export class MatroskaDemuxer extends Demuxer {
 			cuePoints: [],
 
 			dataStartPos: segmentDataStart,
-			elementEndPos: dataSize === -1
-				? (await this.input.source.getSize() - MIN_HEADER_SIZE)
+			elementEndPos: dataSize === null
+				? await this.input.source.getSize() // Assume it goes until the end of the file
 				: segmentDataStart + dataSize,
 			clusterSeekStartPos: segmentDataStart,
 
@@ -289,6 +295,7 @@ export class MatroskaDemuxer extends Demuxer {
 				const field = METADATA_ELEMENTS[metadataElementIndex]!.flag;
 				this.currentSegment[field] = true;
 
+				assertDefinedSize(size);
 				await this.metadataReader.reader.loadRange(this.metadataReader.pos, this.metadataReader.pos + size);
 				this.readContiguousElements(this.metadataReader, size);
 			} else if (id === EBMLId.Cluster) {
@@ -324,7 +331,10 @@ export class MatroskaDemuxer extends Demuxer {
 				}
 			}
 
-			this.assertDefinedSize(size);
+			if (size === null) {
+				break;
+			}
+
 			this.metadataReader.pos = dataStartPos + size;
 
 			if (!clusterEncountered) {
@@ -346,6 +356,8 @@ export class MatroskaDemuxer extends Demuxer {
 			);
 			const { id, size } = this.metadataReader.readElementHeader();
 			if (id !== target.id) continue;
+
+			assertDefinedSize(size);
 
 			this.currentSegment[target.flag] = true;
 			await this.metadataReader.reader.loadRange(this.metadataReader.pos, this.metadataReader.pos + size);
@@ -411,8 +423,23 @@ export class MatroskaDemuxer extends Demuxer {
 		await this.metadataReader.reader.loadRange(this.metadataReader.pos, this.metadataReader.pos + MAX_HEADER_SIZE);
 
 		const elementStartPos = this.metadataReader.pos;
-		const { id, size } = this.metadataReader.readElementHeader();
+		const elementHeader = this.metadataReader.readElementHeader();
+		const id = elementHeader.id;
+		let size = elementHeader.size;
 		const dataStartPos = this.metadataReader.pos;
+
+		if (size === null) {
+			// The cluster's size is undefined (can happen in livestreamed files). We'd still like to know the size of
+			// it, so we have no other choice but to iterate over the EBML structure until we find an element at level
+			// 0 or 1, indicating the end of the cluster (all elements inside the cluster are at level 2).
+			this.clusterReader.pos = dataStartPos;
+			const nextElementPos = await this.clusterReader.searchForNextElementId(
+				LEVEL_0_AND_1_EBML_IDS,
+				segment.elementEndPos,
+			);
+
+			size = (nextElementPos ?? segment.elementEndPos) - dataStartPos;
+		}
 
 		assert(id === EBMLId.Cluster);
 
@@ -539,6 +566,7 @@ export class MatroskaDemuxer extends Demuxer {
 	traverseElement(reader: EBMLReader) {
 		const { id, size } = reader.readElementHeader();
 		const dataStartPos = reader.pos;
+		assertDefinedSize(size);
 
 		switch (id) {
 			case EBMLId.DocType: {
@@ -981,7 +1009,6 @@ export class MatroskaDemuxer extends Demuxer {
 			}; break;
 		}
 
-		this.assertDefinedSize(size);
 		reader.pos = dataStartPos + size;
 	}
 }
@@ -1329,6 +1356,7 @@ abstract class MatroskaTrackBacking implements InputTrackBacking {
 
 			// We use the metadata reader to find the cluster, but the cluster reader to load the cluster
 			const metadataReader = demuxer.metadataReader;
+			const clusterReader = demuxer.clusterReader;
 
 			let prevCluster: Cluster | null = null;
 			let bestClusterIndex = clusterIndex;
@@ -1379,7 +1407,9 @@ abstract class MatroskaTrackBacking implements InputTrackBacking {
 				// Load the header
 				await metadataReader.reader.loadRange(metadataReader.pos, metadataReader.pos + MAX_HEADER_SIZE);
 				const elementStartPos = metadataReader.pos;
-				const { id, size } = metadataReader.readElementHeader();
+				const elementHeader = metadataReader.readElementHeader();
+				const id = elementHeader.id;
+				let size = elementHeader.size;
 				const dataStartPos = metadataReader.pos;
 
 				if (id === EBMLId.Cluster) {
@@ -1412,6 +1442,42 @@ abstract class MatroskaTrackBacking implements InputTrackBacking {
 					if (clusterIndex !== -1) {
 						bestClusterIndex = clusterIndex;
 						bestBlockIndex = blockIndex;
+					}
+				}
+
+				if (size === null) {
+					// Undefined element size (can happen in livestreamed files). In this case, we need to do some
+					// searching to determine the actual size of the element.
+
+					if (id === EBMLId.Cluster) {
+						// The cluster should have already computed its length, we can just copy that result
+						assert(prevCluster);
+						size = prevCluster.elementEndPos - dataStartPos;
+					} else {
+						// Search for the next element at level 0 or 1
+						clusterReader.pos = dataStartPos;
+						const nextElementPos = await clusterReader.searchForNextElementId(
+							LEVEL_0_AND_1_EBML_IDS,
+							segment.elementEndPos,
+						);
+
+						size = (nextElementPos ?? segment.elementEndPos) - dataStartPos;
+					}
+
+					const endPos = dataStartPos + size;
+					if (endPos >= segment.elementEndPos - MIN_HEADER_SIZE) {
+						// No more elements fit in this segment
+						break;
+					} else {
+						// Check the next element. If it's a new segment, we know this segment ends here. The new
+						// segment is just ignored, since we're likely in a livestreamed file and thus only care about
+						// the first segment.
+						clusterReader.pos = endPos;
+						const elementId = clusterReader.readElementId();
+						if (elementId === EBMLId.Segment) {
+							segment.elementEndPos = endPos;
+							break;
+						}
 					}
 				}
 
@@ -1483,7 +1549,10 @@ class MatroskaVideoTrackBacking extends MatroskaTrackBacking implements InputVid
 		return this.decoderConfigPromise ??= (async (): Promise<VideoDecoderConfig> => {
 			let firstPacket: EncodedPacket | null = null;
 			const needsPacketForAdditionalInfo
-				= this.internalTrack.info.codec === 'vp9' || this.internalTrack.info.codec === 'av1';
+				= this.internalTrack.info.codec === 'vp9'
+					|| this.internalTrack.info.codec === 'av1'
+					// Packets are in Annex B format:
+					|| (this.internalTrack.info.codec === 'avc' && !this.internalTrack.info.codecDescription);
 
 			if (needsPacketForAdditionalInfo) {
 				firstPacket = await this.getFirstPacket({});
@@ -1496,6 +1565,9 @@ class MatroskaVideoTrackBacking extends MatroskaTrackBacking implements InputVid
 					codec: this.internalTrack.info.codec,
 					codecDescription: this.internalTrack.info.codecDescription,
 					colorSpace: this.internalTrack.info.colorSpace,
+					avcCodecInfo: this.internalTrack.info.codec === 'avc' && firstPacket
+						? extractAvcDecoderConfigurationRecord(firstPacket.data)
+						: null,
 					vp9CodecInfo: this.internalTrack.info.codec === 'vp9' && firstPacket
 						? extractVp9CodecInfoFromFrame(firstPacket.data)
 						: null,

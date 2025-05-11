@@ -121,7 +121,7 @@ export class MatroskaInputFormat extends InputFormat {
 		}
 
 		const dataSize = ebmlReader.readElementSize();
-		if (dataSize === -1) {
+		if (dataSize === null) {
 			return false; // Miss me with that shit
 		}
 
@@ -129,7 +129,7 @@ export class MatroskaInputFormat extends InputFormat {
 		while (ebmlReader.pos < startPos + dataSize) {
 			const { id, size } = ebmlReader.readElementHeader();
 			const dataStartPos = ebmlReader.pos;
-			if (size === -1) return false;
+			if (size === null) return false;
 
 			switch (id) {
 				case EBMLId.EBMLVersion: {

@@ -21,7 +21,7 @@
 			chunked: true,
 			chunkSize: 2**20
 		});
-		const outputFormat = new Metamuxer.WavOutputFormat();
+		const outputFormat = new Metamuxer.Mp4OutputFormat();
 
 		const button = document.createElement('button');
 		button.textContent = 'Cancel';
@@ -103,12 +103,12 @@
 		console.log("Done", target.buffer);
 
 		const video = document.createElement('video');
-		video.src = URL.createObjectURL(new Blob([target.buffer]));	
+		video.src = URL.createObjectURL(new Blob([target.buffer], { type: outputFormat.mimeType }));	
 		video.controls = true;	
 		document.body.append(video);
 		video.play();
 
-		download(new Blob([target.buffer]), 'converted' + outputFormat.fileExtension);
+		//download(new Blob([target.buffer]), 'converted' + outputFormat.fileExtension);
 
 		function download(blob, filename) {
 			const url = URL.createObjectURL(blob);

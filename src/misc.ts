@@ -30,19 +30,77 @@ export const isU32 = (value: number) => {
 	return value >= 0 && value < 2 ** 32;
 };
 
-export const readBits = (bytes: Uint8Array, start: number, end: number) => {
-	let result = 0;
+export class Bitstream {
+	/** Current offset in bits. */
+	pos = 0;
 
-	for (let i = start; i < end; i++) {
-		const byteIndex = Math.floor(i / 8);
-		const byte = bytes[byteIndex]!;
-		const bitIndex = 0b111 - (i & 0b111);
-		const bit = (byte & (1 << bitIndex)) >> bitIndex;
+	constructor(public bytes: Uint8Array) {}
 
-		result <<= 1;
-		result |= bit;
+	seekToByte(byteOffset: number) {
+		this.pos = 8 * byteOffset;
 	}
 
+	readBit() {
+		const byteIndex = Math.floor(this.pos / 8);
+		const byte = this.bytes[byteIndex] ?? 0;
+		const bitIndex = 0b111 - (this.pos & 0b111);
+		const bit = (byte & (1 << bitIndex)) >> bitIndex;
+
+		this.pos++;
+		return bit;
+	}
+
+	readBits(n: number) {
+		let result = 0;
+
+		for (let i = 0; i < n; i++) {
+			result <<= 1;
+			result |= this.readBit();
+		}
+
+		return result;
+	}
+
+	readAlignedByte() {
+		// Ensure we're byte-aligned
+		if (this.pos % 8 !== 0) {
+			throw new Error('Bitstream is not byte-aligned.');
+		}
+
+		const byteIndex = this.pos / 8;
+		const byte = this.bytes[byteIndex] ?? 0;
+
+		this.pos += 8;
+		return byte;
+	}
+
+	skipBits(n: number) {
+		this.pos += n;
+	}
+
+	getBitsLeft() {
+		return this.bytes.length * 8 - this.pos;
+	}
+
+	clone() {
+		const clone = new Bitstream(this.bytes);
+		clone.pos = this.pos;
+		return clone;
+	}
+}
+
+/** Reads an exponential-Golomb universal code from a Bitstream.  */
+export const readExpGolomb = (bitstream: Bitstream) => {
+	let leadingZeroBits = 0;
+	while (bitstream.readBit() === 0 && leadingZeroBits < 32) {
+		leadingZeroBits++;
+	}
+
+	if (leadingZeroBits >= 32) {
+		throw new Error('Invalid exponential-Golomb code.');
+	}
+
+	const result = (1 << leadingZeroBits) - 1 + bitstream.readBits(leadingZeroBits);
 	return result;
 };
 

@@ -1,4 +1,5 @@
 import {
+	Bitstream,
 	COLOR_PRIMARIES_MAP,
 	MATRIX_COEFFICIENTS_MAP,
 	TRANSFER_CHARACTERISTICS_MAP,
@@ -6,7 +7,6 @@ import {
 	assert,
 	colorSpaceIsComplete,
 	normalizeRotation,
-	readBits,
 	roundToMultiple,
 	textEncoder,
 	toUint8Array,
@@ -623,37 +623,42 @@ export class MatroskaMuxer extends Muxer {
 		}
 	}
 
-	/** Due to [a bug in Chromium](https://bugs.chromium.org/p/chromium/issues/detail?id=1377842), VP9 streams often
-	 * lack color space information. This method patches in that information. */
-	// http://downloads.webmproject.org/docs/vp9/vp9-bitstream_superframe-and-uncompressed-header_v1.0.pdf
-	private fixVP9ColorSpace(trackData: MatroskaVideoTrackData, chunk: InternalMediaChunk) {
+	/**
+	 * Due to [a bug in Chromium](https://bugs.chromium.org/p/chromium/issues/detail?id=1377842), VP9 streams often
+ 	 * lack color space information. This method patches in that information.
+	 */
+	private fixVP9ColorSpace(
+		trackData: MatroskaVideoTrackData,
+		chunk: InternalMediaChunk,
+	) {
+		// http://downloads.webmproject.org/docs/vp9/vp9-bitstream_superframe-and-uncompressed-header_v1.0.pdf
+
 		if (chunk.type !== 'key') return;
 		if (!trackData.info.decoderConfig.colorSpace || !trackData.info.decoderConfig.colorSpace.matrix) return;
 
-		let i = 0;
+		const bitstream = new Bitstream(chunk.data);
+
 		// Check if it's a "superframe"
-		if (readBits(chunk.data, 0, 2) !== 0b10) return;
-		i += 2;
+		if (bitstream.readBits(2) !== 0b10) return;
 
-		const profile = (readBits(chunk.data, i + 1, i + 2) << 1) + readBits(chunk.data, i + 0, i + 1);
-		i += 2;
-		if (profile === 3) i++;
+		const profileLowBit = bitstream.readBits(1);
+		const profileHighBit = bitstream.readBits(1);
+		const profile = (profileHighBit << 1) + profileLowBit;
 
-		const showExistingFrame = readBits(chunk.data, i + 0, i + 1);
-		i++;
+		if (profile === 3) bitstream.skipBits(1);
+
+		const showExistingFrame = bitstream.readBits(1);
 		if (showExistingFrame) return;
 
-		const frameType = readBits(chunk.data, i + 0, i + 1);
-		i++;
+		const frameType = bitstream.readBits(1);
 		if (frameType !== 0) return; // Just to be sure
 
-		i += 2;
+		bitstream.skipBits(2);
 
-		const syncCode = readBits(chunk.data, i + 0, i + 24);
-		i += 24;
+		const syncCode = bitstream.readBits(24);
 		if (syncCode !== 0x498342) return;
 
-		if (profile >= 2) i++;
+		if (profile >= 2) bitstream.skipBits(1);
 
 		const colorSpaceID = {
 			rgb: 7,
@@ -661,7 +666,10 @@ export class MatroskaMuxer extends Muxer {
 			bt470bg: 1,
 			smpte170m: 3,
 		}[trackData.info.decoderConfig.colorSpace.matrix];
-		writeBits(chunk.data, i + 0, i + 3, colorSpaceID);
+
+		// The bitstream position is now at the start of the color space bits.
+		// We can use the global writeBits function here as requested.
+		writeBits(chunk.data, bitstream.pos, bitstream.pos + 3, colorSpaceID);
 	}
 
 	/** Converts a read-only external chunk into an internal one for easier use. */

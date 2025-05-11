@@ -15,6 +15,11 @@ import {
 } from '../codec';
 import { BufferTarget } from '../target';
 import { EncodedPacket, PacketType } from '../packet';
+import {
+	extractAvcDecoderConfigurationRecord,
+	serializeAvcDecoderConfigurationRecord,
+	transformAnnexBToAvcc,
+} from '../avc';
 
 export const GLOBAL_TIMESCALE = 1000;
 const TIMESTAMP_OFFSET = 2_082_844_800; // Seconds between Jan 1 1904 and Jan 1 1970
@@ -47,11 +52,6 @@ export type IsobmffTrackData = {
 	compositionTimeOffsetTable: { sampleCount: number; sampleCompositionTimeOffset: number }[];
 	lastTimescaleUnits: number | null;
 	lastSample: Sample | null;
-	/**
-	 * The "PCM transformation" is making every sample in the sample table be exactly one PCM audio sample long.
-	 * Some players expect this for PCM audio.
-	 */
-	requiresPcmTransformation: boolean;
 
 	finalizedChunks: Chunk[];
 	currentChunk: Chunk | null;
@@ -66,6 +66,11 @@ export type IsobmffTrackData = {
 		width: number;
 		height: number;
 		decoderConfig: VideoDecoderConfig;
+		/**
+		 * The "AVC transformation" involves converting the raw AVC packet data from Annex B to AVCC format.
+		 * https://stackoverflow.com/questions/24884827
+		 */
+		requiresAvcTransformation: boolean;
 	};
 } | {
 	track: OutputAudioTrack;
@@ -74,6 +79,11 @@ export type IsobmffTrackData = {
 		numberOfChannels: number;
 		sampleRate: number;
 		decoderConfig: AudioDecoderConfig;
+		/**
+		 * The "PCM transformation" is making every sample in the sample table be exactly one PCM audio sample long.
+		 * Some players expect this for PCM audio.
+		 */
+		requiresPcmTransformation: boolean;
 	};
 } | {
 	track: OutputSubtitleTrack;
@@ -183,7 +193,7 @@ export class IsobmffMuxer extends Muxer {
 		release();
 	}
 
-	private getVideoTrackData(track: OutputVideoTrack, meta?: EncodedVideoChunkMetadata) {
+	private getVideoTrackData(track: OutputVideoTrack, packet: EncodedPacket, meta?: EncodedVideoChunkMetadata) {
 		const existingTrackData = this.trackDatas.find(x => x.track === track);
 		if (existingTrackData) {
 			return existingTrackData as IsobmffVideoTrackData;
@@ -193,8 +203,30 @@ export class IsobmffMuxer extends Muxer {
 
 		assert(meta);
 		assert(meta.decoderConfig);
-		assert(meta.decoderConfig.codedWidth !== undefined);
-		assert(meta.decoderConfig.codedHeight !== undefined);
+
+		const decoderConfig = { ...meta.decoderConfig };
+		assert(decoderConfig.codedWidth !== undefined);
+		assert(decoderConfig.codedHeight !== undefined);
+
+		let requiresAvcTransformation = false;
+
+		if (track.source._codec === 'avc' && !decoderConfig.description) {
+			// ISOBMFF can only hold AVC in the AVCC format, not in Annex B, but the missing description indicates
+			// Annex B. This means we'll need to do some converterino.
+
+			const decoderConfigurationRecord = extractAvcDecoderConfigurationRecord(packet.data);
+			if (!decoderConfigurationRecord) {
+				throw new Error(
+					'Couldn\'t extract an AVCDecoderConfigurationRecord from the AVC packet. Make sure the packets are'
+					+ ' in Annex B format (as specified in ITU-T-REC-H.264) when not providing a description, or'
+					+ ' provide a description (must be an AVCDecoderConfigurationRecord as specified in ISO 14496-15)'
+					+ ' and ensure the packets are in AVCC format.',
+				);
+			}
+
+			decoderConfig.description = serializeAvcDecoderConfigurationRecord(decoderConfigurationRecord);
+			requiresAvcTransformation = true;
+		}
 
 		// The frame rate set by the user may not be an integer. Since timescale is an integer, we'll approximate the
 		// frame time (inverse of frame rate) with a rational number, then use that approximation's denominator
@@ -205,9 +237,10 @@ export class IsobmffMuxer extends Muxer {
 			track,
 			type: 'video',
 			info: {
-				width: meta.decoderConfig.codedWidth,
-				height: meta.decoderConfig.codedHeight,
-				decoderConfig: meta.decoderConfig,
+				width: decoderConfig.codedWidth,
+				height: decoderConfig.codedHeight,
+				decoderConfig: decoderConfig,
+				requiresAvcTransformation,
 			},
 			timescale,
 			samples: [],
@@ -220,7 +253,6 @@ export class IsobmffMuxer extends Muxer {
 			finalizedChunks: [],
 			currentChunk: null,
 			compactlyCodedChunkTable: [],
-			requiresPcmTransformation: false,
 		};
 
 		this.trackDatas.push(newTrackData);
@@ -247,6 +279,9 @@ export class IsobmffMuxer extends Muxer {
 				numberOfChannels: meta.decoderConfig.numberOfChannels,
 				sampleRate: meta.decoderConfig.sampleRate,
 				decoderConfig: meta.decoderConfig,
+				requiresPcmTransformation:
+					!this.isFragmented
+					&& (PCM_AUDIO_CODECS as readonly string[]).includes(track.source._codec),
 			},
 			timescale: meta.decoderConfig.sampleRate,
 			samples: [],
@@ -259,9 +294,6 @@ export class IsobmffMuxer extends Muxer {
 			finalizedChunks: [],
 			currentChunk: null,
 			compactlyCodedChunkTable: [],
-			requiresPcmTransformation:
-				!this.isFragmented
-				&& (PCM_AUDIO_CODECS as readonly string[]).includes(track.source._codec),
 		};
 
 		this.trackDatas.push(newTrackData);
@@ -298,7 +330,6 @@ export class IsobmffMuxer extends Muxer {
 			finalizedChunks: [],
 			currentChunk: null,
 			compactlyCodedChunkTable: [],
-			requiresPcmTransformation: false,
 
 			lastCueEndTimestamp: 0,
 			cueQueue: [],
@@ -316,7 +347,20 @@ export class IsobmffMuxer extends Muxer {
 		const release = await this.mutex.acquire();
 
 		try {
-			const trackData = this.getVideoTrackData(track, meta);
+			const trackData = this.getVideoTrackData(track, packet, meta);
+
+			let packetData = packet.data;
+			if (trackData.info.requiresAvcTransformation) {
+				const transformedData = transformAnnexBToAvcc(packetData);
+				if (!transformedData) {
+					throw new Error(
+						'Failed to transform packet data. Make sure all packets are provided in Annex B format, as'
+						+ ' specified in ITU-T-REC-H.264.',
+					);
+				}
+
+				packetData = transformedData;
+			}
 
 			const timestamp = this.validateAndNormalizeTimestamp(
 				trackData.track,
@@ -325,7 +369,7 @@ export class IsobmffMuxer extends Muxer {
 			);
 			const internalSample = this.createSampleForTrack(
 				trackData,
-				packet.data,
+				packetData,
 				timestamp,
 				packet.duration,
 				packet.type,
@@ -356,7 +400,7 @@ export class IsobmffMuxer extends Muxer {
 				packet.type,
 			);
 
-			if (trackData.requiresPcmTransformation) {
+			if (trackData.info.requiresPcmTransformation) {
 				await this.maybePadWithSilence(trackData, timestamp);
 			}
 
@@ -534,7 +578,7 @@ export class IsobmffMuxer extends Muxer {
 			return;
 		}
 
-		if (trackData.requiresPcmTransformation) {
+		if (trackData.type === 'audio' && trackData.info.requiresPcmTransformation) {
 			let totalDuration = 0;
 
 			// Compute the total duration in the track timescale (which is equal to the amount of PCM audio samples)
@@ -748,7 +792,7 @@ export class IsobmffMuxer extends Muxer {
 		this.finalizedChunks.push(trackData.currentChunk);
 
 		let sampleCount = trackData.currentChunk.samples.length;
-		if (trackData.requiresPcmTransformation) {
+		if (trackData.type === 'audio' && trackData.info.requiresPcmTransformation) {
 			sampleCount = trackData.currentChunk.samples
 				.reduce((acc, sample) => acc + intoTimescale(sample.duration, trackData.timescale), 0);
 		}

@@ -104,7 +104,33 @@ export enum EBMLId {
 	Projection = 0x7670,
 	ProjectionType = 0x7671,
 	ProjectionPoseRoll = 0x7675,
+	Attachments = 0x1941a469,
+	Chapters = 0x1043a770,
+	Tags = 0x1254c367,
 }
+
+export const LEVEL_0_EBML_IDS: EBMLId[] = [
+	EBMLId.EBML,
+	EBMLId.Segment,
+];
+
+export const LEVEL_1_EBML_IDS: EBMLId[] = [
+	EBMLId.EBMLMaxIDLength,
+	EBMLId.EBMLMaxSizeLength,
+	EBMLId.SeekHead,
+	EBMLId.Info,
+	EBMLId.Cluster,
+	EBMLId.Tracks,
+	EBMLId.Cues,
+	EBMLId.Attachments,
+	EBMLId.Chapters,
+	EBMLId.Tags,
+];
+
+export const LEVEL_0_AND_1_EBML_IDS = [
+	...LEVEL_0_EBML_IDS,
+	...LEVEL_1_EBML_IDS,
+];
 
 export const measureUnsignedInt = (value: number) => {
 	if (value < (1 << 8)) {
@@ -476,13 +502,22 @@ export class EBMLReader {
 	}
 
 	readElementSize() {
-		let size = this.readU8();
+		let size: number | null = this.readU8();
 
 		if (size === 0xff) {
-			size = -1;
+			size = null;
 		} else {
 			this.pos--;
 			size = this.readVarInt();
+
+			// In some (livestreamed) files, this is the value of the size field. While this technically is just a very
+			// large number, it is intended to behave like the reserved size 0xFF, meaning the size is undefined. We
+			// catch the number here. Note that it cannot be perfectly represented as a double, but the comparison works
+			// nonetheless.
+			// eslint-disable-next-line no-loss-of-precision
+			if (size === 0x00ffffffffffffff) {
+				size = null;
+			}
 		}
 
 		return size;
@@ -493,6 +528,30 @@ export class EBMLReader {
 		const size = this.readElementSize();
 
 		return { id, size };
+	}
+
+	/** Returns the byte offset in the file of the next element with a matching ID. */
+	async searchForNextElementId(ids: EBMLId[], until: number) {
+		const loadChunkSize = 2 ** 20; // 1 MiB
+		const idsSet = new Set(ids);
+
+		while (this.pos < until - MAX_HEADER_SIZE) {
+			if (!this.reader.rangeIsLoaded(this.pos, this.pos + MAX_HEADER_SIZE)) {
+				await this.reader.loadRange(this.pos, Math.min(this.pos + loadChunkSize, until));
+			}
+
+			const elementStartPos = this.pos;
+			const elementHeader = this.readElementHeader();
+			if (idsSet.has(elementHeader.id)) {
+				return elementStartPos;
+			}
+
+			assertDefinedSize(elementHeader.size);
+
+			this.pos += elementHeader.size;
+		}
+
+		return null;
 	}
 }
 
@@ -518,4 +577,10 @@ export const CODEC_STRING_MAP: Partial<Record<MediaCodec, string>> = {
 	'pcm-f32': 'A_PCM/FLOAT/IEEE',
 
 	'webvtt': 'S_TEXT/WEBVTT',
+};
+
+export function assertDefinedSize(size: number | null): asserts size is number {
+	if (size === null) {
+		throw new Error('Undefined element size is used in a place where it is not supported.');
+	}
 };

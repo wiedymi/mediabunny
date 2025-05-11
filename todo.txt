@@ -1,3 +1,4 @@
 - https://github.com/Vanilagy/mp4-muxer/issues/83 tell him it's possible now
 - textsubtitlesource, chunked piping
 - More efficient MP3 loading when reading sequentially
+- Redo readers: I think better to have a single reader with ephemeral/non-ephemeral loading methods than to have multiple readers. This way, they can still share data.

@@ -52,6 +52,8 @@ export abstract class OutputFormat {
 
 	/** The file extension used by this output format, beginning with a dot. */
 	abstract get fileExtension(): string;
+	/** The base MIME type of the output format. */
+	abstract get mimeType(): string;
 	/** Returns a list of media codecs that this output format can contain. */
 	abstract getSupportedCodecs(): MediaCodec[];
 	/** Returns the number of tracks that this output format supports. */
@@ -227,6 +229,10 @@ export class Mp4OutputFormat extends IsobmffOutputFormat {
 		return '.mp4';
 	}
 
+	get mimeType() {
+		return 'video/mp4';
+	}
+
 	getSupportedCodecs(): MediaCodec[] {
 		return [
 			...VIDEO_CODECS,
@@ -257,6 +263,10 @@ export class MovOutputFormat extends IsobmffOutputFormat {
 
 	get fileExtension() {
 		return '.mov';
+	}
+
+	get mimeType() {
+		return 'video/quicktime';
 	}
 
 	getSupportedCodecs(): MediaCodec[] {
@@ -380,6 +390,10 @@ export class MkvOutputFormat extends OutputFormat {
 		return '.mkv';
 	}
 
+	get mimeType() {
+		return 'video/x-matroska';
+	}
+
 	getSupportedCodecs(): MediaCodec[] {
 		return [
 			...VIDEO_CODECS,
@@ -421,6 +435,10 @@ export class WebMOutputFormat extends MkvOutputFormat {
 
 	override get fileExtension() {
 		return '.webm';
+	}
+
+	override get mimeType() {
+		return 'video/webm';
 	}
 
 	/** @internal */
@@ -491,6 +509,10 @@ export class Mp3OutputFormat extends OutputFormat {
 		return '.mp3';
 	}
 
+	get mimeType() {
+		return 'audio/mpeg';
+	}
+
 	getSupportedCodecs(): MediaCodec[] {
 		return ['mp3'];
 	}
@@ -554,6 +576,10 @@ export class WavOutputFormat extends OutputFormat {
 
 	get fileExtension() {
 		return '.wav';
+	}
+
+	get mimeType() {
+		return 'audio/wav';
 	}
 
 	getSupportedCodecs(): MediaCodec[] {
@@ -626,6 +652,10 @@ export class OggOutputFormat extends OutputFormat {
 
 	get fileExtension() {
 		return '.ogg';
+	}
+
+	get mimeType() {
+		return 'application/ogg';
 	}
 
 	getSupportedCodecs(): MediaCodec[] {

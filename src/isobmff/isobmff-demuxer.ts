@@ -1,3 +1,4 @@
+import { AvcDecoderConfigurationRecord } from '../avc';
 import {
 	AacCodecInfo,
 	AudioCodec,
@@ -73,6 +74,7 @@ type InternalTrack = {
 		codec: VideoCodec | null;
 		codecDescription: Uint8Array | null;
 		colorSpace: VideoColorSpaceInit | null;
+		avcCodecInfo: AvcDecoderConfigurationRecord | null;
 		vp9CodecInfo: Vp9CodecInfo | null;
 		av1CodecInfo: Av1CodecInfo | null;
 	};
@@ -445,7 +447,8 @@ export class IsobmffDemuxer extends Demuxer {
 		const moofBoxInfo = this.metadataReader.readBoxHeader();
 		assert(moofBoxInfo.name === 'moof');
 
-		await this.metadataReader.reader.loadRange(startPos, startPos + moofBoxInfo.totalSize);
+		const contentStart = this.metadataReader.pos;
+		await this.metadataReader.reader.loadRange(contentStart, contentStart + moofBoxInfo.contentSize);
 
 		this.metadataReader.pos = startPos;
 		this.traverseBox();
@@ -456,7 +459,9 @@ export class IsobmffDemuxer extends Demuxer {
 		const fragment = this.fragments[index]!;
 		assert(fragment.moofOffset === startPos);
 
-		this.metadataReader.reader.forgetRange(startPos, startPos + moofBoxInfo.totalSize);
+		// We have read everything in the moof box, there's no need to keep the data around anymore
+		// (keep the header tho)
+		this.metadataReader.reader.forgetRange(contentStart, contentStart + moofBoxInfo.contentSize);
 
 		// It may be that some tracks don't define the base decode time, i.e. when the fragment begins. This means the
 		// only other option is to sum up the duration of all previous fragments.
@@ -756,6 +761,7 @@ export class IsobmffDemuxer extends Demuxer {
 						codec: null,
 						codecDescription: null,
 						colorSpace: null,
+						avcCodecInfo: null,
 						vp9CodecInfo: null,
 						av1CodecInfo: null,
 					};

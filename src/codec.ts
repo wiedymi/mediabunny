@@ -1,5 +1,7 @@
+import { AvcDecoderConfigurationRecord } from './avc';
 import { customAudioEncoders, customVideoEncoders } from './custom-coder';
 import {
+	Bitstream,
 	COLOR_PRIMARIES_MAP,
 	MATRIX_COEFFICIENTS_MAP,
 	TRANSFER_CHARACTERISTICS_MAP,
@@ -7,7 +9,6 @@ import {
 	bytesToHexString,
 	isAllowSharedBufferSource,
 	last,
-	readBits,
 	reverseBitsU32,
 	toDataView,
 } from './misc';
@@ -335,20 +336,31 @@ export const extractVideoCodecString = (trackInfo: {
 	codec: VideoCodec | null;
 	codecDescription: Uint8Array | null;
 	colorSpace: VideoColorSpaceInit | null;
+	avcCodecInfo: AvcDecoderConfigurationRecord | null;
 	vp9CodecInfo: Vp9CodecInfo | null;
 	av1CodecInfo: Av1CodecInfo | null;
 }) => {
-	const { codec, codecDescription: description, colorSpace, vp9CodecInfo, av1CodecInfo } = trackInfo;
+	const { codec, codecDescription: description, colorSpace, avcCodecInfo, vp9CodecInfo, av1CodecInfo } = trackInfo;
 
 	if (codec === 'avc') {
+		if (avcCodecInfo) {
+			const bytes = new Uint8Array([
+				avcCodecInfo.avcProfileIndication,
+				avcCodecInfo.profileCompatibility,
+				avcCodecInfo.avcLevelIndication,
+			]);
+
+			return `avc1.${bytesToHexString(bytes)}`;
+		}
+
 		if (!description || description.byteLength < 4) {
-			throw new TypeError('AVC description must be at least 4 bytes long.');
+			throw new TypeError('AVC decoder description is not provided or is not at least 4 bytes long.');
 		}
 
 		return `avc1.${bytesToHexString(description.subarray(1, 4))}`;
 	} else if (codec === 'hevc') {
 		if (!description) {
-			throw new TypeError('HEVC description must be provided.');
+			throw new TypeError('HEVC decoder description is not provided.');
 		}
 
 		const view = toDataView(description);
@@ -480,11 +492,9 @@ export const extractVideoCodecString = (trackInfo: {
 	throw new TypeError(`Unhandled codec '${codec}'.`);
 };
 
-/**
- * When VP9 codec information is not provided by the container, we can still try to extract the information by digging
- * into the VP9 bitstream.
- */
-export const extractVp9CodecInfoFromFrame = (frame: Uint8Array): Vp9CodecInfo | null => {
+export const extractVp9CodecInfoFromFrame = (
+	frame: Uint8Array,
+): Vp9CodecInfo | null => {
 	// eslint-disable-next-line @stylistic/max-len
 	// https://storage.googleapis.com/downloads.webmproject.org/docs/vp9/vp9-bitstream-specification-v0.7-20170222-draft.pdf
 	// http://downloads.webmproject.org/docs/vp9/vp9-bitstream_superframe-and-uncompressed-header_v1.0.pdf
@@ -513,91 +523,80 @@ export const extractVp9CodecInfoFromFrame = (frame: Uint8Array): Vp9CodecInfo | 
 		frame = frame.subarray(0, frameSize);
 	}
 
-	let bitPos = 0;
+	const bitstream = new Bitstream(frame);
 
 	// Frame marker (0b10)
-	const frameMarker = readBits(frame, bitPos, bitPos + 2);
+	const frameMarker = bitstream.readBits(2);
 	if (frameMarker !== 2) {
 		return null;
 	}
-	bitPos += 2;
 
 	// Profile
-	const profileLowBit = readBits(frame, bitPos, bitPos + 1);
-	bitPos += 1;
-	const profileHighBit = readBits(frame, bitPos, bitPos + 1);
-	bitPos += 1;
+	const profileLowBit = bitstream.readBits(1);
+	const profileHighBit = bitstream.readBits(1);
 	const profile = (profileHighBit << 1) + profileLowBit;
 
 	// Skip reserved bit for profile 3
 	if (profile === 3) {
-		bitPos += 1;
+		bitstream.skipBits(1);
 	}
 
 	// show_existing_frame
-	const showExistingFrame = readBits(frame, bitPos, bitPos + 1);
-	bitPos += 1;
+	const showExistingFrame = bitstream.readBits(1);
 
 	if (showExistingFrame === 1) {
 		return null;
 	}
 
 	// frame_type (0 = key frame)
-	const frameType = readBits(frame, bitPos, bitPos + 1);
-	bitPos += 1;
+	const frameType = bitstream.readBits(1);
 
 	if (frameType !== 0) {
 		return null;
 	}
 
 	// Skip show_frame and error_resilient_mode
-	bitPos += 2;
+	bitstream.skipBits(2);
 
 	// Sync code (0x498342)
-	const syncCode = readBits(frame, bitPos, bitPos + 24);
+	const syncCode = bitstream.readBits(24);
 	if (syncCode !== 0x498342) {
 		return null;
 	}
-	bitPos += 24;
 
 	// Color config
 	let bitDepth = 8;
 	if (profile >= 2) {
-		const tenOrTwelveBit = readBits(frame, bitPos, bitPos + 1);
-		bitPos += 1;
+		const tenOrTwelveBit = bitstream.readBits(1);
 		bitDepth = tenOrTwelveBit ? 12 : 10;
 	}
 
 	// Color space
-	const colorSpace = readBits(frame, bitPos, bitPos + 3);
-	bitPos += 3;
+	const colorSpace = bitstream.readBits(3);
 
 	let chromaSubsampling = 0;
 	let videoFullRangeFlag = 0;
 
 	if (colorSpace !== 7) { // 7 is CS_RGB
-		const colorRange = readBits(frame, bitPos, bitPos + 1);
-		bitPos += 1;
+		const colorRange = bitstream.readBits(1);
 		videoFullRangeFlag = colorRange;
 
 		if (profile === 1 || profile === 3) {
-			const subsamplingX = readBits(frame, bitPos, bitPos + 1);
-			bitPos += 1;
-			const subsamplingY = readBits(frame, bitPos, bitPos + 1);
-			bitPos += 1;
+			const subsamplingX = bitstream.readBits(1);
+			const subsamplingY = bitstream.readBits(1);
 
 			// 0 = 4:2:0 vertical
 			// 1 = 4:2:0 colocated
 			// 2 = 4:2:2
 			// 3 = 4:4:4
-			chromaSubsampling = (!subsamplingX && !subsamplingY)
+			chromaSubsampling = !subsamplingX && !subsamplingY
 				? 3 // 0,0 = 4:4:4
-				: (subsamplingX && !subsamplingY)
-						? 2 // 1,0 = 4:2:2
-						: 1; // 1,1 = 4:2:0 colocated (default)
+				: subsamplingX && !subsamplingY
+					? 2 // 1,0 = 4:2:2
+					: 1; // 1,1 = 4:2:0 colocated (default)
 
 			// Skip reserved bit
-			bitPos += 1;
+			bitstream.skipBits(1);
 		} else {
 			// For profile 0 and 2, always 4:2:0
 			chromaSubsampling = 1; // Using colocated as default
@@ -609,10 +608,8 @@ export const extractVp9CodecInfoFromFrame = (frame: Uint8Array): Vp9CodecInfo | 
 	}
 
 	// Parse frame size
-	const widthMinusOne = readBits(frame, bitPos, bitPos + 16);
-	bitPos += 16;
-	const heightMinusOne = readBits(frame, bitPos, bitPos + 16);
-	bitPos += 16;
+	const widthMinusOne = bitstream.readBits(16);
+	const heightMinusOne = bitstream.readBits(16);
 
 	const width = widthMinusOne + 1;
 	const height = heightMinusOne + 1;
@@ -632,15 +629,21 @@ export const extractVp9CodecInfoFromFrame = (frame: Uint8Array): Vp9CodecInfo | 
 		? 0
 		: colorSpace === 2
 			? 1
-			: colorSpace === 1 ? 6 : 2;
+			: colorSpace === 1
+				? 6
+				: 2;
 
 	const colourPrimaries = colorSpace === 2
 		? 1
-		: colorSpace === 1 ? 6 : 2;
+		: colorSpace === 1
+			? 6
+			: 2;
 
 	const transferCharacteristics = colorSpace === 2
 		? 1
-		: colorSpace === 1 ? 6 : 2;
+		: colorSpace === 1
+			? 6
+			: 2;
 
 	return {
 		profile,
@@ -658,16 +661,18 @@ export const extractVp9CodecInfoFromFrame = (frame: Uint8Array): Vp9CodecInfo | 
  * When AV1 codec information is not provided by the container, we can still try to extract the information by digging
  * into the AV1 bitstream.
  */
-export const extractAv1CodecInfoFromFrame = (data: Uint8Array): Av1CodecInfo | null => {
+export const extractAv1CodecInfoFromFrame = (
+	data: Uint8Array,
+): Av1CodecInfo | null => {
 	// https://aomediacodec.github.io/av1-spec/av1-spec.pdf
 
-	let offset = 0;
+	const bitstream = new Bitstream(data);
 
-	const readLeb128 = () => {
+	const readLeb128 = (): number | null => {
 		let value = 0;
 
 		for (let i = 0; i < 8; i++) {
-			const byte = data[offset++];
+			const byte = bitstream.readAlignedByte();
 			if (byte === undefined) return 0;
 
 			value |= ((byte & 0x7f) << (i * 7));
@@ -690,10 +695,9 @@ export const extractAv1CodecInfoFromFrame = (data: Uint8Array): Av1CodecInfo | n
 		return value;
 	};
 
-	while (offset < data.length) {
+	while (bitstream.getBitsLeft() >= 8) {
 		// Parse OBU header
-		const obuHeader = readBits(data, offset * 8, offset * 8 + 8);
-		offset += 1;
+		const obuHeader = bitstream.readBits(8);
 
 		const obuType = (obuHeader >> 3) & 0xf;
 		const obuExtension = (obuHeader >> 2) & 0x1;
@@ -701,7 +705,7 @@ export const extractAv1CodecInfoFromFrame = (data: Uint8Array): Av1CodecInfo | n
 
 		// Skip extension header if present
 		if (obuExtension) {
-			offset += 1;
+			bitstream.skipBits(8);
 		}
 
 		// Read OBU size if present
@@ -711,43 +715,35 @@ export const extractAv1CodecInfoFromFrame = (data: Uint8Array): Av1CodecInfo | n
 			if (obuSizeValue === null) return null; // It was invalid
 			obuSize = obuSizeValue;
 		} else {
-			obuSize = data.length - offset;
+			// Calculate remaining bits and convert to bytes, rounding down
+			obuSize = Math.floor(bitstream.getBitsLeft() / 8);
 		}
 
 		// We're only interested in Sequence Header OBU (type 1)
 		if (obuType === 1) {
-			const startBit = offset * 8;
-			let bitOffset = 0;
-
 			// Read sequence header fields
-			const seqProfile = readBits(data, startBit + bitOffset, startBit + bitOffset + 3);
-			bitOffset += 3;
+			const seqProfile = bitstream.readBits(3);
 
 			// eslint-disable-next-line @typescript-eslint/no-unused-vars
-			const stillPicture = readBits(data, startBit + bitOffset, startBit + bitOffset + 1);
-			bitOffset += 1;
+			const stillPicture = bitstream.readBits(1);
 
-			const reducedStillPictureHeader = readBits(data, startBit + bitOffset, startBit + bitOffset + 1);
-			bitOffset += 1;
+			const reducedStillPictureHeader = bitstream.readBits(1);
 
 			let seqLevel = 0;
 			let seqTier = 0;
 			let bufferDelayLengthMinus1 = 0;
 
 			if (reducedStillPictureHeader) {
-				seqLevel = readBits(data, startBit + bitOffset, startBit + bitOffset + 5);
-				bitOffset += 5;
+				seqLevel = bitstream.readBits(5);
 			} else {
 				// Parse timing_info_present_flag
-				const timingInfoPresentFlag = readBits(data, startBit + bitOffset, startBit + bitOffset + 1);
-				bitOffset += 1;
+				const timingInfoPresentFlag = bitstream.readBits(1);
 
 				if (timingInfoPresentFlag) {
 					// Skip timing info (num_units_in_display_tick, time_scale, equal_picture_interval)
-					bitOffset += 32; // num_units_in_display_tick
-					bitOffset += 32; // time_scale
-					const equalPictureInterval = readBits(data, startBit + bitOffset, startBit + bitOffset + 1);
-					bitOffset += 1;
+					bitstream.skipBits(32); // num_units_in_display_tick
+					bitstream.skipBits(32); // time_scale
+					const equalPictureInterval = bitstream.readBits(1);
 
 					if (equalPictureInterval) {
 						// Skip num_ticks_per_picture_minus_1 (uvlc)
@@ -758,30 +754,26 @@ export const extractAv1CodecInfoFromFrame = (data: Uint8Array): Av1CodecInfo | n
 				}
 
 				// Parse decoder_model_info_present_flag
-				const decoderModelInfoPresentFlag = readBits(data, startBit + bitOffset, startBit + bitOffset + 1);
-				bitOffset += 1;
+				const decoderModelInfoPresentFlag = bitstream.readBits(1);
 
 				if (decoderModelInfoPresentFlag) {
 					// Store buffer_delay_length_minus_1 instead of just skipping
-					bufferDelayLengthMinus1 = readBits(data, startBit + bitOffset, startBit + bitOffset + 5);
-					bitOffset += 5;
-					bitOffset += 32; // num_units_in_decoding_tick
-					bitOffset += 5; // buffer_removal_time_length_minus_1
-					bitOffset += 5; // frame_presentation_time_length_minus_1
+					bufferDelayLengthMinus1 = bitstream.readBits(5);
+					bitstream.skipBits(32); // num_units_in_decoding_tick
+					bitstream.skipBits(5); // buffer_removal_time_length_minus_1
+					bitstream.skipBits(5); // frame_presentation_time_length_minus_1
 				}
 
 				// Parse operating_points_cnt_minus_1
-				const operatingPointsCntMinus1 = readBits(data, startBit + bitOffset, startBit + bitOffset + 5);
-				bitOffset += 5;
+				const operatingPointsCntMinus1 = bitstream.readBits(5);
 
 				// For each operating point
 				for (let i = 0; i <= operatingPointsCntMinus1; i++) {
 					// operating_point_idc[i]
-					bitOffset += 12;
+					bitstream.skipBits(12);
 
 					// seq_level_idx[i]
-					const seqLevelIdx = readBits(data, startBit + bitOffset, startBit + bitOffset + 5);
-					bitOffset += 5;
+					const seqLevelIdx = bitstream.readBits(5);
 
 					if (i === 0) {
 						seqLevel = seqLevelIdx;
@@ -789,8 +781,7 @@ export const extractAv1CodecInfoFromFrame = (data: Uint8Array): Av1CodecInfo | n
 
 					if (seqLevelIdx > 7) {
 						// seq_tier[i]
-						const seqTierTemp = readBits(data, startBit + bitOffset, startBit + bitOffset + 1);
-						bitOffset += 1;
+						const seqTierTemp = bitstream.readBits(1);
 						if (i === 0) {
 							seqTier = seqTierTemp;
 						}
@@ -798,37 +789,31 @@ export const extractAv1CodecInfoFromFrame = (data: Uint8Array): Av1CodecInfo | n
 
 					if (decoderModelInfoPresentFlag) {
 						// decoder_model_present_for_this_op[i]
-						const decoderModelPresentForThisOp
-							= readBits(data, startBit + bitOffset, startBit + bitOffset + 1);
-						bitOffset += 1;
+						const decoderModelPresentForThisOp = bitstream.readBits(1);
 
 						if (decoderModelPresentForThisOp) {
 							const n = bufferDelayLengthMinus1 + 1;
-							bitOffset += n; // decoder_buffer_delay[op]
-							bitOffset += n; // encoder_buffer_delay[op]
-							bitOffset += 1; // low_delay_mode_flag[op]
+							bitstream.skipBits(n); // decoder_buffer_delay[op]
+							bitstream.skipBits(n); // encoder_buffer_delay[op]
+							bitstream.skipBits(1); // low_delay_mode_flag[op]
 						}
 					}
 
 					// initial_display_delay_present_flag
-					const initialDisplayDelayPresentFlag
-						= readBits(data, startBit + bitOffset, startBit + bitOffset + 1);
-					bitOffset += 1;
+					const initialDisplayDelayPresentFlag = bitstream.readBits(1);
 
 					if (initialDisplayDelayPresentFlag) {
 						// initial_display_delay_minus_1[i]
-						bitOffset += 4;
+						bitstream.skipBits(4);
 					}
 				}
 			}
 
-			const highBitdepth = readBits(data, startBit + bitOffset, startBit + bitOffset + 1);
-			bitOffset += 1;
+			const highBitdepth = bitstream.readBits(1);
 
 			let bitDepth = 8;
 			if (seqProfile === 2 && highBitdepth) {
-				const twelveBit = readBits(data, startBit + bitOffset, startBit + bitOffset + 1);
-				bitOffset += 1;
+				const twelveBit = bitstream.readBits(1);
 				bitDepth = twelveBit ? 12 : 10;
 			} else if (seqProfile <= 2) {
 				bitDepth = highBitdepth ? 10 : 8;
@@ -836,8 +821,7 @@ export const extractAv1CodecInfoFromFrame = (data: Uint8Array): Av1CodecInfo | n
 
 			let monochrome = 0;
 			if (seqProfile !== 1) {
-				monochrome = readBits(data, startBit + bitOffset, startBit + bitOffset + 1);
-				bitOffset += 1;
+				monochrome = bitstream.readBits(1);
 			}
 
 			let chromaSubsamplingX = 1;
@@ -853,18 +837,15 @@ export const extractAv1CodecInfoFromFrame = (data: Uint8Array): Av1CodecInfo | n
 					chromaSubsamplingY = 0;
 				} else {
 					if (bitDepth === 12) {
-						chromaSubsamplingX = readBits(data, startBit + bitOffset, startBit + bitOffset + 1);
-						bitOffset += 1;
+						chromaSubsamplingX = bitstream.readBits(1);
 						if (chromaSubsamplingX) {
-							chromaSubsamplingY = readBits(data, startBit + bitOffset, startBit + bitOffset + 1);
-							bitOffset += 1;
+							chromaSubsamplingY = bitstream.readBits(1);
 						}
 					}
 				}
 
 				if (chromaSubsamplingX && chromaSubsamplingY) {
-					chromaSamplePosition = readBits(data, startBit + bitOffset, startBit + bitOffset + 2);
-					bitOffset += 2;
+					chromaSamplePosition = bitstream.readBits(2);
 				}
 			}
 
@@ -881,7 +862,8 @@ export const extractAv1CodecInfoFromFrame = (data: Uint8Array): Av1CodecInfo | n
 		}
 
 		// Move to next OBU
-		offset += obuSize;
+		// The OBU size is in bytes, so skip that many bytes.
+		bitstream.skipBits(obuSize * 8);
 	}
 
 	return null;
@@ -958,30 +940,25 @@ export const parseAacAudioSpecificConfig = (bytes: Uint8Array | null) => {
 		throw new TypeError('AAC description must be at least 2 bytes long.');
 	}
 
-	let bitOffset = 0;
+	const bitstream = new Bitstream(bytes);
 
 	// 1) Audio Object Type (5 bits)
-	let objectType = readBits(bytes, bitOffset, bitOffset + 5);
-	bitOffset += 5;
+	let objectType = bitstream.readBits(5);
 	if (objectType === 31) {
 		// (Escape value) -> 6 bits + 32
-		objectType = 32 + readBits(bytes, bitOffset, bitOffset + 6);
-		bitOffset += 6;
+		objectType = 32 + bitstream.readBits(6);
 	}
 
 	// 2) Sampling Frequency Index (4 bits)
-	const frequencyIndex = readBits(bytes, bitOffset, bitOffset + 4);
-	bitOffset += 4;
+	const frequencyIndex = bitstream.readBits(4);
 	let sampleRate: number | null = null;
 	if (frequencyIndex === 15) {
 		// Explicit sample rate (24 bits)
-		sampleRate = readBits(bytes, bitOffset, bitOffset + 24);
-		bitOffset += 24;
+		sampleRate = bitstream.readBits(24);
 	} else {
 		const freqTable = [
-			96000, 88200, 64000, 48000, 44100,
-			32000, 24000, 22050, 16000, 12000,
-			11025, 8000, 7350,
+			96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050,
+			16000, 12000, 11025, 8000, 7350,
 		];
 		if (frequencyIndex < freqTable.length) {
 			sampleRate = freqTable[frequencyIndex]!;
@@ -989,13 +966,16 @@ export const parseAacAudioSpecificConfig = (bytes: Uint8Array | null) => {
 	}
 
 	// 3) Channel Configuration (4 bits)
-	const channelConfiguration = readBits(bytes, bitOffset, bitOffset + 4);
-	bitOffset += 4;
+	const channelConfiguration = bitstream.readBits(4);
 	let numberOfChannels: number | null = null;
 	if (channelConfiguration >= 1 && channelConfiguration <= 7) {
 		const channelMap = {
-			1: 1, 2: 2, 3: 3,
-			4: 4, 5: 5, 6: 6,
+			1: 1,
+			2: 2,
+			3: 3,
+			4: 4,
+			5: 5,
+			6: 6,
 			7: 8,
 		};
 		numberOfChannels = channelMap[channelConfiguration as keyof typeof channelMap];
@@ -1374,12 +1354,9 @@ export const validateVideoChunkMetadata = (metadata: EncodedVideoChunkMetadata |
 			);
 		}
 
-		if (!metadata.decoderConfig.description) {
-			throw new TypeError(
-				'Video chunk metadata decoder configuration for AVC must include a description, which is expected to be'
-				+ ' an AVCDecoderConfigurationRecord as specified in ISO 14496-15.',
-			);
-		}
+		// `description` may or may not be set, depending on if the format is AVCC or Annex B, so don't perform any
+		// validation for it.
+		// https://www.w3.org/TR/webcodecs-avc-codec-registration
 	} else if (metadata.decoderConfig.codec.startsWith('hev1') || metadata.decoderConfig.codec.startsWith('hvc1')) {
 		// HEVC-specific validation
 
