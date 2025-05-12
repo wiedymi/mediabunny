@@ -864,38 +864,38 @@ export type Vp9CodecInfo = {
 	matrixCoefficients: number;
 };
 
-export const extractVp9CodecInfoFromFrame = (
-	frame: Uint8Array,
+export const extractVp9CodecInfoFromPacket = (
+	packet: Uint8Array,
 ): Vp9CodecInfo | null => {
 	// eslint-disable-next-line @stylistic/max-len
 	// https://storage.googleapis.com/downloads.webmproject.org/docs/vp9/vp9-bitstream-specification-v0.7-20170222-draft.pdf
 	// http://downloads.webmproject.org/docs/vp9/vp9-bitstream_superframe-and-uncompressed-header_v1.0.pdf
 
 	// Handle superframe
-	const lastByte = frame[frame.length - 1];
+	const lastByte = packet[packet.length - 1];
 	if (lastByte && (lastByte & 0xe0) === 0xc0) { // Is superframe
 		const bytesPerFrameSize = ((lastByte & 0x18) >> 3) + 1;
 		const numFrames = (lastByte & 0x07) + 1;
 		const indexSize = 2 + numFrames * bytesPerFrameSize;
 
 		// Verify matching marker bytes
-		if (frame[frame.length - indexSize] !== lastByte) {
+		if (packet[packet.length - indexSize] !== lastByte) {
 			return null;
 		}
 
 		// Get first frame size
 		let frameSize = 0;
-		const offset = frame.length - indexSize + 1;
+		const offset = packet.length - indexSize + 1;
 
 		for (let i = 0; i < bytesPerFrameSize; i++) {
-			if (!frame[offset + i]) return null;
-			frameSize |= frame[offset + i]! << (8 * i);
+			if (!packet[offset + i]) return null;
+			frameSize |= packet[offset + i]! << (8 * i);
 		}
 
-		frame = frame.subarray(0, frameSize);
+		packet = packet.subarray(0, frameSize);
 	}
 
-	const bitstream = new Bitstream(frame);
+	const bitstream = new Bitstream(packet);
 
 	// Frame marker (0b10)
 	const frameMarker = bitstream.readBits(2);
@@ -1044,12 +1044,12 @@ export type Av1CodecInfo = {
  * When AV1 codec information is not provided by the container, we can still try to extract the information by digging
  * into the AV1 bitstream.
  */
-export const extractAv1CodecInfoFromFrame = (
-	data: Uint8Array,
+export const extractAv1CodecInfoFromPacket = (
+	packet: Uint8Array,
 ): Av1CodecInfo | null => {
 	// https://aomediacodec.github.io/av1-spec/av1-spec.pdf
 
-	const bitstream = new Bitstream(data);
+	const bitstream = new Bitstream(packet);
 
 	const readLeb128 = (): number | null => {
 		let value = 0;

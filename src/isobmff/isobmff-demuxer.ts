@@ -13,8 +13,8 @@ import {
 	HevcDecoderConfigurationRecord,
 	Vp9CodecInfo,
 	Av1CodecInfo,
-	extractVp9CodecInfoFromFrame,
-	extractAv1CodecInfoFromFrame,
+	extractVp9CodecInfoFromPacket,
+	extractAv1CodecInfoFromPacket,
 } from '../codec-data';
 import { Demuxer } from '../demuxer';
 import { Input } from '../input';
@@ -2360,10 +2360,10 @@ class IsobmffVideoTrackBacking extends IsobmffTrackBacking implements InputVideo
 		return this.decoderConfigPromise ??= (async (): Promise<VideoDecoderConfig> => {
 			if (this.internalTrack.info.codec === 'vp9' && !this.internalTrack.info.vp9CodecInfo) {
 				const firstPacket = await this.getFirstPacket({});
-				this.internalTrack.info.vp9CodecInfo = firstPacket && extractVp9CodecInfoFromFrame(firstPacket.data);
+				this.internalTrack.info.vp9CodecInfo = firstPacket && extractVp9CodecInfoFromPacket(firstPacket.data);
 			} else if (this.internalTrack.info.codec === 'av1' && !this.internalTrack.info.av1CodecInfo) {
 				const firstPacket = await this.getFirstPacket({});
-				this.internalTrack.info.av1CodecInfo = firstPacket && extractAv1CodecInfoFromFrame(firstPacket.data);
+				this.internalTrack.info.av1CodecInfo = firstPacket && extractAv1CodecInfoFromPacket(firstPacket.data);
 			}
 
 			return {

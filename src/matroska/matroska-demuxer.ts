@@ -1,8 +1,8 @@
 import {
-	extractAv1CodecInfoFromFrame,
+	extractAv1CodecInfoFromPacket,
 	extractAvcDecoderConfigurationRecord,
 	extractHevcDecoderConfigurationRecord,
-	extractVp9CodecInfoFromFrame,
+	extractVp9CodecInfoFromPacket,
 } from '../codec-data';
 import {
 	AacCodecInfo,
@@ -1577,10 +1577,10 @@ class MatroskaVideoTrackBacking extends MatroskaTrackBacking implements InputVid
 						? extractHevcDecoderConfigurationRecord(firstPacket.data)
 						: null,
 					vp9CodecInfo: this.internalTrack.info.codec === 'vp9' && firstPacket
-						? extractVp9CodecInfoFromFrame(firstPacket.data)
+						? extractVp9CodecInfoFromPacket(firstPacket.data)
 						: null,
 					av1CodecInfo: this.internalTrack.info.codec === 'av1' && firstPacket
-						? extractAv1CodecInfoFromFrame(firstPacket.data)
+						? extractAv1CodecInfoFromPacket(firstPacket.data)
 						: null,
 				}),
 				codedWidth: this.internalTrack.info.width,
