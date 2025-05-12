@@ -4,9 +4,9 @@ Mediakit enables you to create media files with very fine levels of control. You
 
 Mediakit provides many ways to supply media data for output tracks, nicely integrating with the WebCodecs API, but also allowing you to use your own encoding stack if you wish. These [media sources](./media-sources) come in multiple levels of abstraction, enabling easy use for common use cases while still giving you fine-grained control if you need it.
 
-## Creating a new output
+## Creating an output
 
-Media file creation in Mediakit revolves around a central class, `Output`. One instance of `Output` represents one media file we want to create.
+Media file creation in Mediakit revolves around a central class, `Output`. One instance of `Output` represents one media file you want to create.
 
 Start by creating a new instance of `Output` using the desired configuration of the file you want to create:
 ```ts
@@ -105,7 +105,7 @@ output.addAudioTrack(audioSource);
 Adding tracks to an `Output` will throw if the track is not compatible with the output format. Be sure to respect the [properties](./output-formats#format-properties) of the output format when adding tracks.
 :::
 
-## Starting the output
+## Starting an output
 
 After all tracks have been added to the `Output`, you need to *start* it. Starting an output spins up the writing process, allowing you to now start sending media data to the output file. It also prevents you from adding any new tracks to it.
 
@@ -135,7 +135,7 @@ const intervalId = setInterval(() => {
 
 And then we'll let this run for as long as we want to capture media data.
 
-## Finalizing the output
+## Finalizing an output
 
 Once all media data has been added, the `Output` needs to be *finalized*. Finalization finishes all remaining encoding
 work and writes the remaining data to create the final, playable media file.
