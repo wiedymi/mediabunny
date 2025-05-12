@@ -1,15 +1,14 @@
 import {
+	extractAv1CodecInfoFromFrame,
 	extractAvcDecoderConfigurationRecord,
 	extractHevcDecoderConfigurationRecord,
-	serializeHevcDecoderConfigurationRecord,
-} from '../avc';
+	extractVp9CodecInfoFromFrame,
+} from '../codec-data';
 import {
 	AacCodecInfo,
 	AudioCodec,
 	extractAudioCodecString,
-	extractAv1CodecInfoFromFrame,
 	extractVideoCodecString,
-	extractVp9CodecInfoFromFrame,
 	MediaCodec,
 	VideoCodec,
 } from '../codec';

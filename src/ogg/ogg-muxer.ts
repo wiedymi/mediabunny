@@ -1,4 +1,5 @@
-import { OPUS_INTERNAL_SAMPLE_RATE, parseOpusIdentificationHeader, validateAudioChunkMetadata } from '../codec';
+import { OPUS_INTERNAL_SAMPLE_RATE, validateAudioChunkMetadata } from '../codec';
+import { parseModesFromVorbisSetupPacket, parseOpusIdentificationHeader } from '../codec-data';
 import { assert, setInt64, toDataView, toUint8Array } from '../misc';
 import { Muxer } from '../muxer';
 import { Output, OutputAudioTrack } from '../output';
@@ -10,7 +11,6 @@ import {
 	extractSampleMetadata,
 	OggCodecInfo,
 	OGGS,
-	parseModesFromVorbisSetupPacket,
 } from './ogg-misc';
 import { MAX_PAGE_SIZE } from './ogg-reader';
 

@@ -1,18 +1,21 @@
-import { AvcDecoderConfigurationRecord, HevcDecoderConfigurationRecord } from '../avc';
 import {
 	AacCodecInfo,
 	AudioCodec,
-	Av1CodecInfo,
 	extractAudioCodecString,
-	extractAv1CodecInfoFromFrame,
 	extractVideoCodecString,
-	extractVp9CodecInfoFromFrame,
 	MediaCodec,
 	parseAacAudioSpecificConfig,
 	PCM_AUDIO_CODECS,
 	VideoCodec,
-	Vp9CodecInfo,
 } from '../codec';
+import {
+	AvcDecoderConfigurationRecord,
+	HevcDecoderConfigurationRecord,
+	Vp9CodecInfo,
+	Av1CodecInfo,
+	extractVp9CodecInfoFromFrame,
+	extractAv1CodecInfoFromFrame,
+} from '../codec-data';
 import { Demuxer } from '../demuxer';
 import { Input } from '../input';
 import {

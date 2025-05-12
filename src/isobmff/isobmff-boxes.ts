@@ -14,7 +14,6 @@ import {
 import {
 	AudioCodec,
 	generateAv1CodecConfigurationFromCodecString,
-	parseOpusIdentificationHeader,
 	parsePcmCodec,
 	PCM_AUDIO_CODECS,
 	PcmAudioCodec,
@@ -32,6 +31,7 @@ import {
 	IsobmffVideoTrackData,
 	Sample,
 } from './isobmff-muxer';
+import { parseOpusIdentificationHeader } from '../codec-data';
 
 export class IsobmffBoxWriter {
 	private helper = new Uint8Array(8);

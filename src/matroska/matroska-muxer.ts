@@ -38,7 +38,6 @@ import {
 	PcmAudioCodec,
 	generateAv1CodecConfigurationFromCodecString,
 	generateVp9CodecConfigurationFromCodecString,
-	parseOpusIdentificationHeader,
 	parsePcmCodec,
 	validateAudioChunkMetadata,
 	validateSubtitleMetadata,
@@ -47,6 +46,7 @@ import {
 import { Muxer } from '../muxer';
 import { Writer } from '../writer';
 import { EncodedPacket } from '../packet';
+import { parseOpusIdentificationHeader } from '../codec-data';
 
 const MIN_CLUSTER_TIMESTAMP_MS = -(2 ** 15);
 const MAX_CLUSTER_TIMESTAMP_MS = 2 ** 15 - 1;

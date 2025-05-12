@@ -1,4 +1,5 @@
-import { OPUS_INTERNAL_SAMPLE_RATE, parseOpusIdentificationHeader } from '../codec';
+import { OPUS_INTERNAL_SAMPLE_RATE } from '../codec';
+import { parseModesFromVorbisSetupPacket, parseOpusIdentificationHeader } from '../codec-data';
 import { Demuxer } from '../demuxer';
 import { Input } from '../input';
 import { InputAudioTrack, InputAudioTrackBacking } from '../input-track';
@@ -6,7 +7,7 @@ import { PacketRetrievalOptions } from '../media-sink';
 import { assert, AsyncMutex, findLast, roundToPrecision, toDataView, UNDETERMINED_LANGUAGE } from '../misc';
 import { EncodedPacket, PLACEHOLDER_DATA } from '../packet';
 import { Reader } from '../reader';
-import { computeOggPageCrc, extractSampleMetadata, OggCodecInfo, parseModesFromVorbisSetupPacket } from './ogg-misc';
+import { computeOggPageCrc, extractSampleMetadata, OggCodecInfo } from './ogg-misc';
 import { MAX_PAGE_HEADER_SIZE, MAX_PAGE_SIZE, MIN_PAGE_HEADER_SIZE, OggReader, Page } from './ogg-reader';
 
 type LogicalBitstream = {

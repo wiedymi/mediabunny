@@ -1,6 +1,7 @@
-import { assert, Bitstream, readExpGolomb, readSignedExpGolomb } from './misc';
+import { VP9_LEVEL_TABLE } from './codec';
+import { assert, Bitstream, last, readExpGolomb, readSignedExpGolomb, toDataView } from './misc';
 
-// References:
+// References for AVC/HEVC code:
 // ISO 14496-15
 // Rec. ITU-T H.264
 // Rec. ITU-T H.265
@@ -78,6 +79,40 @@ const removeEmulationPreventionBytes = (data: Uint8Array) => {
 	}
 
 	return new Uint8Array(result);
+};
+
+/** Converts an AVC packet in Annex B format to length-prefixed format. */
+export const transformAnnexBToLengthPrefixed = (packetData: Uint8Array) => {
+	const NAL_UNIT_LENGTH_SIZE = 4;
+
+	const nalUnits = findNalUnitsInAnnexB(packetData);
+
+	if (nalUnits.length === 0) {
+		// If no NAL units were found, it's not valid Annex B data
+		return null;
+	}
+
+	let totalSize = 0;
+	for (const nalUnit of nalUnits) {
+		totalSize += NAL_UNIT_LENGTH_SIZE + nalUnit.byteLength;
+	}
+
+	const avccData = new Uint8Array(totalSize);
+	const dataView = new DataView(avccData.buffer);
+	let offset = 0;
+
+	// Write each NAL unit with its length prefix
+	for (const nalUnit of nalUnits) {
+		const length = nalUnit.byteLength;
+
+		dataView.setUint32(offset, length, false);
+		offset += 4;
+
+		avccData.set(nalUnit, offset);
+		offset += nalUnit.byteLength;
+	}
+
+	return avccData;
 };
 
 // Data specified in ISO 14496-15
@@ -250,46 +285,13 @@ export const serializeAvcDecoderConfigurationRecord = (record: AvcDecoderConfigu
 	return new Uint8Array(bytes);
 };
 
-/** Converts an AVC packet in Annex B format to length-prefixed format. */
-export const transformAnnexBToLengthPrefixed = (packetData: Uint8Array) => {
-	const NAL_UNIT_LENGTH_SIZE = 4;
-
-	const nalUnits = findNalUnitsInAnnexB(packetData);
-
-	if (nalUnits.length === 0) {
-		// If no NAL units were found, it's not valid Annex B data
-		return null;
-	}
-
-	let totalSize = 0;
-	for (const nalUnit of nalUnits) {
-		totalSize += NAL_UNIT_LENGTH_SIZE + nalUnit.byteLength;
-	}
-
-	const avccData = new Uint8Array(totalSize);
-	const dataView = new DataView(avccData.buffer);
-	let offset = 0;
-
-	// Write each NAL unit with its length prefix
-	for (const nalUnit of nalUnits) {
-		const length = nalUnit.byteLength;
-
-		dataView.setUint32(offset, length, false);
-		offset += 4;
-
-		avccData.set(nalUnit, offset);
-		offset += nalUnit.byteLength;
-	}
-
-	return avccData;
-};
-
 const NALU_TYPE_VPS = 32;
 const NALU_TYPE_SPS = 33;
 const NALU_TYPE_PPS = 34;
 const NALU_TYPE_SEI_PREFIX = 39;
 const NALU_TYPE_SEI_SUFFIX = 40;
 
+// Data specified in ISO 14496-15
 export type HevcDecoderConfigurationRecord = {
 	configurationVersion: number;
 	generalProfileSpace: number;
@@ -319,6 +321,7 @@ const extractNalUnitTypeForHevc = (data: Uint8Array) => {
 	return (data[0]! >> 1) & 0x3F;
 };
 
+/** Builds a HevcDecoderConfigurationRecord from an HEVC packet in Annex B format. */
 export const extractHevcDecoderConfigurationRecord = (
 	packetData: Uint8Array,
 ) => {
@@ -783,6 +786,7 @@ const skipSubLayerHrdParameters = (
 	}
 };
 
+/** Serializes an HevcDecoderConfigurationRecord into the format specified in Section 8.3.3.1 of ISO 14496-15. */
 export const serializeHevcDecoderConfigurationRecord = (record: HevcDecoderConfigurationRecord) => {
 	const bytes: number[] = [];
 
@@ -847,4 +851,536 @@ export const serializeHevcDecoderConfigurationRecord = (record: HevcDecoderConfi
 	}
 
 	return new Uint8Array(bytes);
+};
+
+export type Vp9CodecInfo = {
+	profile: number;
+	level: number;
+	bitDepth: number;
+	chromaSubsampling: number;
+	videoFullRangeFlag: number;
+	colourPrimaries: number;
+	transferCharacteristics: number;
+	matrixCoefficients: number;
+};
+
+export const extractVp9CodecInfoFromFrame = (
+	frame: Uint8Array,
+): Vp9CodecInfo | null => {
+	// eslint-disable-next-line @stylistic/max-len
+	// https://storage.googleapis.com/downloads.webmproject.org/docs/vp9/vp9-bitstream-specification-v0.7-20170222-draft.pdf
+	// http://downloads.webmproject.org/docs/vp9/vp9-bitstream_superframe-and-uncompressed-header_v1.0.pdf
+
+	// Handle superframe
+	const lastByte = frame[frame.length - 1];
+	if (lastByte && (lastByte & 0xe0) === 0xc0) { // Is superframe
+		const bytesPerFrameSize = ((lastByte & 0x18) >> 3) + 1;
+		const numFrames = (lastByte & 0x07) + 1;
+		const indexSize = 2 + numFrames * bytesPerFrameSize;
+
+		// Verify matching marker bytes
+		if (frame[frame.length - indexSize] !== lastByte) {
+			return null;
+		}
+
+		// Get first frame size
+		let frameSize = 0;
+		const offset = frame.length - indexSize + 1;
+
+		for (let i = 0; i < bytesPerFrameSize; i++) {
+			if (!frame[offset + i]) return null;
+			frameSize |= frame[offset + i]! << (8 * i);
+		}
+
+		frame = frame.subarray(0, frameSize);
+	}
+
+	const bitstream = new Bitstream(frame);
+
+	// Frame marker (0b10)
+	const frameMarker = bitstream.readBits(2);
+	if (frameMarker !== 2) {
+		return null;
+	}
+
+	// Profile
+	const profileLowBit = bitstream.readBits(1);
+	const profileHighBit = bitstream.readBits(1);
+	const profile = (profileHighBit << 1) + profileLowBit;
+
+	// Skip reserved bit for profile 3
+	if (profile === 3) {
+		bitstream.skipBits(1);
+	}
+
+	// show_existing_frame
+	const showExistingFrame = bitstream.readBits(1);
+
+	if (showExistingFrame === 1) {
+		return null;
+	}
+
+	// frame_type (0 = key frame)
+	const frameType = bitstream.readBits(1);
+
+	if (frameType !== 0) {
+		return null;
+	}
+
+	// Skip show_frame and error_resilient_mode
+	bitstream.skipBits(2);
+
+	// Sync code (0x498342)
+	const syncCode = bitstream.readBits(24);
+	if (syncCode !== 0x498342) {
+		return null;
+	}
+
+	// Color config
+	let bitDepth = 8;
+	if (profile >= 2) {
+		const tenOrTwelveBit = bitstream.readBits(1);
+		bitDepth = tenOrTwelveBit ? 12 : 10;
+	}
+
+	// Color space
+	const colorSpace = bitstream.readBits(3);
+
+	let chromaSubsampling = 0;
+	let videoFullRangeFlag = 0;
+
+	if (colorSpace !== 7) { // 7 is CS_RGB
+		const colorRange = bitstream.readBits(1);
+		videoFullRangeFlag = colorRange;
+
+		if (profile === 1 || profile === 3) {
+			const subsamplingX = bitstream.readBits(1);
+			const subsamplingY = bitstream.readBits(1);
+
+			// 0 = 4:2:0 vertical
+			// 1 = 4:2:0 colocated
+			// 2 = 4:2:2
+			// 3 = 4:4:4
+			chromaSubsampling = !subsamplingX && !subsamplingY
+				? 3 // 0,0 = 4:4:4
+				: subsamplingX && !subsamplingY
+					? 2 // 1,0 = 4:2:2
+					: 1; // 1,1 = 4:2:0 colocated (default)
+
+			// Skip reserved bit
+			bitstream.skipBits(1);
+		} else {
+			// For profile 0 and 2, always 4:2:0
+			chromaSubsampling = 1; // Using colocated as default
+		}
+	} else {
+		// RGB is always 4:4:4
+		chromaSubsampling = 3;
+		videoFullRangeFlag = 1;
+	}
+
+	// Parse frame size
+	const widthMinusOne = bitstream.readBits(16);
+	const heightMinusOne = bitstream.readBits(16);
+
+	const width = widthMinusOne + 1;
+	const height = heightMinusOne + 1;
+
+	// Calculate level based on dimensions
+	const pictureSize = width * height;
+	let level = last(VP9_LEVEL_TABLE)!.level; // Default to highest level
+	for (const entry of VP9_LEVEL_TABLE) {
+		if (pictureSize <= entry.maxPictureSize) {
+			level = entry.level;
+			break;
+		}
+	}
+
+	// Map color_space to standard values
+	const matrixCoefficients = colorSpace === 7
+		? 0
+		: colorSpace === 2
+			? 1
+			: colorSpace === 1
+				? 6
+				: 2;
+
+	const colourPrimaries = colorSpace === 2
+		? 1
+		: colorSpace === 1
+			? 6
+			: 2;
+
+	const transferCharacteristics = colorSpace === 2
+		? 1
+		: colorSpace === 1
+			? 6
+			: 2;
+
+	return {
+		profile,
+		level,
+		bitDepth,
+		chromaSubsampling,
+		videoFullRangeFlag,
+		colourPrimaries,
+		transferCharacteristics,
+		matrixCoefficients,
+	};
+};
+
+export type Av1CodecInfo = {
+	profile: number;
+	level: number;
+	tier: number;
+	bitDepth: number;
+	monochrome: number;
+	chromaSubsamplingX: number;
+	chromaSubsamplingY: number;
+	chromaSamplePosition: number;
+};
+
+/**
+ * When AV1 codec information is not provided by the container, we can still try to extract the information by digging
+ * into the AV1 bitstream.
+ */
+export const extractAv1CodecInfoFromFrame = (
+	data: Uint8Array,
+): Av1CodecInfo | null => {
+	// https://aomediacodec.github.io/av1-spec/av1-spec.pdf
+
+	const bitstream = new Bitstream(data);
+
+	const readLeb128 = (): number | null => {
+		let value = 0;
+
+		for (let i = 0; i < 8; i++) {
+			const byte = bitstream.readAlignedByte();
+			if (byte === undefined) return 0;
+
+			value |= ((byte & 0x7f) << (i * 7));
+
+			if (!(byte & 0x80)) {
+				break;
+			}
+
+			// Spec requirement
+			if (i === 7 && (byte & 0x80)) {
+				return null;
+			}
+		}
+
+		// Spec requirement
+		if (value >= 2 ** 32 - 1) {
+			return null;
+		}
+
+		return value;
+	};
+
+	while (bitstream.getBitsLeft() >= 8) {
+		// Parse OBU header
+		const obuHeader = bitstream.readBits(8);
+
+		const obuType = (obuHeader >> 3) & 0xf;
+		const obuExtension = (obuHeader >> 2) & 0x1;
+		const obuHasSizeField = (obuHeader >> 1) & 0x1;
+
+		// Skip extension header if present
+		if (obuExtension) {
+			bitstream.skipBits(8);
+		}
+
+		// Read OBU size if present
+		let obuSize: number;
+		if (obuHasSizeField) {
+			const obuSizeValue = readLeb128();
+			if (obuSizeValue === null) return null; // It was invalid
+			obuSize = obuSizeValue;
+		} else {
+			// Calculate remaining bits and convert to bytes, rounding down
+			obuSize = Math.floor(bitstream.getBitsLeft() / 8);
+		}
+
+		// We're only interested in Sequence Header OBU (type 1)
+		if (obuType === 1) {
+			// Read sequence header fields
+			const seqProfile = bitstream.readBits(3);
+
+			// eslint-disable-next-line @typescript-eslint/no-unused-vars
+			const stillPicture = bitstream.readBits(1);
+
+			const reducedStillPictureHeader = bitstream.readBits(1);
+
+			let seqLevel = 0;
+			let seqTier = 0;
+			let bufferDelayLengthMinus1 = 0;
+
+			if (reducedStillPictureHeader) {
+				seqLevel = bitstream.readBits(5);
+			} else {
+				// Parse timing_info_present_flag
+				const timingInfoPresentFlag = bitstream.readBits(1);
+
+				if (timingInfoPresentFlag) {
+					// Skip timing info (num_units_in_display_tick, time_scale, equal_picture_interval)
+					bitstream.skipBits(32); // num_units_in_display_tick
+					bitstream.skipBits(32); // time_scale
+					const equalPictureInterval = bitstream.readBits(1);
+
+					if (equalPictureInterval) {
+						// Skip num_ticks_per_picture_minus_1 (uvlc)
+						// Since this is variable length, we'd need to implement uvlc reading
+						// For now, we'll return null as this is rare
+						return null;
+					}
+				}
+
+				// Parse decoder_model_info_present_flag
+				const decoderModelInfoPresentFlag = bitstream.readBits(1);
+
+				if (decoderModelInfoPresentFlag) {
+					// Store buffer_delay_length_minus_1 instead of just skipping
+					bufferDelayLengthMinus1 = bitstream.readBits(5);
+					bitstream.skipBits(32); // num_units_in_decoding_tick
+					bitstream.skipBits(5); // buffer_removal_time_length_minus_1
+					bitstream.skipBits(5); // frame_presentation_time_length_minus_1
+				}
+
+				// Parse operating_points_cnt_minus_1
+				const operatingPointsCntMinus1 = bitstream.readBits(5);
+
+				// For each operating point
+				for (let i = 0; i <= operatingPointsCntMinus1; i++) {
+					// operating_point_idc[i]
+					bitstream.skipBits(12);
+
+					// seq_level_idx[i]
+					const seqLevelIdx = bitstream.readBits(5);
+
+					if (i === 0) {
+						seqLevel = seqLevelIdx;
+					}
+
+					if (seqLevelIdx > 7) {
+						// seq_tier[i]
+						const seqTierTemp = bitstream.readBits(1);
+						if (i === 0) {
+							seqTier = seqTierTemp;
+						}
+					}
+
+					if (decoderModelInfoPresentFlag) {
+						// decoder_model_present_for_this_op[i]
+						const decoderModelPresentForThisOp = bitstream.readBits(1);
+
+						if (decoderModelPresentForThisOp) {
+							const n = bufferDelayLengthMinus1 + 1;
+							bitstream.skipBits(n); // decoder_buffer_delay[op]
+							bitstream.skipBits(n); // encoder_buffer_delay[op]
+							bitstream.skipBits(1); // low_delay_mode_flag[op]
+						}
+					}
+
+					// initial_display_delay_present_flag
+					const initialDisplayDelayPresentFlag = bitstream.readBits(1);
+
+					if (initialDisplayDelayPresentFlag) {
+						// initial_display_delay_minus_1[i]
+						bitstream.skipBits(4);
+					}
+				}
+			}
+
+			const highBitdepth = bitstream.readBits(1);
+
+			let bitDepth = 8;
+			if (seqProfile === 2 && highBitdepth) {
+				const twelveBit = bitstream.readBits(1);
+				bitDepth = twelveBit ? 12 : 10;
+			} else if (seqProfile <= 2) {
+				bitDepth = highBitdepth ? 10 : 8;
+			}
+
+			let monochrome = 0;
+			if (seqProfile !== 1) {
+				monochrome = bitstream.readBits(1);
+			}
+
+			let chromaSubsamplingX = 1;
+			let chromaSubsamplingY = 1;
+			let chromaSamplePosition = 0;
+
+			if (!monochrome) {
+				if (seqProfile === 0) {
+					chromaSubsamplingX = 1;
+					chromaSubsamplingY = 1;
+				} else if (seqProfile === 1) {
+					chromaSubsamplingX = 0;
+					chromaSubsamplingY = 0;
+				} else {
+					if (bitDepth === 12) {
+						chromaSubsamplingX = bitstream.readBits(1);
+						if (chromaSubsamplingX) {
+							chromaSubsamplingY = bitstream.readBits(1);
+						}
+					}
+				}
+
+				if (chromaSubsamplingX && chromaSubsamplingY) {
+					chromaSamplePosition = bitstream.readBits(2);
+				}
+			}
+
+			return {
+				profile: seqProfile,
+				level: seqLevel,
+				tier: seqTier,
+				bitDepth,
+				monochrome,
+				chromaSubsamplingX,
+				chromaSubsamplingY,
+				chromaSamplePosition,
+			};
+		}
+
+		// Move to next OBU
+		// The OBU size is in bytes, so skip that many bytes.
+		bitstream.skipBits(obuSize * 8);
+	}
+
+	return null;
+};
+
+export const parseOpusIdentificationHeader = (bytes: Uint8Array) => {
+	const view = toDataView(bytes);
+
+	const outputChannelCount = view.getUint8(9);
+	const preSkip = view.getUint16(10, true);
+	const inputSampleRate = view.getUint32(12, true);
+	const outputGain = view.getInt16(16, true);
+	const channelMappingFamily = view.getUint8(18);
+
+	let channelMappingTable: Uint8Array | null = null;
+	if (channelMappingFamily) {
+		channelMappingTable = bytes.subarray(19, 19 + 2 + outputChannelCount);
+	}
+
+	return {
+		outputChannelCount,
+		preSkip,
+		inputSampleRate,
+		outputGain,
+		channelMappingFamily,
+		channelMappingTable,
+	};
+};
+
+// From https://datatracker.ietf.org/doc/html/rfc6716, in 48 kHz samples
+const OPUS_FRAME_DURATION_TABLE = [
+	480, 960, 1920, 2880,
+	480, 960, 1920, 2880,
+	480, 960, 1920, 2880,
+	480, 960,
+	480, 960,
+	120, 240, 480, 960,
+	120, 240, 480, 960,
+	120, 240, 480, 960,
+	120, 240, 480, 960,
+];
+
+export const parseOpusTocByte = (packet: Uint8Array) => {
+	const config = packet[0]! >> 3;
+
+	return {
+		durationInSamples: OPUS_FRAME_DURATION_TABLE[config]!,
+	};
+};
+
+// Based on vorbis_parser.c from FFmpeg.
+export const parseModesFromVorbisSetupPacket = (setupHeader: Uint8Array) => {
+	// Verify that this is a Setup header.
+	if (setupHeader.length < 7) {
+		throw new Error('Setup header is too short.');
+	}
+	if (setupHeader[0] !== 5) {
+		throw new Error('Wrong packet type in Setup header.');
+	}
+	const signature = String.fromCharCode(...setupHeader.slice(1, 7));
+	if (signature !== 'vorbis') {
+		throw new Error('Invalid packet signature in Setup header.');
+	}
+
+	// Reverse the entire buffer.
+	const bufSize = setupHeader.length;
+	const revBuffer = new Uint8Array(bufSize);
+	for (let i = 0; i < bufSize; i++) {
+		revBuffer[i] = setupHeader[bufSize - 1 - i]!;
+	}
+
+	// Initialize a Bitstream on the reversed buffer.
+	const bitstream = new Bitstream(revBuffer);
+
+	// --- Find the framing bit.
+	// In FFmpeg code, we scan until get_bits1() returns 1.
+	let gotFramingBit = 0;
+	while (bitstream.getBitsLeft() > 97) {
+		if (bitstream.readBits(1) === 1) {
+			gotFramingBit = bitstream.pos;
+			break;
+		}
+	}
+	if (gotFramingBit === 0) {
+		throw new Error('Invalid Setup header: framing bit not found.');
+	}
+
+	// --- Search backwards for a valid mode header.
+	// We try to “guess” the number of modes by reading a fixed pattern.
+	let modeCount = 0;
+	let gotModeHeader = false;
+	let lastModeCount = 0;
+	while (bitstream.getBitsLeft() >= 97) {
+		const tempPos = bitstream.pos;
+		const a = bitstream.readBits(8);
+		const b = bitstream.readBits(16);
+		const c = bitstream.readBits(16);
+		// If a > 63 or b or c nonzero, assume we’ve gone too far.
+		if (a > 63 || b !== 0 || c !== 0) {
+			bitstream.pos = tempPos;
+			break;
+		}
+		bitstream.skipBits(1);
+		modeCount++;
+		if (modeCount > 64) {
+			break;
+		}
+		const bsClone = bitstream.clone();
+		const candidate = bsClone.readBits(6) + 1;
+		if (candidate === modeCount) {
+			gotModeHeader = true;
+			lastModeCount = modeCount;
+		}
+	}
+	if (!gotModeHeader) {
+		throw new Error('Invalid Setup header: mode header not found.');
+	}
+	if (lastModeCount > 63) {
+		throw new Error(`Unsupported mode count: ${lastModeCount}.`);
+	}
+	const finalModeCount = lastModeCount;
+
+	// --- Reinitialize the bitstream.
+	bitstream.pos = 0;
+	// Skip the bits up to the found framing bit.
+	bitstream.skipBits(gotFramingBit);
+
+	// --- Now read, for each mode (in reverse order), 40 bits then one bit.
+	// That one bit is the mode blockflag.
+	const modeBlockflags = Array(finalModeCount).fill(0) as	number[];
+	for (let i = finalModeCount - 1; i >= 0; i--) {
+		bitstream.skipBits(40);
+		modeBlockflags[i] = bitstream.readBits(1);
+	}
+
+	return { modeBlockflags };
 };
