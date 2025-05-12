@@ -3,7 +3,7 @@ import { Demuxer } from '../demuxer';
 import { Input } from '../input';
 import { InputAudioTrack, InputAudioTrackBacking } from '../input-track';
 import { PacketRetrievalOptions } from '../media-sink';
-import { assert, findLast, roundToPrecision, toDataView, UNDETERMINED_LANGUAGE } from '../misc';
+import { assert, AsyncMutex, findLast, roundToPrecision, toDataView, UNDETERMINED_LANGUAGE } from '../misc';
 import { EncodedPacket, PLACEHOLDER_DATA } from '../packet';
 import { Reader } from '../reader';
 import { computeOggPageCrc, extractSampleMetadata, OggCodecInfo, parseModesFromVorbisSetupPacket } from './ogg-misc';
@@ -28,6 +28,11 @@ type Packet = {
 
 export class OggDemuxer extends Demuxer {
 	reader: OggReader;
+	/**
+	 * Lots of reading operations require multiple async reads and thus need to be mutually exclusive to avoid
+	 * conflicts in reader position.
+	 */
+	readingMutex = new AsyncMutex();
 
 	metadataPromise: Promise<void> | null = null;
 	fileSize: number | null = null;
@@ -491,387 +496,409 @@ class OggAudioTrackBacking implements InputAudioTrackBacking {
 		return encodedPacket;
 	}
 
-	async getFirstPacket(options: PacketRetrievalOptions) {
-		assert(this.bitstream.lastMetadataPacket);
-		const packetPosition = await this.demuxer.findNextPacketStart(
-			this.demuxer.reader,
-			this.bitstream.lastMetadataPacket,
-		);
-		if (!packetPosition) {
-			return null;
+	async getFirstPacket(options: PacketRetrievalOptions, exclusive = true) {
+		const release = exclusive ? await this.demuxer.readingMutex.acquire() : null;
+
+		try {
+			assert(this.bitstream.lastMetadataPacket);
+			const packetPosition = await this.demuxer.findNextPacketStart(
+				this.demuxer.reader,
+				this.bitstream.lastMetadataPacket,
+			);
+			if (!packetPosition) {
+				return null;
+			}
+
+			let timestampInSamples = 0;
+			if (this.bitstream.codecInfo.codec === 'opus') {
+				assert(this.bitstream.codecInfo.opusInfo);
+				timestampInSamples -= this.bitstream.codecInfo.opusInfo.preSkip;
+			}
+
+			const packet = await this.demuxer.readPacket(
+				this.demuxer.reader,
+				packetPosition.startPage,
+				packetPosition.startSegmentIndex,
+			);
+
+			return this.createEncodedPacketFromOggPacket(
+				packet,
+				{
+					timestampInSamples,
+					vorbisLastBlocksize: null,
+				},
+				options,
+			);
+		} finally {
+			release?.();
 		}
-
-		let timestampInSamples = 0;
-		if (this.bitstream.codecInfo.codec === 'opus') {
-			assert(this.bitstream.codecInfo.opusInfo);
-			timestampInSamples -= this.bitstream.codecInfo.opusInfo.preSkip;
-		}
-
-		const packet = await this.demuxer.readPacket(
-			this.demuxer.reader,
-			packetPosition.startPage,
-			packetPosition.startSegmentIndex,
-		);
-
-		return this.createEncodedPacketFromOggPacket(
-			packet,
-			{
-				timestampInSamples,
-				vorbisLastBlocksize: null,
-			},
-			options,
-		);
 	}
 
 	async getNextPacket(prevPacket: EncodedPacket, options: PacketRetrievalOptions) {
-		const prevMetadata = this.encodedPacketToMetadata.get(prevPacket);
-		if (!prevMetadata) {
-			throw new Error('Packet was not created from this track.');
+		const release = await this.demuxer.readingMutex.acquire();
+
+		try {
+			const prevMetadata = this.encodedPacketToMetadata.get(prevPacket);
+			if (!prevMetadata) {
+				throw new Error('Packet was not created from this track.');
+			}
+
+			const packetPosition = await this.demuxer.findNextPacketStart(this.demuxer.reader, prevMetadata.packet);
+			if (!packetPosition) {
+				return null;
+			}
+
+			const timestampInSamples = prevMetadata.timestampInSamples + prevMetadata.durationInSamples;
+
+			const packet = await this.demuxer.readPacket(
+				this.demuxer.reader,
+				packetPosition.startPage,
+				packetPosition.startSegmentIndex,
+			);
+
+			return this.createEncodedPacketFromOggPacket(
+				packet,
+				{
+					timestampInSamples,
+					vorbisLastBlocksize: prevMetadata.vorbisBlockSize,
+				},
+				options,
+			);
+		} finally {
+			release();
 		}
-
-		const packetPosition = await this.demuxer.findNextPacketStart(this.demuxer.reader, prevMetadata.packet);
-		if (!packetPosition) {
-			return null;
-		}
-
-		const timestampInSamples = prevMetadata.timestampInSamples + prevMetadata.durationInSamples;
-
-		const packet = await this.demuxer.readPacket(
-			this.demuxer.reader,
-			packetPosition.startPage,
-			packetPosition.startSegmentIndex,
-		);
-
-		return this.createEncodedPacketFromOggPacket(
-			packet,
-			{
-				timestampInSamples,
-				vorbisLastBlocksize: prevMetadata.vorbisBlockSize,
-			},
-			options,
-		);
 	}
 
 	async getPacket(timestamp: number, options: PacketRetrievalOptions) {
-		assert(this.demuxer.fileSize !== null);
+		const release = await this.demuxer.readingMutex.acquire();
 
-		const timestampInSamples = roundToPrecision(timestamp * this.internalSampleRate, 14);
-		if (timestampInSamples === 0) {
-			// Fast path for timestamp 0 - avoids binary search when playing back from the start
-			return this.getFirstPacket(options);
-		}
-		if (timestampInSamples < 0) {
-			// There's nothing here
-			return null;
-		}
+		try {
+			assert(this.demuxer.fileSize !== null);
 
-		const reader = this.demuxer.reader;
+			const timestampInSamples = roundToPrecision(timestamp * this.internalSampleRate, 14);
+			if (timestampInSamples === 0) {
+				// Fast path for timestamp 0 - avoids binary search when playing back from the start
+				return this.getFirstPacket(options, false);
+			}
+			if (timestampInSamples < 0) {
+				// There's nothing here
+				return null;
+			}
 
-		assert(this.bitstream.lastMetadataPacket);
-		const startPosition = await this.demuxer.findNextPacketStart(
-			reader,
-			this.bitstream.lastMetadataPacket,
-		);
-		if (!startPosition) {
-			return null;
-		}
+			const reader = this.demuxer.reader;
 
-		let lowPage = startPosition.startPage;
-		let high = this.demuxer.fileSize;
+			assert(this.bitstream.lastMetadataPacket);
+			const startPosition = await this.demuxer.findNextPacketStart(
+				reader,
+				this.bitstream.lastMetadataPacket,
+			);
+			if (!startPosition) {
+				return null;
+			}
 
-		const lowPages: Page[] = [lowPage];
+			let lowPage = startPosition.startPage;
+			let high = this.demuxer.fileSize;
 
-		// First, let's perform a binary serach (bisection search) on the file to find the approximate page where we'll
-		// find the packet. We want to find a page whose end packet position is less than or equal to the
-		// packet position we're searching for.
+			const lowPages: Page[] = [lowPage];
 
-		// Outer loop: Does the binary serach
-		outer:
-		while (lowPage.headerStartPos + lowPage.totalSize < high) {
-			const low = lowPage.headerStartPos;
-			const mid = Math.floor((low + high) / 2);
+			// First, let's perform a binary serach (bisection search) on the file to find the approximate page where
+			// we'll find the packet. We want to find a page whose end packet position is less than or equal to the
+			// packet position we're searching for.
 
-			let searchStartPos = mid;
+			// Outer loop: Does the binary serach
+			outer:
+			while (lowPage.headerStartPos + lowPage.totalSize < high) {
+				const low = lowPage.headerStartPos;
+				const mid = Math.floor((low + high) / 2);
 
-			// Inner loop: Does a linear forward scan if the page cannot be found immediately
-			while (true) {
-				const until = Math.min(
-					searchStartPos + MAX_PAGE_SIZE,
-					high - MIN_PAGE_HEADER_SIZE,
-				);
+				let searchStartPos = mid;
 
-				await reader.reader.loadRange(searchStartPos, until);
+				// Inner loop: Does a linear forward scan if the page cannot be found immediately
+				while (true) {
+					const until = Math.min(
+						searchStartPos + MAX_PAGE_SIZE,
+						high - MIN_PAGE_HEADER_SIZE,
+					);
 
-				reader.pos = searchStartPos;
-				const found = reader.findNextPageHeader(until);
+					await reader.reader.loadRange(searchStartPos, until);
 
-				if (!found) {
-					high = mid + MIN_PAGE_HEADER_SIZE;
+					reader.pos = searchStartPos;
+					const found = reader.findNextPageHeader(until);
+
+					if (!found) {
+						high = mid + MIN_PAGE_HEADER_SIZE;
+						continue outer;
+					}
+
+					await reader.reader.loadRange(reader.pos, reader.pos + MAX_PAGE_HEADER_SIZE);
+					const page = reader.readPageHeader();
+					assert(page);
+
+					let pageValid = false;
+					if (page.serialNumber === this.bitstream.serialNumber) {
+						// Serial numbers are basically random numbers, and the chance of finding a fake page with
+						// matching serial number is astronomically low, so we can be pretty sure this page is legit.
+						pageValid = true;
+					} else {
+						await reader.reader.loadRange(page.headerStartPos, page.headerStartPos + page.totalSize);
+
+						// Validate the page by checking checksum
+						reader.pos = page.headerStartPos;
+						const bytes = reader.readBytes(page.totalSize);
+						const crc = computeOggPageCrc(bytes);
+
+						pageValid = crc === page.checksum;
+					}
+
+					if (!pageValid) {
+						// Keep searching for a valid page
+						searchStartPos = page.headerStartPos + 4; // 'OggS' is 4 bytes
+						continue;
+					}
+
+					if (pageValid && page.serialNumber !== this.bitstream.serialNumber) {
+						// Page is valid but from a different bitstream, so keep searching forward until we find one
+						// belonging to the our bitstream
+						searchStartPos = page.headerStartPos + page.totalSize;
+						continue;
+					}
+
+					const isContinuationPage = page.granulePosition === -1;
+					if (isContinuationPage) {
+						// No packet ends on this page - keep looking
+						searchStartPos = page.headerStartPos + page.totalSize;
+						continue;
+					}
+
+					// The page is valid and belongs to our bitstream; let's check its granule position to see where we
+					// need to take the bisection search.
+					if (this.granulePositionToTimestampInSamples(page.granulePosition) > timestampInSamples) {
+						high = page.headerStartPos;
+					} else {
+						lowPage = page;
+						lowPages.push(page);
+					}
+
 					continue outer;
 				}
-
-				await reader.reader.loadRange(reader.pos, reader.pos + MAX_PAGE_HEADER_SIZE);
-				const page = reader.readPageHeader();
-				assert(page);
-
-				let pageValid = false;
-				if (page.serialNumber === this.bitstream.serialNumber) {
-					// Serial numbers are basically random numbers, and the chance of finding a fake page with matching
-					// serial number is astronomically low, so we can be pretty sure this page is legit.
-					pageValid = true;
-				} else {
-					await reader.reader.loadRange(page.headerStartPos, page.headerStartPos + page.totalSize);
-
-					// Validate the page by checking checksum
-					reader.pos = page.headerStartPos;
-					const bytes = reader.readBytes(page.totalSize);
-					const crc = computeOggPageCrc(bytes);
-
-					pageValid = crc === page.checksum;
-				}
-
-				if (!pageValid) {
-					// Keep searching for a valid page
-					searchStartPos = page.headerStartPos + 4; // 'OggS' is 4 bytes
-					continue;
-				}
-
-				if (pageValid && page.serialNumber !== this.bitstream.serialNumber) {
-					// Page is valid but from a different bitstream, so keep searching forward until we find one
-					// belonging to the our bitstream
-					searchStartPos = page.headerStartPos + page.totalSize;
-					continue;
-				}
-
-				const isContinuationPage = page.granulePosition === -1;
-				if (isContinuationPage) {
-					// No packet ends on this page - keep looking
-					searchStartPos = page.headerStartPos + page.totalSize;
-					continue;
-				}
-
-				// The page is valid and belongs to our bitstream; let's check its granule position to see where we need
-				// to take the bisection search.
-				if (this.granulePositionToTimestampInSamples(page.granulePosition) > timestampInSamples) {
-					high = page.headerStartPos;
-				} else {
-					lowPage = page;
-					lowPages.push(page);
-				}
-
-				continue outer;
-			}
-		}
-
-		// Now we have the last page with a packet position <= the packet position we're looking for, but there might
-		// be multiple pages with the packet position, in which case we actually need to find the first of such pages.
-		// We'll do this in two steps: First, let's find the latest page we know with an earlier packet position, and
-		// then linear scan ourselves forward until we find the correct page.
-
-		let lowerPage = startPosition.startPage;
-		for (const otherLowPage of lowPages) {
-			if (otherLowPage.granulePosition === lowPage.granulePosition) {
-				break;
 			}
 
-			if (!lowerPage || otherLowPage.headerStartPos > lowerPage.headerStartPos) {
-				lowerPage = otherLowPage;
-			}
-		}
+			// Now we have the last page with a packet position <= the packet position we're looking for, but there
+			// might be multiple pages with the packet position, in which case we actually need to find the first of
+			// such pages. We'll do this in two steps: First, let's find the latest page we know with an earlier packet
+			// position, and then linear scan ourselves forward until we find the correct page.
 
-		let currentPage: Page | null = lowerPage;
-		// Keep track of the pages we traversed, we need these later for backwards seeking
-		const previousPages: Page[] = [currentPage];
-
-		while (true) {
-			// This loop must terminate as we'll eventually reach lowPage
-			if (
-				currentPage.serialNumber === this.bitstream.serialNumber
-				&& currentPage.granulePosition === lowPage.granulePosition
-			) {
-				break;
-			}
-
-			reader.pos = currentPage.headerStartPos + currentPage.totalSize;
-			await reader.reader.loadRange(reader.pos, reader.pos + MAX_PAGE_HEADER_SIZE);
-
-			const nextPage = reader.readPageHeader();
-			assert(nextPage);
-
-			currentPage = nextPage;
-
-			if (currentPage.serialNumber === this.bitstream.serialNumber) {
-				previousPages.push(currentPage);
-			}
-		}
-
-		assert(currentPage.granulePosition !== -1);
-
-		let currentSegmentIndex: number | null = null;
-		let currentTimestampInSamples: number;
-		let currentTimestampIsCorrect: boolean;
-
-		// These indicate the end position of the packet that the granule position belongs to
-		let endPage = currentPage;
-		let endSegmentIndex = 0;
-
-		if (currentPage.headerStartPos === startPosition.startPage.headerStartPos) {
-			currentTimestampInSamples = this.granulePositionToTimestampInSamples(0);
-			currentTimestampIsCorrect = true;
-			currentSegmentIndex = 0;
-		} else {
-			currentTimestampInSamples = 0; // Placeholder value! We'll refine it once we can
-			currentTimestampIsCorrect = false;
-
-			// Find the segment index of the next packet
-			for (let i = currentPage.lacingValues.length - 1; i >= 0; i--) {
-				const value = currentPage.lacingValues[i]!;
-				if (value < 255) {
-					// We know the last packet ended at i, so the next one starts at i + 1
-					currentSegmentIndex = i + 1;
+			let lowerPage = startPosition.startPage;
+			for (const otherLowPage of lowPages) {
+				if (otherLowPage.granulePosition === lowPage.granulePosition) {
 					break;
 				}
-			}
 
-			// This must hold: Since this page has a granule position set, that means there must be a packet that ends
-			// in this page.
-			if (currentSegmentIndex === null) {
-				throw new Error('Invalid page with granule position: no packets end on this page.');
-			}
-
-			endSegmentIndex = currentSegmentIndex - 1;
-			const pseudopacket: Packet = {
-				data: PLACEHOLDER_DATA,
-				endPage,
-				endSegmentIndex,
-			};
-			const nextPosition = await this.demuxer.findNextPacketStart(reader, pseudopacket);
-
-			if (nextPosition) {
-				// Let's rewind a single step (packet) - this previous packet ensures that we'll correctly compute the
-				// duration for the packet we're looking for.
-				const endPosition = findPreviousPacketEndPosition(previousPages, currentPage, currentSegmentIndex);
-				assert(endPosition);
-
-				const startPosition = findPacketStartPosition(
-					previousPages, endPosition.page, endPosition.segmentIndex,
-				);
-				if (startPosition) {
-					currentPage = startPosition.page;
-					currentSegmentIndex = startPosition.segmentIndex;
+				if (!lowerPage || otherLowPage.headerStartPos > lowerPage.headerStartPos) {
+					lowerPage = otherLowPage;
 				}
+			}
+
+			let currentPage: Page | null = lowerPage;
+			// Keep track of the pages we traversed, we need these later for backwards seeking
+			const previousPages: Page[] = [currentPage];
+
+			while (true) {
+				// This loop must terminate as we'll eventually reach lowPage
+				if (
+					currentPage.serialNumber === this.bitstream.serialNumber
+					&& currentPage.granulePosition === lowPage.granulePosition
+				) {
+					break;
+				}
+
+				reader.pos = currentPage.headerStartPos + currentPage.totalSize;
+				await reader.reader.loadRange(reader.pos, reader.pos + MAX_PAGE_HEADER_SIZE);
+
+				const nextPage = reader.readPageHeader();
+				assert(nextPage);
+
+				currentPage = nextPage;
+
+				if (currentPage.serialNumber === this.bitstream.serialNumber) {
+					previousPages.push(currentPage);
+				}
+			}
+
+			assert(currentPage.granulePosition !== -1);
+
+			let currentSegmentIndex: number | null = null;
+			let currentTimestampInSamples: number;
+			let currentTimestampIsCorrect: boolean;
+
+			// These indicate the end position of the packet that the granule position belongs to
+			let endPage = currentPage;
+			let endSegmentIndex = 0;
+
+			if (currentPage.headerStartPos === startPosition.startPage.headerStartPos) {
+				currentTimestampInSamples = this.granulePositionToTimestampInSamples(0);
+				currentTimestampIsCorrect = true;
+				currentSegmentIndex = 0;
 			} else {
-				// There is no next position, which means we're looking for the last packet in the bitstream. The
-				// granule position on the last page tends to be fucky, so let's instead start the search on the page
-				// before that. So let's loop until we find a packet that ends in a previous page.
-				while (true) {
-					const endPosition = findPreviousPacketEndPosition(previousPages, currentPage, currentSegmentIndex);
-					if (!endPosition) {
+				currentTimestampInSamples = 0; // Placeholder value! We'll refine it once we can
+				currentTimestampIsCorrect = false;
+
+				// Find the segment index of the next packet
+				for (let i = currentPage.lacingValues.length - 1; i >= 0; i--) {
+					const value = currentPage.lacingValues[i]!;
+					if (value < 255) {
+						// We know the last packet ended at i, so the next one starts at i + 1
+						currentSegmentIndex = i + 1;
 						break;
 					}
+				}
+
+				// This must hold: Since this page has a granule position set, that means there must be a packet that
+				// ends in this page.
+				if (currentSegmentIndex === null) {
+					throw new Error('Invalid page with granule position: no packets end on this page.');
+				}
+
+				endSegmentIndex = currentSegmentIndex - 1;
+				const pseudopacket: Packet = {
+					data: PLACEHOLDER_DATA,
+					endPage,
+					endSegmentIndex,
+				};
+				const nextPosition = await this.demuxer.findNextPacketStart(reader, pseudopacket);
+
+				if (nextPosition) {
+					// Let's rewind a single step (packet) - this previous packet ensures that we'll correctly compute
+					// the duration for the packet we're looking for.
+					const endPosition = findPreviousPacketEndPosition(previousPages, currentPage, currentSegmentIndex);
+					assert(endPosition);
 
 					const startPosition = findPacketStartPosition(
 						previousPages, endPosition.page, endPosition.segmentIndex,
 					);
-					if (!startPosition) {
-						break;
+					if (startPosition) {
+						currentPage = startPosition.page;
+						currentSegmentIndex = startPosition.segmentIndex;
 					}
+				} else {
+					// There is no next position, which means we're looking for the last packet in the bitstream. The
+					// granule position on the last page tends to be fucky, so let's instead start the search on the
+					// page before that. So let's loop until we find a packet that ends in a previous page.
+					while (true) {
+						const endPosition = findPreviousPacketEndPosition(
+							previousPages, currentPage, currentSegmentIndex,
+						);
+						if (!endPosition) {
+							break;
+						}
 
-					currentPage = startPosition.page;
-					currentSegmentIndex = startPosition.segmentIndex;
+						const startPosition = findPacketStartPosition(
+							previousPages, endPosition.page, endPosition.segmentIndex,
+						);
+						if (!startPosition) {
+							break;
+						}
 
-					if (endPosition.page.headerStartPos !== endPage.headerStartPos) {
-						endPage = endPosition.page;
-						endSegmentIndex = endPosition.segmentIndex;
-						break;
+						currentPage = startPosition.page;
+						currentSegmentIndex = startPosition.segmentIndex;
+
+						if (endPosition.page.headerStartPos !== endPage.headerStartPos) {
+							endPage = endPosition.page;
+							endSegmentIndex = endPosition.segmentIndex;
+							break;
+						}
 					}
 				}
 			}
-		}
 
-		let lastEncodedPacket: EncodedPacket | null = null;
-		let lastEncodedPacketMetadata: EncodedPacketMetadata | null = null;
+			let lastEncodedPacket: EncodedPacket | null = null;
+			let lastEncodedPacketMetadata: EncodedPacketMetadata | null = null;
 
-		// Alright, now it's time for the final, granular seek: We keep iterating over packets until we've found the one
-		// with the correct timestamp - i.e., the last one with a timestamp <= the timestamp we're looking for.
-		while (currentPage !== null) {
-			assert(currentSegmentIndex !== null);
+			// Alright, now it's time for the final, granular seek: We keep iterating over packets until we've found the
+			// one with the correct timestamp - i.e., the last one with a timestamp <= the timestamp we're looking for.
+			while (currentPage !== null) {
+				assert(currentSegmentIndex !== null);
 
-			const packet = await this.demuxer.readPacket(reader, currentPage, currentSegmentIndex);
-			if (!packet) {
-				break;
-			}
+				const packet = await this.demuxer.readPacket(reader, currentPage, currentSegmentIndex);
+				if (!packet) {
+					break;
+				}
 
-			// We might need to skip the packet if it's a metadata one
-			const skipPacket = currentPage.headerStartPos === startPosition.startPage.headerStartPos
-				&& currentSegmentIndex < startPosition.startSegmentIndex;
+				// We might need to skip the packet if it's a metadata one
+				const skipPacket = currentPage.headerStartPos === startPosition.startPage.headerStartPos
+					&& currentSegmentIndex < startPosition.startSegmentIndex;
 
-			if (!skipPacket) {
-				let encodedPacket = this.createEncodedPacketFromOggPacket(
-					packet,
-					{
-						timestampInSamples: currentTimestampInSamples,
-						vorbisLastBlocksize: lastEncodedPacketMetadata?.vorbisBlockSize ?? null,
-					},
-					options,
-				);
-				assert(encodedPacket);
-
-				let encodedPacketMetadata = this.encodedPacketToMetadata.get(encodedPacket);
-				assert(encodedPacketMetadata);
-
-				if (
-					!currentTimestampIsCorrect
-					&& packet.endPage.headerStartPos === endPage.headerStartPos
-					&& packet.endSegmentIndex === endSegmentIndex
-				) {
-					// We know this packet end timestamp can be derived from the page's granule position
-					currentTimestampInSamples = this.granulePositionToTimestampInSamples(currentPage.granulePosition);
-					currentTimestampIsCorrect = true;
-
-					// Let's backpatch the packet we just created with the correct timestamp
-					encodedPacket = this.createEncodedPacketFromOggPacket(
+				if (!skipPacket) {
+					let encodedPacket = this.createEncodedPacketFromOggPacket(
 						packet,
 						{
-							timestampInSamples: currentTimestampInSamples - encodedPacketMetadata.durationInSamples,
+							timestampInSamples: currentTimestampInSamples,
 							vorbisLastBlocksize: lastEncodedPacketMetadata?.vorbisBlockSize ?? null,
 						},
 						options,
 					);
 					assert(encodedPacket);
 
-					encodedPacketMetadata = this.encodedPacketToMetadata.get(encodedPacket);
+					let encodedPacketMetadata = this.encodedPacketToMetadata.get(encodedPacket);
 					assert(encodedPacketMetadata);
-				} else {
-					currentTimestampInSamples += encodedPacketMetadata.durationInSamples;
+
+					if (
+						!currentTimestampIsCorrect
+						&& packet.endPage.headerStartPos === endPage.headerStartPos
+						&& packet.endSegmentIndex === endSegmentIndex
+					) {
+						// We know this packet end timestamp can be derived from the page's granule position
+						currentTimestampInSamples = this.granulePositionToTimestampInSamples(
+							currentPage.granulePosition,
+						);
+						currentTimestampIsCorrect = true;
+
+						// Let's backpatch the packet we just created with the correct timestamp
+						encodedPacket = this.createEncodedPacketFromOggPacket(
+							packet,
+							{
+								timestampInSamples: currentTimestampInSamples - encodedPacketMetadata.durationInSamples,
+								vorbisLastBlocksize: lastEncodedPacketMetadata?.vorbisBlockSize ?? null,
+							},
+							options,
+						);
+						assert(encodedPacket);
+
+						encodedPacketMetadata = this.encodedPacketToMetadata.get(encodedPacket);
+						assert(encodedPacketMetadata);
+					} else {
+						currentTimestampInSamples += encodedPacketMetadata.durationInSamples;
+					}
+
+					lastEncodedPacket = encodedPacket;
+					lastEncodedPacketMetadata = encodedPacketMetadata;
+
+					if (
+						currentTimestampIsCorrect
+						&& (
+							// Next timestamp will be too late
+							Math.max(currentTimestampInSamples, 0) > timestampInSamples
+							// This timestamp already matches
+							|| Math.max(encodedPacketMetadata.timestampInSamples, 0) === timestampInSamples
+						)
+					) {
+						break;
+					}
 				}
 
-				lastEncodedPacket = encodedPacket;
-				lastEncodedPacketMetadata = encodedPacketMetadata;
-
-				if (
-					currentTimestampIsCorrect
-					&& (
-						// Next timestamp will be too late
-						Math.max(currentTimestampInSamples, 0) > timestampInSamples
-						// This timestamp already matches
-						|| Math.max(encodedPacketMetadata.timestampInSamples, 0) === timestampInSamples
-					)
-				) {
+				const nextPosition = await this.demuxer.findNextPacketStart(reader, packet);
+				if (!nextPosition) {
 					break;
 				}
+
+				currentPage = nextPosition.startPage;
+				currentSegmentIndex = nextPosition.startSegmentIndex;
 			}
 
-			const nextPosition = await this.demuxer.findNextPacketStart(reader, packet);
-			if (!nextPosition) {
-				break;
-			}
-
-			currentPage = nextPosition.startPage;
-			currentSegmentIndex = nextPosition.startSegmentIndex;
+			return lastEncodedPacket;
+		} finally {
+			release();
 		}
-
-		return lastEncodedPacket;
 	}
 
 	getKeyPacket(timestamp: number, options: PacketRetrievalOptions) {
