@@ -1,4 +1,4 @@
-import { AvcDecoderConfigurationRecord } from '../avc';
+import { AvcDecoderConfigurationRecord, HevcDecoderConfigurationRecord } from '../avc';
 import {
 	AacCodecInfo,
 	AudioCodec,
@@ -75,6 +75,7 @@ type InternalTrack = {
 		codecDescription: Uint8Array | null;
 		colorSpace: VideoColorSpaceInit | null;
 		avcCodecInfo: AvcDecoderConfigurationRecord | null;
+		hevcCodecInfo: HevcDecoderConfigurationRecord | null;
 		vp9CodecInfo: Vp9CodecInfo | null;
 		av1CodecInfo: Av1CodecInfo | null;
 	};
@@ -762,6 +763,7 @@ export class IsobmffDemuxer extends Demuxer {
 						codecDescription: null,
 						colorSpace: null,
 						avcCodecInfo: null,
+						hevcCodecInfo: null,
 						vp9CodecInfo: null,
 						av1CodecInfo: null,
 					};

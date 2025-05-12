@@ -1,4 +1,8 @@
-import { extractAvcDecoderConfigurationRecord } from '../avc';
+import {
+	extractAvcDecoderConfigurationRecord,
+	extractHevcDecoderConfigurationRecord,
+	serializeHevcDecoderConfigurationRecord,
+} from '../avc';
 import {
 	AacCodecInfo,
 	AudioCodec,
@@ -1552,7 +1556,9 @@ class MatroskaVideoTrackBacking extends MatroskaTrackBacking implements InputVid
 				= this.internalTrack.info.codec === 'vp9'
 					|| this.internalTrack.info.codec === 'av1'
 					// Packets are in Annex B format:
-					|| (this.internalTrack.info.codec === 'avc' && !this.internalTrack.info.codecDescription);
+					|| (this.internalTrack.info.codec === 'avc' && !this.internalTrack.info.codecDescription)
+					// Packets are in Annex B format:
+					|| (this.internalTrack.info.codec === 'hevc' && !this.internalTrack.info.codecDescription);
 
 			if (needsPacketForAdditionalInfo) {
 				firstPacket = await this.getFirstPacket({});
@@ -1567,6 +1573,9 @@ class MatroskaVideoTrackBacking extends MatroskaTrackBacking implements InputVid
 					colorSpace: this.internalTrack.info.colorSpace,
 					avcCodecInfo: this.internalTrack.info.codec === 'avc' && firstPacket
 						? extractAvcDecoderConfigurationRecord(firstPacket.data)
+						: null,
+					hevcCodecInfo: this.internalTrack.info.codec === 'hevc' && firstPacket
+						? extractHevcDecoderConfigurationRecord(firstPacket.data)
 						: null,
 					vp9CodecInfo: this.internalTrack.info.codec === 'vp9' && firstPacket
 						? extractVp9CodecInfoFromFrame(firstPacket.data)

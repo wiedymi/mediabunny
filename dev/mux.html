@@ -44,6 +44,7 @@
 	format = new Metamuxer.Mp4OutputFormat({ fastStart: 'fragmented', minimumFragmentDuration: 2 });
 	format = new Metamuxer.MkvOutputFormat({ minimumClusterDuration: 2 });
 	format = new Metamuxer.WavOutputFormat();
+	format = new Metamuxer.MkvOutputFormat();
 	let target = new Metamuxer.BufferTarget();
 
 	/*
@@ -58,6 +59,7 @@
 
 	let output = new Metamuxer.Output({ format, target });
 
+	/*
 	let sourcy = new Metamuxer.AudioBufferSource({
 		codec: 'pcm-s16',
 		bitrate: Metamuxer.QUALITY_HIGH
@@ -81,6 +83,7 @@
 	await output.finalize();
 
 	await new Promise(() => {});
+	*/
 
 	/*
 	let videoSource = new Metamuxer.EncodedVideoChunkSource('avc');
@@ -112,8 +115,8 @@
 	*/
 
 	let videoSource = new Metamuxer.CanvasSource(canvas, {
-		codec: 'avc',
-		fullCodecString: 'avc1.42001f',
+		codec: 'hevc',
+		//fullCodecString: 'avc1.42001f',
 		bitrate: 1e6
 	});
 	let audioSource = new Metamuxer.AudioBufferSource({
@@ -190,7 +193,7 @@ Testing... <00:17.350>One... <00:18.125>Two...
 		context.fillStyle = ['red', 'green', 'blue', 'yellow'][i % 4];
 		context.fillRect(canvas.width * Math.random(), canvas.height * Math.random(), canvas.width * Math.random(), canvas.height * Math.random());
 
-		await videoSource.add(i / 10, 1 / 10, { keyFrame: true });
+		await videoSource.add(i / 10, 1 / 10);
 	}
 
 	let audioContext = new AudioContext();
@@ -203,5 +206,5 @@ Testing... <00:17.350>One... <00:18.125>Two...
 	await output.finalize();
 
 	console.log(target);
-	//download(new Blob([target.buffer]), 'test' + format.fileExtension);
+	download(new Blob([target.buffer]), 'test' + format.fileExtension);
 </script>

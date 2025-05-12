@@ -104,6 +104,15 @@ export const readExpGolomb = (bitstream: Bitstream) => {
 	return result;
 };
 
+/** Reads a signed exponential-Golomb universal code from a Bitstream. */
+export const readSignedExpGolomb = (bitstream: Bitstream) => {
+	const codeNum = readExpGolomb(bitstream);
+
+	return ((codeNum & 1) === 0)
+		? -(codeNum >> 1)
+		: ((codeNum + 1) >> 1);
+};
+
 export const writeBits = (bytes: Uint8Array, start: number, end: number, value: number) => {
 	for (let i = start; i < end; i++) {
 		const byteIndex = Math.floor(i / 8);

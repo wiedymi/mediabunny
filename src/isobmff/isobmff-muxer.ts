@@ -17,8 +17,10 @@ import { BufferTarget } from '../target';
 import { EncodedPacket, PacketType } from '../packet';
 import {
 	extractAvcDecoderConfigurationRecord,
+	extractHevcDecoderConfigurationRecord,
 	serializeAvcDecoderConfigurationRecord,
-	transformAnnexBToAvcc,
+	serializeHevcDecoderConfigurationRecord,
+	transformAnnexBToLengthPrefixed,
 } from '../avc';
 
 export const GLOBAL_TIMESCALE = 1000;
@@ -67,10 +69,11 @@ export type IsobmffTrackData = {
 		height: number;
 		decoderConfig: VideoDecoderConfig;
 		/**
-		 * The "AVC transformation" involves converting the raw AVC packet data from Annex B to AVCC format.
+		 * The "Annex B transformation" involves converting the raw packet data from Annex B to
+		 * "MP4" (length-prefixed) format.
 		 * https://stackoverflow.com/questions/24884827
 		 */
-		requiresAvcTransformation: boolean;
+		requiresAnnexBTransformation: boolean;
 	};
 } | {
 	track: OutputAudioTrack;
@@ -208,7 +211,7 @@ export class IsobmffMuxer extends Muxer {
 		assert(decoderConfig.codedWidth !== undefined);
 		assert(decoderConfig.codedHeight !== undefined);
 
-		let requiresAvcTransformation = false;
+		let requiresAnnexBTransformation = false;
 
 		if (track.source._codec === 'avc' && !decoderConfig.description) {
 			// ISOBMFF can only hold AVC in the AVCC format, not in Annex B, but the missing description indicates
@@ -225,7 +228,23 @@ export class IsobmffMuxer extends Muxer {
 			}
 
 			decoderConfig.description = serializeAvcDecoderConfigurationRecord(decoderConfigurationRecord);
-			requiresAvcTransformation = true;
+			requiresAnnexBTransformation = true;
+		} else if (track.source._codec === 'hevc' && !decoderConfig.description) {
+			// ISOBMFF can only hold HEVC in the HEVC format, not in Annex B, but the missing description indicates
+			// Annex B. This means we'll need to do some converterino.
+
+			const decoderConfigurationRecord = extractHevcDecoderConfigurationRecord(packet.data);
+			if (!decoderConfigurationRecord) {
+				throw new Error(
+					'Couldn\'t extract an HEVCDecoderConfigurationRecord from the HEVC packet. Make sure the packets'
+					+ ' are in Annex B format (as specified in ITU-T-REC-H.265) when not providing a description, or'
+					+ ' provide a description (must be an HEVCDecoderConfigurationRecord as specified in ISO 14496-15)'
+					+ ' and ensure the packets are in HEVC format.',
+				);
+			}
+
+			decoderConfig.description = serializeHevcDecoderConfigurationRecord(decoderConfigurationRecord);
+			requiresAnnexBTransformation = true;
 		}
 
 		// The frame rate set by the user may not be an integer. Since timescale is an integer, we'll approximate the
@@ -240,7 +259,7 @@ export class IsobmffMuxer extends Muxer {
 				width: decoderConfig.codedWidth,
 				height: decoderConfig.codedHeight,
 				decoderConfig: decoderConfig,
-				requiresAvcTransformation,
+				requiresAnnexBTransformation,
 			},
 			timescale,
 			samples: [],
@@ -350,12 +369,12 @@ export class IsobmffMuxer extends Muxer {
 			const trackData = this.getVideoTrackData(track, packet, meta);
 
 			let packetData = packet.data;
-			if (trackData.info.requiresAvcTransformation) {
-				const transformedData = transformAnnexBToAvcc(packetData);
+			if (trackData.info.requiresAnnexBTransformation) {
+				const transformedData = transformAnnexBToLengthPrefixed(packetData);
 				if (!transformedData) {
 					throw new Error(
 						'Failed to transform packet data. Make sure all packets are provided in Annex B format, as'
-						+ ' specified in ITU-T-REC-H.264.',
+						+ ' specified in ITU-T-REC-H.264 and ITU-T-REC-H.265.',
 					);
 				}
 

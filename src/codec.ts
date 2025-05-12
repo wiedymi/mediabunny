@@ -1,4 +1,4 @@
-import { AvcDecoderConfigurationRecord } from './avc';
+import { AvcDecoderConfigurationRecord, HevcDecoderConfigurationRecord } from './avc';
 import { customAudioEncoders, customVideoEncoders } from './custom-coder';
 import {
 	Bitstream,
@@ -337,10 +337,11 @@ export const extractVideoCodecString = (trackInfo: {
 	codecDescription: Uint8Array | null;
 	colorSpace: VideoColorSpaceInit | null;
 	avcCodecInfo: AvcDecoderConfigurationRecord | null;
+	hevcCodecInfo: HevcDecoderConfigurationRecord | null;
 	vp9CodecInfo: Vp9CodecInfo | null;
 	av1CodecInfo: Av1CodecInfo | null;
 }) => {
-	const { codec, codecDescription: description, colorSpace, avcCodecInfo, vp9CodecInfo, av1CodecInfo } = trackInfo;
+	const { codec, codecDescription, colorSpace, avcCodecInfo, hevcCodecInfo, vp9CodecInfo, av1CodecInfo } = trackInfo;
 
 	if (codec === 'avc') {
 		if (avcCodecInfo) {
@@ -353,52 +354,63 @@ export const extractVideoCodecString = (trackInfo: {
 			return `avc1.${bytesToHexString(bytes)}`;
 		}
 
-		if (!description || description.byteLength < 4) {
+		if (!codecDescription || codecDescription.byteLength < 4) {
 			throw new TypeError('AVC decoder description is not provided or is not at least 4 bytes long.');
 		}
 
-		return `avc1.${bytesToHexString(description.subarray(1, 4))}`;
+		return `avc1.${bytesToHexString(codecDescription.subarray(1, 4))}`;
 	} else if (codec === 'hevc') {
-		if (!description) {
-			throw new TypeError('HEVC decoder description is not provided.');
+		let generalProfileSpace: number;
+		let generalProfileIdc: number;
+		let compatibilityFlags: number;
+		let generalTierFlag: number;
+		let generalLevelIdc: number;
+		let constraintFlags: number[];
+
+		if (hevcCodecInfo) {
+			generalProfileSpace = hevcCodecInfo.generalProfileSpace;
+			generalProfileIdc = hevcCodecInfo.generalProfileIdc;
+			compatibilityFlags = reverseBitsU32(hevcCodecInfo.generalProfileCompatibilityFlags);
+			generalTierFlag = hevcCodecInfo.generalTierFlag;
+			generalLevelIdc = hevcCodecInfo.generalLevelIdc;
+			constraintFlags = [...hevcCodecInfo.generalConstraintIndicatorFlags];
+		} else {
+			if (!codecDescription || codecDescription.byteLength < 23) {
+				throw new TypeError('HEVC decoder description is not provided or is not at least 23 bytes long.');
+			}
+
+			const view = toDataView(codecDescription);
+			const profileByte = view.getUint8(1);
+
+			generalProfileSpace = (profileByte >> 6) & 0x03;
+			generalProfileIdc = profileByte & 0x1F;
+			compatibilityFlags = reverseBitsU32(view.getUint32(2));
+			generalTierFlag = (profileByte >> 5) & 0x01;
+			generalLevelIdc = view.getUint8(12);
+
+			constraintFlags = [];
+			for (let i = 0; i < 6; i++) {
+				constraintFlags.push(view.getUint8(6 + i));
+			}
 		}
 
-		const view = toDataView(description);
 		let codecString = 'hev1.';
 
-		// general_profile_space and general_profile_idc
-		const generalProfileSpace = (description[1]! >> 6) & 0x03;
-		const generalProfileIdc = description[1]! & 0x1F;
 		codecString += ['', 'A', 'B', 'C'][generalProfileSpace]! + generalProfileIdc;
-
 		codecString += '.';
-
-		// general_profile_compatibility_flags (in reverse bit order)
-		const compatibilityFlags = reverseBitsU32(view.getUint32(2));
-		codecString += compatibilityFlags.toString(16);
-
+		codecString += compatibilityFlags.toString(16).toUpperCase();
 		codecString += '.';
-
-		// general_tier_flag and general_level_idc
-		const generalTierFlag = (description[1]! >> 5) & 0x01;
-		const generalLevelIdc = description[12]!;
 		codecString += generalTierFlag === 0 ? 'L' : 'H';
 		codecString += generalLevelIdc;
 
-		codecString += '.';
-
-		// constraint_flags (6 bytes)
-		const constraintFlags: number[] = [];
-		for (let i = 0; i < 6; i++) {
-			const byte = description[i + 13]!;
-			constraintFlags.push(byte);
-		}
-
-		while (constraintFlags[constraintFlags.length - 1] === 0) {
+		while (constraintFlags.length > 0 && constraintFlags[constraintFlags.length - 1] === 0) {
 			constraintFlags.pop();
 		}
 
-		codecString += constraintFlags.map(x => x.toString(16)).join('.');
+		if (constraintFlags.length > 0) {
+			codecString += '.';
+			codecString += constraintFlags.map(x => x.toString(16).toUpperCase()).join('.');
+		}
 
 		return codecString;
 	} else if (codec === 'vp8') {
@@ -1367,12 +1379,9 @@ export const validateVideoChunkMetadata = (metadata: EncodedVideoChunkMetadata |
 			);
 		}
 
-		if (!metadata.decoderConfig.description) {
-			throw new TypeError(
-				'Video chunk metadata decoder configuration for HEVC must include a description, which is expected to'
-				+ ' be an HEVCDecoderConfigurationRecord as specified in ISO 14496-15.',
-			);
-		}
+		// `description` may or may not be set, depending on if the format is HEVC or Annex B, so don't perform any
+		// validation for it.
+		// https://www.w3.org/TR/webcodecs-hevc-codec-registration
 	} else if (metadata.decoderConfig.codec.startsWith('vp8')) {
 		// VP8-specific validation
 
