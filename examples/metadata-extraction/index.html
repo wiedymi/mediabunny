@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en" translate="no">
+	<head>
+		<meta charset="UTF-8">
+		<meta http-equiv="X-UA-Compatible" content="IE=edge">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<title>Metadata extraction example | Mediakit</title>
+		<script type="module" src="./metadata-extraction.ts"></script>
+		<link rel="stylesheet" href="../index.css">
+	</head>
+
+	<body class="flex flex-col items-center py-10 bg-gray-50 text-gray-800">
+		<h1 class="text-3xl">Metadata extraction example</h1>
+		<p>Select or drop a media file, and Mediakit will start extracting various metadata about that file.</p>
+
+		<div class="flex gap-2 mt-4">
+			<button class="rounded-lg bg-gray-200 hover:bg-gray-300 px-5 py-1">
+				Select media file
+			</button>
+
+			<a href="../../assets/big-buck-bunny-trimmed.mp4" download class="rounded-lg bg-gray-200 hover:bg-gray-300 px-5 group grid place-items-center" title="Download sample file">
+				<img src="../../assets/download-icon.svg" class="opacity-30 group-hover:opacity-80">
+			</a>
+		</div>
+		<p class="text-xs opacity-60 mt-0.5" id="file-name"></p>
+
+		<hr class="w-96 my-4 border-gray-300" style="display: none;">
+
+		<p id="bytes-read" class="text-center text-xs font-medium mb-4"></p>
+		<div id="metadata-container" class="text-sm"></div>
+
+		<div class="fixed top-0 left-0 flex gap-2 p-2 items-center">
+			<img src="../../assets/mediakit-logo.svg" class="size-6">
+			<p class="text-sm font-semibold">Mediakit</p>
+		</div>
+
+		<a
+			href="https://github.com/Vanilagy/metamuxer/tree/main/examples/metadata-extraction"
+			target="_blank"
+			class="flex items-center gap-2 fixed top-0 right-0 py-2 px-5 bg-gray-200 hover:bg-gray-300 rounded-bl-xl"
+		>
+			<img src="../../assets/github-mark.svg" class="size-6">
+			<p>View source code</p>
+		</a>
+	</body>
+
+	<style>
+		@reference "../index.css";
+
+		ul {
+			@apply py-1 px-4 bg-gray-500/10 rounded-lg;
+		}
+
+		b {
+			@apply font-semibold;
+		}
+	</style>
+</html>

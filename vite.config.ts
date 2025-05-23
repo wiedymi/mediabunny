@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 import path from 'path';
 import fs from 'fs';
+import tailwindcss from '@tailwindcss/vite';
 
 const examplesDir = path.resolve(__dirname, './examples');
 
@@ -21,6 +22,12 @@ export default defineConfig({
 		alias: {
 			mediakit: path.resolve(__dirname, './dist/metamuxer.mjs'),
 		},
+	},
+	plugins: [
+		tailwindcss(),
+	],
+	server: {
+		hmr: false,
 	},
 	build: {
 		outDir: 'dist-docs', // Build them directly into the docs build folder
