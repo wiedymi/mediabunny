@@ -9,8 +9,8 @@ export default withMermaid({
 	themeConfig: {
 		// https://vitepress.dev/reference/default-theme-config
 		nav: [
-			{ text: 'Home', link: '/' },
 			{ text: 'Guide', link: '/guide/introduction', activeMatch: '/guide' },
+			{ text: 'Examples', link: '/examples', activeMatch: '/examples' },
 		],
 
 		sidebar: [
