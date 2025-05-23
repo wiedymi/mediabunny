@@ -3,14 +3,17 @@ layout: home
 
 hero:
     text: Examples
-    tagline: Various demos showcasing the usage of the features of Mediakit
+    tagline: Demos showcasing the usage of various features of Mediakit
 
 features:
     - title: Metadata extraction
-      details: See how you can extract various metadata from an input media file.
+      details: Extract various metadata from an input media file
       link: /examples/metadata-extraction
-    - title: Feature B
-      details: Lorem ipsum dolor sit amet, consectetur adipiscing elit
+      target: _self
+    - title: Thumbnail generation
+      details: Generate multiple small thumbnails for a video track
+      link: /examples/thumbnail-generation
+      target: _self
     - title: Feature C
       details: Lorem ipsum dolor sit amet, consectetur adipiscing elit
     - title: Feature A

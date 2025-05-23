@@ -291,7 +291,7 @@ for await (const sample of keyFrameSamples) {
 While `VideoSampleSink` extracts raw decoded video samples, you can use `CanvasSink` to extract these samples as canvases instead. In doing so, certain operations such as scaling and rotating can also be handled by the sink. The downside is the additional VRAM requirements for the canvases' framebuffers.
 
 ::: info
-This sink yields `OffscreenCanvas` whenever possible, and falls back to `HTMLCanvasElement` otherwise.
+This sink yields `HTMLCanvasElement` whenever possible, and falls back to `OffscreenCanvas` otherwise (in Worker contexts, for example).
 :::
 
 Create the sink like so:

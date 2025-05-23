@@ -226,7 +226,7 @@ export class Mp3InputFormat extends InputFormat {
 		const framesStartPos = mp3Reader.pos;
 		await mp3Reader.reader.loadRange(mp3Reader.pos, mp3Reader.pos + 4096);
 
-		const firstHeader = mp3Reader.readNextFrameHeader(framesStartPos + 4096);
+		const firstHeader = mp3Reader.readNextFrameHeader(Math.min(framesStartPos + 4096, sourceSize));
 		if (!firstHeader) {
 			return false;
 		}
@@ -239,7 +239,7 @@ export class Mp3InputFormat extends InputFormat {
 		// Fine, we found one frame header, but we're still not entirely sure this is MP3. Let's check if we can find
 		// another header nearby:
 		mp3Reader.pos = firstHeader.startPos + firstHeader.totalSize;
-		const secondHeader = mp3Reader.readNextFrameHeader(framesStartPos + 4096);
+		const secondHeader = mp3Reader.readNextFrameHeader(Math.min(framesStartPos + 4096, sourceSize));
 		if (!secondHeader) {
 			return false;
 		}

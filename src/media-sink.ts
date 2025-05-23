@@ -922,6 +922,8 @@ export type CanvasSinkOptions = {
  * A sink that renders video samples (frames) of the given video track to canvases. This is often more useful than
  * directly retrieving frames, as it comes with common preprocessing steps such as resizing or applying rotation
  * metadata.
+ *
+ * This sink will yield HTMLCanvasElements when in a DOM context, and OffscreenCanvases otherwise.
  * @public
  */
 export class CanvasSink {
@@ -1008,13 +1010,13 @@ export class CanvasSink {
 	_videoSampleToWrappedCanvas(sample: VideoSample): WrappedCanvas {
 		let canvas = this._canvasPool[this._nextCanvasIndex];
 		if (!canvas) {
-			if (typeof OffscreenCanvas !== 'undefined') {
-				// Prefer an OffscreenCanvas
-				canvas = new OffscreenCanvas(this._width, this._height);
-			} else {
+			if (typeof document !== 'undefined') {
+				// Prefer an HTMLCanvasElement
 				canvas = document.createElement('canvas');
 				canvas.width = this._width;
 				canvas.height = this._height;
+			} else {
+				canvas = new OffscreenCanvas(this._width, this._height);
 			}
 
 			if (this._canvasPool.length > 0) {

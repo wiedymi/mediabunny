@@ -4,14 +4,14 @@
 		<meta charset="UTF-8">
 		<meta http-equiv="X-UA-Compatible" content="IE=edge">
 		<meta name="viewport" content="width=device-width, initial-scale=1.0">
-		<title>Metadata extraction example | Mediakit</title>
-		<script type="module" src="./metadata-extraction.ts"></script>
+		<title>Thumbnail generation example | Mediakit</title>
+		<script type="module" src="./thumbnail-generation.ts"></script>
 		<link rel="stylesheet" href="../index.css">
 	</head>
 
 	<body class="flex flex-col items-center py-10 bg-gray-50 text-gray-800 px-2">
-		<h1 class="text-3xl">Metadata extraction example</h1>
-		<p>Select or drop a media file, and Mediakit will start extracting various metadata about that file.</p>
+		<h1 class="text-3xl">Thumbnail generation example</h1>
+		<p>Select or drop a media file, and Mediakit will extract video thumbnails for it.</p>
 
 		<div class="flex gap-2 mt-4">
 			<button class="rounded-lg bg-gray-200 hover:bg-gray-300 px-5 py-1">
@@ -26,8 +26,8 @@
 
 		<hr class="w-96 my-4 border-gray-300" style="display: none;">
 
-		<p id="bytes-read" class="text-center text-xs font-medium mb-4"></p>
-		<div id="metadata-container" class="text-sm"></div>
+		<p id="error-element" class="text-red-500"></p>
+		<div id="thumbnail-container" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"></div>
 
 		<div class="fixed top-0 left-0 flex gap-2 py-2 px-5 items-center">
 			<img src="../../assets/mediakit-logo.svg" class="size-6">
@@ -35,7 +35,7 @@
 		</div>
 
 		<a
-			href="https://github.com/Vanilagy/metamuxer/tree/main/examples/metadata-extraction"
+			href="https://github.com/Vanilagy/metamuxer/tree/main/examples/thumbnail-generation"
 			target="_blank"
 			class="flex items-center gap-2 fixed top-0 right-0 py-2 px-5 bg-gray-200 hover:bg-gray-300 rounded-bl-xl"
 		>
@@ -43,16 +43,4 @@
 			<p>View source code</p>
 		</a>
 	</body>
-
-	<style>
-		@reference "../index.css";
-
-		ul {
-			@apply py-1 px-4 bg-gray-500/10 rounded-lg;
-		}
-
-		b {
-			@apply font-semibold;
-		}
-	</style>
 </html>
