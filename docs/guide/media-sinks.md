@@ -222,7 +222,7 @@ sink.samplesAtTimestamps([1, 2, 3]);
 sink.samplesAtTimestamps([4, 5, 5, 5]);
 sink.samplesAtTimestamps([10, -2, 3]);
 ```
-This method is more efficient than `getSample` because it avoids decoding the same packet twice.
+This method is more efficient than multiple calls to `getSample` because it avoids decoding the same packet twice.
 
 In addition to arrays, you can pass any iterable into this method:
 ```ts

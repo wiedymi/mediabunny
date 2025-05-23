@@ -38,8 +38,8 @@ things the guide needs to cover:
 - conversion
 
 Examples:
-- Extracting media file metadata
-- Rendering thumbnails for a video / extracting a wave form?
+✅ Extracting media file metadata
+✅ Rendering thumbnails for a video / extracting a wave form?
 - Media player
 - Conversion demo: File compressor
 - Procedurally generated video (faster than real time)
