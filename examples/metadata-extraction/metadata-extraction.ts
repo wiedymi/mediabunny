@@ -1,10 +1,10 @@
 import { Input, ALL_FORMATS, BlobSource } from 'mediakit';
 
-const selectMediaButton = document.querySelector('button')!;
-const fileNameElement = document.querySelector('#file-name')!;
-const horizontalRule = document.querySelector('hr')!;
-const bytesReadElement = document.querySelector('#bytes-read')!;
-const metadataContainer = document.querySelector('#metadata-container')!;
+const selectMediaButton = document.querySelector('button') as HTMLButtonElement;
+const fileNameElement = document.querySelector('#file-name') as HTMLParagraphElement;
+const horizontalRule = document.querySelector('hr') as HTMLHRElement;
+const bytesReadElement = document.querySelector('#bytes-read') as HTMLParagraphElement;
+const metadataContainer = document.querySelector('#metadata-container') as HTMLDivElement;
 
 const extractMetadata = (file: File) => {
 	// Create a new input from the file
@@ -84,35 +84,6 @@ const extractMetadata = (file: File) => {
 	metadataContainer.append(bytesReadElement, htmlElement);
 };
 
-selectMediaButton.addEventListener('click', () => {
-	const fileInput = document.createElement('input');
-	fileInput.type = 'file';
-	fileInput.addEventListener('change', () => {
-		const file = fileInput.files?.[0];
-		if (!file) {
-			return;
-		}
-
-		extractMetadata(file);
-	});
-
-	fileInput.click();
-});
-
-document.addEventListener('dragover', (event) => {
-	event.preventDefault();
-	event.dataTransfer!.dropEffect = 'copy';
-});
-
-document.addEventListener('drop', (event) => {
-	event.preventDefault();
-	const files = event.dataTransfer?.files;
-	const file = files && files.length > 0 ? files[0] : undefined;
-	if (file) {
-		extractMetadata(file);
-	}
-});
-
 // Creates an HTML element to display any given value
 const renderValue = (value: unknown) => {
 	if (Array.isArray(value)) {
@@ -175,3 +146,34 @@ const renderObject = (object: Record<string, unknown>) => {
 const shortDelay = () => {
 	return new Promise(resolve => setTimeout(resolve, 1000 / 60));
 };
+
+/** === FILE SELECTION LOGIC === */
+
+selectMediaButton.addEventListener('click', () => {
+	const fileInput = document.createElement('input');
+	fileInput.type = 'file';
+	fileInput.addEventListener('change', () => {
+		const file = fileInput.files?.[0];
+		if (!file) {
+			return;
+		}
+
+		extractMetadata(file);
+	});
+
+	fileInput.click();
+});
+
+document.addEventListener('dragover', (event) => {
+	event.preventDefault();
+	event.dataTransfer!.dropEffect = 'copy';
+});
+
+document.addEventListener('drop', (event) => {
+	event.preventDefault();
+	const files = event.dataTransfer?.files;
+	const file = files && files.length > 0 ? files[0] : undefined;
+	if (file) {
+		extractMetadata(file);
+	}
+});

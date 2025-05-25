@@ -1,10 +1,10 @@
 import { Input, ALL_FORMATS, BlobSource, CanvasSink } from 'mediakit';
 
-const selectMediaButton = document.querySelector('button')!;
-const fileNameElement = document.querySelector('#file-name')!;
-const horizontalRule = document.querySelector('hr')!;
-const thumbnailContainer = document.querySelector('#thumbnail-container')!;
-const errorElement = document.querySelector('#error-element')!;
+const selectMediaButton = document.querySelector('button') as HTMLButtonElement;
+const fileNameElement = document.querySelector('#file-name') as HTMLParagraphElement;
+const horizontalRule = document.querySelector('hr') as HTMLHRElement;
+const thumbnailContainer = document.querySelector('#thumbnail-container') as HTMLDivElement;
+const errorElement = document.querySelector('#error-element') as HTMLParagraphElement;
 
 const THUMBNAIL_COUNT = 16;
 const THUMBNAIL_SIZE = 200;
@@ -90,6 +90,8 @@ const generateThumbnails = async (file: File) => {
 		thumbnailContainer.innerHTML = '';
 	}
 };
+
+/** === FILE SELECTION LOGIC === */
 
 selectMediaButton.addEventListener('click', () => {
 	const fileInput = document.createElement('input');
