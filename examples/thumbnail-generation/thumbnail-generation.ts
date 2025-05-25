@@ -39,7 +39,7 @@ const generateThumbnails = async (file: File) => {
 		const thumbnailElements = [];
 		for (let i = 0; i < THUMBNAIL_COUNT; i++) {
 			const thumbnailElement = document.createElement('div');
-			thumbnailElement.className = 'rounded-lg overflow-hidden bg-gray-100 relative';
+			thumbnailElement.className = 'rounded-lg overflow-hidden bg-zinc-100 dark:bg-zinc-800 relative';
 			thumbnailElement.style.width = `${width}px`;
 			thumbnailElement.style.height = `${height}px`;
 			thumbnailElements.push(thumbnailElement);

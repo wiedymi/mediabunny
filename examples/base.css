@@ -6,3 +6,8 @@
 		cursor: pointer;
 	}
 }
+
+@theme {
+	--color-zinc-750: oklch(32.2% 0.0095 285.919);
+	--font-sans: "Inter Variable", sans-serif;
+}

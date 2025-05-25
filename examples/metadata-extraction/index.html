@@ -5,47 +5,48 @@
 		<meta http-equiv="X-UA-Compatible" content="IE=edge">
 		<meta name="viewport" content="width=device-width, initial-scale=1.0">
 		<title>Metadata extraction example | Mediakit</title>
+		<script type="module" src="../base.ts"></script>
 		<script type="module" src="./metadata-extraction.ts"></script>
-		<link rel="stylesheet" href="../index.css">
+		<link rel="stylesheet" href="../base.css">
 	</head>
 
-	<body class="flex flex-col items-center py-10 bg-gray-50 text-gray-800 px-2">
-		<h1 class="text-3xl">Metadata extraction example</h1>
+	<body class="flex flex-col items-center py-10 bg-zinc-50 text-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 px-2">
+		<h1 class="text-3xl font-medium text-blue-800 dark:text-blue-200">Metadata extraction example</h1>
 		<p>Select or drop a media file, and Mediakit will start extracting various metadata about that file.</p>
 
 		<div class="flex gap-2 mt-4">
-			<button class="rounded-lg bg-gray-200 hover:bg-gray-300 px-5 py-1">
+			<button class="rounded-lg bg-zinc-200 dark:bg-zinc-750 hover:bg-zinc-300 dark:hover:bg-zinc-700 px-5 py-1">
 				Select media file
 			</button>
 
-			<a href="../../assets/big-buck-bunny-trimmed.mp4" download class="rounded-lg bg-gray-200 hover:bg-gray-300 px-5 group grid place-items-center" title="Download sample file">
-				<img src="../../assets/download-icon.svg" class="opacity-30 group-hover:opacity-80">
+			<a href="../../assets/big-buck-bunny-trimmed.mp4" download class="rounded-lg bg-zinc-200 dark:bg-zinc-750 hover:bg-zinc-300 dark:hover:bg-zinc-700 px-5 group grid place-items-center" title="Download sample file">
+				<img src="../../assets/download-icon.svg" class="opacity-30 group-hover:opacity-80 dark:invert">
 			</a>
 		</div>
 		<p class="text-xs opacity-60 mt-0.5" id="file-name"></p>
 
-		<hr class="w-96 my-4 border-gray-300" style="display: none;">
+		<hr class="w-96 my-4 border-zinc-300 dark:border-zinc-700" style="display: none;">
 
 		<p id="bytes-read" class="text-center text-xs font-medium mb-4"></p>
 		<div id="metadata-container" class="text-sm"></div>
 
 		<div class="fixed top-0 left-0 flex gap-2 py-2 px-5 items-center">
-			<img src="../../assets/mediakit-logo.svg" class="size-6">
+			<img src="../../assets/mediakit-logo.svg" class="size-6 dark:invert">
 			<p class="text-sm font-semibold">Mediakit</p>
 		</div>
 
 		<a
 			href="https://github.com/Vanilagy/metamuxer/tree/main/examples/metadata-extraction"
 			target="_blank"
-			class="flex items-center gap-2 fixed top-0 right-0 py-2 px-5 bg-gray-200 hover:bg-gray-300 rounded-bl-xl"
+			class="flex items-center gap-2 fixed top-0 right-0 py-2 px-5 bg-zinc-200 dark:bg-zinc-750 hover:bg-zinc-300 dark:hover:bg-zinc-700 rounded-bl-xl"
 		>
-			<img src="../../assets/github-mark.svg" class="size-6">
+			<img src="../../assets/github-mark.svg" class="size-6 dark:invert">
 			<p>View source code</p>
 		</a>
 	</body>
 
 	<style>
-		@reference "../index.css";
+		@reference "../base.css";
 
 		ul {
 			@apply py-1 px-4 bg-gray-500/10 rounded-lg;
