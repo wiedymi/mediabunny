@@ -1137,7 +1137,7 @@ export class AudioResampler {
 
 				// For resampling, we do naive linear interpolation to find the in-between sample. This produces
 				// suboptimal results especially for downsampling (for which a low-pass filter would first need to be
-				// applied), but AudioContext doesn't do this either so, whatever.
+				// applied), but AudioContext doesn't do this either, so, whatever, for now.
 				const outputSample = lowerSample + fraction * (upperSample - lowerSample);
 
 				// Write to output buffer (interleaved)
