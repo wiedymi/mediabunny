@@ -112,18 +112,8 @@ const FALLBACK_NUMBER_OF_CHANNELS = 2;
 const FALLBACK_SAMPLE_RATE = 48000;
 
 /**
- * Utility function to convert one media file into another. In addition to conversion, this function can be used to
- * resize and rotate video, resample audio, drop tracks, or trim to a specific time range.
- * @public
- */
-export const convert = async (options: ConversionOptions) => {
-	const conversion = await Conversion.init(options);
-	await conversion.execute();
-	return conversion;
-};
-
-/**
- * Represents a media file conversion process.
+ * Represents a media file conversion process, used to convert one media file into another. In addition to conversion,
+ * this class can be used to resize and rotate video, resample audio, drop tracks, or trim to a specific time range.
  * @public
  */
 export class Conversion {
@@ -171,14 +161,15 @@ export class Conversion {
 
 	/**
 	 * A number between 0 and 1, indicating the completion of the conversion. If the `computeProgress` option is not
-	 * enabled, this value will be stuck at 0.
+	 * enabled, this value will be stuck at 0. Note that a progress of 1 doesn't necessarily mean the conversion is
+	 * complete; the conversion is complete once `execute` resolves.
 	 */
 	progress = 0;
 	/**
 	 * A callback that is fired whenever the conversion progresses. Only called if the `computeProgress` option
 	 * is enabled.
 	 */
-	onProgress?: () => unknown = undefined;
+	onProgress?: (progress: number) => unknown = undefined;
 
 	/** The list of tracks that are included in the output file. */
 	utilizedTracks: InputTrack[] = [];
@@ -333,6 +324,22 @@ export class Conversion {
 		const outputTrackCounts = this._output.format.getSupportedTrackCounts();
 
 		for (const track of inputTracks) {
+			if (track.isVideoTrack() && this._options.video?.discard) {
+				this.discardedTracks.push({
+					track,
+					reason: 'discardedByUser',
+				});
+				continue;
+			}
+
+			if (track.isAudioTrack() && this._options.audio?.discard) {
+				this.discardedTracks.push({
+					track,
+					reason: 'discardedByUser',
+				});
+				continue;
+			}
+
 			if (this._totalTrackCount === outputTrackCounts.total.max) {
 				this.discardedTracks.push({
 					track,
@@ -350,24 +357,8 @@ export class Conversion {
 			}
 
 			if (track.isVideoTrack()) {
-				if (this._options.video?.discard) {
-					this.discardedTracks.push({
-						track,
-						reason: 'discardedByUser',
-					});
-					continue;
-				}
-
 				await this._processVideoTrack(track);
 			} else if (track.isAudioTrack()) {
-				if (this._options.audio?.discard) {
-					this.discardedTracks.push({
-						track,
-						reason: 'discardedByUser',
-					});
-					continue;
-				}
-
 				await this._processAudioTrack(track);
 			}
 		}
@@ -383,7 +374,7 @@ export class Conversion {
 				await this._input.computeDuration() - this._startTimestamp,
 				this._endTimestamp - this._startTimestamp,
 			);
-			this.onProgress?.();
+			this.onProgress?.(this.progress);
 		}
 	}
 
@@ -406,9 +397,9 @@ export class Conversion {
 
 		await this._output.finalize();
 
-		if (this._options.computeProgress) {
+		if (this._options.computeProgress && this.progress !== 1) {
 			this.progress = 1;
-			this.onProgress?.();
+			this.onProgress?.(this.progress);
 		}
 	}
 
@@ -845,9 +836,12 @@ export class Conversion {
 		}
 
 		const averageTimestamp = totalTimestamps / this._totalTrackCount;
+		const newProgress = clamp(averageTimestamp / this._totalDuration, 0, 1);
 
-		this.progress = 0.99 * clamp(averageTimestamp / this._totalDuration, 0, 1);
-		this.onProgress?.();
+		if (newProgress !== this.progress) {
+			this.progress = newProgress;
+			this.onProgress?.(this.progress);
+		}
 	}
 }
 
