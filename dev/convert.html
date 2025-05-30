@@ -21,7 +21,7 @@
 			chunked: true,
 			chunkSize: 2**20
 		});
-		const outputFormat = new Metamuxer.Mp4OutputFormat();
+		const outputFormat = new Metamuxer.WavOutputFormat();
 
 		const button = document.createElement('button');
 		button.textContent = 'Cancel';
@@ -38,8 +38,8 @@
 				target
 			}),
 			audio: {
-				numberOfChannels: 2,
-				//sampleRate: 8000
+				numberOfChannels: 1,
+				sampleRate: 4000
 				//discard: true
 				//forceReencode: true,
 			},
@@ -68,6 +68,7 @@
 			},
 			*/
 			video: {
+				discard: true,
 				width: 1280,
 				//discard: true,
 				//width: 640

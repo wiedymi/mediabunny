@@ -29,9 +29,9 @@ const fullscreenButton = document.querySelector('#fullscreen-button') as HTMLBut
 const errorElement = document.querySelector('#error-element') as HTMLDivElement;
 
 const context = canvas.getContext('2d')!;
-const audioContext = new AudioContext();
-const gainNode = audioContext.createGain();
-gainNode.connect(audioContext.destination);
+
+let audioContext: AudioContext | null = null;
+let gainNode: GainNode | null = null;
 
 let fileLoaded = false;
 let videoSink: CanvasSink | null = null;
@@ -79,11 +79,6 @@ const initMediaPlayer = async (file: File) => {
 		horizontalRule.style.display = '';
 		playerContainer.style.display = 'none';
 
-		if (audioContext.state === 'suspended') {
-			// Resume the audio context now that a user gesture has happened
-			await audioContext.resume();
-		}
-
 		// Create an Input from the file
 		const input = new Input({
 			source: new BlobSource(file),
@@ -109,6 +104,13 @@ const initMediaPlayer = async (file: File) => {
 		if (!videoTrack && !audioTrack) {
 			throw new Error('Media file has no playable video or audio track.');
 		}
+
+		// We must create the audio context with the matching sample rate for correct acoustic results
+		// (especially for low-sample rate files)
+		audioContext = new AudioContext({ sampleRate: audioTrack?.sampleRate });
+		gainNode = audioContext.createGain();
+		gainNode.connect(audioContext.destination);
+		updateVolume();
 
 		// For video, let's use a CanvasSink as it handles rotation and closing video samples for us.
 		// Pool size of 2: We'll only ever have the current and the next frame around, so we only need two canvases.
@@ -248,19 +250,19 @@ const runAudioIterator = async () => {
 	}
 
 	for await (const { buffer, timestamp } of audioBufferIterator!) {
-		const node = audioContext.createBufferSource();
+		const node = audioContext!.createBufferSource();
 		node.buffer = buffer;
-		node.connect(gainNode);
+		node.connect(gainNode!);
 
 		const startTimestamp = audioContextStartTime! + timestamp - playbackTimeAtStart;
 
 		// Two cases: Either, the audio starts in the future or in the past
-		if (startTimestamp >= audioContext.currentTime) {
+		if (startTimestamp >= audioContext!.currentTime) {
 			// If the audio starts in the future, easy, we just schedule it
 			node.start(startTimestamp);
 		} else {
 			// If it starts in the past, then let's only play the audible section that remains from here on out
-			node.start(audioContext.currentTime, audioContext.currentTime - startTimestamp);
+			node.start(audioContext!.currentTime, audioContext!.currentTime - startTimestamp);
 		}
 
 		queuedAudioNodes.add(node);
@@ -290,7 +292,7 @@ const getPlaybackTime = () => {
 	if (playing) {
 		// To ensure perfect audio-video sync, we always use the audio context's clock to determine playback time, even
 		// when there is no audio track.
-		return audioContext.currentTime - audioContextStartTime! + playbackTimeAtStart;
+		return audioContext!.currentTime - audioContextStartTime! + playbackTimeAtStart;
 	} else {
 		return playbackTimeAtStart;
 	}
@@ -303,7 +305,7 @@ const play = async () => {
 		await startVideoIterator();
 	}
 
-	audioContextStartTime = audioContext.currentTime;
+	audioContextStartTime = audioContext!.currentTime;
 	playing = true;
 
 	if (audioSink) {
@@ -398,7 +400,7 @@ const updateVolume = () => {
 	const actualVolume = volumeMuted ? 0 : volume;
 
 	volumeBar.style.width = `${actualVolume * 100}%`;
-	gainNode.gain.value = actualVolume ** 2; // Quadratic for more fine-grained control
+	gainNode!.gain.value = actualVolume ** 2; // Quadratic for more fine-grained control
 
 	const iconNumber = volumeMuted ? 0 : Math.ceil(1 + 3 * volume);
 	for (let i = 0; i < volumeIconWrapper.children.length; i++) {
@@ -406,7 +408,6 @@ const updateVolume = () => {
 		icon.style.display = i === iconNumber ? '' : 'none';
 	}
 };
-updateVolume();
 
 volumeBarContainer.addEventListener('pointerdown', (event) => {
 	draggingVolumeBar = true;
