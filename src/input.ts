@@ -84,8 +84,8 @@ export class Input<S extends Source = Source> {
 	}
 
 	/**
-	 * Computes the duration of the longest track in this input file, in seconds. More precisely, returns the largest
-	 * end timestamp among all tracks.
+	 * Computes the duration of the input file, in seconds. More precisely, returns the largest end timestamp among
+	 * all tracks.
 	 */
 	async computeDuration() {
 		const demuxer = await this._getDemuxer();

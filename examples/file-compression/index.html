@@ -4,15 +4,15 @@
 		<meta charset="UTF-8">
 		<meta http-equiv="X-UA-Compatible" content="IE=edge">
 		<meta name="viewport" content="width=device-width, initial-scale=1.0">
-		<title>Metadata extraction example | Mediakit</title>
+		<title>File compression example | Mediakit</title>
 		<script type="module" src="../base.ts"></script>
-		<script type="module" src="./metadata-extraction.ts"></script>
+		<script type="module" src="./file-compression.ts"></script>
 		<link rel="stylesheet" href="../base.css">
 	</head>
 
 	<body class="flex flex-col items-center py-10 bg-zinc-50 text-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 px-2">
-		<h1 class="text-3xl font-bold text-blue-800 dark:text-blue-200">Metadata extraction example</h1>
-		<p>Select or drop a media file, and Mediakit will start extracting various metadata about that file.</p>
+		<h1 class="text-3xl font-bold text-teal-800 dark:text-teal-200">File compression example</h1>
+		<p>Select or drop a media file, and Mediakit will convert it to a heavily-compressed MP4 file.</p>
 
 		<div class="flex gap-2 mt-4">
 			<button class="rounded-lg bg-zinc-200 dark:bg-zinc-750 hover:bg-zinc-300 dark:hover:bg-zinc-700 px-5 py-1">
@@ -27,8 +27,15 @@
 
 		<hr class="w-full max-w-96 my-4 border-zinc-300 dark:border-zinc-700" style="display: none;">
 
-		<p id="bytes-read" class="text-center text-xs font-medium mb-4"></p>
-		<div id="metadata-container" class="text-sm"></div>
+		<p id="error-element" class="text-red-500"></p>
+
+		<div class="w-full max-w-80 h-2 rounded-full bg-zinc-200 dark:bg-zinc-750 overflow-hidden" id="progress-bar-container" style="display: none;">
+			<div class="h-full bg-emerald-500 w-0" id="progress-bar"></div>
+		</div>
+		<p class="text-xs font-medium mt-1" id="speedometer" style="display: none;"></p>
+
+		<video controls class="rounded-md mt-4" style="display: none;"></video>
+		<p class="text-xs font-medium mt-1" id="compression-facts" style="display: none;"></p>
 
 		<div class="fixed top-0 left-0 flex gap-2 py-2 px-5 items-center">
 			<img src="../../assets/mediakit-logo.svg" class="size-6 dark:invert">
@@ -36,7 +43,7 @@
 		</div>
 
 		<a
-			href="https://github.com/Vanilagy/metamuxer/tree/main/examples/metadata-extraction"
+			href="https://github.com/Vanilagy/metamuxer/tree/main/examples/file-compression"
 			target="_blank"
 			class="flex items-center gap-2 fixed top-0 right-0 py-2 px-5 bg-zinc-200 dark:bg-zinc-750 hover:bg-zinc-300 dark:hover:bg-zinc-700 rounded-bl-xl"
 		>
@@ -44,16 +51,4 @@
 			<p>View source code</p>
 		</a>
 	</body>
-
-	<style>
-		@reference "../base.css";
-
-		ul {
-			@apply py-1 px-4 bg-gray-500/10 rounded-lg;
-		}
-
-		b {
-			@apply font-semibold;
-		}
-	</style>
 </html>

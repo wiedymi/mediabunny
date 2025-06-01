@@ -18,8 +18,10 @@ features:
       details: "A full video & audio media player, implemented from scratch with Mediakit, with microsecond playback accuracy."
       link: /examples/media-player
       target: _self
-    - title: Feature A
-      details: Lorem ipsum dolor sit amet, consectetur adipiscing elit
+    - title: File compression
+      details: Convert an input file to a highly-compressed MP4 file.
+      link: /examples/file-compression
+      target: _self
     - title: Feature B
       details: Lorem ipsum dolor sit amet, consectetur adipiscing elit
     - title: Feature C

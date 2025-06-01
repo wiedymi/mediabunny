@@ -100,12 +100,6 @@ export type ConversionOptions = {
 		/** The time in the input file at which the output file should end. Must be greater than `start`. */
 		end: number;
 	};
-
-	/**
-	 * When set to true, the current progress of the conversion will be computed and kept up to date in the `progress`
-	 * field of the Conversion instance.
-	 */
-	computeProgress?: boolean;
 };
 
 const FALLBACK_NUMBER_OF_CHANNELS = 2;
@@ -160,16 +154,17 @@ export class Conversion {
 	_canceled = false;
 
 	/**
-	 * A number between 0 and 1, indicating the completion of the conversion. If the `computeProgress` option is not
-	 * enabled, this value will be stuck at 0. Note that a progress of 1 doesn't necessarily mean the conversion is
-	 * complete; the conversion is complete once `execute` resolves.
-	 */
-	progress = 0;
-	/**
-	 * A callback that is fired whenever the conversion progresses. Only called if the `computeProgress` option
-	 * is enabled.
+	 * A callback that is fired whenever the conversion progresses. Returns a number between 0 and 1, indicating the
+	 * completion of the conversion. Note that a progress of 1 doesn't necessarily mean the conversion is complete;
+	 * the conversion is complete once `execute` resolves.
+	 *
+	 * In order for progress to be computed, this property must be set before `execute` is called.
 	 */
 	onProgress?: (progress: number) => unknown = undefined;
+	/** @internal */
+	_computeProgress = false;
+	/** @internal */
+	_lastProgress = 0;
 
 	/** The list of tracks that are included in the output file. */
 	utilizedTracks: InputTrack[] = [];
@@ -179,12 +174,12 @@ export class Conversion {
 		track: InputTrack;
 		/** The reason for discarding the track. */
 		reason:
-			| 'discardedByUser'
-			| 'maxTrackCountReached'
-			| 'maxTrackCountOfTypeReached'
-			| 'unknownSourceCodec'
-			| 'undecodableSourceCodec'
-			| 'noEncodableTargetCodec';
+			| 'discarded_by_user'
+			| 'max_track_count_reached'
+			| 'max_track_count_of_type_reached'
+			| 'unknown_source_codec'
+			| 'undecodable_source_codec'
+			| 'no_encodable_target_codec';
 	}[] = [];
 
 	/** Initializes a new conversion process without starting the conversion. */
@@ -302,9 +297,6 @@ export class Conversion {
 			&& options.trim.start >= options.trim.end) {
 			throw new TypeError('options.trim.start must be less than options.trim.end.');
 		}
-		if (options.computeProgress !== undefined && typeof options.computeProgress !== 'boolean') {
-			throw new TypeError('options.computeProgress, when provided, must be a boolean.');
-		}
 
 		this._options = options;
 		this._input = options.input;
@@ -327,7 +319,7 @@ export class Conversion {
 			if (track.isVideoTrack() && this._options.video?.discard) {
 				this.discardedTracks.push({
 					track,
-					reason: 'discardedByUser',
+					reason: 'discarded_by_user',
 				});
 				continue;
 			}
@@ -335,7 +327,7 @@ export class Conversion {
 			if (track.isAudioTrack() && this._options.audio?.discard) {
 				this.discardedTracks.push({
 					track,
-					reason: 'discardedByUser',
+					reason: 'discarded_by_user',
 				});
 				continue;
 			}
@@ -343,7 +335,7 @@ export class Conversion {
 			if (this._totalTrackCount === outputTrackCounts.total.max) {
 				this.discardedTracks.push({
 					track,
-					reason: 'maxTrackCountReached',
+					reason: 'max_track_count_reached',
 				});
 				continue;
 			}
@@ -351,7 +343,7 @@ export class Conversion {
 			if (this._addedCounts[track.type] === outputTrackCounts[track.type].max) {
 				this.discardedTracks.push({
 					track,
-					reason: 'maxTrackCountOfTypeReached',
+					reason: 'max_track_count_of_type_reached',
 				});
 				continue;
 			}
@@ -363,22 +355,14 @@ export class Conversion {
 			}
 		}
 
-		const unintentionallyDiscardedTracks = this.discardedTracks.filter(x => x.reason !== 'discardedByUser');
+		const unintentionallyDiscardedTracks = this.discardedTracks.filter(x => x.reason !== 'discarded_by_user');
 		if (unintentionallyDiscardedTracks.length > 0) {
 			// Let's give the user a notice/warning about discarded tracks so they aren't confused
 			console.warn('Some tracks had to be discarded from the conversion:', unintentionallyDiscardedTracks);
 		}
-
-		if (this._options.computeProgress) {
-			this._totalDuration = Math.min(
-				await this._input.computeDuration() - this._startTimestamp,
-				this._endTimestamp - this._startTimestamp,
-			);
-			this.onProgress?.(this.progress);
-		}
 	}
 
-	/** Starts the conversion process. */
+	/** Executes the conversion process. Resolves once conversion is complete. */
 	async execute() {
 		if (this._executed) {
 			throw new Error('Conversion cannot be executed twice.');
@@ -386,10 +370,28 @@ export class Conversion {
 
 		this._executed = true;
 
+		if (this.onProgress) {
+			this._computeProgress = true;
+			this._totalDuration = Math.min(
+				await this._input.computeDuration() - this._startTimestamp,
+				this._endTimestamp - this._startTimestamp,
+			);
+			this.onProgress?.(0);
+		}
+
 		await this._output.start();
 		this._start();
 
-		await Promise.all(this._trackPromises);
+		try {
+			await Promise.all(this._trackPromises);
+		} catch (error) {
+			if (!this._canceled) {
+				// Make sure to cancel to stop other encoding processes and clean up resources
+				await this.cancel();
+			}
+
+			throw error;
+		}
 
 		if (this._canceled) {
 			await new Promise(() => {}); // Never resolve
@@ -397,9 +399,8 @@ export class Conversion {
 
 		await this._output.finalize();
 
-		if (this._options.computeProgress && this.progress !== 1) {
-			this.progress = 1;
-			this.onProgress?.(this.progress);
+		if (this._computeProgress) {
+			this.onProgress?.(1);
 		}
 	}
 
@@ -424,7 +425,7 @@ export class Conversion {
 		if (!sourceCodec) {
 			this.discardedTracks.push({
 				track,
-				reason: 'unknownSourceCodec',
+				reason: 'unknown_source_codec',
 			});
 			return;
 		}
@@ -508,7 +509,7 @@ export class Conversion {
 			if (!canDecode) {
 				this.discardedTracks.push({
 					track,
-					reason: 'undecodableSourceCodec',
+					reason: 'undecodable_source_codec',
 				});
 				return;
 			}
@@ -517,18 +518,20 @@ export class Conversion {
 				videoCodecs = videoCodecs.filter(codec => codec === this._options.video?.codec);
 			}
 
-			const encodableCodecs = await getEncodableVideoCodecs(videoCodecs, { width, height });
+			const bitrate = this._options.video?.bitrate ?? QUALITY_HIGH;
+
+			const encodableCodecs = await getEncodableVideoCodecs(videoCodecs, { width, height, bitrate });
 			if (encodableCodecs.length === 0) {
 				this.discardedTracks.push({
 					track,
-					reason: 'noEncodableTargetCodec',
+					reason: 'no_encodable_target_codec',
 				});
 				return;
 			}
 
 			const encodingConfig: VideoEncodingConfig = {
 				codec: encodableCodecs[0]!,
-				bitrate: this._options.video?.bitrate ?? QUALITY_HIGH,
+				bitrate,
 				onEncodedPacket: sample => this._reportProgress(track.id, sample.timestamp + sample.duration),
 			};
 
@@ -612,7 +615,7 @@ export class Conversion {
 		if (!sourceCodec) {
 			this.discardedTracks.push({
 				track,
-				reason: 'unknownSourceCodec',
+				reason: 'unknown_source_codec',
 			});
 			return;
 		}
@@ -677,7 +680,7 @@ export class Conversion {
 			if (!canDecode) {
 				this.discardedTracks.push({
 					track,
-					reason: 'undecodableSourceCodec',
+					reason: 'undecodable_source_codec',
 				});
 				return;
 			}
@@ -688,9 +691,12 @@ export class Conversion {
 				audioCodecs = audioCodecs.filter(codec => codec === this._options.audio!.codec);
 			}
 
+			const bitrate = this._options.audio?.bitrate ?? QUALITY_HIGH;
+
 			const encodableCodecs = await getEncodableAudioCodecs(audioCodecs, {
 				numberOfChannels,
 				sampleRate,
+				bitrate,
 			});
 
 			if (
@@ -705,6 +711,7 @@ export class Conversion {
 				const encodableCodecsWithDefaultParams = await getEncodableAudioCodecs(audioCodecs, {
 					numberOfChannels: FALLBACK_NUMBER_OF_CHANNELS,
 					sampleRate: FALLBACK_SAMPLE_RATE,
+					bitrate,
 				});
 
 				if (
@@ -724,17 +731,17 @@ export class Conversion {
 			if (codecOfChoice === null) {
 				this.discardedTracks.push({
 					track,
-					reason: 'noEncodableTargetCodec',
+					reason: 'no_encodable_target_codec',
 				});
 				return;
 			}
 
 			if (needsResample) {
-				audioSource = this._resampleAudio(track, codecOfChoice, numberOfChannels, sampleRate);
+				audioSource = this._resampleAudio(track, codecOfChoice, numberOfChannels, sampleRate, bitrate);
 			} else {
 				const source = new AudioSampleSource({
 					codec: codecOfChoice,
-					bitrate: this._options.audio?.bitrate ?? QUALITY_HIGH,
+					bitrate,
 					onEncodedPacket: packet => this._reportProgress(track.id, packet.timestamp + packet.duration),
 				});
 				audioSource = source;
@@ -777,10 +784,11 @@ export class Conversion {
 		codec: AudioCodec,
 		targetNumberOfChannels: number,
 		targetSampleRate: number,
+		bitrate: number | Quality,
 	) {
 		const source = new AudioSampleSource({
 			codec,
-			bitrate: this._options.audio?.bitrate ?? QUALITY_HIGH,
+			bitrate,
 			onEncodedPacket: packet => this._reportProgress(track.id, packet.timestamp + packet.duration),
 		});
 
@@ -823,7 +831,7 @@ export class Conversion {
 
 	/** @internal */
 	_reportProgress(trackId: number, endTimestamp: number) {
-		if (!this._options.computeProgress) {
+		if (!this._computeProgress) {
 			return;
 		}
 		assert(this._totalDuration !== null);
@@ -838,9 +846,9 @@ export class Conversion {
 		const averageTimestamp = totalTimestamps / this._totalTrackCount;
 		const newProgress = clamp(averageTimestamp / this._totalDuration, 0, 1);
 
-		if (newProgress !== this.progress) {
-			this.progress = newProgress;
-			this.onProgress?.(this.progress);
+		if (newProgress !== this._lastProgress) {
+			this._lastProgress = newProgress;
+			this.onProgress?.(newProgress);
 		}
 	}
 }

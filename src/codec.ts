@@ -1143,7 +1143,7 @@ export const canEncode = (codec: MediaCodec) => {
 export const canEncodeVideo = async (codec: VideoCodec, { width = 1280, height = 720, bitrate = 1e6 }: {
 	width?: number;
 	height?: number;
-	bitrate?: number;
+	bitrate?: number | Quality;
 } = {}) => {
 	if (!VIDEO_CODECS.includes(codec)) {
 		return false;
@@ -1154,9 +1154,13 @@ export const canEncodeVideo = async (codec: VideoCodec, { width = 1280, height =
 	if (!Number.isInteger(height) || height <= 0) {
 		throw new TypeError('height must be a positive integer.');
 	}
-	if (!Number.isInteger(bitrate) || bitrate <= 0) {
-		throw new TypeError('bitrate must be a positive integer.');
+	if (!(bitrate instanceof Quality) && (!Number.isInteger(bitrate) || bitrate <= 0)) {
+		throw new TypeError('bitrate must be a positive integer or a quality.');
 	}
+
+	const resolvedBitrate = bitrate instanceof Quality
+		? bitrate._toVideoBitrate(codec, width, height)
+		: bitrate;
 
 	if (customVideoEncoders.length > 0) {
 		const encoderConfig: VideoEncoderConfig = {
@@ -1164,11 +1168,11 @@ export const canEncodeVideo = async (codec: VideoCodec, { width = 1280, height =
 				codec,
 				width,
 				height,
-				bitrate,
+				resolvedBitrate,
 			),
 			width,
 			height,
-			bitrate,
+			bitrate: resolvedBitrate,
 			...getVideoEncoderConfigExtension(codec),
 		};
 
@@ -1183,10 +1187,10 @@ export const canEncodeVideo = async (codec: VideoCodec, { width = 1280, height =
 	}
 
 	const support = await VideoEncoder.isConfigSupported({
-		codec: buildVideoCodecString(codec, width, height, bitrate),
+		codec: buildVideoCodecString(codec, width, height, resolvedBitrate),
 		width,
 		height,
-		bitrate,
+		bitrate: resolvedBitrate,
 		...getVideoEncoderConfigExtension(codec),
 	});
 
@@ -1200,7 +1204,7 @@ export const canEncodeVideo = async (codec: VideoCodec, { width = 1280, height =
 export const canEncodeAudio = async (codec: AudioCodec, { numberOfChannels = 2, sampleRate = 48000, bitrate = 128e3 }: {
 	numberOfChannels?: number;
 	sampleRate?: number;
-	bitrate?: number;
+	bitrate?: number | Quality;
 } = {}) => {
 	if (!AUDIO_CODECS.includes(codec)) {
 		return false;
@@ -1211,9 +1215,13 @@ export const canEncodeAudio = async (codec: AudioCodec, { numberOfChannels = 2, 
 	if (!Number.isInteger(sampleRate) || sampleRate <= 0) {
 		throw new TypeError('sampleRate must be a positive integer.');
 	}
-	if (!Number.isInteger(bitrate) || bitrate <= 0) {
+	if (!(bitrate instanceof Quality) && (!Number.isInteger(bitrate) || bitrate <= 0)) {
 		throw new TypeError('bitrate must be a positive integer.');
 	}
+
+	const resolvedBitrate = bitrate instanceof Quality
+		? bitrate._toAudioBitrate(codec)
+		: bitrate;
 
 	if (customAudioEncoders.length > 0) {
 		const encoderConfig: AudioEncoderConfig = {
@@ -1224,7 +1232,7 @@ export const canEncodeAudio = async (codec: AudioCodec, { numberOfChannels = 2, 
 			),
 			numberOfChannels,
 			sampleRate,
-			bitrate,
+			bitrate: resolvedBitrate,
 			...getAudioEncoderConfigExtension(codec),
 		};
 
@@ -1246,7 +1254,7 @@ export const canEncodeAudio = async (codec: AudioCodec, { numberOfChannels = 2, 
 		codec: buildAudioCodecString(codec, numberOfChannels, sampleRate),
 		numberOfChannels,
 		sampleRate,
-		bitrate,
+		bitrate: resolvedBitrate,
 		...getAudioEncoderConfigExtension(codec),
 	});
 
@@ -1288,7 +1296,7 @@ export const getEncodableVideoCodecs = async (
 	options?: {
 		width?: number;
 		height?: number;
-		bitrate?: number;
+		bitrate?: number | Quality;
 	},
 ): Promise<VideoCodec[]> => {
 	const bools = await Promise.all(checkedCodecs.map(codec => canEncodeVideo(codec, options)));
@@ -1304,7 +1312,7 @@ export const getEncodableAudioCodecs = async (
 	options?: {
 		numberOfChannels?: number;
 		sampleRate?: number;
-		bitrate?: number;
+		bitrate?: number | Quality;
 	},
 ): Promise<AudioCodec[]> => {
 	const bools = await Promise.all(checkedCodecs.map(codec => canEncodeAudio(codec, options)));

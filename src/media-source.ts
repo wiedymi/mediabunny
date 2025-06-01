@@ -16,7 +16,7 @@ import {
 	VideoCodec,
 } from './codec';
 import { OutputAudioTrack, OutputSubtitleTrack, OutputTrack, OutputVideoTrack } from './output';
-import { assert, CallSerializer, clamp, promiseWithResolvers, setInt24, setUint24 } from './misc';
+import { assert, CallSerializer, clamp, setInt24, setUint24 } from './misc';
 import { Muxer } from './muxer';
 import { SubtitleParser } from './subtitles';
 import { toAlaw, toUlaw } from './pcm';
@@ -345,85 +345,82 @@ class VideoEncoderWrapper {
 			return;
 		}
 
-		const { promise, resolve } = promiseWithResolvers();
-		this.ensureEncoderPromise = promise;
+		return this.ensureEncoderPromise = (async () => {
+			const width = videoSample.codedWidth;
+			const height = videoSample.codedHeight;
+			const bitrate = this.encodingConfig.bitrate instanceof Quality
+				? this.encodingConfig.bitrate._toVideoBitrate(this.encodingConfig.codec, width, height)
+				: this.encodingConfig.bitrate;
 
-		const width = videoSample.codedWidth;
-		const height = videoSample.codedHeight;
-		const bitrate = this.encodingConfig.bitrate instanceof Quality
-			? this.encodingConfig.bitrate._toVideoBitrate(this.encodingConfig.codec, width, height)
-			: this.encodingConfig.bitrate;
-
-		const encoderConfig: VideoEncoderConfig = {
-			codec: this.encodingConfig.fullCodecString ?? buildVideoCodecString(
-				this.encodingConfig.codec,
+			const encoderConfig: VideoEncoderConfig = {
+				codec: this.encodingConfig.fullCodecString ?? buildVideoCodecString(
+					this.encodingConfig.codec,
+					width,
+					height,
+					bitrate,
+				),
 				width,
 				height,
 				bitrate,
-			),
-			width,
-			height,
-			bitrate,
-			framerate: this.source._connectedTrack?.metadata.frameRate,
-			latencyMode: this.encodingConfig.latencyMode,
-			...getVideoEncoderConfigExtension(this.encodingConfig.codec),
-		};
-		this.encodingConfig.onEncoderConfig?.(encoderConfig);
-
-		const MatchingCustomEncoder = customVideoEncoders.find(x => x.supports(
-			this.encodingConfig.codec,
-			encoderConfig,
-		));
-
-		if (MatchingCustomEncoder) {
-			// @ts-expect-error "Can't create instance of abstract class 🤓"
-			this.customEncoder = new MatchingCustomEncoder() as CustomVideoEncoder;
-			this.customEncoder.codec = this.encodingConfig.codec;
-			this.customEncoder.config = encoderConfig;
-			this.customEncoder.onPacket = (packet, meta) => {
-				if (!(packet instanceof EncodedPacket)) {
-					throw new TypeError('The first argument passed to onPacket must be an EncodedPacket.');
-				}
-				if (meta !== undefined && (!meta || typeof meta !== 'object')) {
-					throw new TypeError('The second argument passed to onPacket must be an object or undefined.');
-				}
-
-				this.encodingConfig.onEncodedPacket?.(packet, meta);
-				void this.muxer!.addEncodedVideoPacket(this.source._connectedTrack!, packet, meta);
+				framerate: this.source._connectedTrack?.metadata.frameRate,
+				latencyMode: this.encodingConfig.latencyMode,
+				...getVideoEncoderConfigExtension(this.encodingConfig.codec),
 			};
+			this.encodingConfig.onEncoderConfig?.(encoderConfig);
 
-			await this.customEncoder.init();
-		} else {
-			if (typeof VideoEncoder === 'undefined') {
-				throw new Error('VideoEncoder is not supported by this browser.');
-			}
+			const MatchingCustomEncoder = customVideoEncoders.find(x => x.supports(
+				this.encodingConfig.codec,
+				encoderConfig,
+			));
 
-			const support = await VideoEncoder.isConfigSupported(encoderConfig);
-			if (!support.supported) {
-				throw new Error(
-					'This specific encoder configuration is not supported by this browser. Consider using another codec'
-					+ ' or changing your video parameters.',
-				);
-			}
-
-			this.encoder = new VideoEncoder({
-				output: (chunk, meta) => {
-					const packet = EncodedPacket.fromEncodedChunk(chunk);
+			if (MatchingCustomEncoder) {
+				// @ts-expect-error "Can't create instance of abstract class 🤓"
+				this.customEncoder = new MatchingCustomEncoder() as CustomVideoEncoder;
+				this.customEncoder.codec = this.encodingConfig.codec;
+				this.customEncoder.config = encoderConfig;
+				this.customEncoder.onPacket = (packet, meta) => {
+					if (!(packet instanceof EncodedPacket)) {
+						throw new TypeError('The first argument passed to onPacket must be an EncodedPacket.');
+					}
+					if (meta !== undefined && (!meta || typeof meta !== 'object')) {
+						throw new TypeError('The second argument passed to onPacket must be an object or undefined.');
+					}
 
 					this.encodingConfig.onEncodedPacket?.(packet, meta);
 					void this.muxer!.addEncodedVideoPacket(this.source._connectedTrack!, packet, meta);
-				},
-				error: this.encodingConfig.onEncoderError ?? (error => console.error('VideoEncoder error:', error)),
-			});
-			this.encoder.configure(encoderConfig);
-		}
+				};
 
-		assert(this.source._connectedTrack);
-		this.muxer = this.source._connectedTrack.output._muxer;
+				await this.customEncoder.init();
+			} else {
+				if (typeof VideoEncoder === 'undefined') {
+					throw new Error('VideoEncoder is not supported by this browser.');
+				}
 
-		this.encoderInitialized = true;
+				const support = await VideoEncoder.isConfigSupported(encoderConfig);
+				if (!support.supported) {
+					throw new Error(
+						'This specific encoder configuration is not supported by this browser. Consider using another'
+						+ ' codec or changing your video parameters.',
+					);
+				}
 
-		resolve();
+				this.encoder = new VideoEncoder({
+					output: (chunk, meta) => {
+						const packet = EncodedPacket.fromEncodedChunk(chunk);
+
+						this.encodingConfig.onEncodedPacket?.(packet, meta);
+						void this.muxer!.addEncodedVideoPacket(this.source._connectedTrack!, packet, meta);
+					},
+					error: this.encodingConfig.onEncoderError ?? (error => console.error('VideoEncoder error:', error)),
+				});
+				this.encoder.configure(encoderConfig);
+			}
+
+			assert(this.source._connectedTrack);
+			this.muxer = this.source._connectedTrack.output._muxer;
+
+			this.encoderInitialized = true;
+		})();
 	}
 
 	async flushAndClose() {
@@ -891,87 +888,85 @@ class AudioEncoderWrapper {
 		}
 	}
 
-	private async ensureEncoder(audioSample: AudioSample) {
+	private ensureEncoder(audioSample: AudioSample) {
 		if (this.encoderInitialized) {
 			return;
 		}
 
-		const { promise, resolve } = promiseWithResolvers();
-		this.ensureEncoderPromise = promise;
+		return this.ensureEncoderPromise = (async () => {
+			const { numberOfChannels, sampleRate } = audioSample;
+			const bitrate = this.encodingConfig.bitrate instanceof Quality
+				? this.encodingConfig.bitrate._toAudioBitrate(this.encodingConfig.codec)
+				: this.encodingConfig.bitrate;
 
-		const { numberOfChannels, sampleRate } = audioSample;
-		const bitrate = this.encodingConfig.bitrate instanceof Quality
-			? this.encodingConfig.bitrate._toAudioBitrate(this.encodingConfig.codec)
-			: this.encodingConfig.bitrate;
-
-		const encoderConfig: AudioEncoderConfig = {
-			codec: this.encodingConfig.fullCodecString ?? buildAudioCodecString(
-				this.encodingConfig.codec,
+			const encoderConfig: AudioEncoderConfig = {
+				codec: this.encodingConfig.fullCodecString ?? buildAudioCodecString(
+					this.encodingConfig.codec,
+					numberOfChannels,
+					sampleRate,
+				),
 				numberOfChannels,
 				sampleRate,
-			),
-			numberOfChannels,
-			sampleRate,
-			bitrate,
-			...getAudioEncoderConfigExtension(this.encodingConfig.codec),
-		};
-		this.encodingConfig.onEncoderConfig?.(encoderConfig);
-
-		const MatchingCustomEncoder = customAudioEncoders.find(x => x.supports(
-			this.encodingConfig.codec,
-			encoderConfig,
-		));
-
-		if (MatchingCustomEncoder) {
-			// @ts-expect-error "Can't create instance of abstract class 🤓"
-			this.customEncoder = new MatchingCustomEncoder() as CustomAudioEncoder;
-			this.customEncoder.codec = this.encodingConfig.codec;
-			this.customEncoder.config = encoderConfig;
-			this.customEncoder.onPacket = (packet, meta) => {
-				if (!(packet instanceof EncodedPacket)) {
-					throw new TypeError('The first argument passed to onPacket must be an EncodedPacket.');
-				}
-				if (meta !== undefined && (!meta || typeof meta !== 'object')) {
-					throw new TypeError('The second argument passed to onPacket must be an object or undefined.');
-				}
-
-				this.encodingConfig.onEncodedPacket?.(packet, meta);
-				void this.muxer!.addEncodedAudioPacket(this.source._connectedTrack!, packet, meta);
+				bitrate,
+				...getAudioEncoderConfigExtension(this.encodingConfig.codec),
 			};
+			this.encodingConfig.onEncoderConfig?.(encoderConfig);
 
-			await this.customEncoder.init();
-		} else if ((PCM_AUDIO_CODECS as readonly string[]).includes(this.encodingConfig.codec)) {
-			this.initPcmEncoder();
-		} else {
-			if (typeof AudioEncoder === 'undefined') {
-				throw new Error('AudioEncoder is not supported by this browser.');
-			}
+			const MatchingCustomEncoder = customAudioEncoders.find(x => x.supports(
+				this.encodingConfig.codec,
+				encoderConfig,
+			));
 
-			const support = await AudioEncoder.isConfigSupported(encoderConfig);
-			if (!support.supported) {
-				throw new Error(
-					'This specific encoder configuration not supported by this browser. Consider using another codec or'
-					+ ' changing your audio parameters.',
-				);
-			}
-
-			this.encoder = new AudioEncoder({
-				output: (chunk, meta) => {
-					const packet = EncodedPacket.fromEncodedChunk(chunk);
+			if (MatchingCustomEncoder) {
+				// @ts-expect-error "Can't create instance of abstract class 🤓"
+				this.customEncoder = new MatchingCustomEncoder() as CustomAudioEncoder;
+				this.customEncoder.codec = this.encodingConfig.codec;
+				this.customEncoder.config = encoderConfig;
+				this.customEncoder.onPacket = (packet, meta) => {
+					if (!(packet instanceof EncodedPacket)) {
+						throw new TypeError('The first argument passed to onPacket must be an EncodedPacket.');
+					}
+					if (meta !== undefined && (!meta || typeof meta !== 'object')) {
+						throw new TypeError('The second argument passed to onPacket must be an object or undefined.');
+					}
 
 					this.encodingConfig.onEncodedPacket?.(packet, meta);
 					void this.muxer!.addEncodedAudioPacket(this.source._connectedTrack!, packet, meta);
-				},
-				error: this.encodingConfig.onEncoderError ?? (error => console.error('AudioEncoder error:', error)),
-			});
-			this.encoder.configure(encoderConfig);
-		}
+				};
 
-		assert(this.source._connectedTrack);
-		this.muxer = this.source._connectedTrack.output._muxer;
+				await this.customEncoder.init();
+			} else if ((PCM_AUDIO_CODECS as readonly string[]).includes(this.encodingConfig.codec)) {
+				this.initPcmEncoder();
+			} else {
+				if (typeof AudioEncoder === 'undefined') {
+					throw new Error('AudioEncoder is not supported by this browser.');
+				}
 
-		this.encoderInitialized = true;
-		resolve();
+				const support = await AudioEncoder.isConfigSupported(encoderConfig);
+				if (!support.supported) {
+					throw new Error(
+						'This specific encoder configuration not supported by this browser. Consider using another'
+						+ ' codec or changing your audio parameters.',
+					);
+				}
+
+				this.encoder = new AudioEncoder({
+					output: (chunk, meta) => {
+						const packet = EncodedPacket.fromEncodedChunk(chunk);
+
+						this.encodingConfig.onEncodedPacket?.(packet, meta);
+						void this.muxer!.addEncodedAudioPacket(this.source._connectedTrack!, packet, meta);
+					},
+					error: this.encodingConfig.onEncoderError ?? (error => console.error('AudioEncoder error:', error)),
+				});
+				this.encoder.configure(encoderConfig);
+			}
+
+			assert(this.source._connectedTrack);
+			this.muxer = this.source._connectedTrack.output._muxer;
+
+			this.encoderInitialized = true;
+		})();
 	}
 
 	private initPcmEncoder() {
