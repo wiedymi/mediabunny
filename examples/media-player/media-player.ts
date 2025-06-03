@@ -28,7 +28,7 @@ const volumeButton = document.querySelector('#volume-button') as HTMLButtonEleme
 const fullscreenButton = document.querySelector('#fullscreen-button') as HTMLButtonElement;
 const errorElement = document.querySelector('#error-element') as HTMLDivElement;
 
-const context = canvas.getContext('2d')!;
+const context = canvas.getContext('2d', { alpha: false, desynchronized: true })!;
 
 let audioContext: AudioContext | null = null;
 let gainNode: GainNode | null = null;
