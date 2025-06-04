@@ -499,7 +499,7 @@ export class Conversion {
 					this._reportProgress(track.id, packet.timestamp + packet.duration);
 				}
 
-				await source.close();
+				source.close();
 				this._synchronizer.closeTrack(track.id);
 			})());
 		} else {
@@ -593,7 +593,7 @@ export class Conversion {
 						sample.close();
 					}
 
-					await source.close();
+					source.close();
 					this._synchronizer.closeTrack(track.id);
 				})());
 			}
@@ -670,7 +670,7 @@ export class Conversion {
 					this._reportProgress(track.id, packet.timestamp + packet.duration);
 				}
 
-				await source.close();
+				source.close();
 				this._synchronizer.closeTrack(track.id);
 			})());
 		} else {
@@ -763,7 +763,7 @@ export class Conversion {
 						sample.close();
 					}
 
-					await source.close();
+					source.close();
 					this._synchronizer.closeTrack(track.id);
 				})());
 			}
@@ -822,7 +822,7 @@ export class Conversion {
 
 			await resampler.finalize();
 
-			await source.close();
+			source.close();
 			this._synchronizer.closeTrack(track.id);
 		})());
 

@@ -81,7 +81,7 @@ export abstract class MediaSource {
 	 */
 	close() {
 		if (this._closingPromise) {
-			throw new Error('Source already closed.');
+			return;
 		}
 
 		const connectedTrack = this._connectedTrack;
@@ -94,7 +94,7 @@ export abstract class MediaSource {
 			throw new Error('Cannot call close before output has been started.');
 		}
 
-		return this._closingPromise = (async () => {
+		this._closingPromise = (async () => {
 			await this._flushAndClose();
 
 			this._closed = true;

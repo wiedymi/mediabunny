@@ -128,13 +128,13 @@ const generateVideo = async () => {
 		}
 
 		// Signal to the output that no more video frames are coming (not necessary, but recommended)
-		void canvasSource.close();
+		canvasSource.close();
 
 		// Let's render the audio. Ideally, the audio is rendered before the video (or concurrently to it), but for
 		// simplicity, we're rendering it after we've cranked through all frames.
 		const audioBuffer = await offlineAudioContext.startRendering();
 		await audioBufferSource.add(audioBuffer);
-		void audioBufferSource.close();
+		audioBufferSource.close();
 
 		clearInterval(progressInterval);
 

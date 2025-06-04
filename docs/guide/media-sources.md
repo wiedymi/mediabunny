@@ -19,7 +19,7 @@ await mediaSource.add(...);
 
 When you're done using the source, meaning no additional media data will be added, it's best to close the source as soon as possible:
 ```ts
-void mediaSource.close();
+mediaSource.close();
 ```
 Closing sources manually is _technically_ not required and will happen automatically when finalizing the `Output`. However, if your `Output` has multiple tracks and not all of them finish supplying their data at the same time (for example, adding all audio first and then all video), closing sources early will improve performance and lower memory usage. This is because the `Output` can better "plan ahead", knowing it doesn't have to wait for certain tracks anymore (see [Packet buffering](./writing-overview#packet-buffering)). Therefore, it is good practice to always manually close all media sources as soon as you are done using them.
 
@@ -399,7 +399,7 @@ await textSource.add(text);
 
 If you add the entire subtitle file at once, make sure to [close the source](#closing-sources) immediately after:
 ```ts
-void textSource.close();
+textSource.close();
 ```
 
 You can also add cues individually in small chunks:
