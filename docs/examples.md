@@ -22,8 +22,10 @@ features:
       details: Convert an input file to a highly-compressed MP4 file.
       link: /examples/file-compression
       target: _self
-    - title: Feature B
-      details: Lorem ipsum dolor sit amet, consectetur adipiscing elit
+    - title: Procedural video generation
+      details: Generate a video file as fast as the hardware allows
+      link: /examples/procedural-generation
+      target: _self
     - title: Feature C
       details: Lorem ipsum dolor sit amet, consectetur adipiscing elit
 ---

@@ -42,6 +42,6 @@ Examples:
 ✅ Rendering thumbnails for a video / extracting a wave form?
 ✅ Media player
 ✅ Conversion demo: File compressor
-- Procedurally generated video (faster than real time)
+✅ Procedurally generated video (faster than real time)
 - Video generated from live sources
 - Live streaming demo?
