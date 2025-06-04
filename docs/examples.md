@@ -23,7 +23,7 @@ features:
       link: /examples/file-compression
       target: _self
     - title: Procedural video generation
-      details: Generate a video file as fast as the hardware allows
+      details: Generate a video file as fast as the hardware allows.
       link: /examples/procedural-generation
       target: _self
     - title: Feature C

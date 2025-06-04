@@ -68,6 +68,7 @@ const generateVideo = async () => {
 		progressText.style.display = '';
 		progressText.textContent = 'Initializing...';
 		resultVideo.style.display = 'none';
+		resultVideo.src = '';
 		videoInfo.style.display = 'none';
 		errorElement.textContent = '';
 
