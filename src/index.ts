@@ -68,6 +68,9 @@ export {
 	getEncodableVideoCodecs,
 	getEncodableAudioCodecs,
 	getEncodableSubtitleCodecs,
+	getFirstEncodableVideoCodec,
+	getFirstEncodableAudioCodec,
+	getFirstEncodableSubtitleCodec,
 } from './codec';
 export { Target, BufferTarget, StreamTarget, StreamTargetChunk, StreamTargetOptions } from './target';
 export { Rotation, AnyIterable, SetRequired } from './misc';

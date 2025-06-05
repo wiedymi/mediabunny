@@ -742,16 +742,11 @@ export class Quality {
 			vp8: 1.2, // Slightly less efficient than AVC
 		};
 
-		const getBaseBitrateForPixels = (pixelCount: number): number => {
-			const referencePixels = 1920 * 1080;
-			const referenceBitrate = 2000000;
+		const referencePixels = 1920 * 1080;
+		const referenceBitrate = 3000000;
+		const scaleFactor = Math.pow(pixels / referencePixels, 0.95); // Slight non-linear scaling
+		const baseBitrate = referenceBitrate * scaleFactor;
 
-			// Non-linear scaling
-			const scaleFactor = Math.pow(pixelCount / referencePixels, 0.75);
-			return referenceBitrate * scaleFactor;
-		};
-
-		const baseBitrate = getBaseBitrateForPixels(pixels);
 		const codecAdjustedBitrate = baseBitrate * codecEfficiencyFactors[codec];
 		const finalBitrate = codecAdjustedBitrate * this._factor;
 
@@ -804,7 +799,7 @@ export class Quality {
  * Represents a very low media quality.
  * @public
  */
-export const QUALITY_VERY_LOW = new Quality(0.4);
+export const QUALITY_VERY_LOW = new Quality(0.3);
 /**
  * Represents a low media quality.
  * @public
@@ -1328,4 +1323,62 @@ export const getEncodableSubtitleCodecs = async (
 ): Promise<SubtitleCodec[]> => {
 	const bools = await Promise.all(checkedCodecs.map(canEncodeSubtitles));
 	return checkedCodecs.filter((_, i) => bools[i]);
+};
+
+/**
+ * Returns the first video codec from the given list that can be encoded by the browser.
+ * @public
+ */
+export const getFirstEncodableVideoCodec = async (
+	checkedCodecs: VideoCodec[],
+	options?: {
+		width?: number;
+		height?: number;
+		bitrate?: number | Quality;
+	},
+): Promise<VideoCodec | null> => {
+	for (const codec of checkedCodecs) {
+		if (await canEncodeVideo(codec, options)) {
+			return codec;
+		}
+	}
+
+	return null;
+};
+
+/**
+ * Returns the first audio codec from the given list that can be encoded by the browser.
+ * @public
+ */
+export const getFirstEncodableAudioCodec = async (
+	checkedCodecs: AudioCodec[],
+	options?: {
+		numberOfChannels?: number;
+		sampleRate?: number;
+		bitrate?: number | Quality;
+	},
+): Promise<AudioCodec | null> => {
+	for (const codec of checkedCodecs) {
+		if (await canEncodeAudio(codec, options)) {
+			return codec;
+		}
+	}
+
+	return null;
+};
+
+/**
+ * Returns the first subtitle codec from the given list that can be encoded by the browser.
+ * @public
+ */
+export const getFirstEncodableSubtitleCodec = async (
+	checkedCodecs: SubtitleCodec[],
+): Promise<SubtitleCodec | null> => {
+	for (const codec of checkedCodecs) {
+		if (await canEncodeSubtitles(codec)) {
+			return codec;
+		}
+	}
+
+	return null;
 };

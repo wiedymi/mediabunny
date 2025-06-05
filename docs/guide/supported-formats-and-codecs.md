@@ -116,8 +116,9 @@ canEncodeAudio('aac', {
 }); // => Promise<boolean>
 ```
 
-In addition, you can use the following functions which check encodability for multiple codecs at once and return a list of
-supported codecs:
+---
+
+In addition, you can use the following functions to check encodability for multiple codecs at once, getting back a list of supported codecs:
 ```ts
 import {
 	getEncodableCodecs,
@@ -126,25 +127,54 @@ import {
 	getEncodableSubtitleCodecs,
 } from 'mediakit';
 
-getEncodableCodecs(); // Promise<MediaCodec[]>
-getEncodableVideoCodecs(); // Promise<VideoCodec[]>
-getEncodableAudioCodecs(); // Promise<AudioCodec[]>
-getEncodableSubtitleCodecs(); // Promise<SubtitleCodec[]>
-```
+getEncodableCodecs(); // => Promise<MediaCodec[]>
+getEncodableVideoCodecs(); // => Promise<VideoCodec[]>
+getEncodableAudioCodecs(); // => Promise<AudioCodec[]>
+getEncodableSubtitleCodecs(); // => Promise<SubtitleCodec[]>
 
-These functions also accept optional configuration options:
-```ts
-import { getEncodableVideoCodecs } from 'mediakit';
-
-// Checks only which of AVC, HEVC and VP8 can be encoded at 1920x1080 @10Mbps:
+// These functions also accept optional configuration options.
+// Here, we check which of AVC, HEVC and VP8 can be encoded at 1920x1080 @10Mbps:
 getEncodableVideoCodecs(
 	['avc', 'hevc', 'vp8'],
 	{ width: 1920, height: 1080, bitrate: 1e7 },
 ); // => Promise<VideoCodec[]>
 ```
 
+---
+
+If you simply want to find the best codec that the browser can encode, you can use these functions, which return the first codec supported by the browser:
+```ts
+import {
+	getFirstEncodableVideoCodec,
+	getFirstEncodableAudioCodec,
+	getFirstEncodableSubtitleCodec,
+} from 'mediakit';
+
+getFirstEncodableVideoCodec(['avc', 'vp9', 'av1']); // => Promise<VideoCodec | null>
+getFirstEncodableAudioCodec(['opus', 'aac']); // => Promise<AudioCodec | null>
+
+getEncodableVideoCodecs(
+	['avc', 'hevc', 'vp8'],
+	{ width: 1920, height: 1080, bitrate: 1e7 },
+); // => Promise<VideoCodec | null>
+```
+
+If none of the listed codecs is supported, `null` is returned.
+
+These functions are especially useful in conjunction with an [output format](./output-formats) to retrieve the best codec that is supported both by the encoder as well as the container format:
+```ts
+import {
+	Mp4OutputFormat,
+	getFirstEncodableVideoCodec,
+} from 'mediakit';
+
+const outputFormat = new Mp4OutputFormat();
+const containableVideoCodecs = outputFormat.getSupportedVideoCodecs();
+const bestVideoCodec = await getFirstEncodableVideoCodec(containableVideoCodecs);
+```
+
 ::: info
-These checks also take [custom encoders](#custom-encoders) into account.
+Codec encodability checks take [custom encoders](#custom-encoders) into account.
 :::
 
 ## Querying codec decodability

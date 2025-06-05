@@ -5,6 +5,8 @@ import {
 	CanvasSource,
 	AudioBufferSource,
 	QUALITY_HIGH,
+	getFirstEncodableAudioCodec,
+	getFirstEncodableVideoCodec,
 } from 'mediakit';
 
 const durationSlider = document.querySelector('#duration-slider') as HTMLInputElement;
@@ -47,6 +49,7 @@ const scaleHues = [
 
 const wallWidth = 10;
 const frameRate = 60;
+const numberOfChannels = 2;
 const sampleRate = 48000;
 
 let balls: Ball[] = [];
@@ -84,19 +87,39 @@ const generateVideo = async () => {
 			format: new Mp4OutputFormat(),
 		});
 
+		// Retrieve the first video codec supported by this browser that can be contained in the output format
+		const videoCodec = await getFirstEncodableVideoCodec(output.format.getSupportedVideoCodecs(), {
+			width: renderCanvas.width,
+			height: renderCanvas.height,
+		});
+		if (!videoCodec) {
+			throw new Error('Your browser doesn\'t support video encoding.');
+		}
+
 		// For video, we use a CanvasSource for convenience, as we're rendering to a canvas
 		const canvasSource = new CanvasSource(renderCanvas, {
-			codec: 'avc',
+			codec: videoCodec,
 			bitrate: QUALITY_HIGH,
 		});
 		output.addVideoTrack(canvasSource);
 
 		// For audio, we use ArrayBufferSource, because we'll be creating an ArrayBuffer with OfflineAudioContext
-		const audioBufferSource = new AudioBufferSource({
-			codec: 'aac',
-			bitrate: QUALITY_HIGH,
+		let audioBufferSource: AudioBufferSource | null = null;
+
+		// Retrieve the first audio codec supported by this browser that can be contained in the output format
+		const audioCodec = await getFirstEncodableAudioCodec(output.format.getSupportedAudioCodecs(), {
+			numberOfChannels,
+			sampleRate,
 		});
-		output.addAudioTrack(audioBufferSource);
+		if (audioCodec) {
+			audioBufferSource = new AudioBufferSource({
+				codec: audioCodec,
+				bitrate: QUALITY_HIGH,
+			});
+			output.addAudioTrack(audioBufferSource);
+		} else {
+			alert('Your browser doesn\'t support audio encoding, so we won\'t include audio in the output file.');
+		}
 
 		await output.start();
 
@@ -105,10 +128,10 @@ const generateVideo = async () => {
 		// Start an interval that updates the progress bar
 		progressInterval = window.setInterval(() => {
 			const videoProgress = currentFrame / totalFrames;
-			const overallProgress = videoProgress * 0.9; // 90% when 100% of the video has been rendered
+			const overallProgress = videoProgress * (audioBufferSource ? 0.9 : 0.95);
 			progressBar.style.width = `${overallProgress * 100}%`;
 
-			if (currentFrame === totalFrames) {
+			if (currentFrame === totalFrames && audioBufferSource) {
 				progressText.textContent = 'Rendering audio...';
 			} else {
 				progressText.textContent = `Rendering frame ${currentFrame}/${totalFrames}`;
@@ -130,11 +153,13 @@ const generateVideo = async () => {
 		// Signal to the output that no more video frames are coming (not necessary, but recommended)
 		canvasSource.close();
 
-		// Let's render the audio. Ideally, the audio is rendered before the video (or concurrently to it), but for
-		// simplicity, we're rendering it after we've cranked through all frames.
-		const audioBuffer = await offlineAudioContext.startRendering();
-		await audioBufferSource.add(audioBuffer);
-		audioBufferSource.close();
+		if (audioBufferSource) {
+			// Let's render the audio. Ideally, the audio is rendered before the video (or concurrently to it), but for
+			// simplicity, we're rendering it after we've cranked through all frames.
+			const audioBuffer = await offlineAudioContext.startRendering();
+			await audioBufferSource.add(audioBuffer);
+			audioBufferSource.close();
+		}
 
 		clearInterval(progressInterval);
 
@@ -172,7 +197,7 @@ const generateVideo = async () => {
 /** === SCENE SIMULATION LOGIC === */
 
 const initScene = (duration: number) => {
-	offlineAudioContext = new OfflineAudioContext(2, duration * sampleRate, sampleRate);
+	offlineAudioContext = new OfflineAudioContext(numberOfChannels, duration * sampleRate, sampleRate);
 
 	// Create reverb effect
 	offlineReverbConvolver = offlineAudioContext.createConvolver();
@@ -467,7 +492,7 @@ const getFrequencyFromScaleIndex = (scaleIndex: number) => {
 
 const createReverbImpulse = (duration: number) => {
 	const length = sampleRate * duration;
-	const impulse = offlineAudioContext.createBuffer(2, length, sampleRate);
+	const impulse = offlineAudioContext.createBuffer(numberOfChannels, length, sampleRate);
 
 	for (let channel = 0; channel < 2; channel++) {
 		const channelData = impulse.getChannelData(channel);
