@@ -1,8 +1,8 @@
 import {
 	AUDIO_CODECS,
 	AudioCodec,
+	getFirstEncodableVideoCodec,
 	getEncodableAudioCodecs,
-	getEncodableVideoCodecs,
 	NON_PCM_AUDIO_CODECS,
 	Quality,
 	QUALITY_HIGH,
@@ -520,8 +520,8 @@ export class Conversion {
 
 			const bitrate = this._options.video?.bitrate ?? QUALITY_HIGH;
 
-			const encodableCodecs = await getEncodableVideoCodecs(videoCodecs, { width, height, bitrate });
-			if (encodableCodecs.length === 0) {
+			const encodableCodec = await getFirstEncodableVideoCodec(videoCodecs, { width, height, bitrate });
+			if (!encodableCodec) {
 				this.discardedTracks.push({
 					track,
 					reason: 'no_encodable_target_codec',
@@ -530,7 +530,7 @@ export class Conversion {
 			}
 
 			const encodingConfig: VideoEncodingConfig = {
-				codec: encodableCodecs[0]!,
+				codec: encodableCodec,
 				bitrate,
 				onEncodedPacket: sample => this._reportProgress(track.id, sample.timestamp + sample.duration),
 			};
@@ -714,13 +714,12 @@ export class Conversion {
 					bitrate,
 				});
 
-				if (
-					encodableCodecsWithDefaultParams
-						.some(codec => (NON_PCM_AUDIO_CODECS as readonly string[]).includes(codec))
-				) {
+				const nonPcmCodec = encodableCodecsWithDefaultParams
+					.find(codec => (NON_PCM_AUDIO_CODECS as readonly string[]).includes(codec));
+				if (nonPcmCodec) {
 					// We are able to encode using a non-PCM codec, but it'll require resampling
 					needsResample = true;
-					codecOfChoice = encodableCodecsWithDefaultParams[0]!;
+					codecOfChoice = nonPcmCodec;
 					numberOfChannels = FALLBACK_NUMBER_OF_CHANNELS;
 					sampleRate = FALLBACK_SAMPLE_RATE;
 				}

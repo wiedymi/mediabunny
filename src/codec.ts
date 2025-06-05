@@ -756,7 +756,7 @@ export class Quality {
 	/** @internal */
 	_toAudioBitrate(codec: AudioCodec) {
 		if ((PCM_AUDIO_CODECS as readonly string[]).includes(codec) || codec === 'flac') {
-			return -1;
+			return undefined;
 		}
 
 		const baseRates = {

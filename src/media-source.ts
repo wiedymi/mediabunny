@@ -201,8 +201,6 @@ export type VideoEncodingConfig = {
 
 	/** Called for each successfully encoded packet. Both the packet and the encoding metadata are passed. */
 	onEncodedPacket?: (packet: EncodedPacket, meta: EncodedVideoChunkMetadata | undefined) => unknown;
-	/** Called when an error occurs within VideoEncoder. */
-	onEncoderError?: (error: Error) => unknown;
 	/** Called when the internal encoder config, as used by the WebCodecs API, is created. */
 	onEncoderConfig?: (config: VideoEncoderConfig) => unknown;
 };
@@ -238,9 +236,6 @@ const validateVideoEncodingConfig = (config: VideoEncodingConfig) => {
 	if (config.onEncodedPacket !== undefined && typeof config.onEncodedPacket !== 'function') {
 		throw new TypeError('config.onEncodedChunk, when provided, must be a function.');
 	}
-	if (config.onEncoderError !== undefined && typeof config.onEncoderError !== 'function') {
-		throw new TypeError('config.onEncodingError, when provided, must be a function.');
-	}
 	if (config.onEncoderConfig !== undefined && typeof config.onEncoderConfig !== 'function') {
 		throw new TypeError('config.onEncoderConfig, when provided, must be a function.');
 	}
@@ -259,9 +254,17 @@ class VideoEncoderWrapper {
 	private customEncoderCallSerializer = new CallSerializer();
 	private customEncoderQueueSize = 0;
 
+	/**
+	 * Encoders typically throw their errors "out of band", meaning asynchronously in some other execution context.
+	 * However, we want to surface these errors to the user within the normal control flow, so they don't go uncaught.
+	 * So, we keep track of the encoder error and throw it as soon as we get the chance.
+	 */
+	private encoderError: Error | null = null;
+
 	constructor(private source: VideoSource, private encodingConfig: VideoEncodingConfig) {}
 
 	async add(videoSample: VideoSample, shouldClose: boolean, encodeOptions?: VideoEncoderEncodeOptions) {
+		this.checkForEncoderError();
 		this.source._ensureValidAdd();
 
 		// Ensure video sample size remains constant
@@ -316,6 +319,9 @@ class VideoEncoderWrapper {
 					if (shouldClose) {
 						videoSample.close();
 					}
+				})
+				.catch((error: Error) => {
+					this.encoderError ??= error;
 				});
 
 			if (this.customEncoderQueueSize >= 4) {
@@ -411,7 +417,9 @@ class VideoEncoderWrapper {
 						this.encodingConfig.onEncodedPacket?.(packet, meta);
 						void this.muxer!.addEncodedVideoPacket(this.source._connectedTrack!, packet, meta);
 					},
-					error: this.encodingConfig.onEncoderError ?? (error => console.error('VideoEncoder error:', error)),
+					error: (error) => {
+						this.encoderError ??= error;
+					},
 				});
 				this.encoder.configure(encoderConfig);
 			}
@@ -424,6 +432,8 @@ class VideoEncoderWrapper {
 	}
 
 	async flushAndClose() {
+		this.checkForEncoderError();
+
 		if (this.customEncoder) {
 			void this.customEncoderCallSerializer.call(() => this.customEncoder!.flush());
 			await this.customEncoderCallSerializer.call(() => this.customEncoder!.close());
@@ -431,6 +441,8 @@ class VideoEncoderWrapper {
 			await this.encoder.flush();
 			this.encoder.close();
 		}
+
+		this.checkForEncoderError();
 	}
 
 	getQueueSize() {
@@ -438,6 +450,13 @@ class VideoEncoderWrapper {
 			return this.customEncoderQueueSize;
 		} else {
 			return this.encoder?.encodeQueueSize ?? 0;
+		}
+	}
+
+	checkForEncoderError() {
+		if (this.encoderError) {
+			this.encoderError.stack = new Error().stack; // Provide a more useful stack trace
+			throw this.encoderError;
 		}
 	}
 }
@@ -581,7 +600,11 @@ export class MediaStreamVideoTrackSource extends VideoSource {
 					return;
 				}
 
-				void this._encoder.add(new VideoSample(videoFrame), true);
+				void this._encoder.add(new VideoSample(videoFrame), true)
+					.catch((error) => {
+						this._abortController?.abort();
+						throw error;
+					});
 			},
 		});
 
@@ -681,8 +704,6 @@ export type AudioEncodingConfig = {
 
 	/** Called for each successfully encoded packet. Both the packet and the encoding metadata are passed. */
 	onEncodedPacket?: (packet: EncodedPacket, meta: EncodedAudioChunkMetadata | undefined) => unknown;
-	/** Called when an error occurs within AudioEncoder. */
-	onEncoderError?: (error: Error) => unknown;
 	/** Called when the internal encoder config, as used by the WebCodecs API, is created. */
 	onEncoderConfig?: (config: AudioEncoderConfig) => unknown;
 };
@@ -719,9 +740,6 @@ const validateAudioEncodingConfig = (config: AudioEncodingConfig) => {
 	if (config.onEncodedPacket !== undefined && typeof config.onEncodedPacket !== 'function') {
 		throw new TypeError('config.onEncodedChunk, when provided, must be a function.');
 	}
-	if (config.onEncoderError !== undefined && typeof config.onEncoderError !== 'function') {
-		throw new TypeError('config.onEncodingError, when provided, must be a function.');
-	}
 	if (config.onEncoderConfig !== undefined && typeof config.onEncoderConfig !== 'function') {
 		throw new TypeError('config.onEncoderConfig, when provided, must be a function.');
 	}
@@ -743,9 +761,17 @@ class AudioEncoderWrapper {
 	private customEncoderCallSerializer = new CallSerializer();
 	private customEncoderQueueSize = 0;
 
+	/**
+	 * Encoders typically throw their errors "out of band", meaning asynchronously in some other execution context.
+	 * However, we want to surface these errors to the user within the normal control flow, so they don't go uncaught.
+	 * So, we keep track of the encoder error and throw it as soon as we get the chance.
+	 */
+	private encoderError: Error | null = null;
+
 	constructor(private source: AudioSource, private encodingConfig: AudioEncodingConfig) {}
 
 	async add(audioSample: AudioSample, shouldClose: boolean) {
+		this.checkForEncoderError();
 		this.source._ensureValidAdd();
 
 		// Ensure audio parameters remain constant
@@ -790,6 +816,9 @@ class AudioEncoderWrapper {
 					if (shouldClose) {
 						audioSample.close();
 					}
+				})
+				.catch((error: Error) => {
+					this.encoderError ??= error;
 				});
 
 			if (this.customEncoderQueueSize >= 4) {
@@ -957,7 +986,9 @@ class AudioEncoderWrapper {
 						this.encodingConfig.onEncodedPacket?.(packet, meta);
 						void this.muxer!.addEncodedAudioPacket(this.source._connectedTrack!, packet, meta);
 					},
-					error: this.encodingConfig.onEncoderError ?? (error => console.error('AudioEncoder error:', error)),
+					error: (error) => {
+						this.encoderError ??= error;
+					},
 				});
 				this.encoder.configure(encoderConfig);
 			}
@@ -1051,6 +1082,8 @@ class AudioEncoderWrapper {
 	}
 
 	async flushAndClose() {
+		this.checkForEncoderError();
+
 		if (this.customEncoder) {
 			void this.customEncoderCallSerializer.call(() => this.customEncoder!.flush());
 			await this.customEncoderCallSerializer.call(() => this.customEncoder!.close());
@@ -1058,6 +1091,8 @@ class AudioEncoderWrapper {
 			await this.encoder.flush();
 			this.encoder.close();
 		}
+
+		this.checkForEncoderError();
 	}
 
 	getQueueSize() {
@@ -1067,6 +1102,13 @@ class AudioEncoderWrapper {
 			return 0;
 		} else {
 			return this.encoder?.encodeQueueSize ?? 0;
+		}
+	}
+
+	checkForEncoderError() {
+		if (this.encoderError) {
+			this.encoderError.stack = new Error().stack; // Provide a more useful stack trace
+			throw this.encoderError;
 		}
 	}
 }
@@ -1234,7 +1276,11 @@ export class MediaStreamAudioTrackSource extends AudioSource {
 					return;
 				}
 
-				void this._encoder.add(new AudioSample(audioData), true);
+				void this._encoder.add(new AudioSample(audioData), true)
+					.catch((error) => {
+						this._abortController?.abort();
+						throw error;
+					});
 			},
 		});
 

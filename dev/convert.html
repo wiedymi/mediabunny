@@ -7,9 +7,9 @@
 	fileInput.type = 'file';
 	document.body.append(fileInput);
 
-	const progress = document.createElement('progress');	
-	progress.max = 1;
-	document.body.append(progress);
+	const progressElement = document.createElement('progress');	
+	progressElement.max = 1;
+	document.body.append(progressElement);
 
 	fileInput.addEventListener('change', async () => {
 		const file = fileInput.files[0];
@@ -21,7 +21,7 @@
 			chunked: true,
 			chunkSize: 2**20
 		});
-		const outputFormat = new Metamuxer.WavOutputFormat();
+		const outputFormat = new Metamuxer.Mp4OutputFormat();
 
 		const button = document.createElement('button');
 		button.textContent = 'Cancel';
@@ -38,10 +38,10 @@
 				target
 			}),
 			audio: {
-				numberOfChannels: 1,
-				sampleRate: 4000
+				//numberOfChannels: 1,
+				//sampleRate: 4000
 				//discard: true
-				//forceReencode: true,
+				forceReencode: true,
 			},
 			/*
 			video: {
@@ -68,11 +68,11 @@
 			},
 			*/
 			video: {
-				discard: true,
-				width: 1280,
+				//discard: true,
+				//width: 1280,
 				//discard: true,
 				//width: 640
-				//forceReencode: true,
+				forceReencode: true,
 				//rotate: 90
 				//width: 720 ?? 2160,
 				//height: 1280 ?? 3840,
@@ -87,14 +87,16 @@
 				start: 0,
 				end: 40
 			},
-			computeProgress: true
 		});
 		console.log(conversion);
 
-		function updateProgress() {
-			progress.value = conversion.progress;
+		let progress = 0;
+		conversion.onProgress = newProgress => progress = newProgress;
 
-			if (conversion.progress === 1) {
+		function updateProgress() {
+			progressElement.value = progress;
+
+			if (progress === 1) {
 				return;
 			}
 
