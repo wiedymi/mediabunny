@@ -5,7 +5,9 @@ import {
 	extractVideoCodecString,
 	MediaCodec,
 	parseAacAudioSpecificConfig,
+	parsePcmCodec,
 	PCM_AUDIO_CODECS,
+	PcmAudioCodec,
 	VideoCodec,
 } from '../codec';
 import {
@@ -334,6 +336,9 @@ export class IsobmffDemuxer extends Demuxer {
 			// the samples in the chunk are contiguous and the format is PCM, so the entire chunk as one thing still
 			// encodes valid audio information.
 
+			assert(internalTrack.info?.type === 'audio');
+			const pcmInfo = parsePcmCodec(internalTrack.info.codec as PcmAudioCodec);
+
 			const newSampleTimingEntries: SampleTimingEntry[] = [];
 			const newSampleSizes: number[] = [];
 
@@ -379,16 +384,13 @@ export class IsobmffDemuxer extends Demuxer {
 						});
 					}
 
-					// Compute the chunk size by summing the sample sizes
-					let chunkSize = 0;
-					if (sampleTable.sampleSizes.length === 1) {
-						// Given PCM, this branch should be the likely one
-						chunkSize = sampleTable.sampleSizes[0]! * chunkEntry.samplesPerChunk;
-					} else {
-						for (let k = startSampleIndex; k < endSampleIndex; k++) {
-							chunkSize += sampleTable.sampleSizes[k]!;
-						}
-					}
+					// Instead of determining the chunk's size by looping over the samples sizes in the sample table, we
+					// can directly compute it as we know how many PCM frames are in this chunk, and the size of each
+					// PCM frame. This also improves compatibility with some files which fail to write proper sample
+					// size values into their sample tables in the PCM case.
+					const chunkSize = chunkEntry.samplesPerChunk
+						* pcmInfo.sampleSize
+						* internalTrack.info.numberOfChannels;
 
 					newSampleSizes.push(chunkSize);
 				}
