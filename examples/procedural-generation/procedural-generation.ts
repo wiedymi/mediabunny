@@ -27,11 +27,11 @@ const renderCanvas = new OffscreenCanvas(1280, 720);
 const renderCtx = renderCanvas.getContext('2d', { alpha: false })!;
 
 // Stuff we need for rendering audio
-let offlineAudioContext: OfflineAudioContext;
-let offlineGlobalGainNode: GainNode;
-let offlineDryGain: GainNode;
-let offlineWetGain: GainNode;
-let offlineReverbConvolver: ConvolverNode;
+let audioContext: OfflineAudioContext;
+let globalGainNode: GainNode;
+let dryGain: GainNode;
+let wetGain: GainNode;
+let reverbConvolver: ConvolverNode;
 
 // Scales are defined as semitone offsets from A440
 const scaleProgression = [
@@ -156,7 +156,7 @@ const generateVideo = async () => {
 		if (audioBufferSource) {
 			// Let's render the audio. Ideally, the audio is rendered before the video (or concurrently to it), but for
 			// simplicity, we're rendering it after we've cranked through all frames.
-			const audioBuffer = await offlineAudioContext.startRendering();
+			const audioBuffer = await audioContext.startRendering();
 			await audioBufferSource.add(audioBuffer);
 			audioBufferSource.close();
 		}
@@ -197,25 +197,25 @@ const generateVideo = async () => {
 /** === SCENE SIMULATION LOGIC === */
 
 const initScene = (duration: number) => {
-	offlineAudioContext = new OfflineAudioContext(numberOfChannels, duration * sampleRate, sampleRate);
+	audioContext = new OfflineAudioContext(numberOfChannels, duration * sampleRate, sampleRate);
 
 	// Create reverb effect
-	offlineReverbConvolver = offlineAudioContext.createConvolver();
-	offlineReverbConvolver.buffer = createReverbImpulse(5);
+	reverbConvolver = audioContext.createConvolver();
+	reverbConvolver.buffer = createReverbImpulse(5);
 
-	offlineGlobalGainNode = offlineAudioContext.createGain();
-	offlineDryGain = offlineAudioContext.createGain();
-	offlineWetGain = offlineAudioContext.createGain();
+	globalGainNode = audioContext.createGain();
+	dryGain = audioContext.createGain();
+	wetGain = audioContext.createGain();
 
-	offlineGlobalGainNode.connect(offlineDryGain);
-	offlineGlobalGainNode.connect(offlineReverbConvolver);
-	offlineReverbConvolver.connect(offlineWetGain);
-	offlineDryGain.connect(offlineAudioContext.destination);
-	offlineWetGain.connect(offlineAudioContext.destination);
+	globalGainNode.connect(dryGain);
+	globalGainNode.connect(reverbConvolver);
+	reverbConvolver.connect(wetGain);
+	dryGain.connect(audioContext.destination);
+	wetGain.connect(audioContext.destination);
 
-	offlineGlobalGainNode.gain.setValueAtTime(0.8, 0);
-	offlineDryGain.gain.setValueAtTime(0.5, 0);
-	offlineWetGain.gain.setValueAtTime(0.5, 0);
+	globalGainNode.gain.setValueAtTime(0.8, 0);
+	dryGain.gain.setValueAtTime(0.5, 0);
+	wetGain.gain.setValueAtTime(0.5, 0);
 
 	// Let's init the balls
 	const numBalls = Number(ballsSlider.value);
@@ -440,16 +440,16 @@ class Ball {
 	}
 
 	scheduleSound(currentTime: number) {
-		const oscillator = offlineAudioContext.createOscillator();
-		const gainNode = offlineAudioContext.createGain();
-		const pannerNode = offlineAudioContext.createStereoPanner();
+		const oscillator = audioContext.createOscillator();
+		const gainNode = audioContext.createGain();
+		const pannerNode = audioContext.createStereoPanner();
 
 		// Calculate pan based on x position
 		const panValue = ((this.x / renderCanvas.width) - 0.5) * Math.SQRT2;
 
 		oscillator.connect(gainNode);
 		gainNode.connect(pannerNode);
-		pannerNode.connect(offlineGlobalGainNode);
+		pannerNode.connect(globalGainNode);
 
 		const frequency = getFrequencyFromScaleIndex(this.scaleIndex);
 		oscillator.frequency.setValueAtTime(frequency, currentTime);
@@ -492,7 +492,7 @@ const getFrequencyFromScaleIndex = (scaleIndex: number) => {
 
 const createReverbImpulse = (duration: number) => {
 	const length = sampleRate * duration;
-	const impulse = offlineAudioContext.createBuffer(numberOfChannels, length, sampleRate);
+	const impulse = audioContext.createBuffer(numberOfChannels, length, sampleRate);
 
 	for (let channel = 0; channel < 2; channel++) {
 		const channelData = impulse.getChannelData(channel);

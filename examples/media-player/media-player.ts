@@ -249,6 +249,8 @@ const runAudioIterator = async () => {
 		return;
 	}
 
+	// To play back audio, we loop over all audio chunks (typically very short) of the file and play them at the correct
+	// timestamp. The result is a continuous, uninteruppted audio signal.
 	for await (const { buffer, timestamp } of audioBufferIterator!) {
 		const node = audioContext!.createBufferSource();
 		node.buffer = buffer;
