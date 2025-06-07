@@ -1,6 +1,6 @@
 # Writing overview
 
-Mediakit enables you to create media files with very fine levels of control. You can add an arbitrary number of video, audio and subtitle tracks to a media file, and precisely control the timing of media data. This library supports [many output file formats](./output-formats). Using [output targets](#output-targets), you can decide if you want to build up the entire file in memory or stream it out in chunks as it's being created—allowing you to create very large files.
+Mediakit enables you to create media files with very fine levels of control. You can add an arbitrary number of video, audio and subtitle tracks to a media file, and precisely control the timing of media data. This library supports [many output file formats](./output-formats). Using [output targets](#output-targets), you can decide if you want to build up the entire file in memory or stream it out in chunks as it's being created - allowing you to create very large files.
 
 Mediakit provides many ways to supply media data for output tracks, nicely integrating with the WebCodecs API, but also allowing you to use your own encoding stack if you wish. These [media sources](./media-sources) come in multiple levels of abstraction, enabling easy use for common use cases while still giving you fine-grained control if you need it.
 
@@ -304,8 +304,31 @@ Check the [Output formats](./output-formats) page to see which format configurat
 
 ---
 
-If your output format configuration requires packet buffering, make sure to add media data in a somewhat interleaved way to keep memory usage low. For example, if you're creating a 5-minute file, add your data in chunks—10 seconds of video, then 10 seconds of audio, then repeat—instead of first adding all 300 seconds of video followed by all 300 seconds of audio.
+If your output format configuration requires packet buffering, make sure to add media data in a somewhat interleaved way to keep memory usage low. For example, if you're creating a 5-minute file, add your data in chunks - 10 seconds of video, then 10 seconds of audio, then repeat - instead of first adding all 300 seconds of video followed by all 300 seconds of audio.
 
 ::: info
 If this kind of chunking isn't possible for your use case, try adding the media with the overall smaller data footprint first: First add the 300 seconds of audio, then add the 300 seconds of video.
 :::
+
+## Output MIME type
+
+Sometimes you may want to retrieve the MIME type of the file created by an `Output`. For example, when working with Media Source Extensions, [`addSourceBuffer`](https://developer.mozilla.org/en-US/docs/Web/API/MediaSource/addSourceBuffer) requires the file's full MIME type, including codec strings.
+
+For this, use the following method:
+```ts
+output.getMimeType(); // => Promise<string>
+```
+
+This may resolve to a string like this:
+```
+video/mp4; codecs="avc1.42c032, mp4a.40.2"
+```
+
+::: warning
+The promise returned by `getMimeType` only resolves once the precise codec strings for all tracks of the `Output` are known - meaning it potentially needs to wait for all encoders to be fully initialized. Therefore, make sure not to get yourself into a deadlock: Awaiting this method before adding media data to tracks will result in the promise never resolving.
+:::
+
+If you don't care about specific track codecs, you can instead use the simpler [`mimeType`](./output-formats#output-format-properties) property on the `Output`'s format:
+```ts
+output.format.mimeType; // => string
+```

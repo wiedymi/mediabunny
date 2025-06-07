@@ -7,6 +7,7 @@ import {
 	assert,
 	colorSpaceIsComplete,
 	normalizeRotation,
+	promiseWithResolvers,
 	roundToMultiple,
 	textEncoder,
 	toUint8Array,
@@ -22,6 +23,7 @@ import {
 	EBMLSignedInt,
 	EBMLWriter,
 } from './ebml';
+import { buildMatroskaMimeType } from './matroska-misc';
 import { MkvOutputFormat, WebMOutputFormat } from '../output-format';
 import { Output, OutputAudioTrack, OutputSubtitleTrack, OutputTrack, OutputVideoTrack } from '../output';
 import {
@@ -36,6 +38,7 @@ import {
 	OPUS_INTERNAL_SAMPLE_RATE,
 	PCM_AUDIO_CODECS,
 	PcmAudioCodec,
+	SubtitleCodec,
 	generateAv1CodecConfigurationFromCodecString,
 	generateVp9CodecConfigurationFromCodecString,
 	parsePcmCodec,
@@ -121,6 +124,7 @@ export class MatroskaMuxer extends Muxer {
 	private format: WebMOutputFormat | MkvOutputFormat;
 
 	private trackDatas: MatroskaTrackData[] = [];
+	private allTracksKnown = promiseWithResolvers();
 
 	private segment: EBMLElement | null = null;
 	private segmentInfo: EBMLElement | null = null;
@@ -396,6 +400,40 @@ export class MatroskaMuxer extends Muxer {
 		return this.ebmlWriter.dataOffsets.get(this.segment)!;
 	}
 
+	private allTracksAreKnown() {
+		for (const track of this.output._tracks) {
+			if (!track.source._closed && !this.trackDatas.some(x => x.track === track)) {
+				return false; // We haven't seen a sample from this open track yet
+			}
+		}
+
+		return true;
+	}
+
+	async getMimeType() {
+		await this.allTracksKnown.promise;
+
+		const codecStrings = this.trackDatas.map((trackData) => {
+			if (trackData.type === 'video') {
+				return trackData.info.decoderConfig.codec;
+			} else if (trackData.type === 'audio') {
+				return trackData.info.decoderConfig.codec;
+			} else {
+				const map: Record<SubtitleCodec, string> = {
+					webvtt: 'wvtt',
+				};
+				return map[trackData.track.source._codec];
+			}
+		});
+
+		return buildMatroskaMimeType({
+			isWebM: this.format instanceof WebMOutputFormat,
+			hasVideo: this.trackDatas.some(x => x.type === 'video'),
+			hasAudio: this.trackDatas.some(x => x.type === 'audio'),
+			codecStrings,
+		});
+	}
+
 	private getVideoTrackData(track: OutputVideoTrack, meta?: EncodedVideoChunkMetadata) {
 		const existingTrackData = this.trackDatas.find(x => x.track === track);
 		if (existingTrackData) {
@@ -445,6 +483,10 @@ export class MatroskaMuxer extends Muxer {
 		this.trackDatas.push(newTrackData);
 		this.trackDatas.sort((a, b) => a.track.id - b.track.id);
 
+		if (this.allTracksAreKnown()) {
+			this.allTracksKnown.resolve();
+		}
+
 		return newTrackData;
 	}
 
@@ -474,6 +516,10 @@ export class MatroskaMuxer extends Muxer {
 		this.trackDatas.push(newTrackData);
 		this.trackDatas.sort((a, b) => a.track.id - b.track.id);
 
+		if (this.allTracksAreKnown()) {
+			this.allTracksKnown.resolve();
+		}
+
 		return newTrackData;
 	}
 
@@ -500,6 +546,10 @@ export class MatroskaMuxer extends Muxer {
 
 		this.trackDatas.push(newTrackData);
 		this.trackDatas.sort((a, b) => a.track.id - b.track.id);
+
+		if (this.allTracksAreKnown()) {
+			this.allTracksKnown.resolve();
+		}
 
 		return newTrackData;
 	}
@@ -587,10 +637,8 @@ export class MatroskaMuxer extends Muxer {
 
 	private async interleaveChunks(isFinalCall = false) {
 		if (!isFinalCall) {
-			for (const track of this.output._tracks) {
-				if (!track.source._closed && !this.trackDatas.some(x => x.track === track)) {
-					return; // We haven't seen a sample from this open track yet
-				}
+			if (!this.allTracksAreKnown()) {
+				return; // We can't interleave yet as we don't yet know how many tracks we'll truly have
 			}
 		}
 
@@ -880,6 +928,10 @@ export class MatroskaMuxer extends Muxer {
 	override async onTrackClose() {
 		const release = await this.mutex.acquire();
 
+		if (this.allTracksAreKnown()) {
+			this.allTracksKnown.resolve();
+		}
+
 		// Since a track is now closed, we may be able to write out chunks that were previously waiting
 		await this.interleaveChunks();
 
@@ -889,6 +941,8 @@ export class MatroskaMuxer extends Muxer {
 	/** Finalizes the file, making it ready for use. Must be called after all media chunks have been added. */
 	async finalize() {
 		const release = await this.mutex.acquire();
+
+		this.allTracksKnown.resolve();
 
 		if (!this.segment) {
 			this.createTracks();

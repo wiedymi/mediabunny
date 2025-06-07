@@ -27,6 +27,10 @@ export class WaveMuxer extends Muxer {
 		// Nothing needed here - we'll write the header with the first sample
 	}
 
+	async getMimeType() {
+		return 'audio/wav';
+	}
+
 	async addEncodedVideoPacket() {
 		throw new Error('WAVE does not support video.');
 	}

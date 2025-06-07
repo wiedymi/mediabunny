@@ -345,6 +345,15 @@ export class Output<
 	}
 
 	/**
+	 * Resolves with the full MIME type of the output file, including track codecs.
+	 *
+	 * The returned promise will resolve only once the precise codec strings of all tracks are known.
+	 */
+	getMimeType() {
+		return this._muxer.getMimeType();
+	}
+
+	/**
 	 * Cancels the creation of the output file, releasing internal resources like encoders and preventing further
 	 * samples from being added.
 	 *

@@ -240,7 +240,7 @@ export const buildVideoCodecString = (codec: VideoCodec, width: number, height: 
 
 		const bitDepth = '08'; // 8-bit
 
-		return `vp09.${profile}.${levelInfo.level.toString().padStart(2, '0')}.${bitDepth}${VP9_DEFAULT_SUFFIX}`;
+		return `vp09.${profile}.${levelInfo.level.toString().padStart(2, '0')}.${bitDepth}`;
 	} else if (codec === 'av1') {
 		const profile = 0; // Main Profile, single digit
 
@@ -252,7 +252,7 @@ export const buildVideoCodecString = (codec: VideoCodec, width: number, height: 
 
 		const bitDepth = '08'; // 8-bit
 
-		return `av01.${profile}.${level}${levelInfo.tier}.${bitDepth}${AV1_DEFAULT_SUFFIX}`;
+		return `av01.${profile}.${level}${levelInfo.tier}.${bitDepth}`;
 	}
 
 	// eslint-disable-next-line @typescript-eslint/restrict-template-expressions
@@ -426,9 +426,8 @@ export const extractVideoCodecString = (trackInfo: {
 		let string = `vp09.${profile}.${level}.${bitDepth}.${chromaSubsampling}`;
 		string += `.${colourPrimaries}.${transferCharacteristics}.${matrixCoefficients}.${videoFullRangeFlag}`;
 
-		const defaultSuffix = '.01.01.01.01.00';
-		if (string.endsWith(defaultSuffix)) {
-			string = string.slice(0, -defaultSuffix.length);
+		if (string.endsWith(VP9_DEFAULT_SUFFIX)) {
+			string = string.slice(0, -VP9_DEFAULT_SUFFIX.length);
 		}
 
 		return string;
@@ -476,9 +475,8 @@ export const extractVideoCodecString = (trackInfo: {
 		string += `.${matrixCoefficients.toString().padStart(2, '0')}`;
 		string += `.${videoFullRangeFlag}`;
 
-		const defaultSuffix = '.0.110.01.01.01.0';
-		if (string.endsWith(defaultSuffix)) {
-			string = string.slice(0, -defaultSuffix.length);
+		if (string.endsWith(AV1_DEFAULT_SUFFIX)) {
+			string = string.slice(0, -AV1_DEFAULT_SUFFIX.length);
 		}
 
 		return string;

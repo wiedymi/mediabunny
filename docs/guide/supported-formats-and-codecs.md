@@ -183,7 +183,7 @@ Whether a codec can be decoded depends on the specific codec configuration of an
 
 ## Custom coders
 
-Mediakit allows you to register your own custom encoders and decoders—useful if you want to polyfill a codec that's not supported in all browsers, or want to use Mediakit outside of an environment with WebCodecs (such as Node.js).
+Mediakit allows you to register your own custom encoders and decoders - useful if you want to polyfill a codec that's not supported in all browsers, or want to use Mediakit outside of an environment with WebCodecs (such as Node.js).
 
 Encoders and decoders can be registered for [all video and audio codecs](#codecs) supported by the library. It is not possible to add new codecs.
 

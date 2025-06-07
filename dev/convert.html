@@ -21,7 +21,7 @@
 			chunked: true,
 			chunkSize: 2**20
 		});
-		const outputFormat = new Metamuxer.Mp4OutputFormat({ fastStart: 'fragmented' });
+		const outputFormat = new Metamuxer.OggOutputFormat();
 
 		const button = document.createElement('button');
 		button.textContent = 'Cancel';

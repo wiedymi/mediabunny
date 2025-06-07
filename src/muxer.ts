@@ -19,6 +19,7 @@ export abstract class Muxer {
 	}
 
 	abstract start(): Promise<void>;
+	abstract getMimeType(): Promise<string>;
 	abstract addEncodedVideoPacket(
 		track: OutputVideoTrack,
 		packet: EncodedPacket,

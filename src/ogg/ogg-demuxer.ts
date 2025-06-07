@@ -7,7 +7,7 @@ import { PacketRetrievalOptions } from '../media-sink';
 import { assert, AsyncMutex, findLast, roundToPrecision, toDataView, UNDETERMINED_LANGUAGE } from '../misc';
 import { EncodedPacket, PLACEHOLDER_DATA } from '../packet';
 import { Reader } from '../reader';
-import { computeOggPageCrc, extractSampleMetadata, OggCodecInfo } from './ogg-misc';
+import { buildOggMimeType, computeOggPageCrc, extractSampleMetadata, OggCodecInfo } from './ogg-misc';
 import { MAX_PAGE_HEADER_SIZE, MAX_PAGE_SIZE, MIN_PAGE_HEADER_SIZE, OggReader, Page } from './ogg-reader';
 
 type LogicalBitstream = {
@@ -366,16 +366,11 @@ export class OggDemuxer extends Demuxer {
 	async getMimeType() {
 		await this.readMetadata();
 
-		let string = 'audio/ogg';
+		const codecStrings = await Promise.all(this.tracks.map(x => x.getCodecParameterString()));
 
-		if (this.tracks.length > 0) {
-			const codecMimeTypes = await Promise.all(this.tracks.map(x => x.getCodecParameterString()));
-			const uniqueCodecMimeTypes = [...new Set(codecMimeTypes.filter(Boolean))];
-
-			string += `; codecs="${uniqueCodecMimeTypes.join(', ')}"`;
-		}
-
-		return string;
+		return buildOggMimeType({
+			codecStrings: codecStrings.filter(Boolean) as string[],
+		});
 	}
 
 	async getTracks() {

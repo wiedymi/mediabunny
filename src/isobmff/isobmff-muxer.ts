@@ -2,13 +2,14 @@ import { Box, ftyp, IsobmffBoxWriter, mdat, mfra, moof, moov, vtta, vttc, vtte }
 import { Muxer } from '../muxer';
 import { Output, OutputAudioTrack, OutputSubtitleTrack, OutputTrack, OutputVideoTrack } from '../output';
 import { BufferTargetWriter, Writer } from '../writer';
-import { assert, computeRationalApproximation, last } from '../misc';
+import { assert, computeRationalApproximation, last, promiseWithResolvers } from '../misc';
 import { IsobmffOutputFormatOptions, IsobmffOutputFormat, MovOutputFormat } from '../output-format';
 import { inlineTimestampRegex, SubtitleConfig, SubtitleCue, SubtitleMetadata } from '../subtitles';
 import {
 	parsePcmCodec,
 	PCM_AUDIO_CODECS,
 	PcmAudioCodec,
+	SubtitleCodec,
 	validateAudioChunkMetadata,
 	validateSubtitleMetadata,
 	validateVideoChunkMetadata,
@@ -22,6 +23,7 @@ import {
 	serializeHevcDecoderConfigurationRecord,
 	transformAnnexBToLengthPrefixed,
 } from '../codec-data';
+import { buildIsobmffMimeType } from './isobmff-misc';
 
 export const GLOBAL_TIMESCALE = 1000;
 const TIMESTAMP_OFFSET = 2_082_844_800; // Seconds between Jan 1 1904 and Jan 1 1970
@@ -125,6 +127,7 @@ export class IsobmffMuxer extends Muxer {
 	private mdat: Box | null = null;
 
 	private trackDatas: IsobmffTrackData[] = [];
+	private allTracksKnown = promiseWithResolvers();
 
 	private creationTime = Math.floor(Date.now() / 1000) + TIMESTAMP_OFFSET;
 	private finalizedChunks: Chunk[] = [];
@@ -195,6 +198,40 @@ export class IsobmffMuxer extends Muxer {
 		await this.writer.flush();
 
 		release();
+	}
+
+	private allTracksAreKnown() {
+		for (const track of this.output._tracks) {
+			if (!track.source._closed && !this.trackDatas.some(x => x.track === track)) {
+				return false; // We haven't seen a sample from this open track yet
+			}
+		}
+
+		return true;
+	}
+
+	async getMimeType() {
+		await this.allTracksKnown.promise;
+
+		const codecStrings = this.trackDatas.map((trackData) => {
+			if (trackData.type === 'video') {
+				return trackData.info.decoderConfig.codec;
+			} else if (trackData.type === 'audio') {
+				return trackData.info.decoderConfig.codec;
+			} else {
+				const map: Record<SubtitleCodec, string> = {
+					webvtt: 'wvtt',
+				};
+				return map[trackData.track.source._codec];
+			}
+		});
+
+		return buildIsobmffMimeType({
+			isQuicktime: this.isMov,
+			hasVideo: this.trackDatas.some(x => x.type === 'video'),
+			hasAudio: this.trackDatas.some(x => x.type === 'audio'),
+			codecStrings,
+		});
 	}
 
 	private getVideoTrackData(track: OutputVideoTrack, packet: EncodedPacket, meta?: EncodedVideoChunkMetadata) {
@@ -278,6 +315,10 @@ export class IsobmffMuxer extends Muxer {
 		this.trackDatas.push(newTrackData);
 		this.trackDatas.sort((a, b) => a.track.id - b.track.id);
 
+		if (this.allTracksAreKnown()) {
+			this.allTracksKnown.resolve();
+		}
+
 		return newTrackData;
 	}
 
@@ -319,6 +360,10 @@ export class IsobmffMuxer extends Muxer {
 		this.trackDatas.push(newTrackData);
 		this.trackDatas.sort((a, b) => a.track.id - b.track.id);
 
+		if (this.allTracksAreKnown()) {
+			this.allTracksKnown.resolve();
+		}
+
 		return newTrackData;
 	}
 
@@ -359,6 +404,10 @@ export class IsobmffMuxer extends Muxer {
 
 		this.trackDatas.push(newTrackData);
 		this.trackDatas.sort((a, b) => a.track.id - b.track.id);
+
+		if (this.allTracksAreKnown()) {
+			this.allTracksKnown.resolve();
+		}
 
 		return newTrackData;
 	}
@@ -869,10 +918,8 @@ export class IsobmffMuxer extends Muxer {
 		assert(this.isFragmented);
 
 		if (!isFinalCall) {
-			for (const track of this.output._tracks) {
-				if (!track.source._closed && !this.trackDatas.some(x => x.track === track)) {
-					return; // We haven't seen a sample from this open track yet
-				}
+			if (!this.allTracksAreKnown()) {
+				return; // We can't interleave yet as we don't yet know how many tracks we'll truly have
 			}
 		}
 
@@ -1006,6 +1053,10 @@ export class IsobmffMuxer extends Muxer {
 			}
 		}
 
+		if (this.allTracksAreKnown()) {
+			this.allTracksKnown.resolve();
+		}
+
 		if (this.isFragmented) {
 			// Since a track is now closed, we may be able to write out chunks that were previously waiting
 			await this.interleaveSamples();
@@ -1017,6 +1068,8 @@ export class IsobmffMuxer extends Muxer {
 	/** Finalizes the file, making it ready for use. Must be called after all video and audio chunks have been added. */
 	async finalize() {
 		const release = await this.mutex.acquire();
+
+		this.allTracksKnown.resolve();
 
 		for (const trackData of this.trackDatas) {
 			if (trackData.type === 'subtitle' && trackData.track.source._codec === 'webvtt') {

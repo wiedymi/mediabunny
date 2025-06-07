@@ -50,6 +50,7 @@ import {
 	MAX_HEADER_SIZE,
 	MIN_HEADER_SIZE,
 } from './ebml';
+import { buildMatroskaMimeType } from './matroska-misc';
 
 type Segment = {
 	seekHeadSeen: boolean;
@@ -194,23 +195,15 @@ export class MatroskaDemuxer extends Demuxer {
 	override async getMimeType() {
 		await this.readMetadata();
 
-		const base = this.segments.some(segment => segment.tracks.some(x => x.info?.type === 'video'))
-			? 'video/'
-			: this.segments.some(segment => segment.tracks.some(x => x.info?.type === 'audio'))
-				? 'audio/'
-				: 'application/';
-
-		let string = base + (this.isWebM ? 'webm' : 'x-matroska');
-
 		const tracks = await this.getTracks();
-		if (tracks.length > 0) {
-			const codecMimeTypes = await Promise.all(tracks.map(x => x.getCodecParameterString()));
-			const uniqueCodecMimeTypes = [...new Set(codecMimeTypes.filter(Boolean))];
+		const codecStrings = await Promise.all(tracks.map(x => x.getCodecParameterString()));
 
-			string += `; codecs="${uniqueCodecMimeTypes.join(', ')}"`;
-		}
-
-		return string;
+		return buildMatroskaMimeType({
+			isWebM: this.isWebM,
+			hasVideo: this.segments.some(segment => segment.tracks.some(x => x.info?.type === 'video')),
+			hasAudio: this.segments.some(segment => segment.tracks.some(x => x.info?.type === 'audio')),
+			codecStrings: codecStrings.filter(Boolean) as string[],
+		});
 	}
 
 	readMetadata() {

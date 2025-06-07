@@ -111,12 +111,13 @@ const FALLBACK_SAMPLE_RATE = 48000;
  * @public
  */
 export class Conversion {
+	/** The input file. */
+	input: Input;
+	/** The output file. */
+	output: Output;
+
 	/** @internal */
 	_options: ConversionOptions;
-	/** @internal */
-	_input: Input;
-	/** @internal */
-	_output: Output;
 	/** @internal */
 	_startTimestamp: number;
 	/** @internal */
@@ -299,8 +300,8 @@ export class Conversion {
 		}
 
 		this._options = options;
-		this._input = options.input;
-		this._output = options.output;
+		this.input = options.input;
+		this.output = options.output;
 
 		this._startTimestamp = options.trim?.start ?? 0;
 		this._endTimestamp = options.trim?.end ?? Infinity;
@@ -312,8 +313,8 @@ export class Conversion {
 
 	/** @internal */
 	async _init() {
-		const inputTracks = await this._input.getTracks();
-		const outputTrackCounts = this._output.format.getSupportedTrackCounts();
+		const inputTracks = await this.input.getTracks();
+		const outputTrackCounts = this.output.format.getSupportedTrackCounts();
 
 		for (const track of inputTracks) {
 			if (track.isVideoTrack() && this._options.video?.discard) {
@@ -373,13 +374,13 @@ export class Conversion {
 		if (this.onProgress) {
 			this._computeProgress = true;
 			this._totalDuration = Math.min(
-				await this._input.computeDuration() - this._startTimestamp,
+				await this.input.computeDuration() - this._startTimestamp,
 				this._endTimestamp - this._startTimestamp,
 			);
 			this.onProgress?.(0);
 		}
 
-		await this._output.start();
+		await this.output.start();
 		this._start();
 
 		try {
@@ -397,7 +398,7 @@ export class Conversion {
 			await new Promise(() => {}); // Never resolve
 		}
 
-		await this._output.finalize();
+		await this.output.finalize();
 
 		if (this._computeProgress) {
 			this.onProgress?.(1);
@@ -406,7 +407,7 @@ export class Conversion {
 
 	/** Cancels the conversion process. Does nothing if the conversion is already complete. */
 	async cancel() {
-		if (this._output.state === 'finalizing' || this._output.state === 'finalized') {
+		if (this.output.state === 'finalizing' || this.output.state === 'finalized') {
 			return;
 		}
 
@@ -416,7 +417,7 @@ export class Conversion {
 		}
 
 		this._canceled = true;
-		await this._output.cancel();
+		await this.output.cancel();
 	}
 
 	/** @internal */
@@ -433,7 +434,7 @@ export class Conversion {
 		let videoSource: VideoSource;
 
 		const totalRotation = normalizeRotation(track.rotation + (this._options.video?.rotate ?? 0));
-		const outputSupportsRotation = this._output.format.supportsVideoRotationMetadata;
+		const outputSupportsRotation = this.output.format.supportsVideoRotationMetadata;
 
 		const [originalWidth, originalHeight] = totalRotation % 180 === 0
 			? [track.codedWidth, track.codedHeight]
@@ -463,7 +464,7 @@ export class Conversion {
 			|| height !== originalHeight
 			|| (totalRotation !== 0 && !outputSupportsRotation);
 
-		let videoCodecs = this._output.format.getSupportedVideoCodecs();
+		let videoCodecs = this.output.format.getSupportedVideoCodecs();
 		if (
 			!needsReencode
 			&& !this._options.video?.bitrate
@@ -599,7 +600,7 @@ export class Conversion {
 			}
 		}
 
-		this._output.addVideoTrack(videoSource, {
+		this.output.addVideoTrack(videoSource, {
 			languageCode: track.languageCode,
 			rotation: needsRerender ? 0 : totalRotation, // Rerendering will bake the rotation into the output
 		});
@@ -634,7 +635,7 @@ export class Conversion {
 			|| this._startTimestamp > 0
 			|| firstTimestamp < 0;
 
-		let audioCodecs = this._output.format.getSupportedAudioCodecs();
+		let audioCodecs = this.output.format.getSupportedAudioCodecs();
 		if (
 			!this._options.audio?.forceReencode
 			&& !this._options.audio?.bitrate
@@ -768,7 +769,7 @@ export class Conversion {
 			}
 		}
 
-		this._output.addAudioTrack(audioSource, {
+		this.output.addAudioTrack(audioSource, {
 			languageCode: track.languageCode,
 		});
 		this._addedCounts.audio++;

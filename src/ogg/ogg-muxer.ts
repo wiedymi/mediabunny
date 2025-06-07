@@ -1,12 +1,13 @@
 import { OPUS_INTERNAL_SAMPLE_RATE, validateAudioChunkMetadata } from '../codec';
 import { parseModesFromVorbisSetupPacket, parseOpusIdentificationHeader } from '../codec-data';
-import { assert, setInt64, toDataView, toUint8Array } from '../misc';
+import { assert, promiseWithResolvers, setInt64, toDataView, toUint8Array } from '../misc';
 import { Muxer } from '../muxer';
 import { Output, OutputAudioTrack } from '../output';
 import { OggOutputFormat } from '../output-format';
 import { EncodedPacket } from '../packet';
 import { Writer } from '../writer';
 import {
+	buildOggMimeType,
 	computeOggPageCrc,
 	extractSampleMetadata,
 	OggCodecInfo,
@@ -46,6 +47,7 @@ export class OggMuxer extends Muxer {
 
 	private trackDatas: OggTrackData[] = [];
 	private bosPagesWritten = false;
+	private allTracksKnown = promiseWithResolvers();
 
 	private pageBytes = new Uint8Array(MAX_PAGE_SIZE);
 	private pageView = new DataView(this.pageBytes.buffer);
@@ -61,6 +63,14 @@ export class OggMuxer extends Muxer {
 
 	async start() {
 		// Nothin'
+	}
+
+	async getMimeType() {
+		await this.allTracksKnown.promise;
+
+		return buildOggMimeType({
+			codecStrings: this.trackDatas.map(x => x.codecInfo.codec!),
+		});
 	}
 
 	addEncodedVideoPacket(): never {
@@ -112,6 +122,11 @@ export class OggMuxer extends Muxer {
 		this.queueHeaderPackets(newTrackData, meta);
 
 		this.trackDatas.push(newTrackData);
+
+		if (this.allTracksAreKnown()) {
+			this.allTracksKnown.resolve();
+		}
+
 		return newTrackData;
 	}
 
@@ -250,12 +265,20 @@ export class OggMuxer extends Muxer {
 		throw new Error('Subtitle tracks are not supported.');
 	}
 
+	allTracksAreKnown() {
+		for (const track of this.output._tracks) {
+			if (!track.source._closed && !this.trackDatas.some(x => x.track === track)) {
+				return false; // We haven't seen a sample from this open track yet
+			}
+		}
+
+		return true;
+	}
+
 	async interleavePages(isFinalCall = false) {
 		if (!this.bosPagesWritten) {
-			for (const track of this.output._tracks) {
-				if (!track.source._closed && !this.trackDatas.some(x => x.track === track)) {
-					return; // We haven't seen a sample from this open track yet
-				}
+			if (!this.allTracksAreKnown()) {
+				return; // We can't interleave yet as we don't yet know how many tracks we'll truly have
 			}
 
 			// Write the header page for all bitstreams
@@ -421,6 +444,10 @@ export class OggMuxer extends Muxer {
 	override async onTrackClose() {
 		const release = await this.mutex.acquire();
 
+		if (this.allTracksAreKnown()) {
+			this.allTracksKnown.resolve();
+		}
+
 		// Since a track is now closed, we may be able to write out chunks that were previously waiting
 		await this.interleavePages();
 
@@ -429,6 +456,8 @@ export class OggMuxer extends Muxer {
 
 	async finalize() {
 		const release = await this.mutex.acquire();
+
+		this.allTracksKnown.resolve();
 
 		await this.interleavePages(true);
 

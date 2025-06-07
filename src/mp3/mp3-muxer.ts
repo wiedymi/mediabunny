@@ -27,6 +27,10 @@ export class Mp3Muxer extends Muxer {
 		// Nothing needed here
 	}
 
+	async getMimeType() {
+		return 'audio/mpeg';
+	}
+
 	async addEncodedVideoPacket() {
 		throw new Error('MP3 does not support video.');
 	}

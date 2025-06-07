@@ -23,9 +23,9 @@ export abstract class InputFormat {
 	abstract _createDemuxer(input: Input): Demuxer;
 
 	/** Returns the name of the input format. */
-	abstract getName(): string;
+	abstract get name(): string;
 	/** Returns the typical base MIME type of the input format. */
-	abstract getMimeType(): string;
+	abstract get mimeType(): string;
 }
 
 /**
@@ -68,11 +68,11 @@ export class Mp4InputFormat extends IsobmffInputFormat {
 		return !!majorBrand && majorBrand !== 'qt  ';
 	}
 
-	getName() {
+	get name() {
 		return 'MP4';
 	}
 
-	getMimeType() {
+	get mimeType() {
 		return 'video/mp4';
 	}
 }
@@ -88,11 +88,11 @@ export class QuickTimeInputFormat extends IsobmffInputFormat {
 		return majorBrand === 'qt  ';
 	}
 
-	getName() {
+	get name() {
 		return 'QuickTime File Format';
 	}
 
-	getMimeType() {
+	get mimeType() {
 		return 'video/quicktime';
 	}
 }
@@ -174,11 +174,11 @@ export class MatroskaInputFormat extends InputFormat {
 		return new MatroskaDemuxer(input);
 	}
 
-	getName() {
+	get name() {
 		return 'Matroska';
 	}
 
-	getMimeType() {
+	get mimeType() {
 		return 'video/x-matroska';
 	}
 }
@@ -193,11 +193,11 @@ export class WebMInputFormat extends MatroskaInputFormat {
 		return this.isSupportedEBMLOfDocType(input, 'webm');
 	}
 
-	override getName() {
+	override get name() {
 		return 'WebM';
 	}
 
-	override getMimeType() {
+	override get mimeType() {
 		return 'video/webm';
 	}
 }
@@ -258,11 +258,11 @@ export class Mp3InputFormat extends InputFormat {
 		return new Mp3Demuxer(input);
 	}
 
-	getName() {
+	get name() {
 		return 'MP3';
 	}
 
-	getMimeType() {
+	get mimeType() {
 		return 'audio/mpeg';
 	}
 }
@@ -295,11 +295,11 @@ export class WaveInputFormat extends InputFormat {
 		return new WaveDemuxer(input);
 	}
 
-	getName() {
+	get name() {
 		return 'WAVE';
 	}
 
-	getMimeType() {
+	get mimeType() {
 		return 'audio/wav';
 	}
 }
@@ -325,11 +325,11 @@ export class OggInputFormat extends InputFormat {
 		return new OggDemuxer(input);
 	}
 
-	getName() {
+	get name() {
 		return 'Ogg';
 	}
 
-	getMimeType() {
+	get mimeType() {
 		return 'application/ogg';
 	}
 }

@@ -49,6 +49,7 @@ import {
 } from '../misc';
 import { EncodedPacket, PLACEHOLDER_DATA } from '../packet';
 import { Reader } from '../reader';
+import { buildIsobmffMimeType } from './isobmff-misc';
 import { IsobmffReader, MAX_BOX_HEADER_SIZE } from './isobmff-reader';
 
 type InternalTrack = {
@@ -223,22 +224,14 @@ export class IsobmffDemuxer extends Demuxer {
 	override async getMimeType() {
 		await this.readMetadata();
 
-		const base = this.tracks.some(x => x.info?.type === 'video')
-			? 'video/'
-			: this.tracks.some(x => x.info?.type === 'audio')
-				? 'audio/'
-				: 'application/';
+		const codecStrings = await Promise.all(this.tracks.map(x => x.inputTrack!.getCodecParameterString()));
 
-		let string = base + (this.isQuickTime ? 'quicktime' : 'mp4');
-
-		if (this.tracks.length > 0) {
-			const codecMimeTypes = await Promise.all(this.tracks.map(x => x.inputTrack!.getCodecParameterString()));
-			const uniqueCodecMimeTypes = [...new Set(codecMimeTypes.filter(Boolean))];
-
-			string += `; codecs="${uniqueCodecMimeTypes.join(', ')}"`;
-		}
-
-		return string;
+		return buildIsobmffMimeType({
+			isQuicktime: this.isQuickTime,
+			hasVideo: this.tracks.some(x => x.info?.type === 'video'),
+			hasAudio: this.tracks.some(x => x.info?.type === 'audio'),
+			codecStrings: codecStrings.filter(Boolean) as string[],
+		});
 	}
 
 	readMetadata() {

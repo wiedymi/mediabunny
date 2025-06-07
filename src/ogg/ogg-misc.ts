@@ -93,3 +93,16 @@ export const extractSampleMetadata = (
 		vorbisBlockSize: currentBlocksize,
 	};
 };
+
+export const buildOggMimeType = (info: {
+	codecStrings: string[];
+}) => {
+	let string = 'audio/ogg';
+
+	if (info.codecStrings) {
+		const uniqueCodecMimeTypes = [...new Set(info.codecStrings)];
+		string += `; codecs="${uniqueCodecMimeTypes.join(', ')}"`;
+	}
+
+	return string;
+};
