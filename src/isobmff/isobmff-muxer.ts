@@ -37,6 +37,7 @@ export type Sample = {
 };
 
 type Chunk = {
+	/** The lowest presentation timestamp in this chunk */
 	startTimestamp: number;
 	samples: Sample[];
 	offset: number | null;
@@ -592,7 +593,7 @@ export class IsobmffMuxer extends Muxer {
 		return sample;
 	}
 
-	private processTimestamps(trackData: IsobmffTrackData) {
+	private processTimestamps(trackData: IsobmffTrackData, nextSample?: Sample) {
 		if (trackData.timestampProcessingQueue.length === 0) {
 			return;
 		}
@@ -725,9 +726,29 @@ export class IsobmffMuxer extends Muxer {
 		}
 
 		trackData.timestampProcessingQueue.length = 0;
+
+		assert(trackData.lastSample);
+		assert(trackData.lastTimescaleUnits !== null);
+
+		if (nextSample !== undefined && trackData.lastSample.timescaleUnitsToNextSample === 0) {
+			assert(nextSample.type === 'key');
+
+			// Given the next sample, we can make a guess about the duration of the last sample. This avoids having
+			// the last sample's duration in each fragment be "0" for fragmented files. The guess we make here is
+			// actually correct most of the time, since typically, no delta frame with a lower timestamp follows the key
+			// frame (although it can happen).
+			const timescaleUnits = intoTimescale(nextSample.timestamp, trackData.timescale, false);
+			const delta = Math.round(timescaleUnits - trackData.lastTimescaleUnits);
+			trackData.lastSample.timescaleUnitsToNextSample = delta;
+		}
 	}
 
 	private async registerSample(trackData: IsobmffTrackData, sample: Sample) {
+		if (sample.type === 'key') {
+			this.processTimestamps(trackData, sample);
+		}
+		trackData.timestampProcessingQueue.push(sample);
+
 		if (this.isFragmented) {
 			trackData.sampleQueue.push(sample);
 			await this.interleaveSamples();
@@ -737,10 +758,6 @@ export class IsobmffMuxer extends Muxer {
 	}
 
 	private async addSampleToTrack(trackData: IsobmffTrackData, sample: Sample) {
-		if (sample.type === 'key') {
-			this.processTimestamps(trackData);
-		}
-
 		if (!this.isFragmented) {
 			trackData.samples.push(sample);
 		}
@@ -749,6 +766,13 @@ export class IsobmffMuxer extends Muxer {
 		if (!trackData.currentChunk) {
 			beginNewChunk = true;
 		} else {
+			// Timestamp don't need to be monotonic (think B-frames), so we may need to update the start timestamp of
+			// the chunk
+			trackData.currentChunk.startTimestamp = Math.min(
+				trackData.currentChunk.startTimestamp,
+				sample.timestamp,
+			);
+
 			const currentChunkDuration = sample.timestamp - trackData.currentChunk.startTimestamp;
 
 			if (this.isFragmented) {
@@ -795,7 +819,6 @@ export class IsobmffMuxer extends Muxer {
 
 		assert(trackData.currentChunk);
 		trackData.currentChunk.samples.push(sample);
-		trackData.timestampProcessingQueue.push(sample);
 
 		if (this.isFragmented) {
 			this.maxWrittenTimestamp = Math.max(this.maxWrittenTimestamp, sample.timestamp);
@@ -1003,6 +1026,11 @@ export class IsobmffMuxer extends Muxer {
 
 		if (this.isFragmented) {
 			await this.interleaveSamples(true);
+
+			for (const trackData of this.trackDatas) {
+				this.processTimestamps(trackData);
+			}
+
 			await this.finalizeFragment(false); // Don't flush the last fragment as we will flush it with the mfra box
 		} else {
 			for (const trackData of this.trackDatas) {

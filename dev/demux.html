@@ -15,10 +15,17 @@
 			formats: Metamuxer.ALL_FORMATS,
 			source
 		});
-
-		let timestamps = [];
+		
 		const videoTrack = await input.getPrimaryVideoTrack();
 
+		const sink = new Metamuxer.EncodedPacketSink(videoTrack);
+		for await (const packet of sink.packets()) {
+			if (packet.timestamp >= 2) break;
+			console.log(packet);
+		}
+
+		/*
+		let timestamps = [];
 		const packetSink = new Metamuxer.EncodedPacketSink(videoTrack);
 		for await (const packet of packetSink.packets()) {
 			if (packet.timestamp >= 1) {
@@ -71,22 +78,25 @@
 			7.253333333333333,
 			7.253333333333333,
 		];
+		*/
 
-		console.log(timestamps);
 		//return;
 		/*
+		console.log(timestamps);
 		const sink = new Metamuxer.EncodedPacketSink(videoTrack);
 		for await (const packet of sink.packets()) {
 			console.log(packet.sequenceNumber);
 		}
 		*/
 
+		/*
 		const sink = new Metamuxer.VideoSampleSink(videoTrack);
 		for await (const sample of sink.samplesAtTimestamps(timestamps)) {
 			console.log("wee", sample.timestamp);
 			sample.close();
 		}
 		console.log("don")
+		*/
 
 		/*
 		const sink = new Metamuxer.CanvasSink(videoTrack, { width: 320 });
@@ -100,6 +110,7 @@
 		
 		
 
+		/*
 		for (let i = 0; i < 40; i++) {
 			const count = Math.floor(50 * Math.random());
 			const timestamps = Array.from({ length: count }, () => Math.random() * 20).sort((a, b) => a-b);
@@ -112,6 +123,7 @@
 		}
 
 		console.log("DONE!")
+		*/
 		
 		
 			
