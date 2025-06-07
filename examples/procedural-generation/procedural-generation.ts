@@ -226,25 +226,35 @@ const initScene = (duration: number) => {
 
 	for (let i = 0; i < numBalls; i++) {
 		const scaleIndex = Math.floor(Math.random() * scaleProgression[0]!.length);
-		const tempFreq = getFrequencyFromScaleIndex(scaleIndex);
-		const baseFreq = semitoneToFreq(0);
-		const radius = 30 * baseFreq / tempFreq;
+		balls.push(new Ball(0, 0, scaleIndex));
+	}
 
-		// Let's find a new spot for this ball where it doesn't overlap with any other ball
-		let x: number, y: number;
-		let attempts = 0;
-		do {
-			x = radius + Math.random() * (renderCanvas.width - 2 * radius);
-			y = radius + Math.random() * (renderCanvas.height - 2 * radius);
-			attempts++;
-		} while (attempts < 100 && balls.some((ball) => {
-			const dx = x - ball.x;
-			const dy = y - ball.y;
-			const distanceSquared = dx * dx + dy * dy;
-			return distanceSquared < (radius + ball.radius + 10) ** 2;
-		}));
+	// Sort balls by size (largest first), so that the following placement algorithm works better
+	balls.sort((a, b) => b.radius - a.radius);
 
-		balls.push(new Ball(x, y, scaleIndex));
+	// Now randomly place each ball without overlapping with previously placed balls
+	for (let i = 0; i < balls.length; i++) {
+		const ball = balls[i]!;
+
+		for (let attempts = 0; attempts < 100; attempts++) {
+			ball.x = ball.radius + Math.random() * (renderCanvas.width - 2 * ball.radius);
+			ball.y = ball.radius + Math.random() * (renderCanvas.height - 2 * ball.radius);
+
+			const overlapsOtherBall = balls.some((otherBall, index) => {
+				if (index >= i) {
+					return false; // This ball hasn't been placed yet
+				}
+
+				const dx = ball.x - otherBall.x;
+				const dy = ball.y - otherBall.y;
+				const distanceSquared = dx * dx + dy * dy;
+				return distanceSquared < (ball.radius + otherBall.radius + 5) ** 2;
+			});
+
+			if (!overlapsOtherBall) {
+				break;
+			}
+		}
 	}
 };
 
