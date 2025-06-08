@@ -103,10 +103,10 @@ Mediakit provides five subjective quality options as an alternative to manually 
 ```ts
 import {
 	QUALITY_VERY_LOW,
-	QUALITY_LOW,	
-	QUALITY_MEDIUM,	
-	QUALITY_HIGH,	
-	QUALITY_VERY_HIGH,	
+	QUALITY_LOW,
+	QUALITY_MEDIUM,
+	QUALITY_HIGH,
+	QUALITY_VERY_HIGH,
 } from 'mediakit';
 ```
 

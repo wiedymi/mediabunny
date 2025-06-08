@@ -35,7 +35,7 @@ things the guide needs to cover:
 - utility functions ✅
 - supported containers / codecs ✅
 - samples & packets ✅
-- conversion
+- conversion ✅
 
 Examples:
 ✅ Extracting media file metadata

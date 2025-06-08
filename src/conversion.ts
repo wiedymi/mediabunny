@@ -45,10 +45,6 @@ export type ConversionOptions = {
 	video?: {
 		/** If true, all video tracks will be discarded and will not be present in the output. */
 		discard?: boolean;
-		/** The desired output video codec. */
-		codec?: VideoCodec;
-		/** The desired bitrate of the output video. */
-		bitrate?: VideoEncodingConfig['bitrate'];
 		/**
 		 * The desired width of the output video in pixels, defaulting to the video's natural display width. If height
 		 * is not set, it will be deduced automatically based on aspect ratio.
@@ -73,31 +69,35 @@ export type ConversionOptions = {
 		 * rotation is _in addition to_ the natural rotation of the input video as specified in input file's metadata.
 		 */
 		rotate?: Rotation;
+		/** The desired output video codec. */
+		codec?: VideoCodec;
+		/** The desired bitrate of the output video. */
+		bitrate?: VideoEncodingConfig['bitrate'];
 		/** When true, video will always be re-encoded instead of directly copying over the encoded samples. */
-		forceReencode?: boolean;
+		forceTranscode?: boolean;
 	};
 
 	/** Audio-specific options. */
 	audio?: {
 		/** If true, all audio tracks will be discarded and will not be present in the output. */
 		discard?: boolean;
+		/** The desired channel count of the output audio. */
+		numberOfChannels?: number;
+		/** The desired sample rate of the output audio, in hertz. */
+		sampleRate?: number;
 		/** The desired output audio codec. */
 		codec?: AudioCodec;
 		/** The desired bitrate of the output audio. */
 		bitrate?: AudioEncodingConfig['bitrate'];
-		/** The desired channel count of the output audio. */
-		numberOfChannels?: number;
-		/** The desired sample rate of the output audio. */
-		sampleRate?: number;
 		/** When true, audio will always be re-encoded instead of directly copying over the encoded samples. */
-		forceReencode?: boolean;
+		forceTranscode?: boolean;
 	};
 
 	/** Options to trim the input file. */
 	trim?: {
-		/** The time in the input file at which the output file should start. Must be less than `end`.  */
+		/** The time in the input file in seconds at which the output file should start. Must be less than `end`.  */
 		start: number;
-		/** The time in the input file at which the output file should end. Must be greater than `start`. */
+		/** The time in the input file in seconds at which the output file should end. Must be greater than `start`. */
 		end: number;
 	};
 };
@@ -201,14 +201,17 @@ export class Conversion {
 		if (!(options.output instanceof Output)) {
 			throw new TypeError('options.output must be an Output.');
 		}
+		if (options.output._tracks.length > 0 || options.output.state !== 'pending') {
+			throw new TypeError('options.output must be fresh: no tracks added and not started.');
+		}
 		if (options.video !== undefined && (!options.video || typeof options.video !== 'object')) {
 			throw new TypeError('options.video, when provided, must be an object.');
 		}
 		if (options.video?.discard !== undefined && typeof options.video.discard !== 'boolean') {
 			throw new TypeError('options.video.discard, when provided, must be a boolean.');
 		}
-		if (options.video?.forceReencode !== undefined && typeof options.video.forceReencode !== 'boolean') {
-			throw new TypeError('options.video.forceReencode, when provided, must be a boolean.');
+		if (options.video?.forceTranscode !== undefined && typeof options.video.forceTranscode !== 'boolean') {
+			throw new TypeError('options.video.forceTranscode, when provided, must be a boolean.');
 		}
 		if (options.video?.codec !== undefined && !VIDEO_CODECS.includes(options.video.codec)) {
 			throw new TypeError(
@@ -256,8 +259,8 @@ export class Conversion {
 		if (options.audio?.discard !== undefined && typeof options.audio.discard !== 'boolean') {
 			throw new TypeError('options.audio.discard, when provided, must be a boolean.');
 		}
-		if (options.audio?.forceReencode !== undefined && typeof options.audio.forceReencode !== 'boolean') {
-			throw new TypeError('options.audio.forceReencode, when provided, must be a boolean.');
+		if (options.audio?.forceTranscode !== undefined && typeof options.audio.forceTranscode !== 'boolean') {
+			throw new TypeError('options.audio.forceTranscode, when provided, must be a boolean.');
 		}
 		if (options.audio?.codec !== undefined && !AUDIO_CODECS.includes(options.audio.codec)) {
 			throw new TypeError(
@@ -459,14 +462,14 @@ export class Conversion {
 		}
 
 		const firstTimestamp = await track.getFirstTimestamp();
-		const needsReencode = !!this._options.video?.forceReencode || this._startTimestamp > 0 || firstTimestamp < 0;
+		const needsTranscode = !!this._options.video?.forceTranscode || this._startTimestamp > 0 || firstTimestamp < 0;
 		const needsRerender = width !== originalWidth
 			|| height !== originalHeight
 			|| (totalRotation !== 0 && !outputSupportsRotation);
 
 		let videoCodecs = this.output.format.getSupportedVideoCodecs();
 		if (
-			!needsReencode
+			!needsTranscode
 			&& !this._options.video?.bitrate
 			&& !needsRerender
 			&& videoCodecs.includes(sourceCodec)
@@ -637,7 +640,7 @@ export class Conversion {
 
 		let audioCodecs = this.output.format.getSupportedAudioCodecs();
 		if (
-			!this._options.audio?.forceReencode
+			!this._options.audio?.forceTranscode
 			&& !this._options.audio?.bitrate
 			&& !needsResample
 			&& audioCodecs.includes(sourceCodec)
