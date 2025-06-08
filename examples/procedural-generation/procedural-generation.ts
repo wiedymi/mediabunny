@@ -101,7 +101,7 @@ const generateVideo = async () => {
 			codec: videoCodec,
 			bitrate: QUALITY_HIGH,
 		});
-		output.addVideoTrack(canvasSource);
+		output.addVideoTrack(canvasSource, { frameRate });
 
 		// For audio, we use ArrayBufferSource, because we'll be creating an ArrayBuffer with OfflineAudioContext
 		let audioBufferSource: AudioBufferSource | null = null;

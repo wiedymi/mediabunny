@@ -1,9 +1,10 @@
 ---
 layout: home
+title: Examples
 
 hero:
     text: Examples
-    tagline: Demos showcasing the usage of various features of Mediakit
+    tagline: Demos showcasing various features of Mediakit
 
 features:
     - title: Metadata extraction
@@ -26,6 +27,8 @@ features:
       details: Generate a video file as fast as the hardware allows.
       link: /examples/procedural-generation
       target: _self
-    - title: Feature C
-      details: Lorem ipsum dolor sit amet, consectetur adipiscing elit
+    - title: Live recording
+      details: Record a video from live sources and stream it to a video element.
+      link: /examples/live-recording	
+      target: _self
 ---
