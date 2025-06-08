@@ -179,7 +179,7 @@ Codec encodability checks take [custom encoders](#custom-encoders) into account.
 
 ## Querying codec decodability
 
-Whether a codec can be decoded depends on the specific codec configuration of an `InputTrack`; you can use its [`canDecode`](./reading-overview#codec-information) method to check.
+Whether a codec can be decoded depends on the specific codec configuration of an `InputTrack`; you can use its [`canDecode`](./reading-media-files#codec-information) method to check.
 
 ## Custom coders
 

@@ -22,7 +22,7 @@
     "build-local": "node build.mjs && tsc -p src && api-extractor run --local --verbose && npm run check-docblocks && tsx scripts/append-namespace.ts",
     "watch": "node build.mjs --watch",
     "lint": "eslint .",
-    "check": "tsc -p src --noEmit && tsc -p scripts --noEmit",
+    "check": "tsc -p src --noEmit && tsc -p scripts --noEmit && tsc -p tsconfig.vite.json --noEmit && rm tsconfig.vite.tsbuildinfo",
     "check-docblocks": "tsx scripts/check-docblocks.ts dist/metamuxer.d.ts",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs && npm run examples:build",

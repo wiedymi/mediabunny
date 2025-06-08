@@ -8,7 +8,7 @@ Media sources are not to be confused with [MediaSource](https://developer.mozill
 
 _Media sources_ provide APIs for adding media data to an output file. Different media sources provide different levels of abstraction and cater to different use cases.
 
-For information on how to use media sources to create output tracks, check the [writing overview](./writing-overview).
+For information on how to use media sources to create output tracks, check [Writing media files](./writing-media-files).
 
 Most media sources follow this code pattern to add media data:
 ```ts
@@ -21,11 +21,11 @@ When you're done using the source, meaning no additional media data will be adde
 ```ts
 mediaSource.close();
 ```
-Closing sources manually is _technically_ not required and will happen automatically when finalizing the `Output`. However, if your `Output` has multiple tracks and not all of them finish supplying their data at the same time (for example, adding all audio first and then all video), closing sources early will improve performance and lower memory usage. This is because the `Output` can better "plan ahead", knowing it doesn't have to wait for certain tracks anymore (see [Packet buffering](./writing-overview#packet-buffering)). Therefore, it is good practice to always manually close all media sources as soon as you are done using them.
+Closing sources manually is _technically_ not required and will happen automatically when finalizing the `Output`. However, if your `Output` has multiple tracks and not all of them finish supplying their data at the same time (for example, adding all audio first and then all video), closing sources early will improve performance and lower memory usage. This is because the `Output` can better "plan ahead", knowing it doesn't have to wait for certain tracks anymore (see [Packet buffering](./writing-media-files#packet-buffering)). Therefore, it is good practice to always manually close all media sources as soon as you are done using them.
 
 ### Backpressure
 
-Media sources are the means by which backpressure is propagated from the output pipeline into your application logic. The `Output` may want to apply backpressure if the encoders or the [StreamTarget](./writing-overview#streamtarget)'s writable can't keep up.
+Media sources are the means by which backpressure is propagated from the output pipeline into your application logic. The `Output` may want to apply backpressure if the encoders or the [StreamTarget](./writing-media-files#streamtarget)'s writable can't keep up.
 
 Backpressure is communicated by media sources via promises. All media sources with an `add` method return a promise:
 ```ts

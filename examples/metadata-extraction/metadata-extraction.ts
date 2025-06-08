@@ -34,7 +34,7 @@ const extractMetadata = (file: File) => {
 
 	// This object contains all the data that gets displayed:
 	const object = {
-		'Format': input.getFormat().then(format => format.getName()),
+		'Format': input.getFormat().then(format => format.name),
 		'Full MIME type': input.getMimeType(),
 		'Duration': input.computeDuration().then(duration => `${duration} seconds`),
 		'Tracks': input.getTracks().then(tracks => tracks.map(track => ({

@@ -80,10 +80,10 @@ type IsobmffOutputFormatOptions = {
 		This option ensures append-only writing.
 		:::
 		::: warning
-		This option requires [packet buffering](./writing-overview#packet-buffering).
+		This option requires [packet buffering](./writing-media-files#packet-buffering).
 		:::
 	- `undefined`\
-		The default option; it behaves like `'in-memory'` when using [`BufferTarget`](./writing-overview#buffertarget) and like `false` otherwise.
+		The default option; it behaves like `'in-memory'` when using [`BufferTarget`](./writing-media-files#buffertarget) and like `false` otherwise.
 - `minimumFragmentDuration`\
 	Only relevant when `fastStart` is `'fragmented'`. Sets the minimum duration in seconds a fragment must have to be finalized and written to the file. Defaults to 1 second.
 - `onFtyp`\

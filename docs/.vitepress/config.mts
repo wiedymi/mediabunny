@@ -21,19 +21,25 @@ export default withMermaid({
 				],
 			},
 			{
-				text: 'Reading media files',
+				text: 'Reading',
 				items: [
-					{ text: 'Reading overview', link: '/guide/reading-overview' },
+					{ text: 'Reading media files', link: '/guide/reading-media-files' },
 					{ text: 'Media sinks', link: '/guide/media-sinks' },
 					{ text: 'Input formats', link: '/guide/input-formats' },
 				],
 			},
 			{
-				text: 'Writing media files',
+				text: 'Writing',
 				items: [
-					{ text: 'Writing overview', link: '/guide/writing-overview' },
+					{ text: 'Writing media files', link: '/guide/writing-media-files' },
 					{ text: 'Media sources', link: '/guide/media-sources' },
 					{ text: 'Output formats', link: '/guide/output-formats' },
+				],
+			},
+			{
+				text: 'Conversion',
+				items: [
+					{ text: 'Converting media files', link: '/guide/converting-media-files' },
 				],
 			},
 			{

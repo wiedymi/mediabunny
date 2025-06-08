@@ -1,7 +1,7 @@
 # Input formats
 
 Mediakit supports a wide variety of commonly used container formats for reading input files. These *input formats* are used in two ways:
-- When creating an `Input`, they are used to specify the list of supported container formats. See [Creating a new input](./reading-overview#creating-a-new-input) for more.
+- When creating an `Input`, they are used to specify the list of supported container formats. See [Creating a new input](./reading-media-files#creating-a-new-input) for more.
 - Given an existing `Input`, its `getFormat` method returns the *actual* format of the file as an `InputFormat`.
 
 ## Input format properties
@@ -16,7 +16,7 @@ You can also retrieve the format's base MIME type:
 inputFormat.mimeType; // => 'video/mp4'
 ```
 
-If you want a file's full MIME type, which depends on track codecs, use [`getMimeType`](./reading-overview#reading-file-metadata) on `Input` instead.
+If you want a file's full MIME type, which depends on track codecs, use [`getMimeType`](./reading-media-files#reading-file-metadata) on `Input` instead.
 
 ## Input format singletons
 

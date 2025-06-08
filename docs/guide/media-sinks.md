@@ -4,7 +4,7 @@
 
 *Media sinks* offer ways to extract media data from an `InputTrack`. Different media sinks provide different levels of abstraction and cater to different use cases.
 
-For information on how to obtain input tracks, or how to generally read data from media files, refer to the [Reading overview](./reading-overview).
+For information on how to obtain input tracks, or how to generally read data from media files, refer to [Reading media files](./reading-media-files).
 
 ### General usage
 
