@@ -705,8 +705,11 @@ class VideoDecoderWrapper extends DecoderWrapper<VideoSample> {
 		if (MatchingCustomDecoder) {
 			// @ts-expect-error "Can't create instance of abstract class 🤓"
 			this.customDecoder = new MatchingCustomDecoder() as CustomVideoDecoder;
+			// @ts-expect-error It's technically readonly
 			this.customDecoder.codec = codec;
+			// @ts-expect-error It's technically readonly
 			this.customDecoder.config = decoderConfig;
+			// @ts-expect-error It's technically readonly
 			this.customDecoder.onSample = (sample) => {
 				if (!(sample instanceof VideoSample)) {
 					throw new TypeError('The argument passed to onSample must be a VideoSample.');
@@ -1151,8 +1154,11 @@ class AudioDecoderWrapper extends DecoderWrapper<AudioSample> {
 		if (MatchingCustomDecoder) {
 			// @ts-expect-error "Can't create instance of abstract class 🤓"
 			this.customDecoder = new MatchingCustomDecoder() as CustomAudioDecoder;
+			// @ts-expect-error It's technically readonly
 			this.customDecoder.codec = codec;
+			// @ts-expect-error It's technically readonly
 			this.customDecoder.config = decoderConfig;
+			// @ts-expect-error It's technically readonly
 			this.customDecoder.onSample = (sample) => {
 				if (!(sample instanceof AudioSample)) {
 					throw new TypeError('The argument passed to onSample must be an AudioSample.');

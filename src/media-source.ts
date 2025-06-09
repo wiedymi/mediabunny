@@ -382,8 +382,11 @@ class VideoEncoderWrapper {
 			if (MatchingCustomEncoder) {
 				// @ts-expect-error "Can't create instance of abstract class 🤓"
 				this.customEncoder = new MatchingCustomEncoder() as CustomVideoEncoder;
+				// @ts-expect-error It's technically readonly
 				this.customEncoder.codec = this.encodingConfig.codec;
+				// @ts-expect-error It's technically readonly
 				this.customEncoder.config = encoderConfig;
+				// @ts-expect-error It's technically readonly
 				this.customEncoder.onPacket = (packet, meta) => {
 					if (!(packet instanceof EncodedPacket)) {
 						throw new TypeError('The first argument passed to onPacket must be an EncodedPacket.');
@@ -949,8 +952,11 @@ class AudioEncoderWrapper {
 			if (MatchingCustomEncoder) {
 				// @ts-expect-error "Can't create instance of abstract class 🤓"
 				this.customEncoder = new MatchingCustomEncoder() as CustomAudioEncoder;
+				// @ts-expect-error It's technically readonly
 				this.customEncoder.codec = this.encodingConfig.codec;
+				// @ts-expect-error It's technically readonly
 				this.customEncoder.config = encoderConfig;
+				// @ts-expect-error It's technically readonly
 				this.customEncoder.onPacket = (packet, meta) => {
 					if (!(packet instanceof EncodedPacket)) {
 						throw new TypeError('The first argument passed to onPacket must be an EncodedPacket.');

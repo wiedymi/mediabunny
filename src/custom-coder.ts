@@ -9,11 +9,11 @@ import { AudioSample, VideoSample } from './sample';
  */
 export abstract class CustomVideoDecoder {
 	/** The input video's codec. */
-	codec!: VideoCodec;
+	readonly codec!: VideoCodec;
 	/** The input video's decoder config. */
-	config!: VideoDecoderConfig;
+	readonly config!: VideoDecoderConfig;
 	/** The callback to call when a decoded VideoSample is available. */
-	onSample!: (sample: VideoSample) => unknown;
+	readonly onSample!: (sample: VideoSample) => unknown;
 
 	/** Returns true iff the decoder can decode the given codec configuration. */
 	// eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -38,11 +38,11 @@ export abstract class CustomVideoDecoder {
  */
 export abstract class CustomAudioDecoder {
 	/** The input audio's codec. */
-	codec!: AudioCodec;
+	readonly codec!: AudioCodec;
 	/** The input audio's decoder config. */
-	config!: AudioDecoderConfig;
+	readonly config!: AudioDecoderConfig;
 	/** The callback to call when a decoded AudioSample is available. */
-	onSample!: (sample: AudioSample) => unknown;
+	readonly onSample!: (sample: AudioSample) => unknown;
 
 	/** Returns true iff the decoder can decode the given codec configuration. */
 	// eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -67,11 +67,11 @@ export abstract class CustomAudioDecoder {
  */
 export abstract class CustomVideoEncoder {
 	/** The codec with which to encode the video. */
-	codec!: VideoCodec;
+	readonly codec!: VideoCodec;
 	/** Config for the encoder. */
-	config!: VideoEncoderConfig;
+	readonly config!: VideoEncoderConfig;
 	/** The callback to call when an EncodedPacket is available. */
-	onPacket!: (packet: EncodedPacket, meta?: EncodedVideoChunkMetadata) => unknown;
+	readonly onPacket!: (packet: EncodedPacket, meta?: EncodedVideoChunkMetadata) => unknown;
 
 	/** Returns true iff the encoder can encode the given codec configuration. */
 	// eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -96,11 +96,11 @@ export abstract class CustomVideoEncoder {
  */
 export abstract class CustomAudioEncoder {
 	/** The codec with which to encode the audio. */
-	codec!: AudioCodec;
+	readonly codec!: AudioCodec;
 	/** Config for the encoder. */
-	config!: AudioEncoderConfig;
+	readonly config!: AudioEncoderConfig;
 	/** The callback to call when an EncodedPacket is available. */
-	onPacket!: (packet: EncodedPacket, meta?: EncodedAudioChunkMetadata) => unknown;
+	readonly onPacket!: (packet: EncodedPacket, meta?: EncodedAudioChunkMetadata) => unknown;
 
 	/** Returns true iff the encoder can encode the given codec configuration. */
 	// eslint-disable-next-line @typescript-eslint/no-unused-vars

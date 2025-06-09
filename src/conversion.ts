@@ -112,9 +112,9 @@ const FALLBACK_SAMPLE_RATE = 48000;
  */
 export class Conversion {
 	/** The input file. */
-	input: Input;
+	readonly input: Input;
 	/** The output file. */
-	output: Output;
+	readonly output: Output;
 
 	/** @internal */
 	_options: ConversionOptions;
@@ -168,9 +168,9 @@ export class Conversion {
 	_lastProgress = 0;
 
 	/** The list of tracks that are included in the output file. */
-	utilizedTracks: InputTrack[] = [];
+	readonly utilizedTracks: InputTrack[] = [];
 	/** The list of tracks from the input file that have been discarded, alongside the discard reason. */
-	discardedTracks: {
+	readonly discardedTracks: {
 		/** The track that was discarded. */
 		track: InputTrack;
 		/** The reason for discarding the track. */
