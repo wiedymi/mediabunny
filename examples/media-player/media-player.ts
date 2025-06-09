@@ -511,10 +511,10 @@ fullscreenButton.addEventListener('click', () => {
 	}
 });
 
-playerContainer.addEventListener('pointerdown', () => {
+playerContainer.addEventListener('click', () => {
 	togglePlay();
 });
-controlsElement.addEventListener('pointerdown', (event) => {
+controlsElement.addEventListener('click', (event) => {
 	// Make sure this does NOT toggle play
 	event.stopPropagation();
 });
