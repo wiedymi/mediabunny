@@ -1,6 +1,6 @@
 # Reading media files
 
-Mediakit allows you to read media files with great control and efficiency. You can use it to extract metadata (such as duration or resolution), as well as to read actual media data from video and audio tracks with frame-accurate timing. Many commonly used [input file formats](./input-formats) are supported. Using [input sources](#input-sources), data can be read from multiple sources, such as directly from memory, from the user's disk, or even over the network.
+Mediabunny allows you to read media files with great control and efficiency. You can use it to extract metadata (such as duration or resolution), as well as to read actual media data from video and audio tracks with frame-accurate timing. Many commonly used [input file formats](./input-formats) are supported. Using [input sources](#input-sources), data can be read from multiple sources, such as directly from memory, from the user's disk, or even over the network.
 
 Files are always read partially ("lazily"), meaning only the bytes required to extract the requested information will be read, keeping performance high and memory usage low. Therefore, most methods for reading data are asynchronous and return promises.
 
@@ -10,11 +10,11 @@ Not all data is extracted equally. Methods that are prefixed with `compute` inst
 
 ## Creating a new input
 
-Reading media files in Mediakit revolves around a central class, `Input`, from which all reading operations begin. One instance of `Input` represents one media file that we want to read.
+Reading media files in Mediabunny revolves around a central class, `Input`, from which all reading operations begin. One instance of `Input` represents one media file that we want to read.
 
 Start by creating a new instance of `Input`. Here, we're creating it with a [File](https://developer.mozilla.org/en-US/docs/Web/API/File) instance, meaning we'll be reading data directly from the user's disk:
 ```ts
-import { Input, ALL_FORMATS, BlobSource } from 'mediakit';
+import { Input, ALL_FORMATS, BlobSource } from 'mediabunny';
 
 const input = new Input({
 	formats: ALL_FORMATS,
@@ -24,9 +24,9 @@ const input = new Input({
 
 `source` specifies where the `Input` reads data from. See [Input sources](#input-sources) for a full list of available input sources.
 
-`formats` specifies the list of formats that the `Input` should support. This field is mainly used for tree shaking optimizations: Using `ALL_FORMATS` means we can load files of [any format that Mediakit supports](./supported-formats-and-codecs#container-formats), but requires that we include the parsers for each of these formats. If we know we'll only be reading MP3 or WAVE files, then something like this will reduce the overall bundle size drastically:
+`formats` specifies the list of formats that the `Input` should support. This field is mainly used for tree shaking optimizations: Using `ALL_FORMATS` means we can load files of [any format that Mediabunny supports](./supported-formats-and-codecs#container-formats), but requires that we include the parsers for each of these formats. If we know we'll only be reading MP3 or WAVE files, then something like this will reduce the overall bundle size drastically:
 ```ts
-import { Input, MP3, WAVE } from 'mediakit';
+import { Input, MP3, WAVE } from 'mediabunny';
 
 const input = new Input({
 	formats: [MP3, WAVE],
@@ -105,7 +105,7 @@ You can query metadata related to the track's codec:
 ```ts
 track.codec; // => MediaCodec | null
 ```
-This field is `null` when the track's codec couldn't be recognized or is not supported by Mediakit. See [Codecs](./supported-formats-and-codecs#codecs) for the full list of supported codecs.
+This field is `null` when the track's codec couldn't be recognized or is not supported by Mediabunny. See [Codecs](./supported-formats-and-codecs#codecs) for the full list of supported codecs.
 
 You can also extract the full codec parameter string from the track, as specified in the [WebCodecs Codec Registry](https://www.w3.org/TR/webcodecs-codec-registry/):
 ```ts
@@ -272,7 +272,7 @@ For example, here's the decoder configuration for an AAC audio track:
 
 ## Reading media data
 
-Mediakit has the concept of *media sinks*, which are the way to read media data from an `InputTrack`. Media sinks differ in their API and in their level of abstraction, meaning you can pick whichever sink best fits your use case.
+Mediabunny has the concept of *media sinks*, which are the way to read media data from an `InputTrack`. Media sinks differ in their API and in their level of abstraction, meaning you can pick whichever sink best fits your use case.
 
 See [Media sinks](./media-sinks) for a full list of sinks.
 
@@ -280,7 +280,7 @@ See [Media sinks](./media-sinks) for a full list of sinks.
 
 Here we iterate over all samples (frames) of a video track:
 ```ts
-import { VideoSampleSink } from 'mediakit';
+import { VideoSampleSink } from 'mediabunny';
 
 const videoTrack = await input.getPrimaryVideoTrack();
 const sink = new VideoSampleSink(videoTrack);
@@ -304,7 +304,7 @@ await sink.getSample(42);
 
 We may want to extract downscaled thumbnails from a video track:
 ```ts
-import { CanvasSink } from 'mediakit';
+import { CanvasSink } from 'mediabunny';
 
 const videoTrack = await input.getPrimaryVideoTrack();
 const sink = new CanvasSink(videoTrack, {
@@ -327,7 +327,7 @@ for await (const result of sink.canvasesAtTimestamps(thumbnailTimestamps)) {
 
 We may loop over a section of an audio track and play it using the Web Audio API:
 ```ts
-import { AudioBufferSink } from 'mediakit';
+import { AudioBufferSink } from 'mediabunny';
 
 const audioTrack = await input.getPrimaryAudioTrack();
 const sink = new AudioBufferSink(audioTrack);
@@ -342,7 +342,7 @@ for await (const { buffer, timestamp } of sink.buffers(5, 10)) {
 
 Or we may take the decoding process into our own hands:
 ```ts
-import { EncodedPacketSink } from 'mediakit';
+import { EncodedPacketSink } from 'mediabunny';
 
 const videoTrack = await input.getPrimaryVideoTrack();
 const sink = new EncodedPacketSink(videoTrack);
@@ -384,7 +384,7 @@ This library offers a couple of sources:
 
 This source uses an in-memory `ArrayBuffer` as the underlying source of data.
 ```ts
-import { BufferSource } from 'mediakit';
+import { BufferSource } from 'mediabunny';
 
 // You can construct a BufferSource directly from ArrayBuffer:
 const source = new BufferSource(arrayBuffer);
@@ -399,7 +399,7 @@ This source is the fastest but requires the entire input file to be held in memo
 
 This source is backed by an underlying [`Blob`](https://developer.mozilla.org/en-US/docs/Web/API/Blob) object. Since [`File`](https://developer.mozilla.org/en-US/docs/Web/API/File) extends `Blob`, this source is perfect for reading data directly from disk.
 ```ts
-import { BlobSource } from 'mediakit';
+import { BlobSource } from 'mediabunny';
 
 fileInput.addEventListener('change', (event) => {
 	const file = event.target.files[0];
@@ -417,7 +417,7 @@ It still works, but keep in mind it's going to be much higher-latency than readi
 
 This source fetches data from a URL. This is useful for reading files over the network.
 ```ts
-import { UrlSource } from 'mediakit';
+import { UrlSource } from 'mediabunny';
 
 const source = new UrlSource('https://example.com/bigbuckbunny.mp4');
 ```
@@ -461,7 +461,7 @@ This is a general-purpose input source you can use to read data from anywhere. A
 
 For example, here we're reading a file from disk using the Node.js file system:
 ```ts
-import { StreamSource } from 'mediakit';
+import { StreamSource } from 'mediabunny';
 import { open } from 'node:fs/promises';
 
 const fileHandle = await open('bigbuckbunny.mp4', 'r');

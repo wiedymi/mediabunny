@@ -98,7 +98,7 @@ type AudioEncodingConfig = {
 
 ### Subjective qualities
 
-Mediakit provides five subjective quality options as an alternative to manually providing a bitrate. From a subjective quality, a bitrate will be calculated internally based on the codec and track information (width, height, sample rate, ...).
+Mediabunny provides five subjective quality options as an alternative to manually providing a bitrate. From a subjective quality, a bitrate will be calculated internally based on the codec and track information (width, height, sample rate, ...).
 
 ```ts
 import {
@@ -107,7 +107,7 @@ import {
 	QUALITY_MEDIUM,
 	QUALITY_HIGH,
 	QUALITY_VERY_HIGH,
-} from 'mediakit';
+} from 'mediabunny';
 ```
 
 ## Video sources
@@ -119,7 +119,7 @@ Video sources feed data to video tracks on an `Output`. They all extend the abst
 This source takes [video samples](./packets-and-samples#videosample), encodes them, and passes the encoded data to the output.
 
 ```ts
-import { VideoSampleSource } from 'mediakit';
+import { VideoSampleSource } from 'mediabunny';
 
 const sampleSource = new VideoSampleSource({
 	codec: 'avc',
@@ -137,7 +137,7 @@ await sampleSource.add(videoSample, { keyFrame: true });
 This source simplifies a common pattern: A single canvas is repeatedly updated in a render loop and each frame is added to the output file.
 
 ```ts
-import { CanvasSource, QUALITY_MEDIUM } from 'mediakit';
+import { CanvasSource, QUALITY_MEDIUM } from 'mediabunny';
 
 const canvasSource = new CanvasSource(canvasElement, {
 	codec: 'av1',
@@ -157,7 +157,7 @@ await canvasSource.add(0.3, 0.1, { keyFrame: true });
 This is a source for use with the [Media Capture and Streams API](https://developer.mozilla.org/en-US/docs/Web/API/Media_Capture_and_Streams_API). Use this source if you want to pipe a real-time video source (such as a webcam or screen recording) to an output file.
 
 ```ts
-import { MediaStreamVideoTrackSource } from 'mediakit';
+import { MediaStreamVideoTrackSource } from 'mediabunny';
 
 // Get the user's screen
 const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
@@ -180,7 +180,7 @@ If this source is the only MediaStreamTrack source in the `Output`, then the fir
 The most barebones of all video sources, this source can be used to directly pipe [encoded packets](./packets-and-samples#encodedpacket) of video data to the output. This source requires that you take care of the encoding process yourself, which enables you to use the WebCodecs API manually or to plug in your own encoding stack. Alternatively, you may retrieve the encoded packets directly by reading them from another media file, allowing you to skip decoding and reencoding video data.
 
 ```ts
-import { EncodedVideoPacketSource } from 'mediakit';
+import { EncodedVideoPacketSource } from 'mediabunny';
 
 // You must specify the codec name:
 const packetSource = new EncodedVideoPacketSource('vp9');
@@ -224,7 +224,7 @@ The decode order for these frames will be:
 ```md
 Frame 1 -> Frame 3 -> Frame 2
 ```
-Some file formats have an explicit notion of both a "decode timestamp" and a "presentation timestamp" to model B-frames or out-of-order decoding. However, Mediakit packets only specify their *presentation timestamp*. Decode order is determined by the order in which you add the packets, so in our example, you must add the packets like this:
+Some file formats have an explicit notion of both a "decode timestamp" and a "presentation timestamp" to model B-frames or out-of-order decoding. However, Mediabunny packets only specify their *presentation timestamp*. Decode order is determined by the order in which you add the packets, so in our example, you must add the packets like this:
 ```ts
 await packetSource.add(packetForFrame1); // 0.0s
 await packetSource.add(packetForFrame3); // 0.2s
@@ -274,7 +274,7 @@ Audio sources feed data to audio tracks on an `Output`. They all extend the abst
 This source takes [audio samples](./packets-and-samples#audiosample), encodes them, and passes the encoded data to the output.
 
 ```ts
-import { AudioSampleSource } from 'mediakit';
+import { AudioSampleSource } from 'mediabunny';
 
 const sampleSource = new AudioSampleSource({
 	codec: 'aac',
@@ -289,7 +289,7 @@ await sampleSource.add(audioSample);
 This source directly accepts instances of `AudioBuffer` as data, simplifying usage with the Web Audio API. The first AudioBuffer will be played at timestamp 0, and any subsequent AudioBuffer will be appended after all previous AudioBuffers.
 
 ```ts
-import { AudioBufferSource, QUALITY_MEDIUM } from 'mediakit';
+import { AudioBufferSource, QUALITY_MEDIUM } from 'mediabunny';
 
 const bufferSource = new AudioBufferSource({
 	codec: 'opus',
@@ -306,7 +306,7 @@ await bufferSource.add(audioBuffer3);
 This is a source for use with the [Media Capture and Streams API](https://developer.mozilla.org/en-US/docs/Web/API/Media_Capture_and_Streams_API). Use this source if you want to pipe a real-time audio source (such as a microphone or audio from the user's computer) to an output file.
 
 ```ts
-import { MediaStreamAudioTrackSource } from 'mediakit';
+import { MediaStreamAudioTrackSource } from 'mediabunny';
 
 // Get the user's microphone
 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -329,7 +329,7 @@ If this source is the only MediaStreamTrack source in the `Output`, then the fir
 The most barebones of all audio sources, this source can be used to directly pipe [encoded packets](./packets-and-samples#encodedpacket) of audio data to the output. This source requires that you take care of the encoding process yourself, which enables you to use the WebCodecs API manually or to plug in your own encoding stack. Alternatively, you may retrieve the encoded packets directly by reading them from another media file, allowing you to skip decoding and reencoding audio data.
 
 ```ts
-import { EncodedAudioPacketSource } from 'mediakit';
+import { EncodedAudioPacketSource } from 'mediabunny';
 
 // You must specify the codec name:
 const packetSource = new EncodedAudioPacketSource('aac');
@@ -360,7 +360,7 @@ Subtitle sources feed data to subtitle tracks on an `Output`. They all extend th
 This source feeds subtitle cues to the output from a text file in which the subtitles are defined.
 
 ```ts
-import { TextSubtitleSource } from 'mediakit';
+import { TextSubtitleSource } from 'mediabunny';
 
 const textSource = new TextSubtitleSource('webvtt');
 
@@ -396,7 +396,7 @@ textSource.close();
 
 You can also add cues individually in small chunks:
 ```ts
-import { TextSubtitleSource } from 'mediakit';
+import { TextSubtitleSource } from 'mediabunny';
 
 const textSource = new TextSubtitleSource('webvtt');
 

@@ -1,31 +1,31 @@
 # Introduction
 
-Install Mediakit using your favorite package manager:
+Install Mediabunny using your favorite package manager:
 
 ::: code-group
 ```bash [npm]
-npm install mediakit
+npm install mediabunny
 ```
 ```bash [yarn]
-yarn add mediakit
+yarn add mediabunny
 ```
 ```bash [pnpm]
-pnpm add mediakit
+pnpm add mediabunny
 ```
 ```bash [bun]
-bun add mediakit
+bun add mediabunny
 ```
 :::
 
 Both ESM and CommonJS are supported:
 ```ts
-import * as Mediakit from 'mediakit';
-const Mediakit = require('mediakit');
+import * as Mediabunny from 'mediabunny';
+const Mediabunny = require('mediabunny');
 ```
 
 Alternativly, you can simply include the library using a script tag in your HTML:
 ```html
-<script src="path/to/mediakit.js"></script>
+<script src="path/to/mediabunny.js"></script>
 ```
 
 You can download the built distribution file from the [releases page](https://github.com/Vanilagy/mp4-muxer/releases).

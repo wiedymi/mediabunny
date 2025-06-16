@@ -1,6 +1,6 @@
 # Input formats
 
-Mediakit supports a wide variety of commonly used container formats for reading input files. These *input formats* are used in two ways:
+Mediabunny supports a wide variety of commonly used container formats for reading input files. These *input formats* are used in two ways:
 - When creating an `Input`, they are used to specify the list of supported container formats. See [Creating a new input](./reading-media-files#creating-a-new-input) for more.
 - Given an existing `Input`, its `getFormat` method returns the *actual* format of the file as an `InputFormat`.
 
@@ -30,12 +30,12 @@ import {
 	MP3, // MP3 input format singleton
 	WAVE, // WAVE input format singleton
 	OGG, // Ogg input format singleton
-} from 'mediakit';
+} from 'mediabunny';
 ```
 
 You can use these singletons when creating an input:
 ```ts
-import { Input, MP3, WAVE, OGG } from 'mediakit';
+import { Input, MP3, WAVE, OGG } from 'mediabunny';
 
 const input = new Input({
 	formats: [MP3, WAVE, OGG],
@@ -45,14 +45,14 @@ const input = new Input({
 
 You can also use them for checking the actual format of an `Input`:
 ```ts
-import { MP3 } from 'mediakit';
+import { MP3 } from 'mediabunny';
 
 const isMp3 = input.getFormat() === MP3;
 ```
 
-There is a special `ALL_FORMATS` constant exported by Mediakit which contains every input format singleton. Use this constant if you want to support as many formats as possible:
+There is a special `ALL_FORMATS` constant exported by Mediabunny which contains every input format singleton. Use this constant if you want to support as many formats as possible:
 ```ts
-import { Input, ALL_FORMATS } from 'mediakit';
+import { Input, ALL_FORMATS } from 'mediabunny';
 
 const input = new Input({
 	formats: ALL_FORMATS,
@@ -79,7 +79,7 @@ In addition to singletons, input format classes are structured hierarchically:
 
 This means you can also perform input format checks using `instanceof` instead of `===` comparisons. For example:
 ```ts
-import { Mp3InputFormat } from 'mediakit';
+import { Mp3InputFormat } from 'mediabunny';
 
 // Check if the file is MP3:
 input.getFormat() instanceof Mp3InputFormat;

@@ -7,7 +7,7 @@ import {
 	QUALITY_HIGH,
 	getFirstEncodableAudioCodec,
 	getFirstEncodableVideoCodec,
-} from 'mediakit';
+} from 'mediabunny';
 
 const durationSlider = document.querySelector('#duration-slider') as HTMLInputElement;
 const durationValue = document.querySelector('#duration-value') as HTMLParagraphElement;

@@ -82,7 +82,7 @@ This sink can be used to extract raw, [encoded packets](./packets-and-samples#en
 
 Start by constructing the sink from any `InputTrack`:
 ```ts
-import { EncodedPacketSink } from 'mediakit';
+import { EncodedPacketSink } from 'mediabunny';
 
 const sink = new EncodedPacketSink(track);
 ```
@@ -169,7 +169,7 @@ All operations of this sink use [presentation order](#decode-vs-presentation-ord
 
 Create the sink like so:
 ```ts
-import { VideoSampleSink } from 'mediakit';
+import { VideoSampleSink } from 'mediabunny';
 
 const sink = new VideoSampleSink(videoTrack);
 ```
@@ -296,7 +296,7 @@ This sink yields `HTMLCanvasElement` whenever possible, and falls back to `Offsc
 
 Create the sink like so:
 ```ts
-import { CanvasSink } from 'mediakit';
+import { CanvasSink } from 'mediabunny';
 
 const sink = new CanvasSink(videoTrack, options);
 ```
@@ -414,7 +414,7 @@ Use this sink to extract decoded [audio samples](./packets-and-samples#audiosamp
 
 Create the sink like so:
 ```ts
-import { AudioSampleSink } from 'mediakit';
+import { AudioSampleSink } from 'mediabunny';
 
 const sink = new AudioSampleSink(audioTrack);
 ```
@@ -457,7 +457,7 @@ While `AudioSampleSink` extracts raw decoded audio samples, you can use `AudioBu
 
 Create the sink like so:
 ```ts
-import { AudioBufferSink } from 'mediakit';
+import { AudioBufferSink } from 'mediabunny';
 
 const sink = new AudioBufferSink(audioTrack);
 ```

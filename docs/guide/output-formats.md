@@ -2,7 +2,7 @@
 
 ## Introduction
 
-An _output format_ specifies the container format of the data written by an `Output`. Mediakit supports many commonly used container formats, each having format-specific options.
+An _output format_ specifies the container format of the data written by an `Output`. Mediabunny supports many commonly used container formats, each having format-specific options.
 
 Many formats also offer *data callbacks*, which are special callbacks that fire for specific data regions in the output file.
 
@@ -45,7 +45,7 @@ type TrackCountLimits = {
 
 This output format creates MP4 files.
 ```ts
-import { Output, Mp4OutputFormat } from 'mediakit';
+import { Output, Mp4OutputFormat } from 'mediabunny';
 
 const output = new Output({
 	format: new Mp4OutputFormat(options),
@@ -99,7 +99,7 @@ type IsobmffOutputFormatOptions = {
 
 This output format creates QuickTime files (.mov).
 ```ts
-import { Output, MovOutputFormat } from 'mediakit';
+import { Output, MovOutputFormat } from 'mediabunny';
 
 const output = new Output({
 	format: new MovOutputFormat(options),
@@ -113,7 +113,7 @@ The available options are the same `IsobmffOutputFormatOptions` used by [MP4](#m
 
 This output format creates WebM files.
 ```ts
-import { Output, WebmOutputFormat } from 'mediakit';
+import { Output, WebmOutputFormat } from 'mediabunny';
 
 const output = new Output({
 	format: new WebmOutputFormat(options),
@@ -150,7 +150,7 @@ type MkvOutputFormatOptions = {
 
 This output format creates Matroska files (.mkv).
 ```ts
-import { Output, MkvOutputFormat } from 'mediakit';
+import { Output, MkvOutputFormat } from 'mediabunny';
 
 const output = new Output({
 	format: new MkvOutputFormat(options),
@@ -164,7 +164,7 @@ The available options are the same `MkvOutputFormatOptions` used by [WebM](#webm
 
 This output format creates Ogg files.
 ```ts
-import { Output, OggOutputFormat } from 'mediakit';
+import { Output, OggOutputFormat } from 'mediabunny';
 
 const output = new Output({
 	format: new OggOutputFormat(options),
@@ -189,7 +189,7 @@ type OggOutputFormatOptions = {
 
 This output format creates MP3 files.
 ```ts
-import { Output, Mp3OutputFormat } from 'mediakit';	
+import { Output, Mp3OutputFormat } from 'mediabunny';	
 
 const output = new Output({
 	format: new Mp3OutputFormat(options),
@@ -210,7 +210,7 @@ type Mp3OutputFormatOptions = {
 
 This output format creates WAVE (.wav) files.
 ```ts
-import { Output, WavOutputFormat } from 'mediakit';	
+import { Output, WavOutputFormat } from 'mediabunny';	
 
 const output = new Output({
 	format: new WavOutputFormat(options),

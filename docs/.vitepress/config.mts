@@ -3,7 +3,7 @@ import footnote from 'markdown-it-footnote';
 
 // https://vitepress.dev/reference/site-config
 export default withMermaid({
-	title: 'Mediakit',
+	title: 'Mediabunny',
 	description: 'A VitePress Site',
 	cleanUrls: true,
 	themeConfig: {

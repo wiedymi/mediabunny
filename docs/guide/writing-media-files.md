@@ -1,16 +1,16 @@
 # Writing media files
 
-Mediakit enables you to create media files with very fine levels of control. You can add an arbitrary number of video, audio and subtitle tracks to a media file, and precisely control the timing of media data. This library supports [many output file formats](./output-formats). Using [output targets](#output-targets), you can decide if you want to build up the entire file in memory or stream it out in chunks as it's being created - allowing you to create very large files.
+Mediabunny enables you to create media files with very fine levels of control. You can add an arbitrary number of video, audio and subtitle tracks to a media file, and precisely control the timing of media data. This library supports [many output file formats](./output-formats). Using [output targets](#output-targets), you can decide if you want to build up the entire file in memory or stream it out in chunks as it's being created - allowing you to create very large files.
 
-Mediakit provides many ways to supply media data for output tracks, nicely integrating with the WebCodecs API, but also allowing you to use your own encoding stack if you wish. These [media sources](./media-sources) come in multiple levels of abstraction, enabling easy use for common use cases while still giving you fine-grained control if you need it.
+Mediabunny provides many ways to supply media data for output tracks, nicely integrating with the WebCodecs API, but also allowing you to use your own encoding stack if you wish. These [media sources](./media-sources) come in multiple levels of abstraction, enabling easy use for common use cases while still giving you fine-grained control if you need it.
 
 ## Creating an output
 
-Media file creation in Mediakit revolves around a central class, `Output`. One instance of `Output` represents one media file you want to create.
+Media file creation in Mediabunny revolves around a central class, `Output`. One instance of `Output` represents one media file you want to create.
 
 Start by creating a new instance of `Output` using the desired configuration of the file you want to create:
 ```ts
-import { Output, Mp4OutputFormat, BufferTarget } from 'mediakit';
+import { Output, Mp4OutputFormat, BufferTarget } from 'mediabunny';
 
 // In this example, we'll be creating an MP4 file in memory:
 const output = new Output({
@@ -82,7 +82,7 @@ As an example, let's add two tracks to our output:
 - An audio track driven by the user's microphone input, encoded using AAC
 
 ```ts
-import { CanvasSource, MediaStreamAudioTrackSource } from 'mediakit';
+import { CanvasSource, MediaStreamAudioTrackSource } from 'mediabunny';
 
 // Assuming `canvasElement` exists
 const videoSource = new CanvasSource(canvasElement, {
@@ -202,7 +202,7 @@ The _output target_ determines where the data created by the `Output` will be wr
 
 This target writes all data to a single, contiguous, in-memory `ArrayBuffer`. This buffer will automatically grow as the file becomes larger. Usage is straightforward:
 ```ts
-import { Output, BufferTarget } from 'mediakit';
+import { Output, BufferTarget } from 'mediabunny';
 
 const output = new Output({
 	target: new BufferTarget(),
@@ -224,7 +224,7 @@ This target passes you the data written by the `Output` in small chunks, requiri
 
 `StreamTarget` makes use of the Streams API, meaning you'll need to pass it an instance of `WritableStream`:
 ```ts
-import { Output, StreamTarget, StreamTargetChunk } from 'mediakit';
+import { Output, StreamTarget, StreamTargetChunk } from 'mediabunny';
 
 const writable = new WritableStream({
 	write(chunk: StreamTargetChunk) {

@@ -5,7 +5,7 @@ import {
 	Output,
 	QUALITY_MEDIUM,
 	StreamTarget,
-} from 'mediakit';
+} from 'mediabunny';
 
 const toggleRecordingButton = document.querySelector('#toggle-button') as HTMLButtonElement;
 const horizontalRule = document.querySelector('hr') as HTMLHRElement;

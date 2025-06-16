@@ -6,7 +6,7 @@ import {
 	Input,
 	WrappedAudioBuffer,
 	WrappedCanvas,
-} from 'mediakit';
+} from 'mediabunny';
 
 const selectMediaButton = document.querySelector('button') as HTMLButtonElement;
 const fileNameElement = document.querySelector('#file-name') as HTMLParagraphElement;

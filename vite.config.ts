@@ -20,7 +20,7 @@ const rollupInput = Object.fromEntries(
 export default defineConfig({
 	resolve: {
 		alias: {
-			mediakit: path.resolve(__dirname, './dist/metamuxer.mjs'),
+			mediabunny: path.resolve(__dirname, './dist/metamuxer.mjs'),
 		},
 	},
 	plugins: [

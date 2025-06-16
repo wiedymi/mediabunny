@@ -2,7 +2,7 @@
  
 ## Container formats
 
-Mediakit supports many commonly used media container formats, all of which are supported bidirectionally (reading & writing):
+Mediabunny supports many commonly used media container formats, all of which are supported bidirectionally (reading & writing):
 
 - ISOBMFF-based formats (.mp4, .m4v, .m4a, ...)
 - QuickTime File Format (.mov)
@@ -14,12 +14,12 @@ Mediakit supports many commonly used media container formats, all of which are s
 
 ## Codecs
 
-Mediakit supports a wide range of video, audio, and subtitle codecs. More specifically, it supports all codecs specified by the WebCodecs API and a few additional PCM codecs out of the box.
+Mediabunny supports a wide range of video, audio, and subtitle codecs. More specifically, it supports all codecs specified by the WebCodecs API and a few additional PCM codecs out of the box.
 
-The availability of the codecs provided by the WebCodecs API depends on the browser and thus cannot be guaranteed by this library. Mediakit provides [special utility functions](#querying-codec-encodability) to check which codecs are able to be encoded. You can also specify [custom coders](#custom-coders) to provide your own encoder/decoder implementation if the browser doesn't support the codec natively.
+The availability of the codecs provided by the WebCodecs API depends on the browser and thus cannot be guaranteed by this library. Mediabunny provides [special utility functions](#querying-codec-encodability) to check which codecs are able to be encoded. You can also specify [custom coders](#custom-coders) to provide your own encoder/decoder implementation if the browser doesn't support the codec natively.
 
 ::: info
-Mediakit ships with built-in decoders and encoders for all audio PCM codecs, meaning they are always supported.
+Mediabunny ships with built-in decoders and encoders for all audio PCM codecs, meaning they are always supported.
 :::
 
 ### Video codecs
@@ -94,12 +94,12 @@ Not all codecs can be used with all containers. The following table specifies th
 
 ## Querying codec encodability
 
-Mediakit provides utility functions that you can use to check if the browser can encode a given codec. Additionally, you
+Mediabunny provides utility functions that you can use to check if the browser can encode a given codec. Additionally, you
 can check if a codec is encodable with a specific _configuration_.
 
 `canEncode` tests whether a codec can be encoded using typical settings:
 ```ts
-import { canEncode } from 'mediakit';
+import { canEncode } from 'mediabunny';
 
 canEncode('avc'); // => Promise<boolean>
 canEncode('opus'); // => Promise<boolean>
@@ -108,7 +108,7 @@ Video codecs are checked using 1280x720 @1Mbps, while audio codecs are checked u
 
 You can also check encodability using specific configurations:
 ```ts
-import { canEncodeVideo, canEncodeAudio } from 'mediakit';
+import { canEncodeVideo, canEncodeAudio } from 'mediabunny';
 
 canEncodeVideo('hevc', {
 	width: 1920, height: 1080, bitrate: 1e7
@@ -128,7 +128,7 @@ import {
 	getEncodableVideoCodecs,
 	getEncodableAudioCodecs,
 	getEncodableSubtitleCodecs,
-} from 'mediakit';
+} from 'mediabunny';
 
 getEncodableCodecs(); // => Promise<MediaCodec[]>
 getEncodableVideoCodecs(); // => Promise<VideoCodec[]>
@@ -151,7 +151,7 @@ import {
 	getFirstEncodableVideoCodec,
 	getFirstEncodableAudioCodec,
 	getFirstEncodableSubtitleCodec,
-} from 'mediakit';
+} from 'mediabunny';
 
 getFirstEncodableVideoCodec(['avc', 'vp9', 'av1']); // => Promise<VideoCodec | null>
 getFirstEncodableAudioCodec(['opus', 'aac']); // => Promise<AudioCodec | null>
@@ -169,7 +169,7 @@ These functions are especially useful in conjunction with an [output format](./o
 import {
 	Mp4OutputFormat,
 	getFirstEncodableVideoCodec,
-} from 'mediakit';
+} from 'mediabunny';
 
 const outputFormat = new Mp4OutputFormat();
 const containableVideoCodecs = outputFormat.getSupportedVideoCodecs();
@@ -186,19 +186,19 @@ Whether a codec can be decoded depends on the specific codec configuration of an
 
 ## Custom coders
 
-Mediakit allows you to register your own custom encoders and decoders - useful if you want to polyfill a codec that's not supported in all browsers, or want to use Mediakit outside of an environment with WebCodecs (such as Node.js).
+Mediabunny allows you to register your own custom encoders and decoders - useful if you want to polyfill a codec that's not supported in all browsers, or want to use Mediabunny outside of an environment with WebCodecs (such as Node.js).
 
 Encoders and decoders can be registered for [all video and audio codecs](#codecs) supported by the library. It is not possible to add new codecs.
 
 ::: warning
-Mediakit requires customs encoders and decoders to follow very specific implementation rules. Pay special attention to the parts labeled with "**must**" to ensure compatibility.
+Mediabunny requires customs encoders and decoders to follow very specific implementation rules. Pay special attention to the parts labeled with "**must**" to ensure compatibility.
 :::
 
 ### Custom encoders
 
 To create a custom video or audio encoder, you'll need to create a class which extends `CustomVideoEncoder` or `CustomAudioEncoder`. Then, you **must** register this class using `registerEncoder`:
 ```ts
-import { CustomAudioEncoder, registerEncoder } from 'mediakit';
+import { CustomAudioEncoder, registerEncoder } from 'mediabunny';
 
 class MyAwesomeMp3Encoder extends CustomAudioEncoder {
 	// ...
@@ -261,7 +261,7 @@ The packets passed to `onPacket` **must** be in [decode order](./media-sinks.md#
 
 To create a custom video or audio decoder, you'll need to create a class which extends `CustomVideoDecoder` or `CustomAudioDecoder`. Then, you **must** register this class using `registerDecoder`:
 ```ts
-import { CustomAudioDecoder, registerDecoder } from 'mediakit';
+import { CustomAudioDecoder, registerDecoder } from 'mediabunny';
 
 class MyAwesomeMp3Decoder extends CustomAudioDecoder {
 	// ...

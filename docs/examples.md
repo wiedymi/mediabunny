@@ -4,7 +4,7 @@ title: Examples
 
 hero:
     text: Examples
-    tagline: Demos showcasing various features of Mediakit
+    tagline: Demos showcasing various features of Mediabunny
 
 features:
     - title: Metadata extraction
@@ -16,7 +16,7 @@ features:
       link: /examples/thumbnail-generation
       target: _self
     - title: Media player (advanced)
-      details: "A full video & audio media player, implemented from scratch with Mediakit, with microsecond playback accuracy."
+      details: "A full video & audio media player, implemented from scratch with Mediabunny, with microsecond playback accuracy."
       link: /examples/media-player
       target: _self
     - title: File compression

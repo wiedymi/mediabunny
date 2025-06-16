@@ -2,7 +2,7 @@
 
 ## Introduction
 
-Media data in Mediakit is present in two different forms:
+Media data in Mediabunny is present in two different forms:
 
 - **Packet:** Encoded media data, the result of an encoding process
 - **Sample:** Raw, uncompressed, presentable media data
@@ -30,7 +30,7 @@ flowchart LR
 
 ### Connection to WebCodecs
 
-Packets and samples in Mediakit correspond directly with concepts of the [WebCodecs API](https://w3c.github.io/webcodecs/):
+Packets and samples in Mediabunny correspond directly with concepts of the [WebCodecs API](https://w3c.github.io/webcodecs/):
 - `EncodedPacket`\
 	-> `EncodedVideoChunk` for video packets\
 	-> `EncodedAudioChunk` for audio packets
@@ -39,14 +39,14 @@ Packets and samples in Mediakit correspond directly with concepts of the [WebCod
 - `AudioSample`
 	-> `AudioData`
 
-Since Mediakit makes heavy use of WebCodecs API, its own classes are typically used as wrappers around the WebCodecs classes. However, this wrapping comes with a few benefits:
+Since Mediabunny makes heavy use of WebCodecs API, its own classes are typically used as wrappers around the WebCodecs classes. However, this wrapping comes with a few benefits:
 1. **Independence:** This library remains functional even if the WebCodecs API isn't available. Encoders and decoders can be polyfilled using [custom coders](./supported-formats-and-codecs#custom-coders), and the library can run in non-browser contexts such as Node.js.
 1. **Extensibility:** The wrappers serve as a namespace for additional operations, such as `toAudioBuffer()` on `AudioSample`, or `draw()` on `VideoSample`.
-1. **Consistency:** While WebCodecs uses integer microsecond timestamps, Mediakit uses floating-point second timestamps everywhere. With these wrappers, all timing information is always in seconds and the user doesn't need to think about unit conversions.
+1. **Consistency:** While WebCodecs uses integer microsecond timestamps, Mediabunny uses floating-point second timestamps everywhere. With these wrappers, all timing information is always in seconds and the user doesn't need to think about unit conversions.
 
 Conversion is easy:
 ```ts
-import { EncodedPacket, VideoSample, AudioSample } from 'mediakit';
+import { EncodedPacket, VideoSample, AudioSample } from 'mediabunny';
 
 // EncodedPacket to WebCodecs chunks:
 encodedPacket.toEncodedVideoChunk(); // => EncodedVideoChunk
@@ -100,7 +100,7 @@ You probably won't ever need to set `sequenceNumber` or `byteLength` in the cons
 
 For example, here we're creating a packet from some encoded video data:
 ```ts
-import { EncodedPacket } from 'mediakit';
+import { EncodedPacket } from 'mediabunny';
 
 const encodedVideoData = new Uint8Array([...]);
 const encodedPacket = new EncodedPacket(encodedVideoData, 'key', 5, 1/24);
@@ -108,7 +108,7 @@ const encodedPacket = new EncodedPacket(encodedVideoData, 'key', 5, 1/24);
 
 Alternatively, if you're coming from WebCodecs encoded chunks, you can create an `EncodedPacket` from them:
 ```ts
-import { EncodedPacket } from 'mediakit';
+import { EncodedPacket } from 'mediabunny';
 
 // From EncodedVideoChunk:
 const encodedPacket = EncodedPacket.fromEncodedChunk(encodedVideoChunk);
@@ -214,7 +214,7 @@ The constructor of `VideoSample` is very similar to [`VideoFrame`'s constructor]
 This constructor creates a `VideoSample` from a `CanvasImageSource`:
 
 ```ts
-import { VideoSample } from 'mediakit';
+import { VideoSample } from 'mediabunny';
 
 // Creates a sample from a canvas element
 const sample = new VideoSample(canvas, {
@@ -237,7 +237,7 @@ const sample = new VideoSample(videoFrame);
 This constructor creates a `VideoSample` from raw pixel data given in an `ArrayBuffer`:
 
 ```ts
-import { VideoSample } from 'mediakit';
+import { VideoSample } from 'mediabunny';
 
 // Creates a sample from pixel data in the RGBX format
 const sample = new VideoSample(buffer, {
@@ -382,7 +382,7 @@ An audio sample represents a section of audio data. It can be created directly f
 Audio samples can be constructed either from an `AudioData` instance or an initialization object:
 
 ```ts
-import { AudioSample } from 'mediakit';
+import { AudioSample } from 'mediabunny';
 
 // From AudioData:
 const sample = new AudioSample(audioData);
@@ -502,7 +502,7 @@ for (let i = 0; i < audioSample.numberOfChannels; i++) {
 ```
 
 ::: info
-The behavior of `allocationSize` and `copyTo` exactly mirrors that of the WebCodecs API. However, the WebCodecs API specification only mandates support for converting to `f32-planar`, while Mediakit's implementation supports conversion into all formats. Therefore, Mediakit's methods are more powerful.
+The behavior of `allocationSize` and `copyTo` exactly mirrors that of the WebCodecs API. However, the WebCodecs API specification only mandates support for converting to `f32-planar`, while Mediabunny's implementation supports conversion into all formats. Therefore, Mediabunny's methods are more powerful.
 :::
 
 ### Closing audio samples

@@ -1,6 +1,6 @@
 # Converting media files
 
-The [reading](./reading-media-files) and [writing](./writing-media-files) primitives in Mediakit provide everything you need to convert media files. However, since this is such a common operation and the details can be tricky, Mediakit ships with a built-in file conversion abstraction.
+The [reading](./reading-media-files) and [writing](./writing-media-files) primitives in Mediabunny provide everything you need to convert media files. However, since this is such a common operation and the details can be tricky, Mediabunny ships with a built-in file conversion abstraction.
 
 It has the following features:
 
@@ -30,7 +30,7 @@ import {
 	WebMOutputFormat,
 	BufferTarget,
 	Conversion,
-} from 'mediakit';
+} from 'mediabunny';
 
 const input = new Input({ ... });
 const output = new Output({
@@ -189,9 +189,9 @@ If you want to get rid of the audio track, use `discard: true`.
 
 ### Resampling audio
 
-The `numberOfChannels` property controls the channel count of the output audio (e.g., 1 for mono, 2 for stereo). If this value differs from the number of channels in the input track, Mediakit will perform up/downmixing of the channel data using [the same algorithm as the Web Audio API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Audio_API/Basic_concepts_behind_Web_Audio_API#audio_channels).
+The `numberOfChannels` property controls the channel count of the output audio (e.g., 1 for mono, 2 for stereo). If this value differs from the number of channels in the input track, Mediabunny will perform up/downmixing of the channel data using [the same algorithm as the Web Audio API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Audio_API/Basic_concepts_behind_Web_Audio_API#audio_channels).
 
-The `sampleRate` property controls the sample rate in Hz (e.g., 44100, 48000). If this value differs from the input track's sample rate, Mediakit will resample the audio.
+The `sampleRate` property controls the sample rate in Hz (e.g., 44100, 48000). If this value differs from the input track's sample rate, Mediabunny will resample the audio.
 
 ### Transcoding audio
 

@@ -1,4 +1,4 @@
-import { Input, ALL_FORMATS, BlobSource, CanvasSink } from 'mediakit';
+import { Input, ALL_FORMATS, BlobSource, CanvasSink } from 'mediabunny';
 
 const selectMediaButton = document.querySelector('button') as HTMLButtonElement;
 const fileNameElement = document.querySelector('#file-name') as HTMLParagraphElement;
