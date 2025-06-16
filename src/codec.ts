@@ -43,6 +43,8 @@ export const PCM_AUDIO_CODECS = [
 	'pcm-s32be',
 	'pcm-f32',
 	'pcm-f32be',
+	'pcm-f64',
+	'pcm-f64be',
 	'pcm-u8',
 	'pcm-s8',
 	'ulaw',
@@ -626,7 +628,7 @@ export const parsePcmCodec = (codec: PcmAudioCodec) => {
 		dataType = 'float';
 	}
 
-	const sampleSize = (Number(match[2]) / 8) as 1 | 2 | 3 | 4;
+	const sampleSize = (Number(match[2]) / 8) as 1 | 2 | 3 | 4 | 8;
 	const littleEndian = match[3] !== 'be';
 	const silentValue = codec === 'pcm-u8' ? 2 ** 7 : 0;
 

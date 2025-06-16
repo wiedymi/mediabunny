@@ -227,7 +227,7 @@ export class IsobmffDemuxer extends Demuxer {
 		const codecStrings = await Promise.all(this.tracks.map(x => x.inputTrack!.getCodecParameterString()));
 
 		return buildIsobmffMimeType({
-			isQuicktime: this.isQuickTime,
+			isQuickTime: this.isQuickTime,
 			hasVideo: this.tracks.some(x => x.info?.type === 'video'),
 			hasAudio: this.tracks.some(x => x.info?.type === 'audio'),
 			codecStrings: codecStrings.filter(Boolean) as string[],
@@ -800,6 +800,7 @@ export class IsobmffDemuxer extends Demuxer {
 				const entries = this.metadataReader.readU32();
 
 				for (let i = 0; i < entries; i++) {
+					const startPos = this.metadataReader.pos;
 					const sampleBoxInfo = this.metadataReader.readBoxHeader();
 					const lowercaseBoxName = sampleBoxInfo.name.toLowerCase();
 
@@ -840,7 +841,10 @@ export class IsobmffDemuxer extends Demuxer {
 							|| lowercaseBoxName === 'in24'
 							|| lowercaseBoxName === 'in32'
 							|| lowercaseBoxName === 'fl32'
+							|| lowercaseBoxName === 'fl64'
 							|| lowercaseBoxName === 'lpcm'
+							|| lowercaseBoxName === 'ipcm' // ISO/IEC 23003-5
+							|| lowercaseBoxName === 'fpcm' // "
 						) {
 							// It's PCM
 							// developer.apple.com/documentation/quicktime-file-format/sound_sample_descriptions/
@@ -923,6 +927,7 @@ export class IsobmffDemuxer extends Demuxer {
 						track.info.numberOfChannels = channelCount;
 						track.info.sampleRate = sampleRate;
 
+						// PCM codec assignments
 						if (lowercaseBoxName === 'twos') {
 							if (sampleSize === 8) {
 								track.info.codec = 'pcm-s8';
@@ -947,6 +952,12 @@ export class IsobmffDemuxer extends Demuxer {
 							track.info.codec = 'pcm-s32be';
 						} else if (lowercaseBoxName === 'fl32') {
 							track.info.codec = 'pcm-f32be';
+						} else if (lowercaseBoxName === 'fl64') {
+							track.info.codec = 'pcm-f64be';
+						} else if (lowercaseBoxName === 'ipcm') {
+							track.info.codec = 'pcm-s16be'; // Placeholder, will be adjusted by the pcmC box
+						} else if (lowercaseBoxName === 'fpcm') {
+							track.info.codec = 'pcm-f32be'; // Placeholder, will be adjusted by the pcmC box
 						}
 
 						this.readContiguousBoxes(startPos + sampleBoxInfo.totalSize - this.metadataReader.pos);
@@ -1147,9 +1158,72 @@ export class IsobmffDemuxer extends Demuxer {
 						track.info.codec = 'pcm-s32';
 					} else if (track.info.codec === 'pcm-f32be') {
 						track.info.codec = 'pcm-f32';
+					} else if (track.info.codec === 'pcm-f64be') {
+						track.info.codec = 'pcm-f64';
 					}
 				}
 			}; break;
+
+			case 'pcmC': {
+				const track = this.currentTrack;
+				assert(track && track.info?.type === 'audio');
+
+				this.metadataReader.pos += 1 + 3; // Version + flags
+
+				// ISO/IEC 23003-5
+
+				const formatFlags = this.metadataReader.readU8();
+				const isLittleEndian = Boolean(formatFlags & 0x01);
+				const pcmSampleSize = this.metadataReader.readU8();
+
+				if (track.info.codec === 'pcm-s16be') {
+					// ipcm
+
+					if (isLittleEndian) {
+						if (pcmSampleSize === 16) {
+							track.info.codec = 'pcm-s16';
+						} else if (pcmSampleSize === 24) {
+							track.info.codec = 'pcm-s24';
+						} else if (pcmSampleSize === 32) {
+							track.info.codec = 'pcm-s32';
+						} else {
+							throw new Error(`Invalid ipcm sample size ${pcmSampleSize}.`);
+						}
+					} else {
+						if (pcmSampleSize === 16) {
+							track.info.codec = 'pcm-s16be';
+						} else if (pcmSampleSize === 24) {
+							track.info.codec = 'pcm-s24be';
+						} else if (pcmSampleSize === 32) {
+							track.info.codec = 'pcm-s32be';
+						} else {
+							throw new Error(`Invalid ipcm sample size ${pcmSampleSize}.`);
+						}
+					}
+				} else if (track.info.codec === 'pcm-f32be') {
+					// fpcm
+
+					if (isLittleEndian) {
+						if (pcmSampleSize === 32) {
+							track.info.codec = 'pcm-f32';
+						} else if (pcmSampleSize === 64) {
+							track.info.codec = 'pcm-f64';
+						} else {
+							throw new Error(`Invalid fpcm sample size ${pcmSampleSize}.`);
+						}
+					} else {
+						if (pcmSampleSize === 32) {
+							track.info.codec = 'pcm-f32be';
+						} else if (pcmSampleSize === 64) {
+							track.info.codec = 'pcm-f64be';
+						} else {
+							throw new Error(`Invalid fpcm sample size ${pcmSampleSize}.`);
+						}
+					}
+				}
+
+				break;
+			};
 
 			case 'dOps': { // Used for Opus audio
 				const track = this.currentTrack;

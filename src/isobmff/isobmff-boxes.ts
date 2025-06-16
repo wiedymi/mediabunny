@@ -274,7 +274,7 @@ export const fullBox = (
  * reader understands.
  */
 export const ftyp = (details: {
-	isMov: boolean;
+	isQuickTime: boolean;
 	holdsAvc: boolean;
 	fragmented: boolean;
 }) => {
@@ -284,7 +284,7 @@ export const ftyp = (details: {
 
 	const minorVersion = 0x200;
 
-	if (details.isMov) {
+	if (details.isQuickTime) {
 		return box('ftyp', [
 			ascii('qt  '), // Major brand
 			u32(minorVersion), // Minor version
@@ -558,7 +558,7 @@ export const stsd = (trackData: IsobmffTrackData) => {
 			trackData,
 		);
 	} else if (trackData.type === 'audio') {
-		const boxName = AUDIO_CODEC_TO_BOX_NAME[trackData.track.source._codec];
+		const boxName = audioCodecToBoxName(trackData.track.source._codec, trackData.muxer.isQuickTime);
 		assert(boxName);
 
 		sampleDescription = soundSampleDescription(
@@ -731,7 +731,7 @@ export const soundSampleDescription = (
 	}
 
 	return box(compressionType, contents, [
-		AUDIO_CODEC_TO_CONFIGURATION_BOX[trackData.track.source._codec]?.(trackData) ?? null,
+		audioCodecToConfigurationBox(trackData.track.source._codec, trackData.muxer.isQuickTime)?.(trackData) ?? null,
 	]);
 };
 
@@ -801,7 +801,7 @@ export const wave = (trackData: IsobmffAudioTrackData) => {
 
 export const frma = (trackData: IsobmffAudioTrackData) => {
 	return box('frma', [
-		ascii(AUDIO_CODEC_TO_BOX_NAME[trackData.track.source._codec]!),
+		ascii(audioCodecToBoxName(trackData.track.source._codec, trackData.muxer.isQuickTime)),
 	]);
 };
 
@@ -865,6 +865,17 @@ export const dfLa = (trackData: IsobmffAudioTrackData) => {
 
 	return fullBox('dfLa', 0, 0, [
 		...bytes.subarray(4),
+	]);
+};
+
+/** PCM Configuration Box, ISO/IEC 23003-5. */
+const pcmC = (trackData: IsobmffAudioTrackData) => {
+	const { littleEndian, sampleSize } = parsePcmCodec(trackData.track.source._codec as PcmAudioCodec);
+	const formatFlags = +littleEndian;
+
+	return fullBox('pcmC', 0, 0, [
+		u8(formatFlags),
+		u8(8 * sampleSize),
 	]);
 };
 
@@ -1252,40 +1263,86 @@ const VIDEO_CODEC_TO_CONFIGURATION_BOX: Record<VideoCodec, (trackData: IsobmffVi
 	av1: av1C,
 };
 
-const AUDIO_CODEC_TO_BOX_NAME: Partial<Record<AudioCodec, string>> = {
-	'aac': 'mp4a',
-	'mp3': 'mp4a',
-	'opus': 'Opus',
-	'vorbis': 'mp4a',
-	'flac': 'fLaC',
-	'ulaw': 'ulaw',
-	'alaw': 'alaw',
-	'pcm-u8': 'raw ',
-	'pcm-s8': 'sowt',
-	'pcm-s16': 'sowt',
-	'pcm-s16be': 'twos',
-	'pcm-s24': 'in24',
-	'pcm-s24be': 'in24',
-	'pcm-s32': 'in32',
-	'pcm-s32be': 'in32',
-	'pcm-f32': 'fl32',
-	'pcm-f32be': 'fl32',
+const audioCodecToBoxName = (codec: AudioCodec, isQuickTime: boolean): string => {
+	switch (codec) {
+		case 'aac': return 'mp4a';
+		case 'mp3': return 'mp4a';
+		case 'opus': return 'Opus';
+		case 'vorbis': return 'mp4a';
+		case 'flac': return 'fLaC';
+		case 'ulaw': return 'ulaw';
+		case 'alaw': return 'alaw';
+		case 'pcm-u8': return 'raw ';
+		case 'pcm-s8': return 'sowt';
+	}
+
+	// Logic diverges here
+	if (isQuickTime) {
+		switch (codec) {
+			case 'pcm-s16': return 'sowt';
+			case 'pcm-s16be': return 'twos';
+			case 'pcm-s24': return 'in24';
+			case 'pcm-s24be': return 'in24';
+			case 'pcm-s32': return 'in32';
+			case 'pcm-s32be': return 'in32';
+			case 'pcm-f32': return 'fl32';
+			case 'pcm-f32be': return 'fl32';
+			case 'pcm-f64': return 'fl64';
+			case 'pcm-f64be': return 'fl64';
+		}
+	} else {
+		switch (codec) {
+			case 'pcm-s16': return 'ipcm';
+			case 'pcm-s16be': return 'ipcm';
+			case 'pcm-s24': return 'ipcm';
+			case 'pcm-s24be': return 'ipcm';
+			case 'pcm-s32': return 'ipcm';
+			case 'pcm-s32be': return 'ipcm';
+			case 'pcm-f32': return 'fpcm';
+			case 'pcm-f32be': return 'fpcm';
+			case 'pcm-f64': return 'fpcm';
+			case 'pcm-f64be': return 'fpcm';
+		}
+	}
 };
 
-const AUDIO_CODEC_TO_CONFIGURATION_BOX: Partial<
-	Record<AudioCodec, (trackData: IsobmffAudioTrackData) => Box | null>
-> = {
-	'aac': esds,
-	'mp3': esds,
-	'opus': dOps,
-	'vorbis': esds,
-	'flac': dfLa,
-	'pcm-s24': wave,
-	'pcm-s24be': wave,
-	'pcm-s32': wave,
-	'pcm-s32be': wave,
-	'pcm-f32': wave,
-	'pcm-f32be': wave,
+const audioCodecToConfigurationBox = (codec: AudioCodec, isQuickTime: boolean) => {
+	switch (codec) {
+		case 'aac': return esds;
+		case 'mp3': return esds;
+		case 'opus': return dOps;
+		case 'vorbis': return esds;
+		case 'flac': return dfLa;
+	}
+
+	// Logic diverges here
+	if (isQuickTime) {
+		switch (codec) {
+			case 'pcm-s24': return wave;
+			case 'pcm-s24be': return wave;
+			case 'pcm-s32': return wave;
+			case 'pcm-s32be': return wave;
+			case 'pcm-f32': return wave;
+			case 'pcm-f32be': return wave;
+			case 'pcm-f64': return wave;
+			case 'pcm-f64be': return wave;
+		}
+	} else {
+		switch (codec) {
+			case 'pcm-s16': return pcmC;
+			case 'pcm-s16be': return pcmC;
+			case 'pcm-s24': return pcmC;
+			case 'pcm-s24be': return pcmC;
+			case 'pcm-s32': return pcmC;
+			case 'pcm-s32be': return pcmC;
+			case 'pcm-f32': return pcmC;
+			case 'pcm-f32be': return pcmC;
+			case 'pcm-f64': return pcmC;
+			case 'pcm-f64be': return pcmC;
+		}
+	}
+
+	return null;
 };
 
 const SUBTITLE_CODEC_TO_BOX_NAME: Record<SubtitleCodec, string> = {

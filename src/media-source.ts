@@ -16,7 +16,7 @@ import {
 	VideoCodec,
 } from './codec';
 import { OutputAudioTrack, OutputSubtitleTrack, OutputTrack, OutputVideoTrack } from './output';
-import { assert, CallSerializer, clamp, setInt24, setUint24 } from './misc';
+import { assert, assertNever, CallSerializer, clamp, setInt24, setUint24 } from './misc';
 import { Muxer } from './muxer';
 import { SubtitleParser } from './subtitles';
 import { toAlaw, toUlaw } from './pcm';
@@ -1083,7 +1083,19 @@ class AudioEncoderWrapper {
 				} else {
 					assert(false);
 				}
-			}
+			}; break;
+			case 8: {
+				if (dataType === 'float') {
+					this.writeOutputValue = (view, byteOffset, value) =>
+						view.setFloat64(byteOffset, value, littleEndian);
+				} else {
+					assert(false);
+				}
+			}; break;
+			default: {
+				assertNever(sampleSize);
+				assert(false);
+			};
 		}
 	}
 

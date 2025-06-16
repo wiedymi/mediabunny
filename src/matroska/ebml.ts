@@ -575,6 +575,7 @@ export const CODEC_STRING_MAP: Partial<Record<MediaCodec, string>> = {
 	'pcm-s32': 'A_PCM/INT/LIT',
 	'pcm-s32be': 'A_PCM/INT/BIG',
 	'pcm-f32': 'A_PCM/FLOAT/IEEE',
+	'pcm-f64': 'A_PCM/FLOAT/IEEE',
 
 	'webvtt': 'S_TEXT/WEBVTT',
 };

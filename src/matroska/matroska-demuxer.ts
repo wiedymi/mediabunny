@@ -707,6 +707,8 @@ export class MatroskaDemuxer extends Demuxer {
 						} else if (this.currentTrack.codecId === 'A_PCM/FLOAT/IEEE') {
 							if (this.currentTrack.info.bitDepth === 32) {
 								this.currentTrack.info.codec = 'pcm-f32';
+							} else if (this.currentTrack.info.bitDepth === 64) {
+								this.currentTrack.info.codec = 'pcm-f64';
 							}
 						}
 

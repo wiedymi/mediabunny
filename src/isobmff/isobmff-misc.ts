@@ -1,5 +1,5 @@
 export const buildIsobmffMimeType = (info: {
-	isQuicktime: boolean;
+	isQuickTime: boolean;
 	hasVideo: boolean;
 	hasAudio: boolean;
 	codecStrings: string[];
@@ -10,7 +10,7 @@ export const buildIsobmffMimeType = (info: {
 			? 'audio/'
 			: 'application/';
 
-	let string = base + (info.isQuicktime ? 'quicktime' : 'mp4');
+	let string = base + (info.isQuickTime ? 'quicktime' : 'mp4');
 
 	if (info.codecStrings.length > 0) {
 		const uniqueCodecMimeTypes = [...new Set(info.codecStrings)];

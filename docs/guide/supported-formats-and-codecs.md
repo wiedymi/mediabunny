@@ -47,6 +47,8 @@ Mediakit ships with built-in decoders and encoders for all audio PCM codecs, mea
 - `'pcm-s32be'` - 32-bit big-endian signed PCM
 - `'pcm-f32'` - 32-bit little-endian float PCM
 - `'pcm-f32be'` - 32-bit big-endian float PCM
+- `'pcm-f64'` - 64-bit little-endian float PCM
+- `'pcm-f64be'` - 64-bit big-endian float PCM
 - `'ulaw'` - μ-law PCM
 - `'alaw'` - A-law PCM
 
@@ -58,7 +60,7 @@ Mediakit ships with built-in decoders and encoders for all audio PCM codecs, mea
 
 Not all codecs can be used with all containers. The following table specifies the supported codec-container combinations:
 
-|                | .mp4[^1] | .mov  | .mkv  | .webm[^2] | .ogg  | .mp3  | .wav  |
+|                | .mp4 | .mov  | .mkv  | .webm[^1] | .ogg  | .mp3  | .wav  |
 |:--------------:|:--------:|:-----:|:-----:|:---------:|:-----:|:-----:|:-----:|
 | `'avc'`        |    ✓     |   ✓   |   ✓   |           |       |       |       |
 | `'hevc'`       |    ✓     |   ✓   |   ✓   |           |       |       |       |
@@ -72,22 +74,23 @@ Not all codecs can be used with all containers. The following table specifies th
 | `'flac'`       |    ✓     |   ✓   |   ✓   |           |       |       |       |
 | `'pcm-u8'`     |          |   ✓   |   ✓   |           |       |       |   ✓   |
 | `'pcm-s8'`     |          |   ✓   |       |           |       |       |       |
-| `'pcm-s16'`    |          |   ✓   |   ✓   |           |       |       |   ✓   |
-| `'pcm-s16be'`  |          |   ✓   |   ✓   |           |       |       |       |
-| `'pcm-s24'`    |          |   ✓   |   ✓   |           |       |       |   ✓   |
-| `'pcm-s24be'`  |          |   ✓   |   ✓   |           |       |       |       |
-| `'pcm-s32'`    |          |   ✓   |   ✓   |           |       |       |   ✓   |
-| `'pcm-s32be'`  |          |   ✓   |   ✓   |           |       |       |       |
-| `'pcm-f32'`    |          |   ✓   |   ✓   |           |       |       |   ✓   |
-| `'pcm-f32be'`  |          |   ✓   |       |           |       |       |       |
+| `'pcm-s16'`    |    ✓     |   ✓   |   ✓   |           |       |       |   ✓   |
+| `'pcm-s16be'`  |    ✓     |   ✓   |   ✓   |           |       |       |       |
+| `'pcm-s24'`    |    ✓     |   ✓   |   ✓   |           |       |       |   ✓   |
+| `'pcm-s24be'`  |    ✓     |   ✓   |   ✓   |           |       |       |       |
+| `'pcm-s32'`    |    ✓     |   ✓   |   ✓   |           |       |       |   ✓   |
+| `'pcm-s32be'`  |    ✓     |   ✓   |   ✓   |           |       |       |       |
+| `'pcm-f32'`    |    ✓     |   ✓   |   ✓   |           |       |       |   ✓   |
+| `'pcm-f32be'`  |    ✓     |   ✓   |       |           |       |       |       |
+| `'pcm-f64'`    |    ✓     |   ✓   |   ✓   |           |       |       |       |
+| `'pcm-f64be'`  |    ✓     |   ✓   |       |           |       |       |       |
 | `'ulaw'`       |          |   ✓   |       |           |       |       |   ✓   |
 | `'alaw'`       |          |   ✓   |       |           |       |       |   ✓   |
-| `'webvtt'`[^3] |   (✓)    |       |  (✓)  |    (✓)    |       |       |       |
+| `'webvtt'`[^2] |   (✓)    |       |  (✓)  |    (✓)    |       |       |       |
 
 
-[^1]: PCM audio codecs are not supported by MP4. However, if PCM audio is included in an MP4 nonetheless, this library would still be able to read it.
-[^2]: WebM only supports a small subset of the codecs supported by Matroska. However, this library can technically read all codecs from a WebM that are supported by Matroska.
-[^3]: WebVTT can only be written, not read.
+[^1]: WebM only supports a small subset of the codecs supported by Matroska. However, this library can technically read all codecs from a WebM that are supported by Matroska.
+[^2]: WebVTT can only be written, not read.
 
 ## Querying codec encodability
 

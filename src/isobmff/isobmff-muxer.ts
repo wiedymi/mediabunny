@@ -48,6 +48,7 @@ type Chunk = {
 };
 
 export type IsobmffTrackData = {
+	muxer: IsobmffMuxer;
 	timescale: number;
 	samples: Sample[];
 	sampleQueue: Sample[]; // For fragmented files
@@ -116,9 +117,10 @@ export class IsobmffMuxer extends Muxer {
 	private format: IsobmffOutputFormat;
 	private writer: Writer;
 	private boxWriter: IsobmffBoxWriter;
-	private isMov: boolean;
 	private fastStart: NonNullable<IsobmffOutputFormatOptions['fastStart']>;
 	private isFragmented: boolean;
+
+	isQuickTime: boolean;
 
 	private auxTarget = new BufferTarget();
 	private auxWriter = this.auxTarget._createWriter();
@@ -144,7 +146,7 @@ export class IsobmffMuxer extends Muxer {
 		this.writer = output._writer;
 		this.boxWriter = new IsobmffBoxWriter(this.writer);
 
-		this.isMov = format instanceof MovOutputFormat;
+		this.isQuickTime = format instanceof MovOutputFormat;
 
 		// If the fastStart option isn't defined, enable in-memory fast start if the target is an ArrayBuffer, as the
 		// memory usage remains identical
@@ -171,7 +173,7 @@ export class IsobmffMuxer extends Muxer {
 			}
 
 			this.boxWriter.writeBox(ftyp({
-				isMov: this.isMov,
+				isQuickTime: this.isQuickTime,
 				holdsAvc: holdsAvc,
 				fragmented: this.isFragmented,
 			}));
@@ -227,7 +229,7 @@ export class IsobmffMuxer extends Muxer {
 		});
 
 		return buildIsobmffMimeType({
-			isQuicktime: this.isMov,
+			isQuickTime: this.isQuickTime,
 			hasVideo: this.trackDatas.some(x => x.type === 'video'),
 			hasAudio: this.trackDatas.some(x => x.type === 'audio'),
 			codecStrings,
@@ -291,6 +293,7 @@ export class IsobmffMuxer extends Muxer {
 		const timescale = computeRationalApproximation(1 / (track.metadata.frameRate ?? 57600), 1e6).denominator;
 
 		const newTrackData: IsobmffVideoTrackData = {
+			muxer: this,
 			track,
 			type: 'video',
 			info: {
@@ -334,6 +337,7 @@ export class IsobmffMuxer extends Muxer {
 		assert(meta.decoderConfig);
 
 		const newTrackData: IsobmffAudioTrackData = {
+			muxer: this,
 			track,
 			type: 'audio',
 			info: {
@@ -379,6 +383,7 @@ export class IsobmffMuxer extends Muxer {
 		assert(meta.config);
 
 		const newTrackData: IsobmffSubtitleTrackData = {
+			muxer: this,
 			track,
 			type: 'subtitle',
 			info: {

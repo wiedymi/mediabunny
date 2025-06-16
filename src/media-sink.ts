@@ -4,6 +4,7 @@ import { InputAudioTrack, InputTrack, InputVideoTrack } from './input-track';
 import {
 	AnyIterable,
 	assert,
+	assertNever,
 	binarySearchLessOrEqual,
 	CallSerializer,
 	getInt24,
@@ -1222,7 +1223,7 @@ class AudioDecoderWrapper extends DecoderWrapper<AudioSample> {
 class PcmAudioDecoderWrapper extends DecoderWrapper<AudioSample> {
 	codec: PcmAudioCodec;
 
-	inputSampleSize: 1 | 2 | 3 | 4;
+	inputSampleSize: 1 | 2 | 3 | 4 | 8;
 	readInputValue: (view: DataView, byteOffset: number) => number;
 
 	outputSampleSize: 1 | 2 | 4;
@@ -1289,6 +1290,17 @@ class PcmAudioDecoderWrapper extends DecoderWrapper<AudioSample> {
 					assert(false);
 				}
 			}; break;
+			case 8: {
+				if (dataType === 'float') {
+					this.readInputValue = (view, byteOffset) => view.getFloat64(byteOffset, littleEndian);
+				} else {
+					assert(false);
+				}
+			}; break;
+			default: {
+				assertNever(sampleSize);
+				assert(false);
+			};
 		}
 
 		switch (sampleSize) {
@@ -1327,6 +1339,16 @@ class PcmAudioDecoderWrapper extends DecoderWrapper<AudioSample> {
 					this.writeOutputValue = (view, byteOffset, value) => view.setInt32(byteOffset, value, true);
 				}
 			}; break;
+			case 8: {
+				this.outputSampleSize = 4;
+
+				this.outputFormat = 'f32';
+				this.writeOutputValue = (view, byteOffset, value) => view.setFloat32(byteOffset, value, true);
+			}; break;
+			default: {
+				assertNever(sampleSize);
+				assert(false);
+			};
 		};
 	}
 
