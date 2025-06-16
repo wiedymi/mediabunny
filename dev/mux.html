@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 
-<script src="../dist/metamuxer.js"></script>
+<script src="../dist/mediabunny.js"></script>
 
 <script type="module">
 	function download(blob, filename) {
@@ -38,17 +38,17 @@
 	canvas.height = 720;
 	const context = canvas.getContext('2d');
 
-	let format = new Metamuxer.MkvOutputFormat({ streamable: false });
-	format = new Metamuxer.Mp4OutputFormat({ fastStart: 'fragmented' }); // new Metamuxer.MkvOutputFormat();// new Metamuxer.Mp4OutputFormat({ fastStart: false });
-	format = new Metamuxer.OggOutputFormat();
-	format = new Metamuxer.Mp4OutputFormat({ fastStart: 'fragmented', minimumFragmentDuration: 2 });
-	format = new Metamuxer.MkvOutputFormat({ minimumClusterDuration: 2 });
-	format = new Metamuxer.WavOutputFormat();
-	format = new Metamuxer.MkvOutputFormat();
-	let target = new Metamuxer.BufferTarget();
+	let format = new Mediabunny.MkvOutputFormat({ streamable: false });
+	format = new Mediabunny.Mp4OutputFormat({ fastStart: 'fragmented' }); // new Mediabunny.MkvOutputFormat();// new Mediabunny.Mp4OutputFormat({ fastStart: false });
+	format = new Mediabunny.OggOutputFormat();
+	format = new Mediabunny.Mp4OutputFormat({ fastStart: 'fragmented', minimumFragmentDuration: 2 });
+	format = new Mediabunny.MkvOutputFormat({ minimumClusterDuration: 2 });
+	format = new Mediabunny.WavOutputFormat();
+	format = new Mediabunny.MkvOutputFormat();
+	let target = new Mediabunny.BufferTarget();
 
 	/*
-	target = new Metamuxer.StreamTarget(new WritableStream({
+	target = new Mediabunny.StreamTarget(new WritableStream({
 		async write(chunk) {
 			console.log(chunk)
 
@@ -57,12 +57,12 @@
 	}), { chunked: true });
 	*/
 
-	let output = new Metamuxer.Output({ format, target });
+	let output = new Mediabunny.Output({ format, target });
 
 	/*
-	let sourcy = new Metamuxer.AudioBufferSource({
+	let sourcy = new Mediabunny.AudioBufferSource({
 		codec: 'pcm-s16',
-		bitrate: Metamuxer.QUALITY_HIGH
+		bitrate: Mediabunny.QUALITY_HIGH
 	});
 	output.addAudioTrack(sourcy);
 
@@ -86,7 +86,7 @@
 	*/
 
 	/*
-	let videoSource = new Metamuxer.EncodedVideoChunkSource('avc');
+	let videoSource = new Mediabunny.EncodedVideoChunkSource('avc');
 	output.addTrack(videoSource);
 
 	output.start();
@@ -114,16 +114,16 @@
 	download(new Blob([target.buffer]), 'test.mkv');
 	*/
 
-	let videoSource = new Metamuxer.CanvasSource(canvas, {
+	let videoSource = new Mediabunny.CanvasSource(canvas, {
 		codec: 'avc',
 		//fullCodecString: 'avc1.42001f',
 		bitrate: 1e6
 	});
-	let audioSource = new Metamuxer.AudioBufferSource({
+	let audioSource = new Mediabunny.AudioBufferSource({
 		codec: 'opus',
 		bitrate: 128e3,
 	});
-	let subtitleSource = new Metamuxer.TextSubtitleSource('webvtt');
+	let subtitleSource = new Mediabunny.TextSubtitleSource('webvtt');
 
 	output.addVideoTrack(videoSource, { languageCode: 'eng' });
 	output.addAudioTrack(audioSource);

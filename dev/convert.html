@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 
-<script src="../dist/metamuxer.js"></script>
+<script src="../dist/mediabunny.js"></script>
 
 <script type="module">
 	const fileInput = document.createElement('input');
@@ -14,26 +14,26 @@
 	fileInput.addEventListener('change', async () => {
 		const file = fileInput.files[0];
 
-		const source = new Metamuxer.BlobSource(file);
-		const target = new Metamuxer.BufferTarget() ?? new Metamuxer.StreamTarget(new WritableStream({
+		const source = new Mediabunny.BlobSource(file);
+		const target = new Mediabunny.BufferTarget() ?? new Mediabunny.StreamTarget(new WritableStream({
 			write: console.log
 		}), {
 			chunked: true,
 			chunkSize: 2**20
 		});
-		const outputFormat = new Metamuxer.MovOutputFormat();
+		const outputFormat = new Mediabunny.MovOutputFormat();
 
 		const button = document.createElement('button');
 		button.textContent = 'Cancel';
 		button.onclick = () => conversion.cancel();
 		document.body.append(button);
 
-		const conversion = await Metamuxer.Conversion.init({
-			input: new Metamuxer.Input({
-				formats: Metamuxer.ALL_FORMATS,	
+		const conversion = await Mediabunny.Conversion.init({
+			input: new Mediabunny.Input({
+				formats: Mediabunny.ALL_FORMATS,	
 				source
 			}),
-			output: new Metamuxer.Output({
+			output: new Mediabunny.Output({
 				format: outputFormat,
 				target
 			}),
@@ -47,15 +47,15 @@
 			/*
 			video: {
 				discard: true,
-				bitrate: Metamuxer.QUALITY_VERY_HIGH,
-				//bitrate: Metamuxer.QUALITY_VERY_HIGH
+				bitrate: Mediabunny.QUALITY_VERY_HIGH,
+				//bitrate: Mediabunny.QUALITY_VERY_HIGH
 				codec: 'av1',
 				//width: 800,
 				//fit: 'fill',
 				//rotate: 90,
 			},
 			audio: {
-				bitrate: Metamuxer.QUALITY_HIGH,
+				bitrate: Mediabunny.QUALITY_HIGH,
 				codec: 'aac',
 			},
 			*/

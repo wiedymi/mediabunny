@@ -12,11 +12,11 @@ const umdConfig = {
 	format: 'iife',
 
 	// The following are hacks to basically make this an UMD module. No native support for that in esbuild as of today
-	globalName: 'Metamuxer',
+	globalName: 'Mediabunny',
 
 	footer: {
 		js:
-`if (typeof module === "object" && typeof module.exports === "object") Object.assign(module.exports, Metamuxer)`,
+`if (typeof module === "object" && typeof module.exports === "object") Object.assign(module.exports, Mediabunny)`,
 	},
 };
 
@@ -27,20 +27,20 @@ const esmConfig = {
 
 const ctxUmd = await esbuild.context({
 	...umdConfig,
-	outfile: 'dist/metamuxer.js',
+	outfile: 'dist/mediabunny.js',
 });
 const ctxEsm = await esbuild.context({
 	...esmConfig,
-	outfile: 'dist/metamuxer.mjs',
+	outfile: 'dist/mediabunny.mjs',
 });
 const ctxUmdMinified = await esbuild.context({
 	...umdConfig,
-	outfile: 'dist/metamuxer.min.js',
+	outfile: 'dist/mediabunny.min.js',
 	minify: true,
 });
 const ctxEsmMinified = await esbuild.context({
 	...esmConfig,
-	outfile: 'dist/metamuxer.min.mjs',
+	outfile: 'dist/mediabunny.min.mjs',
 	minify: true,
 });
 

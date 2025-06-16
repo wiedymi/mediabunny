@@ -15,7 +15,7 @@
 	</div>
 </div>
 
-<script src="../dist/metamuxer.js"></script>
+<script src="../dist/mediabunny.js"></script>
 
 <script type="module">
 const fileInput = document.querySelector('input[type="file"]');
@@ -34,10 +34,10 @@ const file = await new Promise(resolve => {
 fileInput.style.display = 'none';
 const audioContext = new AudioContext();
 
-const source = new Metamuxer.BlobSource(file);
+const source = new Mediabunny.BlobSource(file);
 
-const input = new Metamuxer.Input({
-	formats: Metamuxer.ALL_FORMATS,
+const input = new Mediabunny.Input({
+	formats: Mediabunny.ALL_FORMATS,
 	source
 });
 
@@ -69,8 +69,8 @@ durationElement.textContent = formatSeconds(totalDuration);
 
 playerDiv.style.display = 'flex';
 
-const videoSink = videoTrack && new Metamuxer.CanvasSink(videoTrack, { poolSize: 2 });
-const audioSink = audioTrack && new Metamuxer.AudioBufferSink(audioTrack);
+const videoSink = videoTrack && new Mediabunny.CanvasSink(videoTrack, { poolSize: 2 });
+const audioSink = audioTrack && new Mediabunny.AudioBufferSink(audioTrack);
 
 let startTime = null;
 let playing = false;

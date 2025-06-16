@@ -1,15 +1,15 @@
 {
-  "name": "metamuxer",
+  "name": "mediabunny",
   "version": "0.1.0",
   "description": "TODO",
   "type": "module",
-  "main": "./dist/metamuxer.js",
-  "module": "./dist/metamuxer.mjs",
-  "types": "./dist/metamuxer.d.ts",
+  "main": "./dist/mediabunny.js",
+  "module": "./dist/mediabunny.mjs",
+  "types": "./dist/mediabunny.d.ts",
   "exports": {
-    "types": "./dist/metamuxer.d.ts",
-    "import": "./dist/metamuxer.mjs",
-    "require": "./dist/metamuxer.js"
+    "types": "./dist/mediabunny.d.ts",
+    "import": "./dist/mediabunny.mjs",
+    "require": "./dist/mediabunny.js"
   },
   "files": [
     "README.md",
@@ -23,7 +23,7 @@
     "watch": "node build.mjs --watch",
     "lint": "eslint .",
     "check": "tsc -p src --noEmit && tsc -p scripts --noEmit && tsc -p tsconfig.vite.json --noEmit && rm tsconfig.vite.tsbuildinfo",
-    "check-docblocks": "tsx scripts/check-docblocks.ts dist/metamuxer.d.ts",
+    "check-docblocks": "tsx scripts/check-docblocks.ts dist/mediabunny.d.ts",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs && npm run examples:build",
     "docs:preview": "vitepress preview docs",

@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 
-<script src="../dist/metamuxer.js"></script>
+<script src="../dist/mediabunny.js"></script>
 
 <script type="module">
 	const fileInput = document.createElement('input');
@@ -9,16 +9,16 @@
 
 	fileInput.addEventListener('change', async () => {
 		const file = fileInput.files[0];
-		const source = new Metamuxer.BlobSource(file);
+		const source = new Mediabunny.BlobSource(file);
 
-		const input = new Metamuxer.Input({
-			formats: Metamuxer.ALL_FORMATS,
+		const input = new Mediabunny.Input({
+			formats: Mediabunny.ALL_FORMATS,
 			source
 		});
 		
 		const videoTrack = await input.getPrimaryVideoTrack();
 
-		const sink = new Metamuxer.EncodedPacketSink(videoTrack);
+		const sink = new Mediabunny.EncodedPacketSink(videoTrack);
 		for await (const packet of sink.packets()) {
 			if (packet.timestamp >= 2) break;
 			console.log(packet);
@@ -26,7 +26,7 @@
 
 		/*
 		let timestamps = [];
-		const packetSink = new Metamuxer.EncodedPacketSink(videoTrack);
+		const packetSink = new Mediabunny.EncodedPacketSink(videoTrack);
 		for await (const packet of packetSink.packets()) {
 			if (packet.timestamp >= 1) {
 				break;
@@ -83,14 +83,14 @@
 		//return;
 		/*
 		console.log(timestamps);
-		const sink = new Metamuxer.EncodedPacketSink(videoTrack);
+		const sink = new Mediabunny.EncodedPacketSink(videoTrack);
 		for await (const packet of sink.packets()) {
 			console.log(packet.sequenceNumber);
 		}
 		*/
 
 		/*
-		const sink = new Metamuxer.VideoSampleSink(videoTrack);
+		const sink = new Mediabunny.VideoSampleSink(videoTrack);
 		for await (const sample of sink.samplesAtTimestamps(timestamps)) {
 			console.log("wee", sample.timestamp);
 			sample.close();
@@ -99,7 +99,7 @@
 		*/
 
 		/*
-		const sink = new Metamuxer.CanvasSink(videoTrack, { width: 320 });
+		const sink = new Mediabunny.CanvasSink(videoTrack, { width: 320 });
 		for await (const wrappedCanvas of sink.canvasesAtTimestamps(timestamps)) {
 			console.log(wrappedCanvas);
 		}
@@ -129,15 +129,15 @@
 			
 
 		/*
-		const output = new Metamuxer.Output({
-			format: new Metamuxer.Mp3OutputFormat(),
-			target: new Metamuxer.BufferTarget()
+		const output = new Mediabunny.Output({
+			format: new Mediabunny.Mp3OutputFormat(),
+			target: new Mediabunny.BufferTarget()
 		});
 
 		const audioTrack = await input.getPrimaryAudioTrack();
-		const sink = new Metamuxer.AudioDataSink(audioTrack);
+		const sink = new Mediabunny.AudioDataSink(audioTrack);
 
-		const mediaSource = new Metamuxer.AudioDataSource({
+		const mediaSource = new Mediabunny.AudioDataSource({
 			codec: 'mp3',
 			bitrate: 192000
 		});
@@ -167,31 +167,31 @@
 
 		/*
 		const videoTrack = await input.getPrimaryVideoTrack();
-		const sink = new Metamuxer.EncodedVideoSampleSink(videoTrack);
+		const sink = new Mediabunny.EncodedVideoSampleSink(videoTrack);
 
 		console.log(await sink.getSample(16));
 		console.log(await sink.getFirstSample());
 		*/
 
 		/*
-		const source = new Metamuxer.BufferSource(await file.arrayBuffer()) ?? new Metamuxer.BlobSource(file);
+		const source = new Mediabunny.BufferSource(await file.arrayBuffer()) ?? new Mediabunny.BlobSource(file);
 
 		const start = performance.now();	
-		const input = new Metamuxer.Input({
-			formats: Metamuxer.ALL_FORMATS,
+		const input = new Mediabunny.Input({
+			formats: Mediabunny.ALL_FORMATS,
 			source
 		});
 
-		const output = new Metamuxer.Output({
-			format: new Metamuxer.WaveOutputFormat(),
-			target: new Metamuxer.BufferTarget()
+		const output = new Mediabunny.Output({
+			format: new Mediabunny.WaveOutputFormat(),
+			target: new Mediabunny.BufferTarget()
 		});
 		output.start();
 		*/
 
 		/*
 		const audioTrack = await input.getPrimaryAudioTrack();
-		const sink = new Metamuxer.EncodedAudioSampleSink(audioTrack);
+		const sink = new Mediabunny.EncodedAudioSampleSink(audioTrack);
 
 		let total = 0;
 		for await (const sample of sink.samples(undefined, undefined, { metadataOnly: true })) {
@@ -204,7 +204,7 @@
 		*/
 
 		/*
-		const sink = new Metamuxer.VideoFrameSink(videoTrack);
+		const sink = new Mediabunny.VideoFrameSink(videoTrack);
 
 		console.log(await videoTrack.getLanguageCode());
 
@@ -219,9 +219,9 @@
 		//console.log(await videoTrack.computeSampleStats());
 		//return;
 
-		const target = new Metamuxer.BufferTarget();
-		const output = new Metamuxer.Output({
-			format: new Metamuxer.WaveOutputFormat(),
+		const target = new Mediabunny.BufferTarget();
+		const output = new Mediabunny.Output({
+			format: new Mediabunny.WaveOutputFormat(),
 			target
 		});
 
@@ -230,12 +230,12 @@
 		const audioTrack = await input.getPrimaryAudioTrack();
 		const videoTrack = await input.getPrimaryVideoTrack();
 			
-		const sink = new Metamuxer.EncodedAudioSampleSink(audioTrack);
+		const sink = new Mediabunny.EncodedAudioSampleSink(audioTrack);
 
 		const decoderConfig = await audioTrack.getDecoderConfig();
-		const sampleSource = new Metamuxer.EncodedAudioSampleSource(await audioTrack.getCodec());
-		const audioDataSource = new Metamuxer.AudioDataSource({ codec: 'pcm-s16', bitrate: 128e3 });
-		const videoSampleSource = new Metamuxer.EncodedVideoSampleSource(await videoTrack.getCodec());
+		const sampleSource = new Mediabunny.EncodedAudioSampleSource(await audioTrack.getCodec());
+		const audioDataSource = new Mediabunny.AudioDataSource({ codec: 'pcm-s16', bitrate: 128e3 });
+		const videoSampleSource = new Mediabunny.EncodedVideoSampleSource(await videoTrack.getCodec());
 		output.addAudioTrack(audioDataSource ?? sampleSource);
 		//output.addVideoTrack(videoSampleSource);
 
@@ -253,12 +253,12 @@
 		//	//console.log(sample)
 		//	await sampleSource.add(sample, { decoderConfig });
 		//}
-		for await (const { data, timestamp } of new Metamuxer.AudioDataSink(audioTrack).data()) {
+		for await (const { data, timestamp } of new Mediabunny.AudioDataSink(audioTrack).data()) {
 			//console.log("wow", data.timestamp);
 			//console.log(sample)
 			await audioDataSource.add(data);
 		}
-		//for await (const sample of new Metamuxer.EncodedVideoSampleSink(videoTrack).samples()) {
+		//for await (const sample of new Mediabunny.EncodedVideoSampleSink(videoTrack).samples()) {
 		//	//console.log(sample)
 		//	await videoSampleSource.add(sample, { decoderConfig: videoDecoderConfig });
 		//}
@@ -281,13 +281,13 @@
 		*/
 
 		/*
-		const input2 = new Metamuxer.Input({
-			formats: Metamuxer.ALL_FORMATS,
-			source: new Metamuxer.BufferSource(target.buffer)
+		const input2 = new Mediabunny.Input({
+			formats: Mediabunny.ALL_FORMATS,
+			source: new Mediabunny.BufferSource(target.buffer)
 		});
 
 		const videoTrack2 = await input2.getPrimaryVideoTrack();
-		const drain2 = new Metamuxer.EncodedVideoSampleDrain(videoTrack2);
+		const drain2 = new Mediabunny.EncodedVideoSampleDrain(videoTrack2);
 
 		let i = 0;
 		for await (const sample of drain2.samples(undefined, undefined)) {
@@ -302,13 +302,13 @@
 
 		/*
 		const videoTrack = await input.getPrimaryVideoTrack();
-		const drain = new Metamuxer.VideoFrameDrain(videoTrack);
+		const drain = new Mediabunny.VideoFrameDrain(videoTrack);
 
 		async function* timestamps() {
 			const fromTime = 0;
 			const toTime = await videoTrack.computeDuration();
 			const extractDuration = toTime - fromTime;
-			const drain = new Metamuxer.EncodedVideoSampleDrain(videoTrack);
+			const drain = new Mediabunny.EncodedVideoSampleDrain(videoTrack);
 			const thumbnailsNeeded = 16;
 
 			  for (let i = 0; i < thumbnailsNeeded; i++) {
@@ -341,7 +341,7 @@
 
 		/*
 		const audioTrack = await input.getPrimaryVideoTrack();
-		const drain = new Metamuxer.EncodedVideoChunkDrain(audioTrack);
+		const drain = new Mediabunny.EncodedVideoChunkDrain(audioTrack);
 
 		for await (const chunk of drain.chunks()) {
 			//console.log(chunk);
@@ -352,7 +352,7 @@
 
 
 		/*
-		const drain = new Metamuxer.AudioBufferDrain(audioTrack);
+		const drain = new Mediabunny.AudioBufferDrain(audioTrack);
 
 		const chunks = drain.buffers()
 		const a = chunks.next();
@@ -364,13 +364,13 @@
 
 		/*
 		const videoTrack = await input.getPrimaryVideoTrack();
-		const drain = new Metamuxer.VideoFrameDrain(videoTrack);
+		const drain = new Mediabunny.VideoFrameDrain(videoTrack);
 
-		const target = new Metamuxer.ArrayBufferTarget();
-		const format = new Metamuxer.Mp4OutputFormat();
-		const output = new Metamuxer.Output({ target, format });
+		const target = new Mediabunny.ArrayBufferTarget();
+		const format = new Mediabunny.Mp4OutputFormat();
+		const output = new Mediabunny.Output({ target, format });
 
-		const mediaSource = new Metamuxer.VideoFrameSource({
+		const mediaSource = new Mediabunny.VideoFrameSource({
 			codec: 'av1',
 			bitrate: 1e6
 		});
@@ -398,13 +398,13 @@
 
 		/*
 		const videoTrack = await input.getPrimaryVideoTrack();
-		const drain = new Metamuxer.VideoFrameDrain(videoTrack);
+		const drain = new Mediabunny.VideoFrameDrain(videoTrack);
 
 		async function* timestamps() {
 			const fromTime = 0;
 			const toTime = await videoTrack.computeDuration();
 			const extractDuration = toTime - fromTime;
-			const drain = new Metamuxer.EncodedVideoChunkDrain(videoTrack);
+			const drain = new Mediabunny.EncodedVideoChunkDrain(videoTrack);
 			const thumbnailsNeeded = 16;
 
 			  for (let i = 0; i < thumbnailsNeeded; i++) {
@@ -438,7 +438,7 @@
 
 		/*
 		const videoTrack = await input.getPrimaryVideoTrack();
-		const drain = new Metamuxer.VideoFrameDrain(videoTrack);
+		const drain = new Mediabunny.VideoFrameDrain(videoTrack);
 		const width = await videoTrack.getWidth();
 		const height = await videoTrack.getHeight();
 
@@ -467,7 +467,7 @@
 
 		/*
 		const audioTrack = await input.getPrimaryAudioTrack();
-		const drain = new Metamuxer.AudioBufferDrain(audioTrack);
+		const drain = new Mediabunny.AudioBufferDrain(audioTrack);
 
 		const context = new AudioContext();
 		const startTime = context.currentTime;
@@ -493,7 +493,7 @@
 		*/
 
 		/*
-		const drain = new Metamuxer.AudioDataDrain(audioTrack);
+		const drain = new Mediabunny.AudioDataDrain(audioTrack);
 
 		console.time()
 		for await (const data of drain.data()) {
@@ -504,7 +504,7 @@
 
 
 		/*
-		const drain = new Metamuxer.EncodedAudioChunkDrain(audioTrack);
+		const drain = new Mediabunny.EncodedAudioChunkDrain(audioTrack);
 
 		for await (const chunk of drain.chunks()) {
 			console.log(chunk);
@@ -517,7 +517,7 @@
 
 		/*
 		const videoTrack = await input.getPrimaryVideoTrack();
-		const drain = new Metamuxer.VideoFrameDrain(videoTrack);
+		const drain = new Mediabunny.VideoFrameDrain(videoTrack);
 		const width = await videoTrack.getWidth();
 		const height = await videoTrack.getHeight();
 
@@ -536,7 +536,7 @@
 		*/
 
 		/*
-		const drain = new Metamuxer.EncodedVideoChunkDrain(videoTrack);
+		const drain = new Mediabunny.EncodedVideoChunkDrain(videoTrack);
 
 		const startChunk = await drain.getFirstChunk();
 		for await (const chunk of drain.chunks(startChunk)) {
@@ -552,7 +552,7 @@
 		*/
 
 		/*
-		const drain = new Metamuxer.VideoFrameDrain(videoTrack);
+		const drain = new Mediabunny.VideoFrameDrain(videoTrack);
 
 		for await (const frame of drain.frames()) {
 			// ...
@@ -562,7 +562,7 @@
 		*/
 
 		/*
-		const drain = new Metamuxer.VideoFrameDrain(videoTrack);
+		const drain = new Mediabunny.VideoFrameDrain(videoTrack);
 
 		
 		const width = await videoTrack.getWidth();
@@ -584,7 +584,7 @@
 
 		/*
 		const videoTrack = await input.getPrimaryVideoTrack();
-		const drain = new Metamuxer.VideoFrameDrain(videoTrack);
+		const drain = new Mediabunny.VideoFrameDrain(videoTrack);
 
 		for await (const frame of drain.frames(0.01)) {
 			console.log(frame)
@@ -597,7 +597,7 @@
 			*/
 
 		/*
-		const drain = new Metamuxer.EncodedVideoChunkDrain(videoTrack);
+		const drain = new Mediabunny.EncodedVideoChunkDrain(videoTrack);
 
 		const decoder = new VideoDecoder({
 			output: console.log,
@@ -622,7 +622,7 @@
 
 
 		/*
-		const drain = new Metamuxer.VideoFrameDrain(videoTrack);
+		const drain = new Mediabunny.VideoFrameDrain(videoTrack);
 
 		const frame = await drain.getKeyFrame(69);
 
@@ -636,7 +636,7 @@
 		*/
 
 		/*
-		const drain = new Metamuxer.EncodedVideoChunkDrain(videoTrack);
+		const drain = new Mediabunny.EncodedVideoChunkDrain(videoTrack);
 
 		for await (const chunk of drain.chunks()) {
 			console.log(chunk);

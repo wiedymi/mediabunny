@@ -1,3 +1,3 @@
 import { appendFileSync } from 'fs';
 
-appendFileSync('dist/metamuxer.d.ts', '\nexport as namespace Metamuxer;');
+appendFileSync('dist/mediabunny.d.ts', '\nexport as namespace Mediabunny;');

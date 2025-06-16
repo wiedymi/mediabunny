@@ -1,6 +1,6 @@
 <button>Go</button>
 
-<script src="../dist/metamuxer.js"></script>
+<script src="../dist/mediabunny.js"></script>
 
 <script type="module">
     function download(blob, filename) {
@@ -18,20 +18,20 @@
         const videoTrack = stream.getVideoTracks()[0];
         const audioTrack = stream.getAudioTracks()[0];
 
-        const output = new Metamuxer.Output({
-            target: new Metamuxer.BufferTarget(),
-            format: new Metamuxer.Mp4OutputFormat(),
+        const output = new Mediabunny.Output({
+            target: new Mediabunny.BufferTarget(),
+            format: new Mediabunny.Mp4OutputFormat(),
         });
         if (videoTrack) {
-            output.addVideoTrack(new Metamuxer.MediaStreamVideoTrackSource(videoTrack, {
+            output.addVideoTrack(new Mediabunny.MediaStreamVideoTrackSource(videoTrack, {
                 codec: 'avc',
-                bitrate: Metamuxer.QUALITY_MEDIUM
+                bitrate: Mediabunny.QUALITY_MEDIUM
             }));
         }
         if (audioTrack) {
-            output.addAudioTrack(new Metamuxer.MediaStreamAudioTrackSource(audioTrack, {
+            output.addAudioTrack(new Mediabunny.MediaStreamAudioTrackSource(audioTrack, {
                 codec: 'aac',
-                bitrate: Metamuxer.QUALITY_MEDIUM
+                bitrate: Mediabunny.QUALITY_MEDIUM
             }));
         }
 
