@@ -809,7 +809,7 @@ export class Conversion {
 			});
 
 			const sink = new AudioSampleSink(track);
-			const iterator = sink.samples(this._startTimestamp, this._endTimestamp); // Todo make sure timestamps work
+			const iterator = sink.samples(this._startTimestamp, this._endTimestamp);
 
 			for await (const sample of iterator) {
 				if (this._synchronizer.shouldWait(track.id, sample.timestamp)) {

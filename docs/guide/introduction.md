@@ -1,31 +1,64 @@
 # Introduction
 
-Install Mediabunny using your favorite package manager:
+Mediabunny is a JavaScript library for reading, writing, and converting media files (like MP4 or WebM), directly in the browser. It aims to be a complete toolkit for doing high-performance media operations on the web. It's written from scratch in pure TypeScript, has zero dependencies, and is extremely tree-shakable, meaning you only include what you use. You can think of it like [FFmpeg](https://ffmpeg.org/), but built for the web.
 
-::: code-group
-```bash [npm]
-npm install mediabunny
-```
-```bash [yarn]
-yarn add mediabunny
-```
-```bash [pnpm]
-pnpm add mediabunny
-```
-```bash [bun]
-bun add mediabunny
-```
-:::
+## Features
 
-Both ESM and CommonJS are supported:
-```ts
-import * as Mediabunny from 'mediabunny';
-const Mediabunny = require('mediabunny');
-```
+Here's a long list of stuff this library does:
 
-Alternativly, you can simply include the library using a script tag in your HTML:
-```html
-<script src="path/to/mediabunny.js"></script>
-```
+- Reading metadata from media files
+- Extracting media data from media files
+- Creating new media files
+- Converting media files
+- Hardware-accelerated decoding & encoding (via the WebCodecs API)
+- Support for multiple video, audio and subtitle tracks
+- Support for many container formats (.mp4, .mov, .webm, .mkv, .mp3, .wav, .ogg)
+- Support for 25 different codecs
+- Lazy, optimized, on-demand file reading
+- Input and output streaming, arbitrary file size support
+- File location independence (memory, disk, network, ...)
+- Utilities for compression, resizing, rotation, resampling, trimming
+- Microsecond-accurate reading and writing precision
+- Efficient seeking through time
+- Pipelined design for efficient hardware usage and automatic backpressure
+- Custom encoder & decoder support for polyfilling
+- Low- & high-level abstractions for different use cases
+- Performant everything
+- Node.js support
 
-You can download the built distribution file from the [releases page](https://github.com/Vanilagy/mp4-muxer/releases).
+...and there's probably more.
+
+## Use cases
+
+Mediabunny is a general-purpose toolkit and can be used in infinitely many ways. But, here are a few ideas:
+
+- File conversion & compression
+- Displaying file metadata (duration, dimensions, ...)
+- Extracting thumbnails
+- Creating videos in the browser
+- Building a video editor
+- Live recording & streaming
+
+Check out the [Examples](/examples) page for demo implementations of many of these ideas!
+
+## Motivation
+
+Mediabunny is the evolution of my previous libraries, [mp4-muxer](https://github.com/Vanilagy/mp4-muxer) and [webm-muxer](https://github.com/Vanilagy/webm-muxer), which were both created due to the advent of the WebCodecs API. While they fulfilled their job just fine, I saw a few painpoints:
+- Lots of duplicated code between the two libraries, otherwise very similar API.
+- No help with the difficulties of navigating the WebCodecs API & related browser APIs.
+- "mp4-demuxer when??"
+
+This library is the result of unifying these libraries into one, solving all the above issues, and expanding the scope. Now:
+- Changing the output file format is a single-line change; the rest of the API is identical.
+- Lots of abstractions on top of the WebCodecs API & browser APIs are provided.
+- mp4-demuxer now.
+
+Due to tree shaking, if you only need an MP4 or WebM muxer, this library's bundle size will still be very small.
+
+## Technical overview
+
+At its core, Mediabunny is a collection of multiplexers and demultiplexers, one of each for every container format. Demultiplexers stream data from *sources*, while multiplexers stream data to *targets*. Every demultiplexer is capable of extracting file metadata as well as compressed media data, while multiplexers write metadata and encoded media data into a new file.
+
+Mediabunny then provides several wrappers around the WebCodecs API to simplify usage: for reading, it creates decoders with the correct codec configuration and efficiently decodes media data in a pipelined way. For writing, it figures out the necessary codec configuration and sets up encoders which are then used to encode raw media data, while respecting the backpressure applied by the encoder. Extracting the right decoder configuration from a media file can be tricky and sometimes involves diving into encoded media packet bitstreams.
+
+The conversion abstraction is built on top of Mediabunny's reading and writing primitives and combines them both in a heavily-pipelined way, making sure reading and writing happen in lockstep. It also consists of a lot of conditional logic probing output track compatibility, decoding support, and finding encodable codec configurations. It makes use of the Canvas API for video processing operations, and uses a custom implementation for audio resampling and up/downmixing.

@@ -53,7 +53,7 @@ import { parseOpusIdentificationHeader } from '../codec-data';
 
 const MIN_CLUSTER_TIMESTAMP_MS = -(2 ** 15);
 const MAX_CLUSTER_TIMESTAMP_MS = 2 ** 15 - 1;
-const APP_NAME = 'https://github.com/Vanilagy/webm-muxer'; // TODO
+const APP_NAME = 'https://github.com/Vanilagy/mediabunny';
 const SEGMENT_SIZE_BYTES = 6;
 const CLUSTER_SIZE_BYTES = 5;
 

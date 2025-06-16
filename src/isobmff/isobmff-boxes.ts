@@ -458,9 +458,9 @@ const TRACK_TYPE_TO_COMPONENT_SUBTYPE: Record<IsobmffTrackData['type'], string> 
 };
 
 const TRACK_TYPE_TO_HANDLER_NAME: Record<IsobmffTrackData['type'], string> = {
-	video: 'VideoHandler',
-	audio: 'SoundHandler',
-	subtitle: 'TextHandler',
+	video: 'MediabunnyVideoHandler',
+	audio: 'MediabunnySoundHandler',
+	subtitle: 'MediabunnyTextHandler',
 };
 
 /** Handler Reference Box: Specifies the media handler component that is to be used to interpret the media's data. */
