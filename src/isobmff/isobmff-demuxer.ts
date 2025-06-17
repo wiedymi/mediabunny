@@ -50,7 +50,7 @@ import {
 import { EncodedPacket, PLACEHOLDER_DATA } from '../packet';
 import { Reader } from '../reader';
 import { buildIsobmffMimeType } from './isobmff-misc';
-import { IsobmffReader, MAX_BOX_HEADER_SIZE } from './isobmff-reader';
+import { IsobmffReader, MAX_BOX_HEADER_SIZE, MIN_BOX_HEADER_SIZE } from './isobmff-reader';
 
 type InternalTrack = {
 	id: number;
@@ -549,7 +549,7 @@ export class IsobmffDemuxer extends Demuxer {
 	readContiguousBoxes(totalSize: number) {
 		const startIndex = this.metadataReader.pos;
 
-		while (this.metadataReader.pos - startIndex < totalSize) {
+		while (this.metadataReader.pos - startIndex <= totalSize - MIN_BOX_HEADER_SIZE) {
 			this.traverseBox();
 		}
 	}
@@ -826,7 +826,7 @@ export class IsobmffDemuxer extends Demuxer {
 
 						this.metadataReader.pos += 4 + 4 + 4 + 2 + 32 + 2 + 2;
 
-						this.readContiguousBoxes(startPos + sampleBoxInfo.totalSize - this.metadataReader.pos);
+						this.readContiguousBoxes((startPos + sampleBoxInfo.totalSize) - this.metadataReader.pos);
 					} else {
 						if (lowercaseBoxName === 'mp4a') {
 							// We don't know the codec yet (might be AAC, might be MP3), need to read the esds box
@@ -960,7 +960,7 @@ export class IsobmffDemuxer extends Demuxer {
 							track.info.codec = 'pcm-f32be'; // Placeholder, will be adjusted by the pcmC box
 						}
 
-						this.readContiguousBoxes(startPos + sampleBoxInfo.totalSize - this.metadataReader.pos);
+						this.readContiguousBoxes((startPos + sampleBoxInfo.totalSize) - this.metadataReader.pos);
 					}
 				}
 			}; break;
@@ -1064,9 +1064,7 @@ export class IsobmffDemuxer extends Demuxer {
 			}; break;
 
 			case 'wave': {
-				if (boxInfo.totalSize > 8) {
-					this.readContiguousBoxes(boxInfo.contentSize);
-				}
+				this.readContiguousBoxes(boxInfo.contentSize);
 			}; break;
 
 			case 'esds': {

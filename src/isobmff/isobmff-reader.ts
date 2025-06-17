@@ -1,5 +1,6 @@
 import { Reader } from '../reader';
 
+export const MIN_BOX_HEADER_SIZE = 8;
 export const MAX_BOX_HEADER_SIZE = 16;
 
 export class IsobmffReader {
