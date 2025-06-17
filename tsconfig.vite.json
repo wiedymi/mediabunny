@@ -8,6 +8,7 @@
 		"paths": {
 			"mediabunny": ["./dist/mediabunny.d.ts"],
 		},
+		"types": ["vite/client"]
 	},
 	"include": [
 		"./vite.config.ts",

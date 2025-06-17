@@ -1,5 +1,8 @@
 import { Input, ALL_FORMATS, BlobSource, CanvasSink } from 'mediabunny';
 
+import SampleFileUrl from '../../assets/big-buck-bunny-trimmed.mp4';
+(document.querySelector('#sample-file-download') as HTMLAnchorElement).href = SampleFileUrl;
+
 const selectMediaButton = document.querySelector('button') as HTMLButtonElement;
 const fileNameElement = document.querySelector('#file-name') as HTMLParagraphElement;
 const horizontalRule = document.querySelector('hr') as HTMLHRElement;
