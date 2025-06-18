@@ -581,11 +581,7 @@ export abstract class BaseMediaSampleSink<
 					)
 				) {
 					await decodePackets();
-
-					if (targetPacket.timestamp < lastPacket.timestamp) {
-						// We're going back in time with this one, let's flush and reset to a clean state
-						await flushDecoder();
-					}
+					await flushDecoder();
 				}
 
 				timestampsOfInterest.push(targetPacket.timestamp);
