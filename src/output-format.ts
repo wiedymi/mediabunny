@@ -303,11 +303,11 @@ export class MovOutputFormat extends IsobmffOutputFormat {
  */
 export type MkvOutputFormatOptions = {
 	/**
-	 * Configures the output to only write data monotonically, useful for live-streaming the file as it's being muxed.
-	 * When enabled, some features such as storing duration and seeking will be disabled or impacted, so don't use this
-	 * option when you want to write out a file for later use.
+	 * Configures the output to only append new data at the end, useful for live-streaming the file as it's being
+	 * created. When enabled, some features such as storing duration and seeking will be disabled or impacted, so don't
+	 * use this option when you want to write out a clean file for later use.
 	 */
-	streamable?: boolean;
+	appendOnly?: boolean;
 
 	/**
 	 * This field controls the minimum duration of each Matroska cluster, in seconds. New clusters will only be created
@@ -354,8 +354,8 @@ export class MkvOutputFormat extends OutputFormat {
 		if (!options || typeof options !== 'object') {
 			throw new TypeError('options must be an object.');
 		}
-		if (options.streamable !== undefined && typeof options.streamable !== 'boolean') {
-			throw new TypeError('options.streamable, when provided, must be a boolean.');
+		if (options.appendOnly !== undefined && typeof options.appendOnly !== 'boolean') {
+			throw new TypeError('options.appendOnly, when provided, must be a boolean.');
 		}
 		if (
 			options.minimumClusterDuration !== undefined

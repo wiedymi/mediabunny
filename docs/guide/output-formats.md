@@ -41,6 +41,12 @@ type TrackCountLimits = {
 };
 ```
 
+### Append-only writing
+
+Some output format configurations write in an *append-only* fashion. This means they only ever add new data to the end, and never have to seek back to overwrite a previously-written section of the file. Or, put formally: the byte offset of any write is exactly equal to the number of bytes written before it.
+
+Append-only formats, in combination with [`StreamTarget`](./writing-media-files#streamtarget), have some useful properties. They enable use with [Media Source Extensions](https://developer.mozilla.org/en-US/docs/Web/API/Media_Source_Extensions_API) and allow for trivial streaming across the network, such as for file uploads.
+
 ## MP4
 
 This output format creates MP4 files.
@@ -72,12 +78,12 @@ type IsobmffOutputFormatOptions = {
 	- `'in-memory'`\
 		Produces a file with Fast Start by keeping all media chunks in memory until the file is finalized. This produces a high-quality and compact output at the cost of a more expensive finalization step and higher memory requirements.
 		::: info
-		This option ensures append-only writing.
+		This option ensures [append-only writing](#append-only-writing), although all the writing happens in bulk, at the end.
 		:::
 	- `'fragmented'`\
 		Produces a _fragmented MP4 (fMP4)_ file, evenly placing sample metadata throughout the file by grouping it into "fragments" (short sections of media), while placing general metadata at the beginning of the file. Fragmented files are ideal in streaming contexts, as each fragment can be played individually without requiring knowledge of the other fragments. Furthermore, they remain lightweight to create no matter how large the file becomes, as they don't require media to be kept in memory for very long. However, fragmented files are not as widely and wholly supported as regular MP4 files, and some players don't provide seeking functionality for them.
 		::: info
-		This option ensures append-only writing.
+		This option ensures [append-only writing](#append-only-writing).
 		:::
 		::: warning
 		This option requires [packet buffering](./writing-media-files#packet-buffering).
@@ -124,7 +130,7 @@ const output = new Output({
 The following options are available:
 ```ts
 type MkvOutputFormatOptions = {
-	streamable?: boolean;
+	appendOnly?: boolean;
 	minimumClusterDuration?: number;
 
 	onEbmlHeader?: (data: Uint8Array, position: number) => void;
@@ -132,10 +138,10 @@ type MkvOutputFormatOptions = {
 	onCluster?: (data: Uint8Array, position: number, timestamp: number) => unknown;
 };
 ```
-- `streamable`\
+- `appendOnly`\
 	Configures the output to write data in an append-only fashion. This is useful for live-streaming the output as it's being created. Note that when enabled, certain features like file duration or seeking will be disabled or impacted, so don't use this option when you want to write out a media file for later use.
 	::: info
-	This option ensures append-only writing.
+	This option ensures [append-only writing](#append-only-writing).
 	:::
 - `minimumClusterDuration`\
 	Sets the minimum duration in seconds a cluster must have to be finalized and written to the file. Defaults to 1 second.
@@ -173,7 +179,7 @@ const output = new Output({
 ```
 
 ::: info
-This format ensures append-only writing.
+This format ensures [append-only writing](#append-only-writing).
 :::
 
 The following options are available:

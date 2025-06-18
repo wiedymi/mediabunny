@@ -18,6 +18,7 @@ Here's a long list of stuff this library does:
 - Input and output streaming, arbitrary file size support
 - File location independence (memory, disk, network, ...)
 - Utilities for compression, resizing, rotation, resampling, trimming
+- Transmuxing and transcoding
 - Microsecond-accurate reading and writing precision
 - Efficient seeking through time
 - Pipelined design for efficient hardware usage and automatic backpressure
@@ -40,6 +41,15 @@ Mediabunny is a general-purpose toolkit and can be used in infinitely many ways.
 - Live recording & streaming
 
 Check out the [Examples](/examples) page for demo implementations of many of these ideas!
+
+## Getting started
+
+To get going with Mediabunny, here are some starting points:
+- Check out [Quick start](./quick-start) for a collection of useful code snippets
+- Start with [Reading media files](./reading-media-files) if you want to do read operations.
+- Start with [Writing media files](./writing-media-files) if you want to do write operations.
+- Start with [Converting media files](./converting-media-files) if you care about file conversions.
+- Dive into [Packets & samples](./packets-and-samples) for a deeper understanding of the concepts underlying this library.
 
 ## Motivation
 

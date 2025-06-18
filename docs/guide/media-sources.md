@@ -1,9 +1,5 @@
 # Media sources
 
-::: info
-Media sources are not to be confused with [MediaSource](https://developer.mozilla.org/en-US/docs/Web/API/MediaSource) of the Media Source Extensions API.
-:::
-
 ## Introduction
 
 _Media sources_ provide APIs for adding media data to an output file. Different media sources provide different levels of abstraction and cater to different use cases.

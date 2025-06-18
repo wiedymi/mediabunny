@@ -150,7 +150,7 @@ export class MatroskaMuxer extends Muxer {
 
 		this.ebmlWriter = new EBMLWriter(this.writer);
 
-		if (this.format._options.streamable) {
+		if (this.format._options.appendOnly) {
 			this.writer.ensureMonotonicity = true;
 		}
 	}
@@ -160,7 +160,7 @@ export class MatroskaMuxer extends Muxer {
 
 		this.writeEBMLHeader();
 
-		if (!this.format._options.streamable) {
+		if (!this.format._options.appendOnly) {
 			this.createSeekHead();
 		}
 
@@ -228,7 +228,7 @@ export class MatroskaMuxer extends Muxer {
 			{ id: EBMLId.TimestampScale, data: 1e6 },
 			{ id: EBMLId.MuxingApp, data: APP_NAME },
 			{ id: EBMLId.WritingApp, data: APP_NAME },
-			!this.format._options.streamable ? segmentDuration : null,
+			!this.format._options.appendOnly ? segmentDuration : null,
 		] };
 		this.segmentInfo = segmentInfo;
 	}
@@ -370,9 +370,9 @@ export class MatroskaMuxer extends Muxer {
 	private createSegment() {
 		const segment: EBML = {
 			id: EBMLId.Segment,
-			size: this.format._options.streamable ? -1 : SEGMENT_SIZE_BYTES,
+			size: this.format._options.appendOnly ? -1 : SEGMENT_SIZE_BYTES,
 			data: [
-				!this.format._options.streamable ? this.seekHead as EBML : null,
+				!this.format._options.appendOnly ? this.seekHead as EBML : null,
 				this.segmentInfo,
 				this.tracksElement,
 			],
@@ -862,7 +862,7 @@ export class MatroskaMuxer extends Muxer {
 
 		this.currentCluster = {
 			id: EBMLId.Cluster,
-			size: this.format._options.streamable ? -1 : CLUSTER_SIZE_BYTES,
+			size: this.format._options.appendOnly ? -1 : CLUSTER_SIZE_BYTES,
 			data: [
 				{ id: EBMLId.Timestamp, data: msTimestamp },
 			],
@@ -877,7 +877,7 @@ export class MatroskaMuxer extends Muxer {
 	private finalizeCurrentCluster() {
 		assert(this.currentCluster);
 
-		if (!this.format._options.streamable) {
+		if (!this.format._options.appendOnly) {
 			const clusterSize = this.writer.getPos() - this.ebmlWriter.dataOffsets.get(this.currentCluster)!;
 			const endPos = this.writer.getPos();
 
@@ -959,7 +959,7 @@ export class MatroskaMuxer extends Muxer {
 		assert(this.cues);
 		this.ebmlWriter.writeEBML(this.cues);
 
-		if (!this.format._options.streamable) {
+		if (!this.format._options.appendOnly) {
 			const endPos = this.writer.getPos();
 
 			// Write the Segment size

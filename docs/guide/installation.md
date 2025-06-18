@@ -23,7 +23,7 @@ import { ... } from 'mediabunny'; // ESM
 const { ... } = require('mediabunny'); // or CommonJS
 ```
 
-ESM is prefered because it gives you tree shaking.
+ESM is preferred because it gives you tree shaking.
 
 You can also just include the library using a script tag in your HTML:
 ```html
