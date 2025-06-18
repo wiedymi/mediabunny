@@ -581,7 +581,7 @@ export abstract class BaseMediaSampleSink<
 					)
 				) {
 					await decodePackets();
-					await flushDecoder();
+					await flushDecoder(); // Always flush here, improves decoder compatibility
 				}
 
 				timestampsOfInterest.push(targetPacket.timestamp);
