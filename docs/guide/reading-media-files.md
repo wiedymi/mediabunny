@@ -183,9 +183,11 @@ For example, running this on the video track of a 1080p version of Big Buck Bunn
 
 This means the video track has a total of 14315 frames, a frame rate of exactly 24 Hz, and an average bitrate of ~9.28 Mbps.
 
-::: info
-These statistics aren't simply read from file metadata but have to be computed, meaning this method may (depending on the file) need to perform many reads and might take several hundred milliseconds to resolve.
-:::
+**Note:** These statistics aren't simply read from file metadata but have to be computed, meaning this method may - depending on the file - need to perform many reads and might take several hundred milliseconds to resolve. To speed up computation, you can compute aggregate statistics for only a subset of packets by passing a parameter to the method:
+```ts
+await track.computePacketStats(50);
+```
+This will only look at the first ~50 packets and then return the result. This is great for quickly getting an estimate of frame rate and bitrate, without having to scan through the entire file. For videos with a constant frame rate, this will also always return the correct frame rate.
 
 ### Video track metadata
 
@@ -205,6 +207,12 @@ videoTrack.displayHeight; // => number
 videoTrack.rotation; // => 0 | 90 | 180 | 270
 ```
 
+To compute a video track's average frame rate (FPS), use [`computePacketStats`](#packet-statistics):
+```ts
+const stats = await videoTrack.computePacketStats(100);
+const frameRate = stats.averagePacketRate; // Approximate, but often exact
+```
+
 You can retrieve the track's decoder configuration, which is a `VideoDecoderConfig` from the WebCodecs API for usage within `VideoDecoder`:
 ```ts
 await videoTrack.getDecoderConfig(); // => VideoDecoderConfig | null
@@ -221,8 +229,8 @@ For example, here's the decoder configuration for a 1080p version of Big Buck Bu
 		// Bytes of the AVCDecoderConfigurationRecord
 		1, 77, 64, 41, 255, 225, 0, 22, 39, 77, 64, 41, 169, 24, 15, 0,
 		68, 252, 184, 3, 80, 16, 16, 27, 108, 43, 94, 247, 192, 64, 1, 0,
-		4, 40, 222, 9, 200
-	])
+		4, 40, 222, 9, 200,
+	]),
 }
 ```
 
@@ -265,8 +273,8 @@ For example, here's the decoder configuration for an AAC audio track:
 	sampleRate: 44100,
 	description: new Uint8Array([
 		// Bytes of the AudioSpecificConfig
-		17, 144
-	])
+		17, 144,
+	]),
 }
 ```
 
@@ -317,7 +325,7 @@ const endTimestamp = await videoTrack.computeDuration();
 
 // Let's generate five equally-spaced thumbnails:
 const thumbnailTimestamps = [0, 0.2, 0.4, 0.6, 0.8].map(
-	(t) => startTimestamp + t * (endTimestamp - startTimestamp)
+	(t) => startTimestamp + t * (endTimestamp - startTimestamp),
 );
 
 for await (const result of sink.canvasesAtTimestamps(thumbnailTimestamps)) {

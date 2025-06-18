@@ -22,8 +22,8 @@ if (videoTrack) {
 	videoTrack.displayHeight; // in pixels
 	videoTrack.rotation; // in degrees clockwise
 
-	// Compute FPS (can be expensive)
-	const packetStats = await videoTrack.computePacketStats();
+	// Estimate frame rate (FPS)
+	const packetStats = await videoTrack.computePacketStats(100);
 	const averageFrameRate = packetStats.averagePacketRate;
 }
 

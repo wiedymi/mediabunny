@@ -97,8 +97,15 @@ export abstract class InputTrack {
 		return this._backing.computeDuration();
 	}
 
-	/** Computes aggregate packet statistics for this track, such as average packet rate or bitrate. */
-	async computePacketStats(): Promise<PacketStats> {
+	/**
+	 * Computes aggregate packet statistics for this track, such as average packet rate or bitrate.
+	 *
+	 * @param targetPacketCount - This optional parameter sets a target for how many packets this method must have
+	 * looked at before it can return early; this means, you can use it to aggregate only a subset (prefix) of all
+	 * packets. This is very useful for getting a great estimate of video frame rate without having to scan through the
+	 * entire file.
+	 */
+	async computePacketStats(targetPacketCount = Infinity): Promise<PacketStats> {
 		const sink = new EncodedPacketSink(this);
 
 		let startTimestamp = Infinity;
@@ -107,6 +114,14 @@ export abstract class InputTrack {
 		let totalPacketBytes = 0;
 
 		for await (const packet of sink.packets(undefined, undefined, { metadataOnly: true })) {
+			if (
+				packetCount >= targetPacketCount
+				// This additional condition is needed to produce correct results with out-of-presentation-order packets
+				&& packet.timestamp >= endTimestamp
+			) {
+				break;
+			}
+
 			startTimestamp = Math.min(startTimestamp, packet.timestamp);
 			endTimestamp = Math.max(endTimestamp, packet.timestamp + packet.duration);
 
