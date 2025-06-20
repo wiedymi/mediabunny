@@ -507,16 +507,16 @@ export class MatroskaDemuxer extends Demuxer {
 			if (track) {
 				const insertionIndex = binarySearchLessOrEqual(
 					track.clusters,
-					cluster.timestamp,
-					x => x.timestamp,
+					cluster.elementStartPos,
+					x => x.elementStartPos,
 				);
 				track.clusters.splice(insertionIndex + 1, 0, cluster);
 
 				if (hasKeyFrame) {
 					const insertionIndex = binarySearchLessOrEqual(
 						track.clustersWithKeyFrame,
-						cluster.timestamp,
-						x => x.timestamp,
+						cluster.elementStartPos,
+						x => x.elementStartPos,
 					);
 					track.clustersWithKeyFrame.splice(insertionIndex + 1, 0, cluster);
 				}
@@ -1268,6 +1268,7 @@ abstract class MatroskaTrackBacking implements InputTrackBacking {
 
 	private findBlockInClustersForTimestamp(timestampInTimescale: number) {
 		const clusterIndex = binarySearchLessOrEqual(
+			// This array is technically not sorted by start timestamp, but for any reasonable file, it basically is.
 			this.internalTrack.clusters,
 			timestampInTimescale,
 			x => x.trackData.get(this.internalTrack.id)!.startTimestamp,
@@ -1295,6 +1296,7 @@ abstract class MatroskaTrackBacking implements InputTrackBacking {
 
 	private findKeyBlockInClustersForTimestamp(timestampInTimescale: number) {
 		const indexInKeyFrameClusters = binarySearchLessOrEqual(
+			// This array is technically not sorted by start timestamp, but for any reasonable file, it basically is.
 			this.internalTrack.clustersWithKeyFrame,
 			timestampInTimescale,
 			x => x.trackData.get(this.internalTrack.id)!.firstKeyFrameTimestamp!,

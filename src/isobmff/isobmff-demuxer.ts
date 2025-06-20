@@ -2196,6 +2196,7 @@ abstract class IsobmffTrackBacking implements InputTrackBacking {
 
 	private findSampleInFragmentsForTimestamp(timestampInTimescale: number) {
 		const fragmentIndex = binarySearchLessOrEqual(
+			// This array is technically not sorted by start timestamp, but for any reasonable file, it basically is.
 			this.internalTrack.fragments,
 			timestampInTimescale,
 			x => x.trackData.get(this.internalTrack.id)!.startTimestamp,
@@ -2223,6 +2224,7 @@ abstract class IsobmffTrackBacking implements InputTrackBacking {
 
 	private findKeySampleInFragmentsForTimestamp(timestampInTimescale: number) {
 		const fragmentIndex = binarySearchLessOrEqual(
+			// This array is technically not sorted by start timestamp, but for any reasonable file, it basically is.
 			this.internalTrack.fragments,
 			timestampInTimescale,
 			x => x.trackData.get(this.internalTrack.id)!.startTimestamp,

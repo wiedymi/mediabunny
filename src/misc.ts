@@ -233,17 +233,18 @@ export const reverseBitsU32 = (x: number): number => {
 	return x >>> 0; // Ensure it's treated as an unsigned 32-bit integer
 };
 
+/** Returns the smallest index i such that val[i] === key, or -1 if no such index exists. */
 export const binarySearchExact = <T>(arr: T[], key: number, valueGetter: (x: T) => number): number => {
 	let low = 0;
 	let high = arr.length - 1;
-	let res = -1;
+	let ans = -1;
 
 	while (low <= high) {
 		const mid = (low + high) >> 1;
 		const midVal = valueGetter(arr[mid]!);
 
 		if (midVal === key) {
-			res = mid;
+			ans = mid;
 			high = mid - 1; // Continue searching left to find the lowest index
 		} else if (midVal < key) {
 			low = mid + 1;
@@ -252,13 +253,14 @@ export const binarySearchExact = <T>(arr: T[], key: number, valueGetter: (x: T) 
 		}
 	}
 
-	return res;
+	return ans;
 };
 
+/** Returns the largest index i such that val[i] <= key, or -1 if no such index exists. */
 export const binarySearchLessOrEqual = <T>(arr: T[], key: number, valueGetter: (x: T) => number) => {
-	let ans = -1;
 	let low = 0;
 	let high = arr.length - 1;
+	let ans = -1;
 
 	while (low <= high) {
 		const mid = (low + (high - low + 1) / 2) | 0;
