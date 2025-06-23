@@ -1,12 +1,18 @@
 import { withMermaid } from 'vitepress-plugin-mermaid';
 import footnote from 'markdown-it-footnote';
+import tailwindcss from '@tailwindcss/vite';
 
 // https://vitepress.dev/reference/site-config
 export default withMermaid({
 	title: 'Mediabunny',
 	description: 'A VitePress Site',
 	cleanUrls: true,
+	head: [
+		['link', { rel: 'icon', href: '/mediabunny-logo.svg' }],
+	],
 	themeConfig: {
+		logo: '/mediabunny-logo.svg',
+
 		// https://vitepress.dev/reference/default-theme-config
 		nav: [
 			{ text: 'Guide', link: '/guide/introduction', activeMatch: '/guide' },
@@ -54,7 +60,7 @@ export default withMermaid({
 		],
 
 		socialLinks: [
-			{ icon: 'github', link: 'https://github.com/vuejs/vitepress' },
+			{ icon: 'github', link: 'https://github.com/Vanilagy/mediabunny' },
 		],
 
 		search: {
@@ -67,9 +73,14 @@ export default withMermaid({
 	},
 	markdown: {
 		math: true,
+		theme: { light: 'github-light', dark: 'github-dark-dimmed' },
 		config(md) {
 			md.use(footnote);
 		},
+	},
+	vite: {
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		plugins: [tailwindcss() as any],
 	},
 	outDir: '../dist-docs',
 });

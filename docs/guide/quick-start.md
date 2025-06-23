@@ -467,7 +467,13 @@ const output = new Output({
 	// ...
 });
 
-const conversion = await Conversion.init({ input, output });
+const conversion = await Conversion.init({
+	input,
+	output,
+	audio: {
+		sampleRate: 16000, // Resample to 16 kHz
+	},
+});
 await conversion.execute();
 // Conversion is complete
 ```
