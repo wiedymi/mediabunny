@@ -42,10 +42,12 @@ export class WaveDemuxer extends Demuxer {
 
 	async readMetadata() {
 		return this.metadataPromise ??= (async () => {
+			const actualFileSize = await this.metadataReader.reader.source.getSize();
+
 			const riffType = this.metadataReader.readAscii(4);
 			this.metadataReader.littleEndian = riffType === 'RIFF';
 
-			const totalFileSize = this.metadataReader.readU32() + 8;
+			const totalFileSize = Math.min(this.metadataReader.readU32() + 8, actualFileSize);
 			const format = this.metadataReader.readAscii(4);
 
 			if (format !== 'WAVE') {
@@ -64,7 +66,7 @@ export class WaveDemuxer extends Demuxer {
 					await this.parseFmtChunk(chunkSize);
 				} else if (chunkId === 'data') {
 					this.dataStart = this.metadataReader.pos;
-					this.dataSize = chunkSize;
+					this.dataSize = Math.min(chunkSize, totalFileSize - this.dataStart);
 				}
 
 				this.metadataReader.pos = startPos + chunkSize + (chunkSize & 1); // Handle padding
@@ -90,7 +92,7 @@ export class WaveDemuxer extends Demuxer {
 		let formatTag = this.metadataReader.readU16();
 		const numChannels = this.metadataReader.readU16();
 		const sampleRate = this.metadataReader.readU32();
-		this.metadataReader.pos += 4;
+		this.metadataReader.pos += 4; // Bytes per second
 		const blockAlign = this.metadataReader.readU16();
 
 		let bitsPerSample: number;
