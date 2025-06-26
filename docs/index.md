@@ -1,5 +1,4 @@
 ---
-# https://vitepress.dev/reference/default-theme-home-page
 layout: home
 
 title: Mediabunny
@@ -21,8 +20,8 @@ hero:
 ---
 
 <div class="space-y-16 mt-8">
-<div class="grid grid-cols-2 gap-20 items-center">
-<div>
+<div class="flex flex-col lg:flex-row lg:gap-20 lg:items-center">
+<div class="flex-1 min-w-0">
 <h1 class="inline-block" style="background: -webkit-linear-gradient(-30deg, #ff45ac, #ff78c2); -webkit-background-clip: text; color: transparent;">Read any media file, efficiently</h1>
 <p class="text-lg">Mediabunny allows you efficiently read data from any media file, no matter the size: duration, resolution, rotation, tracks, codecs and other metadata, as well as raw or decoded media data from anywhere in the file. Load only what you need.</p>
 <a class="!no-underline inline-flex items-center gap-1.5" :no-icon="true" href="/guide/reading-media-files">
@@ -30,7 +29,7 @@ hero:
 	<span class="vpi-arrow-right" />
 </a>
 </div>
-<div class="text-sm relative">
+<div class="text-sm relative flex-1 min-w-0">
 
 <div class="absolute size-70 rounded-full bg-[#ff45ac]/0 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 blur-[200px]" />
 
@@ -61,8 +60,8 @@ for await (const frame of sink.samples()) {
 </div>
 </div>
 
-<div class="grid grid-cols-2 gap-20 items-center">
-<div class="text-sm relative">
+<div class="flex flex-col-reverse lg:flex-row lg:gap-20 lg:items-center">
+<div class="text-sm relative flex-1 min-w-0">
 
 <div class="absolute size-70 rounded-full bg-[#ff45ac]/0 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 blur-[200px]" />
 
@@ -95,7 +94,7 @@ const { buffer } = output.target; // Contains the final file
 ```
 
 </div>
-<div>
+<div class="flex-1 min-w-0">
 <h1 class="inline-block" style="background: -webkit-linear-gradient(-30deg, #ff45ac, #ff78c2); -webkit-background-clip: text; color: transparent;">Create new media files, programmatically</h1>
 <p class="text-lg">Generate new media files (such as MP4 or WebM) directly on the client, and as fast as the hardware allows. Add multiple video, audio, or subtitle tracks, and have precise control down to the microsecond.</p>
 <a class="!no-underline inline-flex items-center gap-1.5" :no-icon="true" href="/guide/writing-media-files">
@@ -105,8 +104,8 @@ const { buffer } = output.target; // Contains the final file
 </div>
 </div>
 
-<div class="grid grid-cols-2 gap-20 items-center">
-<div>
+<div class="flex flex-col lg:flex-row lg:gap-20 lg:items-center">
+<div class="flex-1 min-w-0">
 <h1 class="inline-block" style="background: -webkit-linear-gradient(-30deg, #ff45ac, #ff78c2); -webkit-background-clip: text; color: transparent;">Hopping-fast file conversion</h1>
 <p class="text-lg">Use the Conversion API to transform any media file into any other media file: perform transmuxing, transcoding, resizing, rotation, audio resampling, trimming, and more.</p>
 <a class="!no-underline inline-flex items-center gap-1.5" :no-icon="true" href="/guide/converting-media-files">
@@ -114,7 +113,7 @@ const { buffer } = output.target; // Contains the final file
 	<span class="vpi-arrow-right" />
 </a>
 </div>
-<div class="text-sm relative">
+<div class="text-sm relative flex-1 min-w-0">
 
 <div class="absolute size-70 rounded-full bg-[#ff45ac]/0 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 blur-[200px]" />
 
@@ -137,19 +136,19 @@ await conversion.execute();
 </div>
 </div>
 
-<div class="grid grid-cols-2 gap-20 items-center">
-<div class="relative">
+<div class="flex flex-col-reverse lg:flex-row gap-4 lg:gap-20 lg:items-center">
+<div class="relative flex-1 min-w-0">
 <div class="absolute size-70 rounded-full bg-[#ff45ac]/0 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 blur-[200px]" />
 <img class="relative" src="./inspiring-io.svg">
 </div>
-<div>
+<div class="flex-1 min-w-0">
 <h1 class="inline-block" style="background: -webkit-linear-gradient(-30deg, #ff45ac, #ff78c2); -webkit-background-clip: text; color: transparent;">Universal I/O</h1>
 <p class="text-lg">Read and write files from and to memory, disk, or the network. Create files for offline use, or live-stream them as they're being created. Inject media data from a canvas, webcam, screen, microphone, audio buffer, your own encoding stack, or whatever. It's all up to you.</p>
 </div>
 </div>
 
-<div class="grid grid-cols-2 gap-20 items-center">
-<div>
+<div class="flex flex-col lg:flex-row gap-4 lg:gap-20 lg:items-center">
+<div class="flex-1 min-w-0">
 <h1 class="inline-block" style="background: -webkit-linear-gradient(-30deg, #ff45ac, #ff78c2); -webkit-background-clip: text; color: transparent;">Wide container & codec support</h1>
 <p class="text-lg">Mediabunny supports many commonly used container formats and a wide variety of video and audio codecs. And all of them bidirectionally, too! (that means for reading and writing)</p>
 <a class="!no-underline inline-flex items-center gap-1.5" :no-icon="true" href="/guide/supported-formats-and-codecs">
@@ -157,7 +156,7 @@ await conversion.execute();
 	<span class="vpi-arrow-right" />
 </a>
 </div>
-<div class="grid place-items-center relative">
+<div class="grid place-items-center relative flex-1 min-w-0">
 <div class="absolute size-70 rounded-full bg-[#ff45ac]/0 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 blur-[200px]" />
 <img class="relative" src="./codec-soup.svg">
 </div>
@@ -205,14 +204,13 @@ const bundleSizes = [
 	{ name: 'Writing .mp4 files', size: 17.28 },
 	{ name: 'Reading all formats', size: 30.02 },
 	{ name: 'mp4box.js', size: 37.3, isThirdParty: true },
-	{ name: 'web-demuxer', size: 44.8, isThirdParty: true },
 	{ name: 'All features', size: 69.62 },
 	{ name: '@remotion/webcodecs', size: 87.2 + 20.8, isThirdParty: true },
 ];
 </script>
 
-<div class="grid grid-cols-2 gap-20 items-center">
-<div class="space-y-8">
+<div class="flex flex-col-reverse lg:flex-row gap-4 lg:gap-20 lg:items-center">
+<div class="space-y-8 flex-1 min-w-0">
 	<div v-for="benchmark in benchmarks" class="space-y-2">
 		<p class="text-center font-medium text-sm !mt-0 !mb-2">{{ benchmark.name }}</p>
 		<div v-for="result, i in benchmark.results" class="flex items-center gap-2">
@@ -223,18 +221,18 @@ const bundleSizes = [
 	</div>
 	<p class="!my-0 text-center text-[10px] opacity-50 !leading-4">Reading BigBuckBunny1080pH264.mov (691 MiB) from disk<br>Ryzen 7600X, RTX 4070, NVMe SSD, measured 2025-06-22</p>
 </div>
-<div>
+<div class="flex-1 min-w-0">
 <h1 class="inline-block" style="background: -webkit-linear-gradient(-30deg, #ff45ac, #ff78c2); -webkit-background-clip: text; color: transparent;">High performance</h1>
 <p class="text-lg">By reading only what you need, writing progressively, utilizing hardware-accelerated encoding and decoding via the WebCodecs API, and using a pipelined design, Mediabunny is able to get the job done fast.</p>
 </div>
 </div>
 
-<div class="grid grid-cols-2 gap-20 items-center">
-<div>
+<div class="flex flex-col lg:flex-row gap-4 lg:gap-20 lg:items-center">
+<div class="flex-1 min-w-0">
 <h1 class="inline-block" style="background: -webkit-linear-gradient(-30deg, #ff45ac, #ff78c2); -webkit-background-clip: text; color: transparent;">Built from scratch, for the web</h1>
 <p class="text-lg">Mediabunny is 100% implemented in TypeScript and has zero dependencies. Its API was designed to be highly tree-shakable, meaning you only include what you use.</p>
 </div>
-<div class="space-y-2">
+<div class="space-y-2 flex-1 min-w-0">
 	<p class="text-center font-medium text-sm !mt-0 !mb-2">Bundle size, minified + gzipped</p>
 	<div v-for="result in bundleSizes" class="flex items-center gap-2">
 		<p :class="{ '!text-[#ff78c2]': !result.isThirdParty }" class="!my-0 shrink-0 font-medium w-40 text-xs whitespace-nowrap text-right">{{ result.name }}</p>
@@ -247,6 +245,7 @@ const bundleSizes = [
 			<div class="h-full rounded-md absolute top-0 left-0 w-10000" style="background: linear-gradient(to right, var(--vp-c-gray-2) 0px, transparent 2000px, transparent 100%);" />
 		</div>
 	</div>
+	<p class="!mt-2 !mb-0 text-center text-[10px] opacity-50 !leading-4">Measured 2025-06-22</p>
 </div>
 </div>
 

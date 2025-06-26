@@ -39,6 +39,7 @@ Mediabunny is a general-purpose toolkit and can be used in infinitely many ways.
 - Creating videos in the browser
 - Building a video editor
 - Live recording & streaming
+- Efficient, sample-accurate playback of large files via the Web Audio API
 
 Check out the [Examples](/examples) page for demo implementations of many of these ideas!
 

@@ -210,7 +210,7 @@ if (videoTrack) {
 Check out [`EncodedPacketSink`](./media-sinks#encodedpacketsink) for the full documentation.
 :::
 
-## Write new media files
+## Create new media files
 
 ```ts
 import {
