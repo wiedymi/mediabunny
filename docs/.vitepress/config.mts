@@ -1,6 +1,7 @@
 import { withMermaid } from 'vitepress-plugin-mermaid';
 import footnote from 'markdown-it-footnote';
 import tailwindcss from '@tailwindcss/vite';
+import llmstxt from 'vitepress-plugin-llms';
 
 // https://vitepress.dev/reference/site-config
 export default withMermaid({
@@ -84,8 +85,11 @@ export default withMermaid({
 		},
 	},
 	vite: {
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		plugins: [tailwindcss() as any],
+		plugins: [
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			tailwindcss() as any,
+			llmstxt(),
+		],
 	},
 	outDir: '../dist-docs',
 });

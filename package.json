@@ -55,6 +55,7 @@
     "typescript-eslint": "^8.26.1",
     "vite": "^6.3.5",
     "vitepress": "^1.6.3",
+    "vitepress-plugin-llms": "^1.5.1",
     "vitepress-plugin-mermaid": "^2.0.17"
   }
 }
