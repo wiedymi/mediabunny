@@ -255,7 +255,7 @@ await audioSource.add(audioBuffer2);
 
 await output.finalize();
 
-const buffer = output.target.buffer; // Uint8Array containing the final MP4 file
+const buffer = output.target.buffer; // ArrayBuffer containing the final MP4 file
 ```
 
 ::: info
@@ -442,7 +442,7 @@ conversion.onProgress = (progress) => {
 await conversion.execute();
 // Conversion is complete
 
-const buffer = output.target.buffer; // Uint8Array containing the final MP4 file
+const buffer = output.target.buffer; // ArrayBuffer containing the final MP4 file
 ```
 
 ::: info

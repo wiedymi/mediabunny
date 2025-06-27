@@ -45,11 +45,11 @@ const videoTrack = await input.getPrimaryVideoTrack();
 const { displayWidth, displayHeight, rotation } = videoTrack;
 
 const audioTrack = await input.getPrimaryAudioTrack();
-const { sampleRate, channelCount } = audioTrack;
+const { sampleRate, numberOfChannels } = audioTrack;
 
 // Get the frame halfway through the video
 const sink = new VideoSampleSink(videoTrack);
-const { canvas } = await sink.getSample(duration / 2);
+const frame = await sink.getSample(duration / 2);
 
 // Loop over all frames of the video
 for await (const frame of sink.samples()) {
@@ -89,7 +89,7 @@ await output.start();
 
 // Add media data here...
 
-await output.finalize;
+await output.finalize();
 const { buffer } = output.target; // Contains the final file
 ```
 

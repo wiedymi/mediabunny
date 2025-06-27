@@ -362,7 +362,7 @@ const decoder = new VideoDecoder({
 decoder.configure(await videoTrack.getDecoderConfig());
 
 // Let's crank through all packets from timestamp 37s to 50s:
-let currentPacket = sink.getKeyPacket(37);
+let currentPacket = await sink.getKeyPacket(37);
 while (currentPacket && currentPacket.timestamp < 50) {
 	decoder.decode(currentPacket.toEncodedVideoChunk());
 	currentPacket = await sink.getNextPacket(currentPacket);
