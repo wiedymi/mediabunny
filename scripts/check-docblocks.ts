@@ -1,10 +1,7 @@
 import ts from 'typescript';
 import * as fs from 'node:fs';
 
-function checkDocblocks(filePath: string): {
-	success: boolean;
-	missingDocblocks: { name: string; kind: string; line: number; reason: string }[];
-} {
+const checkDocblocks = (filePath: string) => {
 	const program = ts.createProgram([filePath], {});
 	const sourceFile = program.getSourceFile(filePath);
 	const checker = program.getTypeChecker();
@@ -15,7 +12,7 @@ function checkDocblocks(filePath: string): {
 
 	const missingDocblocks: { name: string; kind: string; line: number; reason: string }[] = [];
 
-	function checkNode(node: ts.Node) {
+	const checkNode = (node: ts.Node) => {
 		if (
 			ts.isInterfaceDeclaration(node)
 			|| ts.isClassDeclaration(node)
@@ -40,7 +37,7 @@ function checkDocblocks(filePath: string): {
 							const docStatus = checkDocumentationContent(declSymbol, declaration);
 							if (docStatus.hasProblem) {
 								const name = declaration.name.getText(sourceFile);
-								const line = sourceFile!.getLineAndCharacterOfPosition(declaration.getStart()).line + 1;
+								const line = sourceFile.getLineAndCharacterOfPosition(declaration.getStart()).line + 1;
 								missingDocblocks.push({
 									name,
 									kind: 'variable',
@@ -69,7 +66,7 @@ function checkDocblocks(filePath: string): {
 				}
 			}
 
-			const line = sourceFile!.getLineAndCharacterOfPosition(node.getStart()).line + 1;
+			const line = sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1;
 
 			if (!symbol) {
 				const jsDocNodes = ts.getJSDocCommentsAndTags(node);
@@ -105,9 +102,9 @@ function checkDocblocks(filePath: string): {
 		}
 
 		ts.forEachChild(node, checkNode);
-	}
+	};
 
-	function checkDocumentationContent(symbol: ts.Symbol, node: ts.Node): { hasProblem: boolean; reason: string } {
+	const checkDocumentationContent = (symbol: ts.Symbol, node: ts.Node) => {
 		const docComments = symbol.getDocumentationComment(checker);
 		if (docComments.length === 0) {
 			const jsDocNodes = ts.getJSDocCommentsAndTags(node);
@@ -129,9 +126,9 @@ function checkDocblocks(filePath: string): {
 		}
 
 		return { hasProblem: false, reason: '' };
-	}
+	};
 
-	function checkJSDocContent(jsDocNodes: readonly ts.Node[]): { hasProblem: boolean; reason: string } {
+	const checkJSDocContent = (jsDocNodes: readonly ts.Node[]) => {
 		if (jsDocNodes.length === 0) {
 			return { hasProblem: true, reason: 'No docblock found' };
 		}
@@ -154,7 +151,7 @@ function checkDocblocks(filePath: string): {
 		}
 
 		return { hasProblem: true, reason: 'Docblock contains only modifiers' };
-	}
+	};
 
 	if (sourceFile) {
 		checkNode(sourceFile);
@@ -164,9 +161,9 @@ function checkDocblocks(filePath: string): {
 		success: missingDocblocks.length === 0,
 		missingDocblocks,
 	};
-}
+};
 
-function main() {
+const main = () => {
 	const args = process.argv.slice(2);
 
 	if (args.length !== 1) {
@@ -201,6 +198,6 @@ function main() {
 		console.error('Error:', error);
 		process.exit(1);
 	}
-}
+};
 
 main();

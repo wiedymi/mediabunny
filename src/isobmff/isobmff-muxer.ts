@@ -1,3 +1,11 @@
+/*
+ * Copyright (c) 2025-present, Vanilagy and contributors
+ *
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ */
+
 import { Box, ftyp, IsobmffBoxWriter, mdat, mfra, moof, moov, vtta, vttc, vtte } from './isobmff-boxes';
 import { Muxer } from '../muxer';
 import { Output, OutputAudioTrack, OutputSubtitleTrack, OutputTrack, OutputVideoTrack } from '../output';

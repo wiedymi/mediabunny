@@ -18,8 +18,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "node build.mjs && tsc -p src && api-extractor run && npm run check-docblocks && tsx scripts/append-namespace.ts",
-    "build-local": "node build.mjs && tsc -p src && api-extractor run --local --verbose && npm run check-docblocks && tsx scripts/append-namespace.ts",
+    "build": "tsx scripts/ensure-license-headers.ts && node build.mjs && tsc -p src && api-extractor run && npm run check-docblocks && tsx scripts/append-namespace.ts",
     "watch": "node build.mjs --watch",
     "lint": "eslint .",
     "check": "tsc -p src --noEmit && tsc -p scripts --noEmit && tsc -p tsconfig.vite.json --noEmit && rm tsconfig.vite.tsbuildinfo",
@@ -30,8 +29,8 @@
     "dev": "vite",
     "examples:build": "vite build"
   },
-  "author": "",
-  "license": "MIT",
+  "author": "Vanilagy",
+  "license": "MPL-2.0",
   "dependencies": {
     "@types/dom-mediacapture-transform": "^0.1.10",
     "@types/dom-webcodecs": "^0.1.13"

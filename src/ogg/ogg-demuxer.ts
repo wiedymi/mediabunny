@@ -1,3 +1,11 @@
+/*
+ * Copyright (c) 2025-present, Vanilagy and contributors
+ *
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ */
+
 import { OPUS_INTERNAL_SAMPLE_RATE } from '../codec';
 import { parseModesFromVorbisSetupPacket, parseOpusIdentificationHeader } from '../codec-data';
 import { Demuxer } from '../demuxer';

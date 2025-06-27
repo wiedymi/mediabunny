@@ -70,6 +70,11 @@ export default withMermaid({
 		outline: {
 			level: [2, 3],
 		},
+
+		footer: {
+			message: 'Released under the Mozilla Public License 2.0.',
+			copyright: 'Copyright © 2025-present Vanilagy',
+		},
 	},
 	markdown: {
 		math: true,
