@@ -1,4 +1,4 @@
-/*
+/*!
  * Copyright (c) 2025-present, Vanilagy and contributors
  *
  * This Source Code Form is subject to the terms of the Mozilla Public

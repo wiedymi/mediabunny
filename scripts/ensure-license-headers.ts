@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const LICENSE_HEADER = `/*
+const LICENSE_HEADER = `/*!
  * Copyright (c) 2025-present, Vanilagy and contributors
  *
  * This Source Code Form is subject to the terms of the Mozilla Public

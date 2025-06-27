@@ -6,7 +6,7 @@ const baseConfig = {
 	bundle: true,
 	logLevel: 'info',
 	banner: {
-		js: `/*
+		js: `/*!
  * Copyright (c) 2025-present, Vanilagy and contributors
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
@@ -14,6 +14,7 @@ const baseConfig = {
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */`,
 	},
+	legalComments: 'none',
 };
 
 const umdConfig = {
