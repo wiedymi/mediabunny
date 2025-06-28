@@ -1,6 +1,6 @@
 # Introduction
 
-Mediabunny is a JavaScript library for reading, writing, and converting media files (like MP4 or WebM), directly in the browser. It aims to be a complete toolkit for doing high-performance media operations on the web. It's written from scratch in pure TypeScript, has zero dependencies, and is extremely tree-shakable, meaning you only include what you use. You can think of it kind of like [FFmpeg](https://ffmpeg.org/), but built for the web's needs.
+Mediabunny is a JavaScript library for reading, writing, and converting media files (like MP4 or WebM), directly in the browser. It aims to be a complete toolkit for high-performance media operations on the web. It's written from scratch in pure TypeScript, has zero dependencies, and is extremely tree-shakable, meaning you only include what you use. You can think of it a bit like [FFmpeg](https://ffmpeg.org/), but built for the web's needs.
 
 ## Features
 
@@ -12,7 +12,7 @@ Here's a long list of stuff this library does:
 - Converting media files
 - Hardware-accelerated decoding & encoding (via the WebCodecs API)
 - Support for multiple video, audio and subtitle tracks
-- Support for many container formats (.mp4, .mov, .webm, .mkv, .mp3, .wav, .ogg)
+- Read & write support for many container formats (.mp4, .mov, .webm, .mkv, .mp3, .wav, .ogg), including variations such as MP4 with Fast Start, fragmented MP4, or streamable Matroska
 - Support for 25 different codecs
 - Lazy, optimized, on-demand file reading
 - Input and output streaming, arbitrary file size support
