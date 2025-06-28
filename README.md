@@ -79,7 +79,7 @@ const output = new Output({
 // Add a video track backed by a canvas element
 const videoSource = new CanvasSource(canvas, {
     codec: 'avc',
-    bitrate: QUALITY_HIGH
+    bitrate: QUALITY_HIGH,
 });
 output.addVideoTrack(videoSource);
 
