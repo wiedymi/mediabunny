@@ -23,21 +23,18 @@ hero:
 ---
 
 <script setup>
-import AvatarKonstantin from './assets/avatar-konstantin.png';
-import AvatarYonatan from './assets/avatar-yonatan.jpeg';
-
 const quotes = [
 	{
 		quote: 'The missing part in the JS ecosystem for building web-first media apps.',
 		author: 'Yonatan, Gling AI',
-		image: AvatarYonatan,
-		url: 'https://www.gling.ai/',
+		image: '/avatars/yonatan.jpeg',
+		url: 'https://x.com/yonatanbd',
 	},
 	{
 		quote: 'Mediabunny gives you low-level control with high-level ease. It’s fast, lightweight, and finally feels like media processing built for the web, not ported to it.',
 		author: 'Konstantin, Diffusion Studio',
-		image: AvatarKonstantin,
-		url: 'https://github.com/k9p5',
+		image: '/avatars/konstantin.png',
+		url: 'https://x.com/konstipaulus',
 	}
 ];
 
@@ -85,9 +82,20 @@ const bundleSizes = [
 	{ name: 'All features', size: 69.62 },
 	{ name: '@remotion/webcodecs', size: 87.2 + 20.8, isThirdParty: true },
 ];
+
+const sponsors = {
+	gold: [
+		{ image: '/sponsors/gling.svg', name: 'Gling AI', url: 'https://www.gling.ai/' },
+		{ image: '/sponsors/diffusionstudio.png', name: 'Diffusion Studio', url: 'https://diffusion.studio/' },
+	],
+	individual: [
+		{ image: 'https://avatars.githubusercontent.com/u/30229596', name: 'Pablo Bonilla', url: 'https://github.com/devPablo' },
+		{ image: 'https://avatars.githubusercontent.com/u/58149663', name: 'H7GhosT', url: 'https://github.com/H7GhosT' },
+	],
+};
 </script>
 
-<div class="flex gap-4 flex-wrap justify-center items-center">
+<div class="flex gap-6 flex-wrap justify-center items-center">
 	<div v-for="quote in quotes" class="bg-(--vp-c-bg-soft) w-80 p-4 rounded-2xl flex shrink-0 flex-col relative">
 		<svg class="size-8 absolute -top-3 left-2.5 text-(--vp-c-gray-1)" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><path fill="currentColor" d="M12 12a1 1 0 0 0 1-1V8.558a1 1 0 0 0-1-1h-1.388q0-.527.062-1.054q.093-.558.31-.992t.559-.683q.34-.279.868-.279V3q-.868 0-1.52.372a3.3 3.3 0 0 0-1.085.992a4.9 4.9 0 0 0-.62 1.458A7.7 7.7 0 0 0 9 7.558V11a1 1 0 0 0 1 1zm-6 0a1 1 0 0 0 1-1V8.558a1 1 0 0 0-1-1H4.612q0-.527.062-1.054q.094-.558.31-.992q.217-.434.559-.683q.34-.279.868-.279V3q-.868 0-1.52.372a3.3 3.3 0 0 0-1.085.992a4.9 4.9 0 0 0-.62 1.458A7.7 7.7 0 0 0 3 7.558V11a1 1 0 0 0 1 1z"/></svg>
 		<p class="!my-0 flex-1 text-sm !leading-6">{{ quote.quote }}</p>
@@ -283,4 +291,44 @@ await conversion.execute();
 </div>
 </div>
 
+<div class="flex flex-col items-center">
+	<h2 class="!my-0 !pt-0 !border-0">...and more!</h2>
+	<a class="!no-underline inline-flex items-center gap-1.5" :no-icon="true" href="/guide/introduction#features">
+		See full feature list
+		<span class="vpi-arrow-right" />
+	</a>
+</div>
+
+</div>
+
+<hr class="!my-16" />
+
+<div class="flex flex-col items-center">
+	<h1 id="sponsors" class="flex items-center gap-4" style="background: -webkit-linear-gradient(-30deg, #ff45ac, #ff78c2); -webkit-background-clip: text; color: transparent;">
+		Made possible by you
+		<img class="size-8" src="./assets/fluent-emoji--heart-suit.svg">
+	</h1>
+	<p class="max-w-2xl">Mediabunny is an open-source project released under the <a href="https://choosealicense.com/licenses/mpl-2.0/" target="_blank">MPL-2.0</a> and is therefore free to use for any purpose, including closed-source commercial use. A permissive license is essential for a foundational library like this to truly thrive. That said, this project requires an immense amount of work and care. This is made possible by the generous financial backing of these awesome sponsors:</p>
+	<template v-if="sponsors.gold.length > 0">
+		<h3 class="!text-2xl">Gold sponsors</h3>
+		<div class="flex flex-wrap mt-1 justify-center gap-1">
+			<a v-for="sponsor in sponsors.gold" :href="sponsor.url" target="_blank" class="flex items-center p-2 rounded-full hover:bg-(--vp-c-gray-3) !text-[initial] !no-underline">
+				<img :src="sponsor.image" class="size-16 rounded-full">
+				<p class="!my-0 !font-medium px-3">{{ sponsor.name }}</p>
+			</a>
+		</div>
+	</template>
+	<template v-if="sponsors.individual.length > 0">
+		<h4>Individual sponsors</h4>
+		<div class="flex flex-wrap mt-1 justify-center">
+			<a v-for="sponsor in sponsors.individual" :href="sponsor.url" target="_blank" class="flex gap-1 w-24 flex-col items-center p-2 rounded-xl hover:bg-(--vp-c-gray-3) !text-[initial] !no-underline">
+				<img :src="sponsor.image" class="size-8 rounded-full">
+				<p class="!my-0 !font-medium text-xs !leading-4">{{ sponsor.name }}</p>
+			</a>
+		</div>
+	</template>
+	<a href="https://github.com/sponsors/Vanilagy" target="_blank" class="flex items-center pl-4 pr-5 mt-8 py-2 rounded-full bg-(--vp-c-brand-3) hover:bg-(--vp-c-brand-2) !text-white !no-underline">
+		<svg class="size-6" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><rect width="24" height="24" fill="none"/><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m12 21l-8.8-8.3A5.6 5.6 0 1 1 12 6a5.6 5.6 0 1 1 8.9 6.6z"/></svg>
+		<p class="!my-0 !font-medium pl-3">And you</p>
+	</a>
 </div>
