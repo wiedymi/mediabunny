@@ -409,7 +409,7 @@ The following audio sample formats are supported:
 
 Planar formats store each channel's data contiguously, while interleaved formats store the channels' data interleaved together:
 
-![Planar vs. interleaved formats](./planar_interleaved.svg)
+![Planar vs. interleaved formats](../assets/planar_interleaved.svg)
 
 ### Inspecting audio samples
 
