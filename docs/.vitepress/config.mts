@@ -7,7 +7,8 @@ import { HeadConfig } from 'vitepress';
 // https://vitepress.dev/reference/site-config
 export default withMermaid({
 	title: 'Mediabunny',
-	description: 'A VitePress Site',
+	description: 'A JavaScript library for reading, writing, and converting media files. Directly in the browser, and'
+		+ ' faster than anybunny else.',
 	cleanUrls: true,
 	head: [
 		['link', { rel: 'icon', type: 'image/svg+xml', href: '/mediabunny-logo.svg' }],
