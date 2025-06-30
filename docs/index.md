@@ -20,6 +20,9 @@ hero:
     - theme: alt
       text: Sponsors
       link: "#sponsors"
+    - theme: alt
+      text: License
+      link: https://github.com/Vanilagy/mediabunny#license
 ---
 
 <script setup>

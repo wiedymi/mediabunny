@@ -18,6 +18,8 @@ export default withMermaid({
 		nav: [
 			{ text: 'Guide', link: '/guide/introduction', activeMatch: '/guide' },
 			{ text: 'Examples', link: '/examples', activeMatch: '/examples' },
+			{ text: 'Sponsors', link: '/#sponsors', activeMatch: '/#sponsors' },
+			{ text: 'License', link: 'https://github.com/Vanilagy/mediabunny#license' },
 		],
 
 		sidebar: [
