@@ -2,6 +2,7 @@ import { withMermaid } from 'vitepress-plugin-mermaid';
 import footnote from 'markdown-it-footnote';
 import tailwindcss from '@tailwindcss/vite';
 import llmstxt from 'vitepress-plugin-llms';
+import { HeadConfig } from 'vitepress';
 
 // https://vitepress.dev/reference/site-config
 export default withMermaid({
@@ -9,7 +10,11 @@ export default withMermaid({
 	description: 'A VitePress Site',
 	cleanUrls: true,
 	head: [
-		['link', { rel: 'icon', href: '/mediabunny-logo.svg' }],
+		['link', { rel: 'icon', type: 'image/svg+xml', href: '/mediabunny-logo.svg' }],
+		['link', { rel: 'icon', type: 'image/png', href: '/mediabunny-logo.png' }],
+		['meta', { property: 'og:type', content: 'website' }],
+		['meta', { property: 'og:site_name', content: 'Mediabunny' }],
+		['meta', { property: 'og:image', content: '/mediabunny-og-image.png' }],
 	],
 	themeConfig: {
 		logo: '/mediabunny-logo.svg',
@@ -94,4 +99,14 @@ export default withMermaid({
 		],
 	},
 	outDir: '../dist-docs',
+	transformPageData(pageData) {
+		let title = pageData.title;
+		if (title !== 'Mediabunny') {
+			title += ' | Mediabunny';
+		}
+
+		((pageData.frontmatter['head'] ??= []) as HeadConfig[]).push(
+			['meta', { property: 'og:title', content: title }],
+		);
+	},
 });
