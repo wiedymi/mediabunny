@@ -108,6 +108,14 @@ const sponsors = {
 	</div>
 </div>
 
+<div class="mx-auto w-full max-w-92 text-xl mt-20">
+
+```bash
+npm install mediabunny
+```
+
+</div>
+
 <div class="space-y-16 mt-18">
 <div class="flex flex-col lg:flex-row lg:gap-20 lg:items-center">
 <div class="flex-1 min-w-0">
