@@ -92,6 +92,7 @@ const sponsors = {
 		{ image: '/sponsors/diffusionstudio.png', name: 'Diffusion Studio', url: 'https://diffusion.studio/' },
 	],
 	individual: [
+		{ image: 'https://avatars.githubusercontent.com/u/84167135', name: 'Memenome', url: 'https://github.com/memenome' },
 		{ image: 'https://avatars.githubusercontent.com/u/30229596', name: 'Pablo Bonilla', url: 'https://github.com/devPablo' },
 		{ image: 'https://avatars.githubusercontent.com/u/58149663', name: 'H7GhosT', url: 'https://github.com/H7GhosT' },
 	],
@@ -323,7 +324,7 @@ await conversion.execute();
 	<template v-if="sponsors.gold.length > 0">
 		<h3 class="!text-2xl">Gold sponsors</h3>
 		<div class="flex flex-wrap mt-1 justify-center gap-1">
-			<a v-for="sponsor in sponsors.gold" :href="sponsor.url" target="_blank" class="flex items-center p-2 rounded-full hover:bg-(--vp-c-gray-3) !text-[initial] !no-underline">
+			<a v-for="sponsor in sponsors.gold" :href="sponsor.url" target="_blank" class="flex items-center p-2 rounded-full hover:bg-(--vp-c-gray-3) !text-(--vp-c-text-1) !no-underline">
 				<img :src="sponsor.image" class="size-16 rounded-full">
 				<p class="!my-0 !font-medium px-3">{{ sponsor.name }}</p>
 			</a>
@@ -332,7 +333,7 @@ await conversion.execute();
 	<template v-if="sponsors.individual.length > 0">
 		<h4>Individual sponsors</h4>
 		<div class="flex flex-wrap mt-1 justify-center">
-			<a v-for="sponsor in sponsors.individual" :href="sponsor.url" target="_blank" class="flex gap-1 w-24 flex-col items-center p-2 rounded-xl hover:bg-(--vp-c-gray-3) !text-[initial] !no-underline">
+			<a v-for="sponsor in sponsors.individual" :href="sponsor.url" target="_blank" class="flex gap-1 w-24 flex-col items-center p-2 rounded-xl hover:bg-(--vp-c-gray-3) !text-(--vp-c-text-1) !no-underline">
 				<img :src="sponsor.image" class="size-8 rounded-full">
 				<p class="!my-0 !font-medium text-xs !leading-4">{{ sponsor.name }}</p>
 			</a>
