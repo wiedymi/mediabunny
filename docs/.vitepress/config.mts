@@ -70,6 +70,8 @@ export default withMermaid({
 
 		socialLinks: [
 			{ icon: 'github', link: 'https://github.com/Vanilagy/mediabunny' },
+			{ icon: 'discord', link: 'https://discord.gg/hmpkyYuS4U' },
+			{ icon: 'x', link: 'https://x.com/vanilagy' },
 		],
 
 		search: {
