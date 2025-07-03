@@ -66,6 +66,13 @@ This library is the result of unifying these libraries into one, solving all the
 
 Due to tree shaking, if you only need an MP4 or WebM muxer, this library's bundle size will still be very small.
 
+### Migration
+
+If you're coming from mp4-muxer or webm-muxer, you should migrate to Mediabunny. For that, refer to these guides:
+
+- [Guide: Migrating from mp4-muxer to Mediabunny](https://github.com/Vanilagy/mp4-muxer/blob/main/MIGRATION-GUIDE.md)
+- [Guide: Migrating from webm-muxer to Mediabunny](https://github.com/Vanilagy/webm-muxer/blob/main/MIGRATION-GUIDE.md)
+
 ## Technical overview
 
 At its core, Mediabunny is a collection of multiplexers and demultiplexers, one of each for every container format. Demultiplexers stream data from *sources*, while multiplexers stream data to *targets*. Every demultiplexer is capable of extracting file metadata as well as compressed media data, while multiplexers write metadata and encoded media data into a new file.
