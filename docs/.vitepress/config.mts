@@ -11,11 +11,14 @@ export default withMermaid({
 		+ ' faster than anybunny else.',
 	cleanUrls: true,
 	head: [
-		['link', { rel: 'icon', type: 'image/svg+xml', href: '/mediabunny-logo.svg' }],
 		['link', { rel: 'icon', type: 'image/png', href: '/mediabunny-logo.png' }],
+		['link', { rel: 'icon', type: 'image/svg+xml', href: '/mediabunny-logo.svg' }],
 		['meta', { property: 'og:type', content: 'website' }],
 		['meta', { property: 'og:site_name', content: 'Mediabunny' }],
+		['meta', { property: 'og:url', content: 'https://mediabunny.dev/' }],
 		['meta', { property: 'og:image', content: '/mediabunny-og-image.png' }],
+		['meta', { property: 'og:locale', content: 'en-US' }],
+		['meta', { name: 'twitter:card', content: 'summary_large_image' }],
 	],
 	themeConfig: {
 		logo: '/mediabunny-logo.svg',
