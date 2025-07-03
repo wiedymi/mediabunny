@@ -437,9 +437,9 @@ let sumOfSquares = 0;
 let totalSampleCount = 0;
 
 for await (const sample of sink.samples()) {
-	const bytesNeeded = sample.allocationSize({ format: 'f32' });
+	const bytesNeeded = sample.allocationSize({ format: 'f32', planeIndex: 0 });
 	const floats = new Float32Array(bytesNeeded / 4);
-	sample.copyTo(floats, { format: 'f32' });
+	sample.copyTo(floats, { format: 'f32', planeIndex: 0 });
 
 	for (let i = 0; i < floats.length; i++) {
 		sumOfSquares += floats[i] ** 2;

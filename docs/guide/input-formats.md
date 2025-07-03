@@ -47,7 +47,7 @@ You can also use them for checking the actual format of an `Input`:
 ```ts
 import { MP3 } from 'mediabunny';
 
-const isMp3 = input.getFormat() === MP3;
+const isMp3 = (await input.getFormat()) === MP3;
 ```
 
 There is a special `ALL_FORMATS` constant exported by Mediabunny which contains every input format singleton. Use this constant if you want to support as many formats as possible:
@@ -82,13 +82,13 @@ This means you can also perform input format checks using `instanceof` instead o
 import { Mp3InputFormat } from 'mediabunny';
 
 // Check if the file is MP3:
-input.getFormat() instanceof Mp3InputFormat;
+(await input.getFormat()) instanceof Mp3InputFormat;
 
 // Check if the file is Matroska (MKV + WebM):
-input.getFormat() instanceof MatroskaInputFormat;
+(await input.getFormat()) instanceof MatroskaInputFormat;
 
 // Check if the file is MP4 or QuickTime:
-input.getFormat() instanceof IsobmffInputFormat;
+(await input.getFormat()) instanceof IsobmffInputFormat;
 ```
 
 ::: info

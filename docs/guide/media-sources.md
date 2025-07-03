@@ -56,7 +56,7 @@ type VideoEncodingConfig = {
 		meta: EncodedVideoChunkMetadata | undefined
 	) => unknown;
 	onEncoderConfig?: (
-		config: AudioEncoderConfig
+		config: VideoEncoderConfig
 	) => unknown;
 };
 ```

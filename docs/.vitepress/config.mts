@@ -1,14 +1,21 @@
 import { withMermaid } from 'vitepress-plugin-mermaid';
 import footnote from 'markdown-it-footnote';
 import tailwindcss from '@tailwindcss/vite';
+import llmstxt from 'vitepress-plugin-llms';
+import { HeadConfig } from 'vitepress';
 
 // https://vitepress.dev/reference/site-config
 export default withMermaid({
 	title: 'Mediabunny',
-	description: 'A VitePress Site',
+	description: 'A JavaScript library for reading, writing, and converting media files. Directly in the browser, and'
+		+ ' faster than anybunny else.',
 	cleanUrls: true,
 	head: [
-		['link', { rel: 'icon', href: '/mediabunny-logo.svg' }],
+		['link', { rel: 'icon', type: 'image/svg+xml', href: '/mediabunny-logo.svg' }],
+		['link', { rel: 'icon', type: 'image/png', href: '/mediabunny-logo.png' }],
+		['meta', { property: 'og:type', content: 'website' }],
+		['meta', { property: 'og:site_name', content: 'Mediabunny' }],
+		['meta', { property: 'og:image', content: '/mediabunny-og-image.png' }],
 	],
 	themeConfig: {
 		logo: '/mediabunny-logo.svg',
@@ -17,6 +24,8 @@ export default withMermaid({
 		nav: [
 			{ text: 'Guide', link: '/guide/introduction', activeMatch: '/guide' },
 			{ text: 'Examples', link: '/examples', activeMatch: '/examples' },
+			{ text: 'Sponsors', link: '/#sponsors', activeMatch: '/#sponsors' },
+			{ text: 'License', link: 'https://github.com/Vanilagy/mediabunny#license' },
 		],
 
 		sidebar: [
@@ -61,6 +70,8 @@ export default withMermaid({
 
 		socialLinks: [
 			{ icon: 'github', link: 'https://github.com/Vanilagy/mediabunny' },
+			{ icon: 'discord', link: 'https://discord.gg/hmpkyYuS4U' },
+			{ icon: 'x', link: 'https://x.com/vanilagy' },
 		],
 
 		search: {
@@ -84,8 +95,21 @@ export default withMermaid({
 		},
 	},
 	vite: {
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		plugins: [tailwindcss() as any],
+		plugins: [
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			tailwindcss() as any,
+			llmstxt(),
+		],
 	},
 	outDir: '../dist-docs',
+	transformPageData(pageData) {
+		let title = pageData.title;
+		if (title !== 'Mediabunny') {
+			title += ' | Mediabunny';
+		}
+
+		((pageData.frontmatter['head'] ??= []) as HeadConfig[]).push(
+			['meta', { property: 'og:title', content: title }],
+		);
+	},
 });

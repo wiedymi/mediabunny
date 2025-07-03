@@ -47,6 +47,6 @@
 	color: hsl(345, 100%, 85%);
 }
 
-body {
-	overflow-x: hidden;
+html, body {
+	overflow-x: hidden !important;
 }

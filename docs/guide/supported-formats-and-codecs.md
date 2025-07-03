@@ -156,7 +156,7 @@ import {
 getFirstEncodableVideoCodec(['avc', 'vp9', 'av1']); // => Promise<VideoCodec | null>
 getFirstEncodableAudioCodec(['opus', 'aac']); // => Promise<AudioCodec | null>
 
-getEncodableVideoCodecs(
+getFirstEncodableVideoCodec(
 	['avc', 'hevc', 'vp8'],
 	{ width: 1920, height: 1080, bitrate: 1e7 },
 ); // => Promise<VideoCodec | null>

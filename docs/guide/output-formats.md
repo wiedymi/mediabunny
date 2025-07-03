@@ -119,10 +119,10 @@ The available options are the same `IsobmffOutputFormatOptions` used by [MP4](#m
 
 This output format creates WebM files.
 ```ts
-import { Output, WebmOutputFormat } from 'mediabunny';
+import { Output, WebMOutputFormat } from 'mediabunny';
 
 const output = new Output({
-	format: new WebmOutputFormat(options),
+	format: new WebMOutputFormat(options),
 	// ...
 });
 ```

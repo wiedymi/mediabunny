@@ -213,7 +213,7 @@ const output = new Output({
 
 output.target.buffer; // => null
 await output.finalize();
-output.target.buffer; // => Uint8Array
+output.target.buffer; // => ArrayBuffer
 ```
 
 This target is a great choice for small-ish files (< 100 MB), but since all data will be kept in memory, using it for large files is suboptimal. If the output gets very large, the page might crash due to memory exhaustion. For these cases, using `StreamTarget` is recommended.
