@@ -6,7 +6,7 @@ title: Mediabunny
 hero:
     name: Mediabunny
     text: Complete media toolkit
-    tagline: A JavaScript library for reading, writing, and converting media files. Directly in the browser, and faster than anybunny else.
+    tagline: A JavaScript library for reading, writing, and converting video and audio files. Directly in the browser, and faster than anybunny else.
     image: 
       src: /mediabunny-logo.svg
       alt: Mediabunny logo
@@ -124,7 +124,7 @@ npm install mediabunny
 <div class="flex flex-col lg:flex-row lg:gap-20 lg:items-center">
 <div class="flex-1 min-w-0">
 <h1 class="inline-block" style="background: -webkit-linear-gradient(-30deg, #ff45ac, #ff78c2); -webkit-background-clip: text; color: transparent;">Read any media file, efficiently</h1>
-<p class="text-lg">Mediabunny allows you efficiently read data from any media file, no matter the size: duration, resolution, rotation, tracks, codecs and other metadata, as well as raw or decoded media data from anywhere in the file. Load only what you need.</p>
+<p class="text-lg">Mediabunny allows you efficiently read data from any video or audio file, no matter the size: duration, resolution, rotation, tracks, codecs and other metadata, as well as raw or decoded media data from anywhere in the file. Load only what you need.</p>
 <a class="!no-underline inline-flex items-center gap-1.5" :no-icon="true" href="/guide/reading-media-files">
 	Docs
 	<span class="vpi-arrow-right" />
