@@ -37,7 +37,7 @@ features:
       target: _self
       icon:
         src: /mingcute--magic-3-line.svg
-    - title: Live recording
+    - title: Live recording & streaming
       details: Record a video from live sources and stream it to a video element.
       link: /examples/live-recording	
       target: _self
