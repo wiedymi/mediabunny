@@ -155,6 +155,7 @@ const shortDelay = () => {
 selectMediaButton.addEventListener('click', () => {
 	const fileInput = document.createElement('input');
 	fileInput.type = 'file';
+	fileInput.accept = 'video/*,video/x-matroska,audio/*';
 	fileInput.addEventListener('change', () => {
 		const file = fileInput.files?.[0];
 		if (!file) {
