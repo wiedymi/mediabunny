@@ -134,7 +134,9 @@ export const writeBits = (bytes: Uint8Array, start: number, end: number, value: 
 };
 
 export const toUint8Array = (source: AllowSharedBufferSource): Uint8Array => {
-	if (source instanceof ArrayBuffer) {
+	if (source instanceof Uint8Array) {
+		return source;
+	} else if (source instanceof ArrayBuffer) {
 		return new Uint8Array(source);
 	} else {
 		return new Uint8Array(source.buffer, source.byteOffset, source.byteLength);
@@ -142,7 +144,9 @@ export const toUint8Array = (source: AllowSharedBufferSource): Uint8Array => {
 };
 
 export const toDataView = (source: AllowSharedBufferSource) => {
-	if (source instanceof ArrayBuffer) {
+	if (source instanceof DataView) {
+		return source;
+	} else if (source instanceof ArrayBuffer) {
 		return new DataView(source);
 	} else {
 		return new DataView(source.buffer, source.byteOffset, source.byteLength);
@@ -202,11 +206,10 @@ export const colorSpaceIsComplete = (
 };
 
 export const isAllowSharedBufferSource = (x: unknown) => {
-	// Quite a mouthful:
 	return (
 		x instanceof ArrayBuffer
 		|| (typeof SharedArrayBuffer !== 'undefined' && x instanceof SharedArrayBuffer)
-		|| (ArrayBuffer.isView(x) && !(x instanceof DataView))
+		|| ArrayBuffer.isView(x)
 	);
 };
 

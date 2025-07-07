@@ -890,7 +890,6 @@ export class AudioSample {
 					}
 
 					return new AudioData({
-
 						format: this.format,
 						sampleRate: this.sampleRate,
 						numberOfFrames: this.numberOfFrames,
@@ -900,11 +899,9 @@ export class AudioSample {
 					});
 				} else {
 					const data = new ArrayBuffer(this.allocationSize({ planeIndex: 0, format: this.format }));
-
-					this.copyTo(new DataView(data), { planeIndex: 0, format: this.format });
+					this.copyTo(data, { planeIndex: 0, format: this.format });
 
 					return new AudioData({
-
 						format: this.format,
 						sampleRate: this.sampleRate,
 						numberOfFrames: this.numberOfFrames,
@@ -916,7 +913,6 @@ export class AudioSample {
 			}
 		} else {
 			return new AudioData({
-
 				format: this.format,
 				sampleRate: this.sampleRate,
 				numberOfFrames: this.numberOfFrames,
