@@ -21,7 +21,7 @@
 			chunked: true,
 			chunkSize: 2**20
 		});
-		const outputFormat = new Mediabunny.MovOutputFormat();
+		const outputFormat = new Mediabunny.Mp4OutputFormat();
 
 		const button = document.createElement('button');
 		button.textContent = 'Cancel';
@@ -38,7 +38,8 @@
 				target
 			}),
 			audio: {
-				codec: 'pcm-f64'
+				codec: 'opus',
+				bitrate: 128000,
 				//numberOfChannels: 1,
 				//sampleRate: 4000
 				//discard: true

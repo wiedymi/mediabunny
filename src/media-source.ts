@@ -416,8 +416,9 @@ class VideoEncoderWrapper {
 				const support = await VideoEncoder.isConfigSupported(encoderConfig);
 				if (!support.supported) {
 					throw new Error(
-						'This specific encoder configuration is not supported by this browser. Consider using another'
-						+ ' codec or changing your video parameters.',
+						`This specific encoder configuration (${encoderConfig.codec}, ${encoderConfig.bitrate} bps,`
+						+ ` ${encoderConfig.width}x${encoderConfig.height}) is not supported by this browser. Consider`
+						+ ` using another codec or changing your video parameters.`,
 					);
 				}
 
@@ -988,8 +989,9 @@ class AudioEncoderWrapper {
 				const support = await AudioEncoder.isConfigSupported(encoderConfig);
 				if (!support.supported) {
 					throw new Error(
-						'This specific encoder configuration not supported by this browser. Consider using another'
-						+ ' codec or changing your audio parameters.',
+						`This specific encoder configuration (${encoderConfig.codec}, ${encoderConfig.bitrate} bps,`
+						+ ` ${encoderConfig.numberOfChannels} channels, ${encoderConfig.sampleRate} Hz) is not`
+						+ ` supported by this browser. Consider using another codec or changing your audio parameters.`,
 					);
 				}
 
