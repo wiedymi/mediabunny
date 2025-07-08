@@ -5,7 +5,7 @@
 [![](https://img.shields.io/npm/dm/mediabunny)](https://www.npmjs.com/package/mediabunny)
 
 <div align="center">
-    <img src="./docs/public/mediabunny-logo.svg" height="180">
+    <img src="./docs/public/mediabunny-logo.svg" width="180" height="180">
 </div>
 
 Mediabunny is a JavaScript library for reading, writing, and converting media files (like MP4, WebM, MP3), directly in the browser. It aims to be a complete toolkit for high-performance media operations on the web. It's written from scratch in pure TypeScript, has zero dependencies, is very performant, and is extremely tree-shakable, meaning you only include what you use. You can think of it a bit like [FFmpeg](https://ffmpeg.org/), but built from the ground up for the web.
@@ -16,11 +16,11 @@ Mediabunny is a JavaScript library for reading, writing, and converting media fi
 
 <div align="center">
   <a href="https://www.gling.ai/" target="_blank">
-    <img src="./docs/public/sponsors/gling.svg" height="60" alt="Gling AI">
+    <img src="./docs/public/sponsors/gling.svg" width="60" height="60" alt="Gling AI">
   </a>
   &nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://diffusion.studio/" target="_blank">
-    <img src="./docs/public/sponsors/diffusionstudio.png" height="60" alt="Diffusion Studio">
+    <img src="./docs/public/sponsors/diffusionstudio.png" width="60" height="60" alt="Diffusion Studio">
   </a>
 </div>
 
