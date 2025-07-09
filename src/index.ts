@@ -6,6 +6,9 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
+/// <reference types="dom-mediacapture-transform" preserve="true" />
+/// <reference types="dom-webcodecs" preserve="true" />
+
 export {
 	Output,
 	OutputOptions,

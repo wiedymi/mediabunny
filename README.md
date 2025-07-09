@@ -152,7 +152,7 @@ For development, clone this repository and install it using a modern version of 
 
 ```bash
 npm install # Install dependencies
-npm run watch # Development build with watch mode
+npm run watch # Build bundles on watch mode
 
 npm run build # Production build with type definitions
 

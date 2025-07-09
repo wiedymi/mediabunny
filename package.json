@@ -4,22 +4,24 @@
   "version": "1.0.3",
   "description": "Pure TypeScript media toolkit for reading, writing, and converting media files, directly in the browser.",
   "type": "module",
-  "main": "./dist/mediabunny.js",
-  "module": "./dist/mediabunny.mjs",
-  "types": "./dist/mediabunny.d.ts",
+  "main": "./dist/bundles/mediabunny.cjs",
+  "module": "./dist/modules/index.js",
+  "types": "./dist/modules/index.d.ts",
   "exports": {
-    "types": "./dist/mediabunny.d.ts",
-    "import": "./dist/mediabunny.mjs",
-    "require": "./dist/mediabunny.js"
+    "types": "./dist/modules/index.d.ts",
+    "import": "./dist/modules/index.js",
+    "require": "./dist/bundles/mediabunny.cjs"
   },
   "files": [
     "README.md",
     "package.json",
     "LICENSE",
-    "dist"
+    "dist",
+    "src"
   ],
+  "sideEffects": false,
   "scripts": {
-    "build": "tsx scripts/ensure-license-headers.ts && node build.mjs && tsc -p src && api-extractor run && npm run check-docblocks && tsx scripts/append-namespace.ts",
+    "build": "rm -rf dist && tsx scripts/ensure-license-headers.ts && tsc -p src && npm run fix-build-import-paths && node build.mjs && api-extractor run && npm run check-docblocks && npm run append-namespace",
     "watch": "node build.mjs --watch",
     "lint": "eslint .",
     "check": "tsc -p src --noEmit && tsc -p scripts --noEmit && tsc -p tsconfig.vite.json --noEmit && rm tsconfig.vite.tsbuildinfo",
@@ -28,7 +30,9 @@
     "docs:build": "vitepress build docs && npm run examples:build",
     "docs:preview": "vitepress preview docs",
     "dev": "vite",
-    "examples:build": "vite build"
+    "examples:build": "vite build",
+    "fix-build-import-paths": "find dist -name \"*.js\" -type f -exec sed -i -r \"s/ from '([^']+)';/ from '\\1.js';/g\" {} \\;",
+    "append-namespace": "echo 'export as namespace Mediabunny;' >> dist/mediabunny.d.ts"
   },
   "license": "MPL-2.0",
   "repository": {

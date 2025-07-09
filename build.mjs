@@ -37,20 +37,20 @@ const esmConfig = {
 
 const ctxUmd = await esbuild.context({
 	...umdConfig,
-	outfile: 'dist/mediabunny.js',
+	outfile: 'dist/bundles/mediabunny.cjs',
 });
 const ctxEsm = await esbuild.context({
 	...esmConfig,
-	outfile: 'dist/mediabunny.mjs',
+	outfile: 'dist/bundles/mediabunny.mjs',
 });
 const ctxUmdMinified = await esbuild.context({
 	...umdConfig,
-	outfile: 'dist/mediabunny.min.js',
+	outfile: 'dist/bundles/mediabunny.min.cjs',
 	minify: true,
 });
 const ctxEsmMinified = await esbuild.context({
 	...esmConfig,
-	outfile: 'dist/mediabunny.min.mjs',
+	outfile: 'dist/bundles/mediabunny.min.mjs',
 	minify: true,
 });
 
