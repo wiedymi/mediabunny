@@ -701,7 +701,11 @@ export class IsobmffDemuxer extends Demuxer {
 					}
 
 					if (relevantEntryFound) {
-						throw new Error('Unsupported edit list: multiple edits are not supported.');
+						console.warn(
+							'Unsupported edit list: multiple edits are not currently supported. Only using first edit.',
+						);
+
+						break;
 					}
 
 					if (mediaTime === -1) {
