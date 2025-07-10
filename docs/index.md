@@ -237,7 +237,7 @@ await conversion.execute();
 </div>
 </div>
 
-<div class="flex flex-col-reverse lg:flex-row gap-4 lg:gap-20 lg:items-center">
+<div class="flex flex-col-reverse lg:flex-row gap-4 lg:gap-20 items-center">
 <div class="relative flex-1 min-w-0">
 <div class="absolute size-70 rounded-full bg-[#ff45ac]/0 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 blur-[200px]" />
 <img class="relative" src="./assets/inspiring-io.svg">
