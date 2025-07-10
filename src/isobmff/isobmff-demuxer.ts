@@ -54,6 +54,7 @@ import {
 	isIso639Dash2LanguageCode,
 	roundToMultiple,
 	normalizeRotation,
+	Bitstream,
 } from '../misc';
 import { EncodedPacket, PLACEHOLDER_DATA } from '../packet';
 import { Reader } from '../reader';
@@ -704,7 +705,6 @@ export class IsobmffDemuxer extends Demuxer {
 						console.warn(
 							'Unsupported edit list: multiple edits are not currently supported. Only using first edit.',
 						);
-
 						break;
 					}
 
@@ -714,7 +714,8 @@ export class IsobmffDemuxer extends Demuxer {
 					}
 
 					if (mediaRate !== 1) {
-						throw new Error('Unsupported edit list: media rate must be 1.');
+						console.warn('Unsupported edit list entry: media rate must be 1.');
+						break;
 					}
 
 					track.editListPreviousSegmentDurations = previousSegmentDurations;
@@ -946,7 +947,8 @@ export class IsobmffDemuxer extends Demuxer {
 							} else if (sampleSize === 16) {
 								track.info.codec = 'pcm-s16be';
 							} else {
-								throw new Error(`Unsupported sample size ${sampleSize} for codec 'twos'.`);
+								console.warn(`Unsupported sample size ${sampleSize} for codec 'twos'.`);
+								track.info.codec = null;
 							}
 						} else if (lowercaseBoxName === 'sowt') {
 							if (sampleSize === 8) {
@@ -954,7 +956,8 @@ export class IsobmffDemuxer extends Demuxer {
 							} else if (sampleSize === 16) {
 								track.info.codec = 'pcm-s16';
 							} else {
-								throw new Error(`Unsupported sample size ${sampleSize} for codec 'sowt'.`);
+								console.warn(`Unsupported sample size ${sampleSize} for codec 'sowt'.`);
+								track.info.codec = null;
 							}
 						} else if (lowercaseBoxName === 'raw ') {
 							track.info.codec = 'pcm-u8';
@@ -1197,7 +1200,8 @@ export class IsobmffDemuxer extends Demuxer {
 						} else if (pcmSampleSize === 32) {
 							track.info.codec = 'pcm-s32';
 						} else {
-							throw new Error(`Invalid ipcm sample size ${pcmSampleSize}.`);
+							console.warn(`Invalid ipcm sample size ${pcmSampleSize}.`);
+							track.info.codec = null;
 						}
 					} else {
 						if (pcmSampleSize === 16) {
@@ -1207,7 +1211,8 @@ export class IsobmffDemuxer extends Demuxer {
 						} else if (pcmSampleSize === 32) {
 							track.info.codec = 'pcm-s32be';
 						} else {
-							throw new Error(`Invalid ipcm sample size ${pcmSampleSize}.`);
+							console.warn(`Invalid ipcm sample size ${pcmSampleSize}.`);
+							track.info.codec = null;
 						}
 					}
 				} else if (track.info.codec === 'pcm-f32be') {
@@ -1219,7 +1224,8 @@ export class IsobmffDemuxer extends Demuxer {
 						} else if (pcmSampleSize === 64) {
 							track.info.codec = 'pcm-f64';
 						} else {
-							throw new Error(`Invalid fpcm sample size ${pcmSampleSize}.`);
+							console.warn(`Invalid fpcm sample size ${pcmSampleSize}.`);
+							track.info.codec = null;
 						}
 					} else {
 						if (pcmSampleSize === 32) {
@@ -1227,7 +1233,8 @@ export class IsobmffDemuxer extends Demuxer {
 						} else if (pcmSampleSize === 64) {
 							track.info.codec = 'pcm-f64be';
 						} else {
-							throw new Error(`Invalid fpcm sample size ${pcmSampleSize}.`);
+							console.warn(`Invalid fpcm sample size ${pcmSampleSize}.`);
+							track.info.codec = null;
 						}
 					}
 				}
@@ -1409,8 +1416,27 @@ export class IsobmffDemuxer extends Demuxer {
 			}; break;
 
 			case 'stz2': {
-				throw new Error('Unsupported.');
-			};
+				const track = this.currentTrack;
+				assert(track);
+
+				if (!track.sampleTable) {
+					break;
+				}
+
+				this.metadataReader.pos += 4; // Version + flags
+				this.metadataReader.pos += 3; // Reserved
+
+				const fieldSize = this.metadataReader.readU8(); // in bits
+				const sampleCount = this.metadataReader.readU32();
+
+				const bytes = this.metadataReader.readBytes(Math.ceil(sampleCount * fieldSize / 8));
+				const bitstream = new Bitstream(bytes);
+
+				for (let i = 0; i < sampleCount; i++) {
+					const sampleSize = bitstream.readBits(fieldSize);
+					track.sampleTable.sampleSizes.push(sampleSize);
+				}
+			}; break;
 
 			case 'stss': {
 				const track = this.currentTrack;
@@ -1737,7 +1763,8 @@ export class IsobmffDemuxer extends Demuxer {
 				assert(track.currentFragmentState);
 
 				if (this.currentFragment.trackData.has(track.id)) {
-					throw new Error('Can\'t have two trun boxes for the same track in one fragment.');
+					console.warn('Can\'t have two trun boxes for the same track in one fragment. Ignoring...');
+					break;
 				}
 
 				const version = this.metadataReader.readU8();
