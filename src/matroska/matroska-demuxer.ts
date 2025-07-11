@@ -484,24 +484,18 @@ export class MatroskaDemuxer extends Demuxer {
 				.map((block, i) => ({ timestamp: block.timestamp, blockIndex: i }))
 				.sort((a, b) => a.timestamp - b.timestamp);
 
-			let hasKeyFrame = false;
 			for (let i = 0; i < trackData.presentationTimestamps.length; i++) {
-				const entry = trackData.presentationTimestamps[i]!;
-				const block = trackData.blocks[entry.blockIndex]!;
+				const currentEntry = trackData.presentationTimestamps[i]!;
+				const currentBlock = trackData.blocks[currentEntry.blockIndex]!;
 
-				if (block.isKeyFrame) {
-					hasKeyFrame = true;
-
-					if (trackData.firstKeyFrameTimestamp === null && block.isKeyFrame) {
-						trackData.firstKeyFrameTimestamp = block.timestamp;
-					}
+				if (trackData.firstKeyFrameTimestamp === null && currentBlock.isKeyFrame) {
+					trackData.firstKeyFrameTimestamp = currentBlock.timestamp;
 				}
 
 				if (i < trackData.presentationTimestamps.length - 1) {
 					// Update block durations based on presentation order
 					const nextEntry = trackData.presentationTimestamps[i + 1]!;
-					const nextBlock = trackData.blocks[nextEntry.blockIndex]!;
-					block.duration = nextBlock.timestamp - block.timestamp;
+					currentBlock.duration = nextEntry.timestamp - currentBlock.timestamp;
 				}
 			}
 
@@ -520,6 +514,7 @@ export class MatroskaDemuxer extends Demuxer {
 				);
 				track.clusters.splice(insertionIndex + 1, 0, cluster);
 
+				const hasKeyFrame = trackData.firstKeyFrameTimestamp !== null;
 				if (hasKeyFrame) {
 					const insertionIndex = binarySearchLessOrEqual(
 						track.clustersWithKeyFrame,
@@ -1210,7 +1205,7 @@ abstract class MatroskaTrackBacking implements InputTrackBacking {
 						correctBlockFound: true,
 					};
 				} else {
-					// Walk the list of clusters until we find the next cluster for this track
+					// Walk the list of clusters until we find the next cluster for this track with a key frame
 					let currentCluster = locationInCluster.cluster;
 					while (currentCluster.nextCluster) {
 						currentCluster = currentCluster.nextCluster;

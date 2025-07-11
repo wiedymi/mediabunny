@@ -75,6 +75,7 @@ type InternalTrack = {
 	fragmentLookupTable: FragmentLookupTableEntry[] | null;
 	currentFragmentState: FragmentTrackState | null;
 	fragments: Fragment[];
+	fragmentsWithKeyFrame: Fragment[];
 	/** The segment durations of all edit list entries leading up to the main one (from which the offset is taken.) */
 	editListPreviousSegmentDurations: number;
 	/** The media time offset of the main edit list entry (with media time !== -1) */
@@ -168,6 +169,7 @@ type FragmentTrackState = {
 type FragmentTrackData = {
 	startTimestamp: number;
 	endTimestamp: number;
+	firstKeyFrameTimestamp: number | null;
 	samples: FragmentTrackSample[];
 	presentationTimestamps: {
 		presentationTimestamp: number;
@@ -608,6 +610,7 @@ export class IsobmffDemuxer extends Demuxer {
 					fragmentLookupTable: null,
 					currentFragmentState: null,
 					fragments: [],
+					fragmentsWithKeyFrame: [],
 					editListPreviousSegmentDurations: 0,
 					editListOffset: 0,
 				} satisfies InternalTrack as InternalTrack;
@@ -1665,6 +1668,16 @@ export class IsobmffDemuxer extends Demuxer {
 						);
 						this.currentTrack.fragments.splice(insertionIndex + 1, 0, this.currentFragment);
 
+						const hasKeyFrame = trackData.firstKeyFrameTimestamp !== null;
+						if (hasKeyFrame) {
+							const insertionIndex = binarySearchLessOrEqual(
+								this.currentTrack.fragmentsWithKeyFrame,
+								this.currentFragment.moofOffset,
+								x => x.moofOffset,
+							);
+							this.currentTrack.fragmentsWithKeyFrame.splice(insertionIndex + 1, 0, this.currentFragment);
+						}
+
 						const { currentFragmentState } = this.currentTrack;
 						assert(currentFragmentState);
 
@@ -1801,6 +1814,7 @@ export class IsobmffDemuxer extends Demuxer {
 				const trackData: FragmentTrackData = {
 					startTimestamp: 0,
 					endTimestamp: 0,
+					firstKeyFrameTimestamp: null,
 					samples: [],
 					presentationTimestamps: [],
 					startTimestampIsFinal: false,
@@ -1862,13 +1876,19 @@ export class IsobmffDemuxer extends Demuxer {
 					.map((x, i) => ({ presentationTimestamp: x.presentationTimestamp, sampleIndex: i }))
 					.sort((a, b) => a.presentationTimestamp - b.presentationTimestamp);
 
-				// Update sample durations based on presentation order
-				for (let i = 0; i < trackData.presentationTimestamps.length - 1; i++) {
-					const current = trackData.presentationTimestamps[i]!;
-					const next = trackData.presentationTimestamps[i + 1]!;
+				for (let i = 0; i < trackData.presentationTimestamps.length; i++) {
+					const currentEntry = trackData.presentationTimestamps[i]!;
+					const currentSample = trackData.samples[currentEntry.sampleIndex]!;
 
-					const duration = next.presentationTimestamp - current.presentationTimestamp;
-					trackData.samples[current.sampleIndex]!.duration = duration;
+					if (trackData.firstKeyFrameTimestamp === null && currentSample.isKeyFrame) {
+						trackData.firstKeyFrameTimestamp = currentSample.presentationTimestamp;
+					}
+
+					if (i < trackData.presentationTimestamps.length - 1) {
+						// Update sample durations based on presentation order
+						const nextEntry = trackData.presentationTimestamps[i + 1]!;
+						currentSample.duration = nextEntry.presentationTimestamp - currentEntry.presentationTimestamp;
+					}
 				}
 
 				const firstSample = trackData.samples[trackData.presentationTimestamps[0]!.sampleIndex]!;
@@ -2105,13 +2125,13 @@ abstract class IsobmffTrackBacking implements InputTrackBacking {
 							correctSampleFound: true,
 						};
 					} else {
-						// Walk the list of fragments until we find the next fragment for this track
+						// Walk the list of fragments until we find the next fragment for this track with a key frame
 						let currentFragment = locationInFragment.fragment;
 						while (currentFragment.nextFragment) {
 							currentFragment = currentFragment.nextFragment;
 
 							const trackData = currentFragment.trackData.get(this.internalTrack.id);
-							if (trackData) {
+							if (trackData && trackData.firstKeyFrameTimestamp !== null) {
 								const fragmentIndex = binarySearchExact(
 									this.internalTrack.fragments,
 									currentFragment.moofOffset,
@@ -2120,9 +2140,7 @@ abstract class IsobmffTrackBacking implements InputTrackBacking {
 								assert(fragmentIndex !== -1);
 
 								const keyFrameIndex = trackData.samples.findIndex(x => x.isKeyFrame);
-								if (keyFrameIndex === -1) {
-									throw new Error('Not supported: Fragment does not contain key sample.');
-								}
+								assert(keyFrameIndex !== -1); // There must be one
 
 								return {
 									fragmentIndex,
@@ -2262,26 +2280,34 @@ abstract class IsobmffTrackBacking implements InputTrackBacking {
 	}
 
 	private findKeySampleInFragmentsForTimestamp(timestampInTimescale: number) {
-		const fragmentIndex = binarySearchLessOrEqual(
+		const indexInKeyFrameFragments = binarySearchLessOrEqual(
 			// This array is technically not sorted by start timestamp, but for any reasonable file, it basically is.
-			this.internalTrack.fragments,
+			this.internalTrack.fragmentsWithKeyFrame,
 			timestampInTimescale,
 			x => x.trackData.get(this.internalTrack.id)!.startTimestamp,
 		);
+
+		let fragmentIndex = -1;
 		let sampleIndex = -1;
 		let correctSampleFound = false;
 
-		if (fragmentIndex !== -1) {
-			const fragment = this.internalTrack.fragments[fragmentIndex]!;
+		if (indexInKeyFrameFragments !== -1) {
+			const fragment = this.internalTrack.fragmentsWithKeyFrame[indexInKeyFrameFragments]!;
+
+			// Now, let's find the actual index of the fragment in the list of ALL fragments, not just key frame ones
+			fragmentIndex = binarySearchExact(
+				this.internalTrack.fragments,
+				fragment.moofOffset,
+				x => x.moofOffset,
+			);
+			assert(fragmentIndex !== -1);
+
 			const trackData = fragment.trackData.get(this.internalTrack.id)!;
 			const index = findLastIndex(trackData.presentationTimestamps, (x) => {
 				const sample = trackData.samples[x.sampleIndex]!;
 				return sample.isKeyFrame && x.presentationTimestamp <= timestampInTimescale;
 			});
-
-			if (index === -1) {
-				throw new Error('Not supported: Fragment does not begin with a key sample.');
-			}
+			assert(index !== -1); // It's a key frame fragment, so there must be a key frame
 
 			const entry = trackData.presentationTimestamps[index]!;
 			sampleIndex = entry.sampleIndex;
