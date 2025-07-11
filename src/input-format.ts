@@ -13,6 +13,7 @@ import { IsobmffReader } from './isobmff/isobmff-reader';
 import { EBMLId, EBMLReader } from './matroska/ebml';
 import { MatroskaDemuxer } from './matroska/matroska-demuxer';
 import { Mp3Demuxer } from './mp3/mp3-demuxer';
+import { FRAME_HEADER_SIZE } from './mp3/mp3-misc';
 import { Mp3Reader } from './mp3/mp3-reader';
 import { OggDemuxer } from './ogg/ogg-demuxer';
 import { OggReader } from './ogg/ogg-reader';
@@ -245,9 +246,10 @@ export class Mp3InputFormat extends InputFormat {
 		}
 
 		// Fine, we found one frame header, but we're still not entirely sure this is MP3. Let's check if we can find
-		// another header nearby:
+		// another header right after it:
 		mp3Reader.pos = firstHeader.startPos + firstHeader.totalSize;
-		const secondHeader = mp3Reader.readNextFrameHeader(Math.min(framesStartPos + 4096, sourceSize));
+		await mp3Reader.reader.loadRange(mp3Reader.pos, mp3Reader.pos + FRAME_HEADER_SIZE);
+		const secondHeader = mp3Reader.readNextFrameHeader(mp3Reader.pos + FRAME_HEADER_SIZE);
 		if (!secondHeader) {
 			return false;
 		}
@@ -257,7 +259,7 @@ export class Mp3InputFormat extends InputFormat {
 			return false;
 		}
 
-		// We have found two matching MP3 frames, a strong indicator that this is an MP3 file
+		// We have found two matching consecutive MP3 frames, a strong indicator that this is an MP3 file
 		return true;
 	}
 

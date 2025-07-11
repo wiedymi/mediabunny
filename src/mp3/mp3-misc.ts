@@ -85,6 +85,10 @@ export const readFrameHeader = (word: number, reader: { pos: number; fileSize: n
 
 	reader.pos += 1;
 
+	if (firstByte !== 0xff) {
+		return null;
+	}
+
 	if ((secondByte & 0xe0) !== 0xe0) {
 		return null;
 	}

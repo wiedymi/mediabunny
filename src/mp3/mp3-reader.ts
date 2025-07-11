@@ -65,7 +65,7 @@ export class Mp3Reader {
 		assert(this.fileSize);
 		until ??= this.fileSize;
 
-		while (this.pos < until - FRAME_HEADER_SIZE) {
+		while (this.pos <= until - FRAME_HEADER_SIZE) {
 			const word = this.readU32();
 			this.pos -= 4;
 
