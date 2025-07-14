@@ -85,7 +85,7 @@ const startRecording = async () => {
 
 		// Add the video track, with the canvas as the source
 		videoSource = new CanvasSource(canvas, {
-			codec: 'vp9',
+			codec: 'avc',
 			bitrate: QUALITY_MEDIUM,
 			keyFrameInterval: 0.5,
 			latencyMode: 'realtime', // Allow the encoder to skip frames to keep up with real-time constraints
