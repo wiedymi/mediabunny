@@ -737,6 +737,7 @@ class VideoDecoderWrapper extends DecoderWrapper<VideoSample> {
 		// Round the timestamps to the time resolution
 		sample.setTimestamp(Math.round(sample.timestamp * this.timeResolution) / this.timeResolution);
 		sample.setDuration(Math.round(sample.duration * this.timeResolution) / this.timeResolution);
+		sample.setRotation(this.rotation);
 
 		this.onSample(sample);
 	}

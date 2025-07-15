@@ -15,14 +15,21 @@
 			formats: Mediabunny.ALL_FORMATS,
 			source
 		});
+
+		const canvas = document.createElement('canvas');
+		canvas.width = 1920;
+		canvas.height = 1080;
+		canvas.style.background = 'ghostwhite';
+		const ctx = canvas.getContext('2d');
+		document.body.append(canvas);
 		
 		const videoTrack = await input.getPrimaryVideoTrack();
+		const sink = new Mediabunny.VideoSampleSink(videoTrack);
 
-		const sink = new Mediabunny.EncodedPacketSink(videoTrack);
-		for await (const packet of sink.packets()) {
-			if (packet.timestamp >= 2) break;
-			console.log(packet);
-		}
+		const sample = await sink.getSample(3);
+		console.log(sample);
+
+		sample.draw(ctx, 1500, 500, 50, 50, 0, 0);
 
 		/*
 		let timestamps = [];

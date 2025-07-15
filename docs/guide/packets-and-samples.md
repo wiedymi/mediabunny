@@ -309,17 +309,29 @@ The `VideoFrame` returned by this method **must** be closed separately from the 
 
 ---
 
-It's also common to draw video samples to a `<canvas>` element or an `OffscreenCanvas`. For this, you can use the following method:
+It's also common to draw video samples to a `<canvas>` element or an `OffscreenCanvas`. For this, you can use the following methods:
 ```ts
 draw(
 	context: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
 	dx: number,
 	dy: number,
-	dWidth?: number,
-	dHeight?: number,
+	dWidth?: number, // defaults to displayWidth
+	dHeight?: number, // defaults to displayHeight
+): void;
+
+draw(
+	context: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+	sx: number,
+	sy: number,
+	sWidth: number,
+	sHeight: number,
+	dx: number,
+	dy: number,
+	dWidth?: number, // defaults to sWidth
+	dHeight?: number, // defaults to sHeight
 ): void;
 ```
-This method is similar to [drawImage](https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/drawImage) and paints the video frame at the given position with the given dimensions. If the dimensions aren't specified, they will default to the display dimensions. This method will automatically draw the frame with the correct rotation based on its `rotation` property.
+These methods behave like [drawImage](https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/drawImage) and paint the video frame at the given position with the given dimensions. This method will automatically draw the frame with the correct rotation based on its `rotation` property.
 
 If you want to draw the raw underlying image to a canvas directly (without respecting the rotation metadata), then you can use the following method:
 ```ts

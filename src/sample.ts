@@ -366,9 +366,79 @@ export class VideoSample {
 		context: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
 		dx: number,
 		dy: number,
-		dWidth: number = this.displayWidth,
-		dHeight: number = this.displayHeight,
+		dWidth?: number,
+		dHeight?: number,
+	): void;
+	/**
+	 * Draws the video sample to a 2D canvas context. Rotation metadata will be taken into account.
+	 *
+	 * @param sx - The x-coordinate of the top left corner of the sub-rectangle of the source image to draw into the
+	 * destination context.
+	 * @param sy - The y-coordinate of the top left corner of the sub-rectangle of the source image to draw into the
+	 * destination context.
+	 * @param sWidth - The width of the sub-rectangle of the source image to draw into the destination context.
+	 * @param sHeight - The height of the sub-rectangle of the source image to draw into the destination context.
+	 * @param dx - The x-coordinate in the destination canvas at which to place the top-left corner of the source image.
+	 * @param dy - The y-coordinate in the destination canvas at which to place the top-left corner of the source image.
+	 * @param dWidth - The width in pixels with which to draw the image in the destination canvas.
+	 * @param dHeight - The height in pixels with which to draw the image in the destination canvas.
+	 */
+	draw(
+		context: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+		sx: number,
+		sy: number,
+		sWidth: number,
+		sHeight: number,
+		dx: number,
+		dy: number,
+		dWidth?: number,
+		dHeight?: number,
+	): void;
+	draw(
+		context: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+		arg1: number,
+		arg2: number,
+		arg3?: number,
+		arg4?: number,
+		arg5?: number,
+		arg6?: number,
+		arg7?: number,
+		arg8?: number,
 	) {
+		let sx = 0;
+		let sy = 0;
+		let sWidth = this.displayWidth;
+		let sHeight = this.displayHeight;
+		let dx = 0;
+		let dy = 0;
+		let dWidth = this.displayWidth;
+		let dHeight = this.displayHeight;
+
+		if (arg5 !== undefined) {
+			sx = arg1!;
+			sy = arg2!;
+			sWidth = arg3!;
+			sHeight = arg4!;
+			dx = arg5;
+			dy = arg6!;
+
+			if (arg7 !== undefined) {
+				dWidth = arg7;
+				dHeight = arg8!;
+			} else {
+				dWidth = sWidth;
+				dHeight = sHeight;
+			}
+		} else {
+			dx = arg1;
+			dy = arg2;
+
+			if (arg3 !== undefined) {
+				dWidth = arg3;
+				dHeight = arg4!;
+			}
+		}
+
 		if (!(
 			(typeof CanvasRenderingContext2D !== 'undefined' && context instanceof CanvasRenderingContext2D)
 			|| (
@@ -377,6 +447,18 @@ export class VideoSample {
 			)
 		)) {
 			throw new TypeError('context must be a CanvasRenderingContext2D or OffscreenCanvasRenderingContext2D.');
+		}
+		if (!Number.isFinite(sx)) {
+			throw new TypeError('sx must be a number.');
+		}
+		if (!Number.isFinite(sy)) {
+			throw new TypeError('sy must be a number.');
+		}
+		if (!Number.isFinite(sWidth) || sWidth < 0) {
+			throw new TypeError('sWidth must be a non-negative number.');
+		}
+		if (!Number.isFinite(sHeight) || sHeight < 0) {
+			throw new TypeError('sHeight must be a non-negative number.');
 		}
 		if (!Number.isFinite(dx)) {
 			throw new TypeError('dx must be a number.');
@@ -393,6 +475,29 @@ export class VideoSample {
 
 		if (this._closed) {
 			throw new Error('VideoSample is closed.');
+		}
+
+		// The provided sx,sy,sWidth,sHeight refer to the final rotated image, but that's not actually how the image is
+		// stored. Therefore, we must map these back onto the original, pre-rotation image.
+		if (this.rotation === 90) {
+			[sx, sy, sWidth, sHeight] = [
+				sy,
+				this.codedHeight - sx - sWidth,
+				sHeight,
+				sWidth,
+			];
+		} else if (this.rotation === 180) {
+			[sx, sy] = [
+				this.codedWidth - sx - sWidth,
+				this.codedHeight - sy - sHeight,
+			];
+		} else if (this.rotation === 270) {
+			[sx, sy, sWidth, sHeight] = [
+				this.codedWidth - sy - sHeight,
+				sx,
+				sHeight,
+				sWidth,
+			];
 		}
 
 		const source = this.toCanvasImageSource();
@@ -412,6 +517,10 @@ export class VideoSample {
 
 		context.drawImage(
 			source,
+			sx,
+			sy,
+			sWidth,
+			sHeight,
 			-dWidth / 2,
 			-dHeight / 2,
 			dWidth,
