@@ -220,7 +220,7 @@ export class MatroskaDemuxer extends Demuxer {
 
 			const fileSize = await this.input.source.getSize();
 
-			while (this.metadataReader.pos < fileSize - MIN_HEADER_SIZE) {
+			while (this.metadataReader.pos <= fileSize - MIN_HEADER_SIZE) {
 				await this.metadataReader.reader.loadRange(
 					this.metadataReader.pos,
 					this.metadataReader.pos + MAX_HEADER_SIZE,
@@ -557,7 +557,7 @@ export class MatroskaDemuxer extends Demuxer {
 	readContiguousElements(reader: EBMLReader, totalSize: number) {
 		const startIndex = reader.pos;
 
-		while (reader.pos - startIndex < totalSize) {
+		while (reader.pos - startIndex <= totalSize - MIN_HEADER_SIZE) {
 			this.traverseElement(reader);
 		}
 	}
@@ -1468,7 +1468,7 @@ abstract class MatroskaTrackBacking implements InputTrackBacking {
 					}
 
 					const endPos = dataStartPos + size;
-					if (endPos >= segment.elementEndPos - MIN_HEADER_SIZE) {
+					if (endPos > segment.elementEndPos - MIN_HEADER_SIZE) {
 						// No more elements fit in this segment
 						break;
 					} else {
