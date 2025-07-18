@@ -53,9 +53,13 @@ export class WaveDemuxer extends Demuxer {
 			const actualFileSize = await this.metadataReader.reader.source.getSize();
 
 			const riffType = this.metadataReader.readAscii(4);
-			this.metadataReader.littleEndian = riffType === 'RIFF';
+			this.metadataReader.littleEndian = riffType !== 'RIFX';
 
-			const totalFileSize = Math.min(this.metadataReader.readU32() + 8, actualFileSize);
+			const isRf64 = riffType === 'RF64';
+
+			const outerChunkSize = this.metadataReader.readU32();
+
+			let totalFileSize = isRf64 ? actualFileSize : Math.min(outerChunkSize + 8, actualFileSize);
 			const format = this.metadataReader.readAscii(4);
 
 			if (format !== 'WAVE') {
@@ -63,6 +67,9 @@ export class WaveDemuxer extends Demuxer {
 			}
 
 			this.metadataReader.pos = 12;
+			let chunksRead = 0;
+			let dataChunkSize: number | null = null;
+
 			while (this.metadataReader.pos < totalFileSize) {
 				await this.metadataReader.reader.loadRange(this.metadataReader.pos, this.metadataReader.pos + 8);
 
@@ -70,14 +77,28 @@ export class WaveDemuxer extends Demuxer {
 				const chunkSize = this.metadataReader.readU32();
 				const startPos = this.metadataReader.pos;
 
+				if (isRf64 && chunksRead === 0 && chunkId !== 'ds64') {
+					throw new Error('Invalid RF64 file: First chunk must be "ds64".');
+				}
+
 				if (chunkId === 'fmt ') {
 					await this.parseFmtChunk(chunkSize);
 				} else if (chunkId === 'data') {
+					dataChunkSize ??= chunkSize;
+
 					this.dataStart = this.metadataReader.pos;
-					this.dataSize = Math.min(chunkSize, totalFileSize - this.dataStart);
+					this.dataSize = Math.min(dataChunkSize, totalFileSize - this.dataStart);
+				} else if (chunkId === 'ds64') {
+					// File and data chunk sizes are defined in here instead
+
+					const riffChunkSize = this.metadataReader.readU64();
+					dataChunkSize = this.metadataReader.readU64();
+
+					totalFileSize = Math.min(riffChunkSize + 8, actualFileSize);
 				}
 
 				this.metadataReader.pos = startPos + chunkSize + (chunkSize & 1); // Handle padding
+				chunksRead++;
 			}
 
 			if (!this.audioInfo) {

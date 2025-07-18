@@ -18,10 +18,13 @@ import { assert } from '../misc';
 
 export class WaveMuxer extends Muxer {
 	private format: WavOutputFormat;
+	private isRf64: boolean;
 	private writer: Writer;
 	private riffWriter: RiffWriter;
 	private headerWritten = false;
 	private dataSize = 0;
+	private sampleRate: number | null = null;
+	private sampleCount = 0;
 
 	constructor(output: Output, format: WavOutputFormat) {
 		super(output);
@@ -29,6 +32,7 @@ export class WaveMuxer extends Muxer {
 		this.format = format;
 		this.writer = output._writer;
 		this.riffWriter = new RiffWriter(output._writer);
+		this.isRf64 = !!format._options.large;
 	}
 
 	async start() {
@@ -58,13 +62,22 @@ export class WaveMuxer extends Muxer {
 				assert(meta.decoderConfig);
 
 				this.writeHeader(track, meta.decoderConfig);
+				this.sampleRate = meta.decoderConfig.sampleRate;
 				this.headerWritten = true;
 			}
 
 			this.validateAndNormalizeTimestamp(track, packet.timestamp, packet.type === 'key');
 
+			if (!this.isRf64 && this.writer.getPos() + packet.data.byteLength >= 2 ** 32) {
+				throw new Error(
+					'Adding more audio data would exceed the maximum RIFF size of 4 GiB. To write larger files, use'
+					+ ' RF64 by setting `large: true` in the WavOutputFormatOptions.',
+				);
+			}
+
 			this.writer.write(packet.data);
 			this.dataSize += packet.data.byteLength;
+			this.sampleCount += Math.round(packet.duration * this.sampleRate!);
 
 			await this.writer.flush();
 		} finally {
@@ -101,9 +114,25 @@ export class WaveMuxer extends Muxer {
 		const blockSize = pcmInfo.sampleSize * channels;
 
 		// RIFF header
-		this.riffWriter.writeAscii('RIFF');
-		this.riffWriter.writeU32(0); // File size placeholder
+		this.riffWriter.writeAscii(this.isRf64 ? 'RF64' : 'RIFF');
+
+		if (this.isRf64) {
+			this.riffWriter.writeU32(0xffffffff); // Not used in RF64
+		} else {
+			this.riffWriter.writeU32(0); // File size placeholder
+		}
+
 		this.riffWriter.writeAscii('WAVE');
+
+		if (this.isRf64) {
+			this.riffWriter.writeAscii('ds64');
+			this.riffWriter.writeU32(28); // Chunk size
+			this.riffWriter.writeU64(0); // RIFF size placeholder
+			this.riffWriter.writeU64(0); // Data size placeholder
+			this.riffWriter.writeU64(0); // Sample count placeholder
+			this.riffWriter.writeU32(0); // Table length
+			// Empty table
+		}
 
 		// fmt chunk
 		this.riffWriter.writeAscii('fmt ');
@@ -117,7 +146,12 @@ export class WaveMuxer extends Muxer {
 
 		// data chunk
 		this.riffWriter.writeAscii('data');
-		this.riffWriter.writeU32(0); // Data size placeholder
+
+		if (this.isRf64) {
+			this.riffWriter.writeU32(0xffffffff); // Not used in RF64
+		} else {
+			this.riffWriter.writeU32(0); // Data size placeholder
+		}
 
 		if (this.format._options.onHeader) {
 			const { data, start } = this.writer.stopTrackingWrites();
@@ -130,13 +164,27 @@ export class WaveMuxer extends Muxer {
 
 		const endPos = this.writer.getPos();
 
-		// Write file size
-		this.writer.seek(4);
-		this.riffWriter.writeU32(this.dataSize + 36); // File size - 8
+		if (this.isRf64) {
+			// Write riff size
+			this.writer.seek(20);
+			this.riffWriter.writeU64(endPos - 8);
 
-		// Write data chunk size
-		this.writer.seek(40);
-		this.riffWriter.writeU32(this.dataSize);
+			// Write data size
+			this.writer.seek(28);
+			this.riffWriter.writeU64(this.dataSize);
+
+			// Write sample count
+			this.writer.seek(36);
+			this.riffWriter.writeU64(this.sampleCount);
+		} else {
+			// Write file size
+			this.writer.seek(4);
+			this.riffWriter.writeU32(endPos - 8);
+
+			// Write data chunk size
+			this.writer.seek(40);
+			this.riffWriter.writeU32(this.dataSize);
+		}
 
 		this.writer.seek(endPos);
 

@@ -291,7 +291,7 @@ export class WaveInputFormat extends InputFormat {
 
 		const riffReader = new RiffReader(input._mainReader);
 		const riffType = riffReader.readAscii(4);
-		if (riffType !== 'RIFF' && riffType !== 'RIFX') {
+		if (riffType !== 'RIFF' && riffType !== 'RIFX' && riffType !== 'RF64') {
 			return false;
 		}
 

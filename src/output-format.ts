@@ -547,6 +547,12 @@ export class Mp3OutputFormat extends OutputFormat {
  */
 export type WavOutputFormatOptions = {
 	/**
+	 * When enabled, an RF64 file be written, allowing for file sizes to exceed 4 GiB, which is otherwise not possible
+	 * for regular WAVE files.
+	 */
+	large?: boolean;
+
+	/**
 	 * Will be called once the file header is written. The header consists of the RIFF header, the format chunk, and the
 	 * start of the data chunk (with a placeholder size of 0).
 	 */
@@ -564,6 +570,9 @@ export class WavOutputFormat extends OutputFormat {
 	constructor(options: WavOutputFormatOptions = {}) {
 		if (!options || typeof options !== 'object') {
 			throw new TypeError('options must be an object.');
+		}
+		if (options.large !== undefined && typeof options.large !== 'boolean') {
+			throw new TypeError('options.large, when provided, must be a boolean.');
 		}
 		if (options.onHeader !== undefined && typeof options.onHeader !== 'function') {
 			throw new TypeError('options.onHeader, when provided, must be a function.');

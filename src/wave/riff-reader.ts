@@ -35,6 +35,21 @@ export class RiffReader {
 		return view.getUint32(offset, this.littleEndian);
 	}
 
+	readU64() {
+		let low: number;
+		let high: number;
+
+		if (this.littleEndian) {
+			low = this.readU32();
+			high = this.readU32();
+		} else {
+			high = this.readU32();
+			low = this.readU32();
+		}
+
+		return high * 0x100000000 + low;
+	}
+
 	readAscii(length: number) {
 		const { view, offset } = this.reader.getViewAndOffset(this.pos, this.pos + length);
 		this.pos += length;

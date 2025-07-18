@@ -14,14 +14,20 @@ export class RiffWriter {
 
 	constructor(private writer: Writer) {}
 
+	writeU16(value: number) {
+		this.helperView.setUint16(0, value, true);
+		this.writer.write(this.helper.subarray(0, 2));
+	}
+
 	writeU32(value: number) {
 		this.helperView.setUint32(0, value, true);
 		this.writer.write(this.helper.subarray(0, 4));
 	}
 
-	writeU16(value: number) {
-		this.helperView.setUint16(0, value, true);
-		this.writer.write(this.helper.subarray(0, 2));
+	writeU64(value: number) {
+		this.helperView.setUint32(0, value, true);
+		this.helperView.setUint32(4, Math.floor(value / 2 ** 32), true);
+		this.writer.write(this.helper);
 	}
 
 	writeAscii(text: string) {
