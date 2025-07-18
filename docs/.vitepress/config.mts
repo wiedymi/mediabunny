@@ -4,11 +4,13 @@ import tailwindcss from '@tailwindcss/vite';
 import llmstxt from 'vitepress-plugin-llms';
 import { HeadConfig } from 'vitepress';
 
+const DESCRIPTION = 'A JavaScript library for reading, writing, and converting media files. Directly in the browser,'
+	+ ' and faster than anybunny else.';
+
 // https://vitepress.dev/reference/site-config
 export default withMermaid({
 	title: 'Mediabunny',
-	description: 'A JavaScript library for reading, writing, and converting media files. Directly in the browser, and'
-		+ ' faster than anybunny else.',
+	description: DESCRIPTION,
 	cleanUrls: true,
 	head: [
 		['link', { rel: 'icon', type: 'image/png', href: '/mediabunny-logo.png' }],
@@ -16,9 +18,13 @@ export default withMermaid({
 		['meta', { property: 'og:type', content: 'website' }],
 		['meta', { property: 'og:site_name', content: 'Mediabunny' }],
 		['meta', { property: 'og:url', content: 'https://mediabunny.dev/' }],
-		['meta', { property: 'og:image', content: '/mediabunny-og-image.png' }],
+		['meta', { property: 'og:image', content: 'https://mediabunny.dev/mediabunny-og-image.png' }],
 		['meta', { property: 'og:locale', content: 'en-US' }],
+		['meta', { property: 'og:description', content: DESCRIPTION }],
+		['meta', { name: 'twitter:image', content: 'https://mediabunny.dev/mediabunny-og-image.png' }],
 		['meta', { name: 'twitter:card', content: 'summary_large_image' }],
+		['meta', { name: 'twitter:site', content: '@vanilagy' }],
+		['meta', { name: 'twitter:description', content: DESCRIPTION }],
 	],
 	themeConfig: {
 		logo: '/mediabunny-logo.svg',
@@ -114,6 +120,7 @@ export default withMermaid({
 
 		((pageData.frontmatter['head'] ??= []) as HeadConfig[]).push(
 			['meta', { property: 'og:title', content: title }],
+			['meta', { property: 'twitter:title', content: title }],
 		);
 	},
 });
