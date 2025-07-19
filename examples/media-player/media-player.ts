@@ -30,6 +30,7 @@ const volumeIconWrapper = document.querySelector('#volume-icon-wrapper') as HTML
 const volumeButton = document.querySelector('#volume-button') as HTMLButtonElement;
 const fullscreenButton = document.querySelector('#fullscreen-button') as HTMLButtonElement;
 const errorElement = document.querySelector('#error-element') as HTMLDivElement;
+const warningElement = document.querySelector('#warning-element') as HTMLDivElement;
 
 const context = canvas.getContext('2d', { alpha: false, desynchronized: true })!;
 
@@ -81,6 +82,8 @@ const initMediaPlayer = async (file: File) => {
 		fileNameElement.textContent = file.name;
 		horizontalRule.style.display = '';
 		playerContainer.style.display = 'none';
+		errorElement.textContent = '';
+		warningElement.textContent = '';
 
 		// Create an Input from the file
 		const input = new Input({
@@ -95,17 +98,38 @@ const initMediaPlayer = async (file: File) => {
 		let videoTrack = await input.getPrimaryVideoTrack();
 		let audioTrack = await input.getPrimaryAudioTrack();
 
-		if (!(await videoTrack?.canDecode())) {
-			// We can't decode the video track, so treat it like there is no video track
-			videoTrack = null;
+		let problemMessage = '';
+
+		if (videoTrack) {
+			if (videoTrack.codec === null) {
+				problemMessage += 'Unsupported video codec. ';
+				videoTrack = null;
+			} else if (!(await videoTrack.canDecode())) {
+				problemMessage += 'Unable to decode the video track. ';
+				videoTrack = null;
+			}
 		}
-		if (!(await audioTrack?.canDecode())) {
-			// We can't decode the audio track, so treat it like there is no audio track
-			audioTrack = null;
+
+		if (audioTrack) {
+			if (audioTrack.codec === null) {
+				problemMessage += 'Unsupported audio codec. ';
+				audioTrack = null;
+			} else if (!(await audioTrack.canDecode())) {
+				problemMessage += 'Unable to decode the audio track. ';
+				audioTrack = null;
+			}
 		}
 
 		if (!videoTrack && !audioTrack) {
-			throw new Error('Media file has no playable video or audio track.');
+			if (!problemMessage) {
+				problemMessage = 'No audio or video track found.';
+			}
+
+			throw new Error(problemMessage);
+		}
+
+		if (problemMessage) {
+			warningElement.textContent = problemMessage;
 		}
 
 		// We must create the audio context with the matching sample rate for correct acoustic results

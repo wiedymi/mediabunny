@@ -15,7 +15,7 @@ const THUMBNAIL_SIZE = 200;
 const generateThumbnails = async (file: File) => {
 	fileNameElement.textContent = file.name;
 	horizontalRule.style.display = '';
-	errorElement.innerHTML = '';
+	errorElement.textContent = '';
 	thumbnailContainer.innerHTML = '';
 
 	try {
@@ -28,6 +28,14 @@ const generateThumbnails = async (file: File) => {
 		const videoTrack = await input.getPrimaryVideoTrack();
 		if (!videoTrack) {
 			throw new Error('File has no video track.');
+		}
+
+		if (videoTrack.codec === null) {
+			throw new Error('Unsupported video codec.');
+		}
+
+		if (!(await videoTrack.canDecode())) {
+			throw new Error('Unable to decode the video track.');
 		}
 
 		// Compute width and height of the thumbnails such that the larger dimension is equal to THUMBNAIL_SIZE

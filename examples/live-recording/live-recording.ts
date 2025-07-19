@@ -38,6 +38,7 @@ const startRecording = async () => {
 		mainContainer.style.display = 'none';
 		videoElement.src = '';
 		downloadButton.style.display = 'none';
+		errorElement.textContent = '';
 
 		// Paint a white background to the canvas
 		context.fillStyle = 'white';
