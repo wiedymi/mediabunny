@@ -16,6 +16,62 @@
 			source
 		});
 
+		const videoTrack = await input.getPrimaryVideoTrack();
+		const packetSink = new Mediabunny.EncodedPacketSink(videoTrack);
+		const sampleSink = new Mediabunny.VideoSampleSink(videoTrack);
+
+		for await (const packet of packetSink.packets(undefined, undefined, {verifyType: true})) {
+			const guess = packet.type;
+			const real = await videoTrack.determinePacketType(packet);
+
+			if (guess !== real) {
+				console.log(guess, real, packet);
+			}
+		}
+		console.log("don")
+
+		/*
+		console.time()
+		for await (const packet of packetSink.packets(undefined, undefined, { verifyType: true })) {
+			//console.log(packet)
+		}
+		console.timeEnd()
+		*/
+
+		//console.log(await packetSink.getPacket(6.666666666666667, { verifyType: true }))
+
+		/*
+		for await (const packet of packetSink.packets()) {
+			const guess = packet.type;
+			const real = await videoTrack.determinePacketType(packet);
+
+			if (guess !== real) {
+				console.log(guess, real, packet);
+			}
+		}
+		console.log("done")
+		*/
+
+		/*
+		const timestamp = 6.666666666666667;
+		const thePacket = await packetSink.getPacket(timestamp);
+
+		console.log(videoTrack.codec, thePacket, await videoTrack.determinePacketType(thePacket));
+
+		sampleSink.getSample(thePacket.timestamp);
+		*/
+
+		/*
+		let packet = await packetSink.getFirstPacket();
+		while (packet) {
+			console.log(packet)
+			const sample = await sampleSink.getSample(packet.timestamp);
+
+			packet = await packetSink.getNextKeyPacket(packet);
+		}
+		*/
+
+		/*
 		const canvas = document.createElement('canvas');
 		canvas.width = 1920;
 		canvas.height = 1080;
@@ -30,6 +86,7 @@
 		console.log(sample);
 
 		sample.draw(ctx, 1500, 500, 50, 50, 0, 0);
+		*/
 
 		/*
 		let timestamps = [];

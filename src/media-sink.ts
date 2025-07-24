@@ -39,6 +39,14 @@ export type PacketRetrievalOptions = {
 	 * be loaded.
 	 */
 	metadataOnly?: boolean;
+
+	/**
+	 * When set to true, key packets will be verified upon retrieval by looking into the packet's bitstream.
+	 * If not enabled, the packet types will be determined solely by what's stored in the containing file and may be
+	 * incorrect, potentially leading to decoder errors. Since determining a packet's actual type requires looking into
+	 * its data, this option cannot be enabled together with `metadataOnly`.
+	 */
+	verifyKeyPackets?: boolean;
 };
 
 const validatePacketRetrievalOptions = (options: PacketRetrievalOptions) => {
@@ -48,11 +56,41 @@ const validatePacketRetrievalOptions = (options: PacketRetrievalOptions) => {
 	if (options.metadataOnly !== undefined && typeof options.metadataOnly !== 'boolean') {
 		throw new TypeError('options.metadataOnly, when defined, must be a boolean.');
 	}
+	if (options.verifyKeyPackets !== undefined && typeof options.verifyKeyPackets !== 'boolean') {
+		throw new TypeError('options.verifyKeyPackets, when defined, must be a boolean.');
+	}
+	if (options.verifyKeyPackets && options.metadataOnly) {
+		throw new TypeError('options.verifyKeyPackets and options.metadataOnly cannot be enabled together.');
+	}
 };
 
 const validateTimestamp = (timestamp: number) => {
 	if (typeof timestamp !== 'number' || Number.isNaN(timestamp)) {
 		throw new TypeError('timestamp must be a number.'); // It can be non-finite, that's fine
+	}
+};
+
+const maybeFixPacketType = (
+	track: InputTrack,
+	promise: Promise<EncodedPacket | null>,
+	options: PacketRetrievalOptions,
+) => {
+	if (options.verifyKeyPackets) {
+		return promise.then(async (packet) => {
+			if (!packet || packet.type === 'delta') {
+				return packet;
+			}
+
+			const determinedType = await track.determinePacketType(packet);
+			if (determinedType) {
+				// @ts-expect-error Technically readonly
+				packet.type = determinedType;
+			}
+
+			return packet;
+		});
+	} else {
+		return promise;
 	}
 };
 
@@ -78,7 +116,8 @@ export class EncodedPacketSink {
 	 */
 	getFirstPacket(options: PacketRetrievalOptions = {}) {
 		validatePacketRetrievalOptions(options);
-		return this._track._backing.getFirstPacket(options);
+
+		return maybeFixPacketType(this._track, this._track._backing.getFirstPacket(options), options);
 	}
 
 	/**
@@ -92,7 +131,8 @@ export class EncodedPacketSink {
 	getPacket(timestamp: number, options: PacketRetrievalOptions = {}) {
 		validateTimestamp(timestamp);
 		validatePacketRetrievalOptions(options);
-		return this._track._backing.getPacket(timestamp, options);
+
+		return maybeFixPacketType(this._track, this._track._backing.getPacket(timestamp, options), options);
 	}
 
 	/**
@@ -104,7 +144,8 @@ export class EncodedPacketSink {
 			throw new TypeError('packet must be an EncodedPacket.');
 		}
 		validatePacketRetrievalOptions(options);
-		return this._track._backing.getNextPacket(packet, options);
+
+		return maybeFixPacketType(this._track, this._track._backing.getNextPacket(packet, options), options);
 	}
 
 	/**
@@ -114,24 +155,60 @@ export class EncodedPacketSink {
 	 * last key packet using `getKeyPacket(Infinity)`. The method returns null if the timestamp is before the first
 	 * key packet in the track.
 	 *
+	 * To ensure that the returned packet is guaranteed to be a real key frame, enable `options.verifyKeyPackets`.
+	 *
 	 * @param timestamp - The timestamp used for retrieval, in seconds.
 	 */
-	getKeyPacket(timestamp: number, options: PacketRetrievalOptions = {}) {
+	async getKeyPacket(timestamp: number, options: PacketRetrievalOptions = {}): Promise<EncodedPacket | null> {
 		validateTimestamp(timestamp);
 		validatePacketRetrievalOptions(options);
-		return this._track._backing.getKeyPacket(timestamp, options);
+
+		if (!options.verifyKeyPackets) {
+			return this._track._backing.getKeyPacket(timestamp, options);
+		}
+
+		const packet = await this._track._backing.getKeyPacket(timestamp, options);
+		if (!packet || packet.type === 'delta') {
+			return packet;
+		}
+
+		const determinedType = await this._track.determinePacketType(packet);
+		if (determinedType === 'delta') {
+			// Try returning the previous key packet (in hopes that it's actually a key packet)
+			return this.getKeyPacket(packet.timestamp - 1 / this._track.timeResolution, options);
+		}
+
+		return packet;
 	}
 
 	/**
 	 * Retrieves the key packet following the given packet (in decode order), or null if the given packet is the last
 	 * key packet.
+	 *
+	 * To ensure that the returned packet is guaranteed to be a real key frame, enable `options.verifyKeyPackets`.
 	 */
-	getNextKeyPacket(packet: EncodedPacket, options: PacketRetrievalOptions = {}) {
+	async getNextKeyPacket(packet: EncodedPacket, options: PacketRetrievalOptions = {}): Promise<EncodedPacket | null> {
 		if (!(packet instanceof EncodedPacket)) {
 			throw new TypeError('packet must be an EncodedPacket.');
 		}
 		validatePacketRetrievalOptions(options);
-		return this._track._backing.getNextKeyPacket(packet, options);
+
+		if (!options.verifyKeyPackets) {
+			return this._track._backing.getNextKeyPacket(packet, options);
+		}
+
+		const nextPacket = await this._track._backing.getNextKeyPacket(packet, options);
+		if (!nextPacket || nextPacket.type === 'delta') {
+			return nextPacket;
+		}
+
+		const determinedType = await this._track.determinePacketType(nextPacket);
+		if (determinedType === 'delta') {
+			// Try returning the next key packet (in hopes that it's actually a key packet)
+			return this.getNextKeyPacket(nextPacket, options);
+		}
+
+		return nextPacket;
 	}
 
 	/**
@@ -346,7 +423,8 @@ export abstract class BaseMediaSampleSink<
 			});
 
 			const packetSink = this._createPacketSink();
-			const keyPacket = await packetSink.getKeyPacket(startTimestamp) ?? await packetSink.getFirstPacket();
+			const keyPacket = await packetSink.getKeyPacket(startTimestamp, { verifyKeyPackets: true })
+				?? await packetSink.getFirstPacket();
 			if (!keyPacket) {
 				return;
 			}
@@ -364,7 +442,7 @@ export abstract class BaseMediaSampleSink<
 					? null
 					: packet.type === 'key' && packet.timestamp === endTimestamp
 						? packet
-						: await packetSink.getNextKeyPacket(packet);
+						: await packetSink.getNextKeyPacket(packet, { verifyKeyPackets: true });
 
 				if (keyPacket) {
 					endPacket = keyPacket;
@@ -567,7 +645,7 @@ export abstract class BaseMediaSampleSink<
 				}
 
 				const targetPacket = await packetSink.getPacket(timestamp);
-				const keyPacket = targetPacket && await packetSink.getKeyPacket(timestamp);
+				const keyPacket = targetPacket && await packetSink.getKeyPacket(timestamp, { verifyKeyPackets: true });
 
 				if (!keyPacket) {
 					if (maxSequenceNumber !== -1) {

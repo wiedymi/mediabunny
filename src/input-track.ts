@@ -7,11 +7,12 @@
  */
 
 import { AudioCodec, MediaCodec, VideoCodec } from './codec';
+import { determineVideoPacketType } from './codec-data';
 import { customAudioDecoders, customVideoDecoders } from './custom-coder';
 import { EncodedPacketSink, PacketRetrievalOptions } from './media-sink';
 import { assert, Rotation } from './misc';
 import { TrackType } from './output';
-import { EncodedPacket } from './packet';
+import { EncodedPacket, PacketType } from './packet';
 
 /**
  * Contains aggregate statistics about the encoded packets of a track.
@@ -62,6 +63,11 @@ export abstract class InputTrack {
 	abstract getCodecParameterString(): Promise<string | null>;
 	/** Checks if this track's packets can be decoded by the browser. */
 	abstract canDecode(): Promise<boolean>;
+	/**
+	 * For a given packet of this track, this method determines the actual type of this packet (key/delta) by looking
+	 * into its bitstream. Returns null if the type couldn't be determined.
+	 */
+	abstract determinePacketType(packet: EncodedPacket): Promise<PacketType | null>;
 
 	/** Returns true iff this track is a video track. */
 	isVideoTrack(): this is InputVideoTrack {
@@ -222,7 +228,10 @@ export class InputVideoTrack extends InputTrack {
 			|| (colorSpace.matrix as string) === 'bt2020-ncl';
 	}
 
-	/** Returns the decoder configuration for decoding the track's packets using a VideoDecoder. */
+	/**
+	 * Returns the decoder configuration for decoding the track's packets using a VideoDecoder. Returns null if the
+	 * track's codec is unknown.
+	 */
 	getDecoderConfig() {
 		return this._backing.getDecoderConfig();
 	}
@@ -256,6 +265,21 @@ export class InputVideoTrack extends InputTrack {
 			console.error('Error during decodability check:', error);
 			return false;
 		}
+	}
+
+	async determinePacketType(packet: EncodedPacket): Promise<PacketType | null> {
+		if (!(packet instanceof EncodedPacket)) {
+			throw new TypeError('packet must be an EncodedPacket.');
+		}
+		if (packet.isMetadataOnly) {
+			throw new TypeError('packet must not be metadata-only to determine its type.');
+		}
+
+		if (this.codec === null) {
+			return null;
+		}
+
+		return determineVideoPacketType(this, packet);
 	}
 }
 
@@ -299,7 +323,10 @@ export class InputAudioTrack extends InputTrack {
 		return this._backing.getSampleRate();
 	}
 
-	/** Returns the decoder configuration for decoding the track's packets using an AudioDecoder. */
+	/**
+	 * Returns the decoder configuration for decoding the track's packets using an AudioDecoder. Returns null if the
+	 * track's codec is unknown.
+	 */
 	getDecoderConfig() {
 		return this._backing.getDecoderConfig();
 	}
@@ -337,5 +364,17 @@ export class InputAudioTrack extends InputTrack {
 			console.error('Error during decodability check:', error);
 			return false;
 		}
+	}
+
+	async determinePacketType(packet: EncodedPacket): Promise<PacketType | null> {
+		if (!(packet instanceof EncodedPacket)) {
+			throw new TypeError('packet must be an EncodedPacket.');
+		}
+
+		if (this.codec === null) {
+			return null;
+		}
+
+		return 'key'; // No audio codec with delta packets
 	}
 }

@@ -48,7 +48,7 @@ export class Bitstream {
 		this.pos = 8 * byteOffset;
 	}
 
-	readBit() {
+	private readBit() {
 		const byteIndex = Math.floor(this.pos / 8);
 		const byte = this.bytes[byteIndex] ?? 0;
 		const bitIndex = 0b111 - (this.pos & 0b111);
@@ -59,6 +59,10 @@ export class Bitstream {
 	}
 
 	readBits(n: number) {
+		if (n === 1) {
+			return this.readBit();
+		}
+
 		let result = 0;
 
 		for (let i = 0; i < n; i++) {
@@ -100,7 +104,7 @@ export class Bitstream {
 /** Reads an exponential-Golomb universal code from a Bitstream.  */
 export const readExpGolomb = (bitstream: Bitstream) => {
 	let leadingZeroBits = 0;
-	while (bitstream.readBit() === 0 && leadingZeroBits < 32) {
+	while (bitstream.readBits(1) === 0 && leadingZeroBits < 32) {
 		leadingZeroBits++;
 	}
 

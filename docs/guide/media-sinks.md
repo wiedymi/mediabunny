@@ -144,6 +144,32 @@ for await (const packet of sink.packets(start, end)) {
 
 The `packets` method is more performant than manual iteration as it will intelligently preload future packets before they are needed.
 
+#### Verifying key packets
+
+By default, packet types are determined using the metadata provided by the containing file. Some files can erroneously label some delta packets as key packets, leading to potential decoder errors. To be guaranteed that a key packet is actually a key packet, you can enable the `verifyKeyPackets` option:
+```ts
+// If the packet returned by this method has type: 'key', it's guaranteed
+// to be a key packet.
+await sink.getPacket(5, { verifyKeyPackets: true });
+
+// Returned packets are guaranteed to be key packets
+await sink.getKeyPacket(10, { verifyKeyPackets: true });
+await sink.getNextKeyPacket(packet, { verifyKeyPackets: true });
+
+// Also works for the iterator:
+for await (const packet of sink.packets(
+	undefined,
+	undefined,
+	{ verifyKeyPackets: true },
+)) {
+	// ...
+}
+```
+
+::: info
+`verifyKeyPackets` only works when `metadataOnly` is not also enabled.
+:::
+
 #### Metadata-only packet retrieval
 
 Sometimes, you're only interested in a packet's metadata (timestamp, duration, type, ...) and not in its encoded media data. All methods on `EncodedPacketSink` accept a final `options` parameter which you can use to retrieve [metadata-only packets](./packets-and-samples#metadata-only-packets):

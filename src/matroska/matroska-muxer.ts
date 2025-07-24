@@ -694,8 +694,7 @@ export class MatroskaMuxer extends Muxer {
 
 		const bitstream = new Bitstream(chunk.data);
 
-		// Check if it's a "superframe"
-		if (bitstream.readBits(2) !== 0b10) return;
+		bitstream.skipBits(2);
 
 		const profileLowBit = bitstream.readBits(1);
 		const profileHighBit = bitstream.readBits(1);

@@ -133,6 +133,16 @@ encodedPacket.type; // => PacketType ('key' | 'delta')
 
 For example, in a video track, it is common to have a key frame about every few seconds. When seeking, if the user seeks to a position shortly after a key frame, the decoded data can be shown quickly; if they seek far away from a key frame, the decoder must first crunch through many delta frames before it can show anything.
 
+#### Determining a packet's actual type
+
+The `type` field is derived from metadata in the containing file, which can sometimes (in rare cases) be incorrect. To determine a packet's actual type with certainty, you can do this:
+```ts
+// `packet` must come from the InputTrack `track`
+const type = await track.determinePacketType(packet); // => PacketType | null
+```
+
+This determines the packet's type by looking into its bitstream. `null` is returned when the type couldn't be determined.
+
 ---
 
 You can query the packet's timing information:

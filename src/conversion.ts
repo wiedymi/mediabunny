@@ -498,7 +498,7 @@ export class Conversion {
 					? await sink.getPacket(this._endTimestamp, { metadataOnly: true }) ?? undefined
 					: undefined;
 
-				for await (const packet of sink.packets(undefined, endPacket)) {
+				for await (const packet of sink.packets(undefined, endPacket, { verifyKeyPackets: true })) {
 					if (this._synchronizer.shouldWait(track.id, packet.timestamp)) {
 						await this._synchronizer.wait(packet.timestamp);
 					}
