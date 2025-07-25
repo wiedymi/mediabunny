@@ -1,5 +1,5 @@
 import ts from 'typescript';
-import * as fs from 'node:fs';
+import * as fs from 'fs';
 
 const checkDocblocks = (filePath: string) => {
 	const program = ts.createProgram([filePath], {});
