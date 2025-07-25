@@ -218,7 +218,8 @@ export class UrlSource extends Source {
 
 		const buffer = await response.arrayBuffer();
 
-		if (!range) {
+		if (response.status === 200) {
+			// The server didn't return 206 Partial Content, so it's not a range response
 			this._fullData = buffer;
 		}
 
@@ -252,6 +253,26 @@ export class UrlSource extends Source {
 			return this._fullData.byteLength;
 		}
 
+		// First, try a HEAD request to get the size
+		try {
+			const headResponse = await retriedFetch(
+				this._url,
+				mergeObjectsDeeply(this._options.requestInit ?? {}, {
+					method: 'HEAD',
+				}),
+				this._options.getRetryDelay ?? (() => null),
+			);
+
+			if (headResponse.ok) {
+				const contentLength = headResponse.headers.get('Content-Length');
+				if (contentLength) {
+					return parseInt(contentLength);
+				}
+			}
+		} catch {
+			// We tried
+		}
+
 		// Try a range request to get the Content-Range header
 		const rangeResponse = await retriedFetch(
 			this._url,
@@ -267,9 +288,13 @@ export class UrlSource extends Source {
 			if (contentRange) {
 				const match = contentRange.match(/bytes \d+-\d+\/(\d+)/);
 				if (match && match[1]) {
-					return parseInt(match[1], 10);
+					return parseInt(match[1]);
 				}
 			}
+		} else if (rangeResponse.status === 200) {
+			// The server just returned the whole thing
+			this._fullData = await rangeResponse.arrayBuffer();
+			return this._fullData.byteLength;
 		}
 
 		// If the range request didn't provide the size, make a full GET request

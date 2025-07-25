@@ -515,14 +515,14 @@ export const retriedFetch = async (
 		try {
 			return await fetch(url, requestInit);
 		} catch (error) {
-			console.error('Retrying failed fetch. Error:', error);
-
 			attempts++;
-
 			const retryDelayInSeconds = getRetryDelay(attempts);
+
 			if (retryDelayInSeconds === null) {
 				throw error;
 			}
+
+			console.error('Retrying failed fetch. Error:', error);
 
 			if (!Number.isFinite(retryDelayInSeconds) || retryDelayInSeconds < 0) {
 				throw new TypeError('Retry delay must be a non-negative finite number.');
