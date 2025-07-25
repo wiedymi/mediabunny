@@ -286,6 +286,18 @@ See [Media sinks](./media-sinks) for a full list of sinks.
 
 ### Examples
 
+Loop over all raw encoded packets of a track:
+```ts
+import { EncodedPacketSink } from 'mediabunny';
+
+const videoTrack = await input.getPrimaryVideoTrack();
+const sink = new EncodedPacketSink(videoTrack);
+
+for await (const packet of sink.packets()) {
+	console.log(packet.timestamp);
+}
+```
+
 Here we iterate over all samples (frames) of a video track:
 ```ts
 import { VideoSampleSink } from 'mediabunny';
