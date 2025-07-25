@@ -49,6 +49,8 @@ Core features include:
 npm install mediabunny
 ```
 
+Requires any JavaScript environment that can run ECMAScript 2021 or later. Mediabunny is expected to be run in modern browsers. For types, TypeScript 5.7 or later is required.
+
 ### Read file metadata
 
 ```js
