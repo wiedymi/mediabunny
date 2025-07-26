@@ -28,7 +28,7 @@ Mediabunny is a JavaScript library for reading, writing, and converting media fi
   </a>
 </div>
 
-[Get featured](https://github.com/sponsors/Vanilagy)
+[Sponsor Mediabunny's development](https://github.com/sponsors/Vanilagy)
 
 ## Features
 
