@@ -1,4 +1,5 @@
 import {
+	canEncodeAudio,
 	CanvasSource,
 	MediaStreamAudioTrackSource,
 	Mp4OutputFormat,
@@ -13,6 +14,7 @@ const mainContainer = document.querySelector('#main-container') as HTMLDivElemen
 const videoElement = document.querySelector('video') as HTMLVideoElement;
 const downloadButton = document.querySelector('#download-button') as HTMLAnchorElement;
 const errorElement = document.querySelector('#error-element') as HTMLParagraphElement;
+const warningElement = document.querySelector('#warning-element') as HTMLParagraphElement;
 
 const canvas = document.querySelector('canvas') as HTMLCanvasElement;
 const context = canvas.getContext('2d', { alpha: false, desynchronized: true })!;
@@ -39,18 +41,28 @@ const startRecording = async () => {
 		videoElement.src = '';
 		downloadButton.style.display = 'none';
 		errorElement.textContent = '';
+		warningElement.textContent = '';
 
 		// Paint a white background to the canvas
 		context.fillStyle = 'white';
 		context.fillRect(0, 0, canvas.width, canvas.height);
 
-		// Get user microphone
-		mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+		const audioIsEncodable = await canEncodeAudio('opus', {
+			bitrate: QUALITY_MEDIUM,
+		});
+
+		let audioTrack: MediaStreamAudioTrack | null = null;
+		if (audioIsEncodable) {
+			// Get user microphone
+			mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+			audioTrack = mediaStream.getAudioTracks()[0] ?? null;
+		} else {
+			warningElement.textContent
+				= 'Audio is not yet encodable by your browser, so the audio track has been omitted.';
+		}
 
 		horizontalRule.style.display = '';
 		mainContainer.style.display = '';
-
-		const audioTrack = mediaStream.getAudioTracks()[0];
 
 		// Create a new output file
 		output = new Output({
@@ -99,6 +111,8 @@ const startRecording = async () => {
 				codec: 'opus',
 				bitrate: QUALITY_MEDIUM,
 			});
+			audioSource.errorPromise.catch(cancelRecording); // Make sure errors are bubbled up
+
 			output.addAudioTrack(audioSource);
 		}
 
@@ -108,9 +122,9 @@ const startRecording = async () => {
 		readyForMoreFrames = true;
 		lastFrameNumber = -1;
 
-		// Start the video frame capture loop
-		void addVideoFrame();
-		videoCaptureInterval = window.setInterval(() => void addVideoFrame(), 1000 / frameRate);
+		// Start the video frame capture loop, making sure errors are caught
+		void addVideoFrame().catch(cancelRecording);
+		videoCaptureInterval = window.setInterval(() => void addVideoFrame().catch(cancelRecording), 1000 / frameRate);
 
 		const mimeType = await output.getMimeType();
 		sourceBuffer = mediaSource.addSourceBuffer(mimeType);
@@ -121,13 +135,27 @@ const startRecording = async () => {
 		toggleRecordingButton.textContent = 'Stop recording';
 		toggleRecordingButton.disabled = false;
 	} catch (error) {
-		errorElement.textContent = String(error);
-
-		mainContainer.style.display = 'none';
-		toggleRecordingButton.textContent = 'Start recording';
-		toggleRecordingButton.disabled = false;
-		recording = false;
+		await cancelRecording(error);
 	}
+};
+
+const cancelRecording = async (error: unknown) => {
+	if (!recording) {
+		return; // Already canceled
+	}
+
+	console.error(error);
+
+	errorElement.textContent = String(error);
+
+	clearInterval(videoCaptureInterval);
+	mainContainer.style.display = 'none';
+	toggleRecordingButton.textContent = 'Start recording';
+	toggleRecordingButton.disabled = false;
+	recording = false;
+	await output?.cancel();
+
+	mediaStream?.getTracks().forEach(track => track.stop());
 };
 
 const stopRecording = async () => {
@@ -135,7 +163,7 @@ const stopRecording = async () => {
 	toggleRecordingButton.disabled = true;
 
 	clearInterval(videoCaptureInterval);
-	mediaStream.getTracks().forEach(track => track.stop());
+	mediaStream?.getTracks().forEach(track => track.stop());
 
 	await output.finalize();
 

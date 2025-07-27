@@ -98,6 +98,10 @@ const compressFile = async (file: File) => {
 		compressionFacts.textContent
 			= `${(output.target.buffer!.byteLength / file.size * 100).toPrecision(3)}% of original size`;
 	} catch (error) {
+		console.error(error);
+
+		await currentConversion?.cancel();
+
 		errorElement.textContent = String(error);
 		clearInterval(currentIntervalId);
 

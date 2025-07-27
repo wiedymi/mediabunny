@@ -344,9 +344,8 @@ export class Output<
 
 			await this._muxer.start();
 
-			for (const track of this._tracks) {
-				track.source._start();
-			}
+			const promises = this._tracks.map(track => track.source._start());
+			await Promise.all(promises);
 
 			release();
 		})();

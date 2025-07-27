@@ -7,6 +7,7 @@ import {
 	QUALITY_HIGH,
 	getFirstEncodableAudioCodec,
 	getFirstEncodableVideoCodec,
+	OutputFormat,
 } from 'mediabunny';
 
 const durationSlider = document.querySelector('#duration-slider') as HTMLInputElement;
@@ -57,6 +58,8 @@ let currentScaleIndex = 0;
 let collisionCount = 0;
 let collisionsPerScale = 0;
 
+let output: Output<OutputFormat, BufferTarget>;
+
 /** === MAIN VIDEO FILE GENERATION LOGIC === */
 
 const generateVideo = async () => {
@@ -82,7 +85,7 @@ const generateVideo = async () => {
 		initScene(duration);
 
 		// Create a new output file
-		const output = new Output({
+		output = new Output({
 			target: new BufferTarget(), // Stored in memory
 			format: new Mp4OutputFormat(),
 		});
@@ -184,6 +187,10 @@ const generateVideo = async () => {
 		const fileSizeMiB = (videoBlob.size / (1024 * 1024)).toPrecision(3);
 		videoInfo.textContent = `File size: ${fileSizeMiB} MiB`;
 	} catch (error) {
+		console.error(error);
+
+		await output?.cancel();
+
 		clearInterval(progressInterval);
 		errorElement.textContent = String(error);
 		progressBarContainer.style.display = 'none';

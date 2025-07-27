@@ -175,8 +175,10 @@ const initMediaPlayer = async (file: File) => {
 			controlsElement.style.opacity = '1';
 			playerContainer.style.cursor = '';
 		}
-	} catch (e) {
-		errorElement.textContent = String(e);
+	} catch (error) {
+		console.error(error);
+
+		errorElement.textContent = String(error);
 		playerContainer.style.display = 'none';
 	}
 };

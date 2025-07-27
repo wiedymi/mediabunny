@@ -17,6 +17,8 @@ const checkDocblocks = (filePath: string) => {
 			ts.isInterfaceDeclaration(node)
 			|| ts.isClassDeclaration(node)
 			|| ts.isMethodDeclaration(node)
+			|| ts.isGetAccessorDeclaration(node)
+			|| ts.isSetAccessorDeclaration(node)
 			|| ts.isPropertyDeclaration(node)
 			|| ts.isFunctionDeclaration(node)
 			|| ts.isTypeAliasDeclaration(node)

@@ -96,8 +96,10 @@ const generateThumbnails = async (file: File) => {
 
 			i++;
 		}
-	} catch (e) {
-		errorElement.textContent = String(e);
+	} catch (error) {
+		console.error(error);
+
+		errorElement.textContent = String(error);
 		thumbnailContainer.innerHTML = '';
 	}
 };

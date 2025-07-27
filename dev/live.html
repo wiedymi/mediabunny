@@ -23,21 +23,29 @@
             format: new Mediabunny.Mp4OutputFormat(),
         });
         if (videoTrack) {
-            output.addVideoTrack(new Mediabunny.MediaStreamVideoTrackSource(videoTrack, {
+            const source = new Mediabunny.MediaStreamVideoTrackSource(videoTrack, {
                 codec: 'avc',
                 bitrate: Mediabunny.QUALITY_MEDIUM
-            }));
+            });
+
+            source.errorPromise.catch((d) => console.log("Hello?????", d));
+
+            output.addVideoTrack(source);
         }
         if (audioTrack) {
-            output.addAudioTrack(new Mediabunny.MediaStreamAudioTrackSource(audioTrack, {
+            const source = new Mediabunny.MediaStreamAudioTrackSource(audioTrack, {
                 codec: 'aac',
                 bitrate: Mediabunny.QUALITY_MEDIUM
-            }));
+            });
+
+            source.errorPromise.catch((d) => console.log("Hello!!???", d));
+
+            output.addAudioTrack(source);
         }
 
         await output.start();
 
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        await new Promise(resolve => setTimeout(resolve, 5000));
 
         await output.finalize();
 

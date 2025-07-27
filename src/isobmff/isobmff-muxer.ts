@@ -32,6 +32,7 @@ import {
 	transformAnnexBToLengthPrefixed,
 } from '../codec-data';
 import { buildIsobmffMimeType } from './isobmff-misc';
+import { MAX_BOX_HEADER_SIZE, MIN_BOX_HEADER_SIZE } from './isobmff-reader';
 
 export const GLOBAL_TIMESCALE = 1000;
 const TIMESTAMP_OFFSET = 2_082_844_800; // Seconds between Jan 1 1904 and Jan 1 1970
@@ -989,10 +990,7 @@ export class IsobmffMuxer extends Muxer {
 		const moofOffset = this.writer.getPos();
 		const mdatStartPos = moofOffset + this.boxWriter.measureBox(moofBox);
 
-		// Header with large size. We always reserve 16 bytes for it even if we don't end up using the large size.
-		const mdatHeaderSize = 16;
-
-		let currentPos = mdatStartPos + mdatHeaderSize;
+		let currentPos = mdatStartPos + MIN_BOX_HEADER_SIZE;
 		let fragmentStartTimestamp = Infinity;
 		for (const trackData of tracksInFragment) {
 			trackData.currentChunk!.offset = currentPos;
@@ -1006,6 +1004,15 @@ export class IsobmffMuxer extends Muxer {
 		}
 
 		const mdatSize = currentPos - mdatStartPos;
+		const needsLargeMdatSize = mdatSize >= 2 ** 32;
+
+		if (needsLargeMdatSize) {
+			// Shift all offsets by 8. Previously, all chunks were shifted assuming the large box size, but due to what
+			// I suspect is a bug in WebKit, it failed in Safari (when livestreaming with MSE, not for static playback).
+			for (const trackData of tracksInFragment) {
+				trackData.currentChunk!.offset! += MAX_BOX_HEADER_SIZE - MIN_BOX_HEADER_SIZE;
+			}
+		}
 
 		if (this.format._options.onMoof) {
 			this.writer.startTrackingWrites();
@@ -1025,11 +1032,11 @@ export class IsobmffMuxer extends Muxer {
 			this.writer.startTrackingWrites();
 		}
 
-		const mdatBox = mdat(mdatSize >= 2 ** 32);
+		const mdatBox = mdat(needsLargeMdatSize);
 		mdatBox.size = mdatSize;
 		this.boxWriter.writeBox(mdatBox);
 
-		this.writer.seek(mdatStartPos + mdatHeaderSize);
+		this.writer.seek(mdatStartPos + (needsLargeMdatSize ? MAX_BOX_HEADER_SIZE : MIN_BOX_HEADER_SIZE));
 
 		// Write sample data
 		for (const trackData of tracksInFragment) {
