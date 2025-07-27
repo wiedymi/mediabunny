@@ -163,12 +163,19 @@ const videoTrackSource = new MediaStreamVideoTrackSource(videoTrack, {
 	codec: 'vp9',
 	bitrate: 1e7,
 });
+
+// Make sure to allow any internal errors to properly bubble up
+videoTrackSource.errorPromise.catch((error) => ...);
 ```
 
 This source requires no additional method calls; data will automatically be captured and piped to the output file as soon as `start()` is called on the `Output`. Make sure to `stop()` on `videoTrack` after finalizing the `Output` if you don't need the user's media anymore.
 
 ::: info
 If this source is the only MediaStreamTrack source in the `Output`, then the first video sample added by it starts at timestamp 0. If there are multiple, then the earliest media sample across all tracks starts at timestamp 0, and all tracks will be perfectly synchronized with each other.
+:::
+
+::: warning
+`MediaStreamVideoTrackSource`'s internals are detached from the typical code flow but can still throw, so make sure to utilize `errorPromise` to deal with any errors and to stop the `Output`.
 :::
 
 ### `EncodedVideoPacketSource`
@@ -312,12 +319,19 @@ const audioTrackSource = new MediaStreamAudioTrackSource(audioTrack, {
 	codec: 'opus',
 	bitrate: 128e3,
 });
+
+// Make sure to allow any internal errors to properly bubble up
+audioTrackSource.errorPromise.catch((error) => ...);
 ```
 
 This source requires no additional method calls; data will automatically be captured and piped to the output file as soon as `start()` is called on the `Output`. Make sure to `stop()` on `audioTrack` after finalizing the `Output` if you don't need the user's media anymore.
 
 ::: info
 If this source is the only MediaStreamTrack source in the `Output`, then the first audio sample added by it starts at timestamp 0. If there are multiple, then the earliest media sample across all tracks starts at timestamp 0, and all tracks will be perfectly synchronized with each other.
+:::
+
+::: warning
+`MediaStreamAudioTrackSource`'s internals are detached from the typical code flow but can still throw, so make sure to utilize `errorPromise` to deal with any errors and to stop the `Output`.
 :::
 
 ### `EncodedAudioPacketSource`

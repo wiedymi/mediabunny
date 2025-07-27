@@ -401,7 +401,7 @@ An audio sample represents a section of audio data. It can be created directly f
 
 ### Creating audio samples
 
-Audio samples can be constructed either from an `AudioData` instance or an initialization object:
+Audio samples can be constructed either from an `AudioData` instance, an initialization object, or an `AudioBuffer`:
 
 ```ts
 import { AudioSample } from 'mediabunny';
@@ -417,6 +417,11 @@ const sample = new AudioSample({
     sampleRate: 44100, // in Hz
     timestamp: 0, // in seconds
 });
+
+// From AudioBuffer:
+const timestamp = 0; // in seconds
+const samples = AudioSample.fromAudioBuffer(audioBuffer, timestamp);
+// => Returns multiple AudioSamples if the AudioBuffer is very long
 ```
 
 The following audio sample formats are supported:

@@ -1065,8 +1065,8 @@ export class AudioSample {
 	}
 
 	/**
-	 * Creates AudioSamples from an AudioBuffer, starting at the given timestamp. Typically creates exactly one sample,
-	 * but may create multiple if the AudioBuffer is exceedingly large.
+	 * Creates AudioSamples from an AudioBuffer, starting at the given timestamp in seconds. Typically creates exactly
+	 * one sample, but may create multiple if the AudioBuffer is exceedingly large.
 	 */
 	static fromAudioBuffer(audioBuffer: AudioBuffer, timestamp: number) {
 		if (!(audioBuffer instanceof AudioBuffer)) {
