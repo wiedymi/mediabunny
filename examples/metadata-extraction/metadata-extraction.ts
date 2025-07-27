@@ -129,6 +129,8 @@ const renderObject = (object: Record<string, unknown>) => {
 				listItem.removeChild(loadingSpan);
 				listItem.appendChild(renderValue(resolvedValue));
 			}).catch((error) => {
+				console.error(error);
+
 				// Show the promise error
 				listItem.removeChild(loadingSpan);
 				const errorSpan = document.createElement('span');

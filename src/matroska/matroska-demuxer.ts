@@ -368,6 +368,13 @@ export class MatroskaDemuxer extends Demuxer {
 			this.readContiguousElements(this.metadataReader, size);
 		}
 
+		if (this.currentSegment.timestampScale === -1) {
+			// TimestampScale element is missing. Technically an invalid file, but let's default to the typical value,
+			// which is 1e6.
+			this.currentSegment.timestampScale = 1e6;
+			this.currentSegment.timestampFactor = 1e9 / 1e6;
+		}
+
 		// Put default tracks first
 		this.currentSegment.tracks.sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
 
