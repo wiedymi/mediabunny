@@ -236,6 +236,7 @@ export class VideoSample {
 			return new VideoSample(this._data.clone(), {
 				timestamp: this.timestamp,
 				duration: this.duration,
+				rotation: this.rotation,
 			});
 		} else if (this._data instanceof Uint8Array) {
 			return new VideoSample(this._data.slice(), {
@@ -245,6 +246,7 @@ export class VideoSample {
 				timestamp: this.timestamp,
 				duration: this.duration,
 				colorSpace: this.colorSpace,
+				rotation: this.rotation,
 			});
 		} else {
 			return new VideoSample(this._data, {
@@ -254,6 +256,7 @@ export class VideoSample {
 				timestamp: this.timestamp,
 				duration: this.duration,
 				colorSpace: this.colorSpace,
+				rotation: this.rotation,
 			});
 		}
 	}
