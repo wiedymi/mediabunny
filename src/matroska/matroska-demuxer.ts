@@ -220,13 +220,16 @@ export class MatroskaDemuxer extends Demuxer {
 
 			const fileSize = await this.input.source.getSize();
 
+			// Loop over all top-level elements in the file
 			while (this.metadataReader.pos <= fileSize - MIN_HEADER_SIZE) {
 				await this.metadataReader.reader.loadRange(
 					this.metadataReader.pos,
 					this.metadataReader.pos + MAX_HEADER_SIZE,
 				);
 
-				const { id, size } = this.metadataReader.readElementHeader();
+				const header = this.metadataReader.readElementHeader();
+				const id = header.id;
+				let size = header.size;
 				const startPos = this.metadataReader.pos;
 
 				if (id === EBMLId.EBML) {
@@ -241,6 +244,26 @@ export class MatroskaDemuxer extends Demuxer {
 						// Segment sizes can be undefined (common in livestreamed files), so assume this is the last
 						// and only segment
 						break;
+					}
+				} else if (id === EBMLId.Cluster) {
+					// Clusters are not a top-level element in Matroska, but some files contain a Segment whose size
+					// doesn't contain any of the clusters that follow it. In the case, we apply the following logic: if
+					// we find a top-level cluster, attribute it to the previous segment.
+
+					if (size === null) {
+						// Just in case this is one of those weird sizeless clusters, let's do our best and still try to
+						// determine its size.
+						const nextElementPos = await this.clusterReader.searchForNextElementId(
+							LEVEL_0_AND_1_EBML_IDS,
+							fileSize,
+						);
+						size = (nextElementPos ?? fileSize) - startPos;
+					}
+
+					const lastSegment = last(this.segments);
+					if (lastSegment) {
+						// Extend the previous segment's size
+						lastSegment.elementEndPos = startPos + size;
 					}
 				}
 
