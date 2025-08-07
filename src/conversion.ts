@@ -83,6 +83,8 @@ export type ConversionOptions = {
 		bitrate?: VideoEncodingConfig['bitrate'];
 		/** When true, video will always be re-encoded instead of directly copying over the encoded samples. */
 		forceTranscode?: boolean;
+		/** The desired fps of the output video, if not specified will use the fps of the input video. */
+		fps?: number;
 	};
 
 	/** Audio-specific options. */
@@ -260,6 +262,9 @@ export class Conversion {
 		}
 		if (options.video?.rotate !== undefined && ![0, 90, 180, 270].includes(options.video.rotate)) {
 			throw new TypeError('options.video.rotate, when provided, must be 0, 90, 180 or 270.');
+		}
+		if (options.video?.fps !== undefined && (typeof options.video.fps !== 'number' || isNaN(options.video.fps) || options.video.fps <= 0)) {
+			throw new TypeError('options.video.fps, when provided, must be a positive number.');
 		}
 		if (options.audio !== undefined && (!options.audio || typeof options.audio !== 'object')) {
 			throw new TypeError('options.video, when provided, must be an object.');
@@ -469,11 +474,19 @@ export class Conversion {
 			height = ceilToMultipleOfTwo(this._options.video.height);
 		}
 
+		const packetStats = await track.computePacketStats();
+		const originalFps = packetStats.averagePacketRate;
+		let fps = originalFps;
+		if (this._options.video?.fps !== undefined) {
+			fps = this._options.video.fps;
+		}
+
 		const firstTimestamp = await track.getFirstTimestamp();
 		const needsTranscode = !!this._options.video?.forceTranscode || this._startTimestamp > 0 || firstTimestamp < 0;
 		const needsRerender = width !== originalWidth
 			|| height !== originalHeight
-			|| (totalRotation !== 0 && !outputSupportsRotation);
+			|| (totalRotation !== 0 && !outputSupportsRotation)
+			|| fps !== originalFps;
 
 		let videoCodecs = this.output.format.getSupportedVideoCodecs();
 		if (
@@ -547,6 +560,7 @@ export class Conversion {
 				onEncodedPacket: sample => this._reportProgress(track.id, sample.timestamp + sample.duration),
 			};
 
+			console.log({ originalFps, fps, needsRerender });
 			if (needsRerender) {
 				const source = new VideoSampleSource(encodingConfig);
 				videoSource = source;
@@ -563,6 +577,10 @@ export class Conversion {
 					});
 					const iterator = sink.canvases(this._startTimestamp, this._endTimestamp);
 
+					const frameDuration = 1 / fps;
+
+					let outputTimestamp = 0;
+
 					for await (const { canvas, timestamp, duration } of iterator) {
 						if (this._synchronizer.shouldWait(track.id, timestamp)) {
 							await this._synchronizer.wait(timestamp);
@@ -572,13 +590,25 @@ export class Conversion {
 							return;
 						}
 
-						const sample = new VideoSample(canvas, {
-							timestamp: Math.max(timestamp - this._startTimestamp, 0),
-							duration,
-						});
-
-						await source.add(sample);
-						sample.close();
+						const relativeToStartTimestamp = Math.max(timestamp - this._startTimestamp, 0);
+						if (originalFps === fps) {
+							const sample = new VideoSample(canvas, {
+								timestamp: relativeToStartTimestamp,
+								duration,
+							});
+							await source.add(sample);
+							sample.close();
+						} else {
+							while (relativeToStartTimestamp >= outputTimestamp) {
+								const sample =  new VideoSample(canvas, {
+									timestamp: outputTimestamp,
+									duration: frameDuration,
+								});
+								await source.add(sample);
+								sample.close();
+								outputTimestamp += frameDuration;
+							}
+						}
 					}
 				})());
 			} else {
