@@ -263,7 +263,10 @@ export class Conversion {
 		if (options.video?.rotate !== undefined && ![0, 90, 180, 270].includes(options.video.rotate)) {
 			throw new TypeError('options.video.rotate, when provided, must be 0, 90, 180 or 270.');
 		}
-		if (options.video?.fps !== undefined && (typeof options.video.fps !== 'number' || isNaN(options.video.fps) || options.video.fps <= 0)) {
+		if (
+			options.video?.fps !== undefined
+			&& (typeof options.video.fps !== 'number' || isNaN(options.video.fps) || options.video.fps <= 0)
+		) {
 			throw new TypeError('options.video.fps, when provided, must be a positive number.');
 		}
 		if (options.audio !== undefined && (!options.audio || typeof options.audio !== 'object')) {
@@ -600,7 +603,7 @@ export class Conversion {
 							sample.close();
 						} else {
 							while (relativeToStartTimestamp >= outputTimestamp) {
-								const sample =  new VideoSample(canvas, {
+								const sample = new VideoSample(canvas, {
 									timestamp: outputTimestamp,
 									duration: frameDuration,
 								});
