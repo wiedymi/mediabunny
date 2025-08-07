@@ -563,7 +563,6 @@ export class Conversion {
 				onEncodedPacket: sample => this._reportProgress(track.id, sample.timestamp + sample.duration),
 			};
 
-			console.log({ originalFps, fps, needsRerender });
 			if (needsRerender) {
 				const source = new VideoSampleSource(encodingConfig);
 				videoSource = source;
