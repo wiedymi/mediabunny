@@ -499,7 +499,13 @@ export class EBMLReader {
 		const { view, offset } = this.reader.getViewAndOffset(this.pos, this.pos + length);
 		this.pos += length;
 
-		return String.fromCharCode(...new Uint8Array(view.buffer, offset, length));
+		// Actual string length might be shorter due to null terminators
+		let strLength = 0;
+		while (strLength < length && view.getUint8(offset + strLength) !== 0) {
+			strLength += 1;
+		}
+
+		return String.fromCharCode(...new Uint8Array(view.buffer, offset, strLength));
 	}
 
 	readElementId() {
