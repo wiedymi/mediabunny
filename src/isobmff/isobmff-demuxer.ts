@@ -2024,7 +2024,6 @@ abstract class IsobmffTrackBacking implements InputTrackBacking {
 		}
 
 		const trackData = locationInFragment.fragment.trackData.get(this.internalTrack.id)!;
-		const fragmentSample = trackData.samples[locationInFragment.sampleIndex]!;
 
 		const fragmentIndex = binarySearchExact(
 			this.internalTrack.fragments,
@@ -2072,7 +2071,7 @@ abstract class IsobmffTrackBacking implements InputTrackBacking {
 					};
 				}
 			},
-			fragmentSample.presentationTimestamp,
+			-Infinity, // Use -Infinity as a search timestamp to avoid using the lookup entries
 			Infinity,
 			options,
 		);
@@ -2116,7 +2115,6 @@ abstract class IsobmffTrackBacking implements InputTrackBacking {
 		}
 
 		const trackData = locationInFragment.fragment.trackData.get(this.internalTrack.id)!;
-		const fragmentSample = trackData.samples[locationInFragment.sampleIndex]!;
 
 		const fragmentIndex = binarySearchExact(
 			this.internalTrack.fragments,
@@ -2171,7 +2169,7 @@ abstract class IsobmffTrackBacking implements InputTrackBacking {
 					};
 				}
 			},
-			fragmentSample.presentationTimestamp,
+			-Infinity, // Use -Infinity as a search timestamp to avoid using the lookup entries
 			Infinity,
 			options,
 		);

@@ -594,6 +594,38 @@ export const CODEC_STRING_MAP: Partial<Record<MediaCodec, string>> = {
 	'webvtt': 'S_TEXT/WEBVTT',
 };
 
+export const readVarInt = (data: Uint8Array, offset: number) => {
+	if (offset >= data.length) {
+		throw new Error('Offset out of bounds.');
+	}
+
+	// Read the first byte to determine the width of the variable-length integer
+	const firstByte = data[offset]!;
+
+	// Find the position of VINT_MARKER, which determines the width
+	let width = 1;
+	let mask = 1 << 7;
+	while ((firstByte & mask) === 0 && width < 8) {
+		width++;
+		mask >>= 1;
+	}
+
+	if (offset + width > data.length) {
+		throw new Error('VarInt extends beyond data bounds.');
+	}
+
+	// First byte's value needs the marker bit cleared
+	let value = firstByte & (mask - 1);
+
+	// Read remaining bytes
+	for (let i = 1; i < width; i++) {
+		value *= 1 << 8;
+		value += data[offset + i]!;
+	}
+
+	return { value, width };
+};
+
 export function assertDefinedSize(size: number | null): asserts size is number {
 	if (size === null) {
 		throw new Error('Undefined element size is used in a place where it is not supported.');
