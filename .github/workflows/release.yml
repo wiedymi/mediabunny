@@ -16,6 +16,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Merge main into release branch
+        run: |
+          git fetch origin main release
+          git checkout release
+          git merge origin/main --no-ff -m "Merge main into release for tag ${{ github.event.release.tag_name }}"
+          git push origin release
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
