@@ -4,12 +4,15 @@
   "version": "1.5.0",
   "description": "Pure TypeScript media toolkit for reading, writing, and converting media files, directly in the browser.",
   "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
   "main": "./dist/bundles/mediabunny.cjs",
-  "module": "./dist/modules/index.js",
-  "types": "./dist/modules/index.d.ts",
+  "module": "./dist/modules/src/index.js",
+  "types": "./dist/modules/src/index.d.ts",
   "exports": {
-    "types": "./dist/modules/index.d.ts",
-    "import": "./dist/modules/index.js",
+    "types": "./dist/modules/src/index.d.ts",
+    "import": "./dist/modules/src/index.js",
     "require": "./dist/bundles/mediabunny.cjs"
   },
   "files": [
@@ -21,10 +24,10 @@
   ],
   "sideEffects": false,
   "scripts": {
-    "build": "rm -rf dist && tsx scripts/ensure-license-headers.ts && tsc -p src && npm run fix-build-import-paths && node build.mjs && api-extractor run && npm run check-docblocks && npm run append-namespace",
-    "watch": "node build.mjs --watch",
+    "build": "./build.sh",
+    "watch": "tsx scripts/bundle.ts --watch",
     "lint": "eslint .",
-    "check": "tsc -p src --noEmit && tsc -p scripts --noEmit && tsc -p tsconfig.vite.json --noEmit && rm tsconfig.vite.tsbuildinfo",
+    "check": "tsc -p src --noEmit && tsc -p packages/mp3-encoder/src --noEmit && tsc -p scripts --noEmit && tsc -p tsconfig.vite.json --noEmit && rm tsconfig.vite.tsbuildinfo",
     "check-docblocks": "tsx scripts/check-docblocks.ts dist/mediabunny.d.ts",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs && npm run examples:build",
@@ -61,7 +64,9 @@
     "@types/markdown-it-footnote": "^3.0.4",
     "@types/node": "^22.13.10",
     "esbuild": "^0.25.1",
+    "esbuild-plugin-external-global": "^1.0.1",
     "eslint": "^9.22.0",
+    "find-cache-dir": "^5.0.0",
     "markdown-it-footnote": "^4.0.0",
     "markdown-it-mathjax3": "^4.3.2",
     "mermaid": "^11.6.0",

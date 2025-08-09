@@ -1,0 +1,3 @@
+SWALLOWED ERRORS FOR CUSTOM ENCODESRS (like in init)
+
+- mention in the docs how the delcaration file can be used together with the <script> include

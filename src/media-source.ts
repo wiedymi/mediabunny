@@ -1527,9 +1527,7 @@ type MediaStreamTrackProcessorControllerMessage = {
 const mediaStreamTrackProcessorWorkerCode = () => {
 	const sendMessage = (message: MediaStreamTrackProcessorWorkerMessage, transfer?: Transferable[]) => {
 		if (transfer) {
-			// The error is bullshit, it's using the wrong postMessage
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-argument
-			self.postMessage(message, transfer as any);
+			self.postMessage(message, { transfer });
 		} else {
 			self.postMessage(message);
 		}

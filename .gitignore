@@ -1,5 +1,7 @@
-/node_modules
+node_modules
 /dist
 /dist-docs
 .DS_Store
 /docs/.vitepress/cache
+
+packages/mp3-encoder/dist
