@@ -1,6 +1,6 @@
 {
   "name": "@mediabunny/mp3-encoder",
-  "version": "0.0.1",
+  "version": "1.6.0",
   "main": "./dist/bundles/mediabunny-mp3-encoder.mjs",
   "module": "./dist/bundles/mediabunny-mp3-encoder.mjs",
   "types": "./dist/modules/src/index.d.ts",

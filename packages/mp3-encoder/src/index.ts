@@ -13,7 +13,7 @@ import type { WorkerCommand, WorkerResponse, WorkerResponseData } from './shared
 import createWorker from './encode.worker';
 
 class Mp3Encoder extends CustomAudioEncoder {
-	private worker!: Worker;
+	private worker: Worker | null = null;
 	private nextMessageId = 0;
 	private pendingMessages = new Map<number, {
 		resolve: (value: WorkerResponseData) => void;
@@ -23,7 +23,7 @@ class Mp3Encoder extends CustomAudioEncoder {
 	private buffer = new Uint8Array(2 ** 16);
 	private currentBufferOffset = 0;
 	private currentTimestamp = 0;
-	private chunkMetadata!: EncodedAudioChunkMetadata;
+	private chunkMetadata: EncodedAudioChunkMetadata = {};
 
 	static override supports(codec: AudioCodec, config: AudioDecoderConfig): boolean {
 		return codec === 'mp3'
@@ -113,7 +113,7 @@ class Mp3Encoder extends CustomAudioEncoder {
 	}
 
 	close() {
-		this.worker.terminate();
+		this.worker?.terminate();
 	}
 
 	/**
@@ -173,6 +173,8 @@ class Mp3Encoder extends CustomAudioEncoder {
 		return new Promise<WorkerResponseData>((resolve, reject) => {
 			const id = this.nextMessageId++;
 			this.pendingMessages.set(id, { resolve, reject });
+
+			assert(this.worker);
 
 			if (transferables) {
 				this.worker.postMessage({ id, command }, transferables);
