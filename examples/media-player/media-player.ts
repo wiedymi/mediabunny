@@ -132,6 +132,9 @@ const initMediaPlayer = async (file: File) => {
 			warningElement.textContent = problemMessage;
 		}
 
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access
+		const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+
 		// We must create the audio context with the matching sample rate for correct acoustic results
 		// (especially for low-sample rate files)
 		audioContext = new AudioContext({ sampleRate: audioTrack?.sampleRate });
