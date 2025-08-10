@@ -13,7 +13,6 @@ import {
 	AnyIterable,
 	assert,
 	assertNever,
-	binarySearchLessOrEqual,
 	CallSerializer,
 	getInt24,
 	getUint24,
