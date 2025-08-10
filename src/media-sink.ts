@@ -17,6 +17,7 @@ import {
 	CallSerializer,
 	getInt24,
 	getUint24,
+	insertSorted,
 	isSafari,
 	last,
 	mapAsyncGenerator,
@@ -799,12 +800,7 @@ class VideoDecoderWrapper extends DecoderWrapper<VideoSample> {
 						this.sampleQueue.length = 0;
 					}
 
-					const insertionIndex = binarySearchLessOrEqual(
-						this.sampleQueue,
-						sample.timestamp,
-						x => x.timestamp,
-					);
-					this.sampleQueue.splice(insertionIndex + 1, 0, sample);
+					insertSorted(this.sampleQueue, sample, x => x.timestamp);
 				} else {
 					// Assign it the next earliest timestamp from the input. We do this because browsers, by spec, are
 					// required to emit decoded frames in presentation order *while* retaining the timestamp of their
@@ -858,12 +854,7 @@ class VideoDecoderWrapper extends DecoderWrapper<VideoSample> {
 			assert(this.decoder);
 
 			if (!isSafari()) {
-				const insertionIndex = binarySearchLessOrEqual(
-					this.inputTimestamps,
-					packet.timestamp,
-					x => x,
-				);
-				this.inputTimestamps.splice(insertionIndex + 1, 0, packet.timestamp);
+				insertSorted(this.inputTimestamps, packet.timestamp, x => x);
 			}
 
 			this.decoder.decode(packet.toEncodedVideoChunk());

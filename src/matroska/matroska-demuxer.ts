@@ -38,6 +38,7 @@ import {
 	binarySearchLessOrEqual,
 	COLOR_PRIMARIES_MAP_INVERSE,
 	findLastIndex,
+	insertSorted,
 	isIso639Dash2LanguageCode,
 	last,
 	MATRIX_COEFFICIENTS_MAP_INVERSE,
@@ -570,32 +571,16 @@ export class MatroskaDemuxer extends Demuxer {
 			trackData.endTimestamp = lastBlock.timestamp + lastBlock.duration;
 
 			if (track) {
-				const insertionIndex = binarySearchLessOrEqual(
-					track.clusters,
-					cluster.elementStartPos,
-					x => x.elementStartPos,
-				);
-				track.clusters.splice(insertionIndex + 1, 0, cluster);
+				insertSorted(track.clusters, cluster, x => x.elementStartPos);
 
 				const hasKeyFrame = trackData.firstKeyFrameTimestamp !== null;
 				if (hasKeyFrame) {
-					const insertionIndex = binarySearchLessOrEqual(
-						track.clustersWithKeyFrame,
-						cluster.elementStartPos,
-						x => x.elementStartPos,
-					);
-					track.clustersWithKeyFrame.splice(insertionIndex + 1, 0, cluster);
+					insertSorted(track.clustersWithKeyFrame, cluster, x => x.elementStartPos);
 				}
 			}
 		}
 
-		const insertionIndex = binarySearchLessOrEqual(
-			segment.clusters,
-			elementStartPos,
-			x => x.elementStartPos,
-		);
-		segment.clusters.splice(insertionIndex + 1, 0, cluster);
-
+		insertSorted(segment.clusters, cluster, x => x.elementStartPos);
 		this.currentCluster = null;
 
 		return cluster;

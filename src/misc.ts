@@ -292,6 +292,12 @@ export const binarySearchLessOrEqual = <T>(arr: T[], key: number, valueGetter: (
 	return ans;
 };
 
+/** Assumes the array is already sorted. */
+export const insertSorted = <T>(arr: T[], item: T, valueGetter: (x: T) => number) => {
+	const insertionIndex = binarySearchLessOrEqual(arr, valueGetter(item), valueGetter);
+	arr.splice(insertionIndex + 1, 0, item); // This even behaves correctly for the -1 case
+};
+
 export const promiseWithResolvers = <T = void>() => {
 	let resolve: (value: T) => void;
 	let reject: (reason: unknown) => void;
