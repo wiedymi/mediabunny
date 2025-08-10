@@ -35,7 +35,10 @@
     "dev": "vite",
     "examples:build": "vite build",
     "fix-build-import-paths": "tsx scripts/add-import-extensions.ts",
-    "append-namespace": "echo 'export as namespace Mediabunny;' >> dist/mediabunny.d.ts"
+    "append-namespace": "echo 'export as namespace Mediabunny;' >> dist/mediabunny.d.ts",
+    "bump-patch": "npm version patch --no-git-tag-version --workspaces --include-workspace-root",
+    "bump-minor": "npm version minor --no-git-tag-version --workspaces --include-workspace-root",
+    "bump-major": "npm version major --no-git-tag-version --workspaces --include-workspace-root"
   },
   "license": "MPL-2.0",
   "repository": {
