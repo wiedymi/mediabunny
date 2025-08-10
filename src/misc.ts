@@ -586,3 +586,21 @@ export class CallSerializer {
 		return this.currentPromise = this.currentPromise.then(fn);
 	}
 }
+
+let isSafariCache: boolean | null = null;
+export const isSafari = () => {
+	if (isSafariCache !== null) {
+		return isSafariCache;
+	}
+
+	const result = !!(
+		typeof navigator !== 'undefined'
+		&& navigator.vendor?.match(/apple/i)
+		&& !navigator.userAgent?.match(/crios/i)
+		&& !navigator.userAgent?.match(/fxios/i)
+		&& !navigator.userAgent?.match(/Opera|OPT\//)
+	);
+
+	isSafariCache = result;
+	return result;
+};

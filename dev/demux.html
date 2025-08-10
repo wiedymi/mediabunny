@@ -16,6 +16,14 @@
 			source
 		});
 
+		const videoTrack = await input.getPrimaryVideoTrack();
+		const sink = new Mediabunny.VideoSampleSink(videoTrack);
+
+		for await (const sample of sink.samples(0, 2)) {
+			console.log(sample.timestamp);
+			sample.close();
+		}
+
 		/*
 		const audioTrack = await input.getPrimaryAudioTrack();
 		const sink = new Mediabunny.EncodedPacketSink(audioTrack);
