@@ -410,7 +410,7 @@ export class Conversion {
 		} catch (error) {
 			if (!this._canceled) {
 				// Make sure to cancel to stop other encoding processes and clean up resources
-				await this.cancel();
+				void this.cancel();
 			}
 
 			throw error;
