@@ -42,7 +42,7 @@ while (notDone) {
 
 ### Video encoding config
 
-All video sources that handle encoding internally require you to specify a `VideoEncodingConfiguration`, specifying the codec configuration to use:
+All video sources that handle encoding internally require you to specify a `VideoEncodingConfig`, specifying the codec configuration to use:
 ```ts
 type VideoEncodingConfig = {
 	codec: VideoCodec;
@@ -62,7 +62,7 @@ type VideoEncodingConfig = {
 ```
 - `codec`: The [video codec](./supported-formats-and-codecs#video-codecs) used for encoding.
 - `bitrate`: The target number of bits per second. Alternatively, this can be a [subjective quality](#subjective-qualities).
-- `latencyMode`: The latency mode as specified by the WebCodecs API. Media stream-driven video sources will automatically use the `realtime` setting.
+- `latencyMode`: The latency mode as specified by the WebCodecs API. Browsers default to `quality`. Media stream-driven video sources will automatically use the `realtime` setting.
 - `keyFrameInterval`: The maximum interval in seconds between two adjacent key frames. Defaults to 5 seconds. More frequent key frames improve seeking behavior but increase file size. When using multiple video tracks, this value should be set to the same value for all tracks.
 - `fullCodecString`: Allows you to optionally specify the full codec string used by the video encoder, as specified in the [WebCodecs Codec Registry](https://www.w3.org/TR/webcodecs-codec-registry/). For example, you may set it to `'avc1.42001f'` when using AVC. Keep in mind that the codec string must still match the codec specified in `codec`. If you don't set this field, a codec string will be generated automatically.
 - `onEncodedPacket`: Called for each successfully encoded packet. Useful for determining encoding progress.
@@ -70,7 +70,7 @@ type VideoEncodingConfig = {
 
 ### Audio encoding config
 
-All audio sources that handle encoding internally require you to specify an `AudioEncodingConfiguration`, specifying the codec configuration to use:
+All audio sources that handle encoding internally require you to specify an `AudioEncodingConfig`, specifying the codec configuration to use:
 ```ts
 type AudioEncodingConfig = {
 	codec: AudioCodec;
