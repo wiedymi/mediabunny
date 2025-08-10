@@ -212,6 +212,10 @@ type Mp3OutputFormatOptions = {
 - `onXingFrame`\
 	Will be called once the Xing metadata frame is finalized, which happens at the end of the writing process.
 
+::: info
+Most browsers don't support encoding MP3. Use the official [`@mediabunny/mp3-encoder`](./extensions/mp3-encoder) package to polyfill an encoder.
+:::
+
 ## WAVE
 
 This output format creates WAVE (.wav) files.
