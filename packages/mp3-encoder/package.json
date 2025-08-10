@@ -1,7 +1,7 @@
 {
   "name": "@mediabunny/mp3-encoder",
   "author": "Vanilagy",
-  "version": "1.6.1",
+  "version": "1.6.2",
   "description": "MP3 encoder extension for Mediabunny, based on LAME.",
   "main": "./dist/bundles/mediabunny-mp3-encoder.mjs",
   "module": "./dist/bundles/mediabunny-mp3-encoder.mjs",
@@ -22,12 +22,13 @@
   "license": "MPL-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Vanilagy/mediabunny.git"
+    "url": "git+https://github.com/Vanilagy/mediabunny.git",
+    "directory": "packages/mp3-encoder"
   },
   "bugs": {
     "url": "https://github.com/Vanilagy/mediabunny/issues"
   },
-  "homepage": "https://mediabunny.dev/",
+  "homepage": "https://mediabunny.dev/guide/extensions/mp3-encoder",
   "funding": {
     "type": "individual",
     "url": "https://github.com/sponsors/Vanilagy"
