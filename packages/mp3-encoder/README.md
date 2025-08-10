@@ -10,7 +10,7 @@
 
 Browsers typically have no support for MP3 encoding in their WebCodecs implementations. Given the ubiquity of the format, this extension package provides an MP3 encoder for use with [Mediabunny](https://github.com/Vanilagy/mediabunny). It is implemented using Mediabunny's [custom coder API](https://mediabunny.dev/guide/supported-formats-and-codecs#custom-coders) and uses a highly-performant WASM build of the [LAME MP3 Encoder](https://lame.sourceforge.io/) under the hood.
 
-> This package, like the rest of Mediabunny, is enabled by its [sponsors](https://mediabunny.dev/#sponsors) and their donations. If you've derived value from this package, please consider leaving a donation! 💘
+> This package, like the rest of Mediabunny, is enabled by its [sponsors](https://mediabunny.dev/#sponsors) and their donations. If you've derived value from this package, please consider [leaving a donation](https://github.com/sponsors/Vanilagy)! 💘
 
 ## Installation
 
