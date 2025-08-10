@@ -71,12 +71,17 @@ if (cacheDir === undefined) {
 	throw new Error('Cache directory not found.');
 }
 
+let i = 0;
+
 async function buildWorker(workerPath: string, extraConfig: esbuild.BuildOptions) {
 	const scriptNameParts = path.basename(workerPath).split('.');
 	scriptNameParts.pop();
+	scriptNameParts.push(String(i)); // To make sure it doesn't clash with other builds
 	scriptNameParts.push('js');
 	const scriptName = scriptNameParts.join('.');
 	const bundlePath = path.resolve(cacheDir!, scriptName);
+
+	i = (i + 1) % 32;
 
 	if (extraConfig) {
 		delete extraConfig.entryPoints;

@@ -610,3 +610,9 @@ export const isSafari = () => {
 	isSafariCache = result;
 	return result;
 };
+
+/**
+ * T or a promise that resolves to T.
+ * @public
+ */
+export type MaybePromise<T> = T | Promise<T>;
