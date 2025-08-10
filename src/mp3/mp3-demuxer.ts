@@ -13,7 +13,7 @@ import { InputAudioTrack, InputAudioTrackBacking } from '../input-track';
 import { PacketRetrievalOptions } from '../media-sink';
 import { assert, binarySearchExact, binarySearchLessOrEqual, last, UNDETERMINED_LANGUAGE } from '../misc';
 import { EncodedPacket, PLACEHOLDER_DATA } from '../packet';
-import { FrameHeader, getXingOffset, INFO, XING } from './mp3-misc';
+import { FrameHeader, getXingOffset, INFO, XING } from '../../shared/mp3-misc';
 import { Mp3Reader } from './mp3-reader';
 
 type Sample = {

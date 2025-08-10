@@ -12,7 +12,7 @@ import { Output, OutputAudioTrack } from '../output';
 import { Mp3OutputFormat } from '../output-format';
 import { EncodedPacket } from '../packet';
 import { Writer } from '../writer';
-import { getXingOffset, INFO, readFrameHeader, XING } from './mp3-misc';
+import { getXingOffset, INFO, readFrameHeader, XING } from '../../shared/mp3-misc';
 import { Mp3Writer, XingFrameData } from './mp3-writer';
 
 export class Mp3Muxer extends Muxer {

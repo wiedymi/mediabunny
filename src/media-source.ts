@@ -80,7 +80,8 @@ export abstract class MediaSource {
 	/** @internal */
 	async _start() {}
 	/** @internal */
-	async _flushAndClose() {}
+	// eslint-disable-next-line @typescript-eslint/no-unused-vars
+	async _flushAndClose(forceClose: boolean) {}
 
 	/**
 	 * Closes this source. This prevents future samples from being added and signals to the output file that no further
@@ -103,7 +104,7 @@ export abstract class MediaSource {
 		}
 
 		this._closingPromise = (async () => {
-			await this._flushAndClose();
+			await this._flushAndClose(false);
 
 			this._closed = true;
 
@@ -116,12 +117,12 @@ export abstract class MediaSource {
 	}
 
 	/** @internal */
-	async _flushOrWaitForClose() {
+	async _flushOrWaitForOngoingClose(forceClose: boolean) {
 		if (this._closingPromise) {
 			// Since closing also flushes, we don't want to do it twice
 			return this._closingPromise;
 		} else {
-			return this._flushAndClose();
+			return this._flushAndClose(forceClose);
 		}
 	}
 }
@@ -451,14 +452,20 @@ class VideoEncoderWrapper {
 		})();
 	}
 
-	async flushAndClose() {
+	async flushAndClose(forceClose: boolean) {
 		this.checkForEncoderError();
 
 		if (this.customEncoder) {
-			void this.customEncoderCallSerializer.call(() => this.customEncoder!.flush());
+			if (!forceClose) {
+				void this.customEncoderCallSerializer.call(() => this.customEncoder!.flush());
+			}
+
 			await this.customEncoderCallSerializer.call(() => this.customEncoder!.close());
 		} else if (this.encoder) {
-			await this.encoder.flush();
+			if (!forceClose) {
+				await this.encoder.flush();
+			}
+
 			this.encoder.close();
 		}
 
@@ -512,8 +519,8 @@ export class VideoSampleSource extends VideoSource {
 	}
 
 	/** @internal */
-	override _flushAndClose() {
-		return this._encoder.flushAndClose();
+	override _flushAndClose(forceClose: boolean) {
+		return this._encoder.flushAndClose(forceClose);
 	}
 }
 
@@ -564,8 +571,8 @@ export class CanvasSource extends VideoSource {
 	}
 
 	/** @internal */
-	override _flushAndClose() {
-		return this._encoder.flushAndClose();
+	override _flushAndClose(forceClose: boolean) {
+		return this._encoder.flushAndClose(forceClose);
 	}
 }
 
@@ -714,7 +721,7 @@ export class MediaStreamVideoTrackSource extends VideoSource {
 	}
 
 	/** @internal */
-	override async _flushAndClose() {
+	override async _flushAndClose(forceClose: boolean) {
 		if (this._abortController) {
 			this._abortController.abort();
 			this._abortController = null;
@@ -746,7 +753,7 @@ export class MediaStreamVideoTrackSource extends VideoSource {
 			});
 		}
 
-		await this._encoder.flushAndClose();
+		await this._encoder.flushAndClose(forceClose);
 	}
 }
 
@@ -1226,14 +1233,20 @@ class AudioEncoderWrapper {
 		}
 	}
 
-	async flushAndClose() {
+	async flushAndClose(forceClose: boolean) {
 		this.checkForEncoderError();
 
 		if (this.customEncoder) {
-			void this.customEncoderCallSerializer.call(() => this.customEncoder!.flush());
+			if (!forceClose) {
+				void this.customEncoderCallSerializer.call(() => this.customEncoder!.flush());
+			}
+
 			await this.customEncoderCallSerializer.call(() => this.customEncoder!.close());
 		} else if (this.encoder) {
-			await this.encoder.flush();
+			if (!forceClose) {
+				await this.encoder.flush();
+			}
+
 			this.encoder.close();
 		}
 
@@ -1289,8 +1302,8 @@ export class AudioSampleSource extends AudioSource {
 	}
 
 	/** @internal */
-	override _flushAndClose() {
-		return this._encoder.flushAndClose();
+	override _flushAndClose(forceClose: boolean) {
+		return this._encoder.flushAndClose(forceClose);
 	}
 }
 
@@ -1333,8 +1346,8 @@ export class AudioBufferSource extends AudioSource {
 	}
 
 	/** @internal */
-	override _flushAndClose() {
-		return this._encoder.flushAndClose();
+	override _flushAndClose(forceClose: boolean) {
+		return this._encoder.flushAndClose(forceClose);
 	}
 }
 
@@ -1480,7 +1493,7 @@ export class MediaStreamAudioTrackSource extends AudioSource {
 	}
 
 	/** @internal */
-	override async _flushAndClose() {
+	override async _flushAndClose(forceClose: boolean) {
 		if (this._abortController) {
 			this._abortController.abort();
 			this._abortController = null;
@@ -1493,7 +1506,7 @@ export class MediaStreamAudioTrackSource extends AudioSource {
 			await this._audioContext.suspend();
 		}
 
-		await this._encoder.flushAndClose();
+		await this._encoder.flushAndClose(forceClose);
 	}
 }
 
@@ -1527,9 +1540,7 @@ type MediaStreamTrackProcessorControllerMessage = {
 const mediaStreamTrackProcessorWorkerCode = () => {
 	const sendMessage = (message: MediaStreamTrackProcessorWorkerMessage, transfer?: Transferable[]) => {
 		if (transfer) {
-			// The error is bullshit, it's using the wrong postMessage
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-argument
-			self.postMessage(message, transfer as any);
+			self.postMessage(message, { transfer });
 		} else {
 			self.postMessage(message);
 		}
