@@ -8,6 +8,15 @@
 	document.body.append(fileInput);
 
 	fileInput.addEventListener('change', async () => {
+		const videoUrl = "https://upload.wikimedia.org/wikipedia/commons/5/53/1941._%D0%9A%D0%BE%D0%BD%D1%91%D0%BA-%D0%B3%D0%BE%D1%80%D0%B1%D1%83%D0%BD%D0%BE%D0%BA.webm"
+		const source = new Mediabunny.UrlSource(videoUrl)
+		const input = new Mediabunny.Input({ formats: Mediabunny.ALL_FORMATS, source });
+
+		const videoTrack = await input.getPrimaryVideoTrack();
+
+		console.log(videoTrack);
+
+		/*
 		const file = fileInput.files[0];
 		const source = new Mediabunny.BlobSource(file);
 
@@ -20,6 +29,7 @@
 		const sink = new Mediabunny.EncodedPacketSink(audioTrack);
 
 		console.log(await sink.getPacket(100))
+		*/
 
 		/*
 		for await (const packet of sink.packets()) {
