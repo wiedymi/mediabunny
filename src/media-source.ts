@@ -1446,6 +1446,10 @@ export class MediaStreamAudioTrackSource extends AudioSource {
 			});
 		} else {
 			// Let's fall back to an AudioContext approach
+
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access
+			const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+
 			this._audioContext = new AudioContext({ sampleRate: this._track.getSettings().sampleRate });
 			const sourceNode = this._audioContext.createMediaStreamSource(new MediaStream([this._track]));
 			this._scriptProcessorNode = this._audioContext.createScriptProcessor(4096);
