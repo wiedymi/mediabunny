@@ -731,7 +731,7 @@ export class MatroskaDemuxer extends Demuxer {
 
 		switch (id) {
 			case EBMLId.DocType: {
-				this.isWebM = reader.readString(size) === 'webm';
+				this.isWebM = reader.readAsciiString(size) === 'webm';
 			}; break;
 
 			case EBMLId.Seek: {
@@ -940,7 +940,7 @@ export class MatroskaDemuxer extends Demuxer {
 			case EBMLId.CodecID: {
 				if (!this.currentTrack) break;
 
-				this.currentTrack.codecId = reader.readString(size);
+				this.currentTrack.codecId = reader.readAsciiString(size);
 			}; break;
 
 			case EBMLId.CodecPrivate: {
@@ -959,7 +959,7 @@ export class MatroskaDemuxer extends Demuxer {
 			case EBMLId.Language: {
 				if (!this.currentTrack) break;
 
-				this.currentTrack.languageCode = reader.readString(size);
+				this.currentTrack.languageCode = reader.readAsciiString(size);
 
 				if (!isIso639Dash2LanguageCode(this.currentTrack.languageCode)) {
 					this.currentTrack.languageCode = UNDETERMINED_LANGUAGE;
