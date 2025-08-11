@@ -154,7 +154,7 @@ export class MatroskaInputFormat extends InputFormat {
 					}
 				}; break;
 				case EBMLId.DocType: {
-					const docType = ebmlReader.readString(size);
+					const docType = ebmlReader.readAsciiString(size);
 					if (docType !== desiredDocType) {
 						return false;
 					}
