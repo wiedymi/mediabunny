@@ -1248,9 +1248,15 @@ class AudioDecoderWrapper extends DecoderWrapper<AudioSample> {
 		super(onSample, onError);
 
 		const sampleHandler = (sample: AudioSample) => {
-			const sampleRate = decoderConfig.sampleRate;
+			if (sample.numberOfFrames === 0) {
+				// We skip zero-data (empty) AudioSamples. These are sometimes emitted, for example, by Firefox when it
+				// decodes Vorbis (at the start).
+				sample.close();
+				return;
+			}
 
 			// Round the timestamp to the sample rate
+			const sampleRate = decoderConfig.sampleRate;
 			sample.setTimestamp(Math.round(sample.timestamp * sampleRate) / sampleRate);
 
 			onSample(sample);
