@@ -123,6 +123,7 @@ const sampleSource = new VideoSampleSource({
 });
 
 await sampleSource.add(videoSample);
+videoSample.close(); // If it's not needed anymore
 
 // You may optionally force samples to be encoded as key frames:
 await sampleSource.add(videoSample, { keyFrame: true });
@@ -285,6 +286,7 @@ const sampleSource = new AudioSampleSource({
 });
 
 await sampleSource.add(audioSample);
+audioSample.close(); // If it's not needed anymore
 ```
 
 ### `AudioBufferSource`

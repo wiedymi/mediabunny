@@ -323,17 +323,17 @@ class VideoEncoderWrapper {
 
 			if (this.customEncoder) {
 				this.customEncoderQueueSize++;
-				const promise = this.customEncoderCallSerializer
-					.call(() => this.customEncoder!.encode(videoSample, finalEncodeOptions))
-					.then(() => {
-						this.customEncoderQueueSize--;
 
-						if (shouldClose) {
-							videoSample.close();
-						}
-					})
-					.catch((error: Error) => {
-						this.encoderError ??= error;
+				// We clone the sample so it cannot be closed on us from the outside before it reaches the encoder
+				const clonedSample = videoSample.clone();
+
+				const promise = this.customEncoderCallSerializer
+					.call(() => this.customEncoder!.encode(clonedSample, finalEncodeOptions))
+					.then(() => this.customEncoderQueueSize--)
+					.catch((error: Error) => this.encoderError ??= error)
+					.finally(() => {
+						clonedSample.close();
+						// `videoSample` gets closed in the finally block at the end of the method
 					});
 
 				if (this.customEncoderQueueSize >= 4) {
@@ -440,6 +440,7 @@ class VideoEncoderWrapper {
 						void this.muxer!.addEncodedVideoPacket(this.source._connectedTrack!, packet, meta);
 					},
 					error: (error) => {
+						error.stack = new Error().stack; // Provide a more useful stack trace
 						this.encoderError ??= error;
 					},
 				});
@@ -483,7 +484,6 @@ class VideoEncoderWrapper {
 
 	checkForEncoderError() {
 		if (this.encoderError) {
-			this.encoderError.stack = new Error().stack; // Provide a more useful stack trace
 			throw this.encoderError;
 		}
 	}
@@ -939,17 +939,17 @@ class AudioEncoderWrapper {
 
 			if (this.customEncoder) {
 				this.customEncoderQueueSize++;
-				const promise = this.customEncoderCallSerializer
-					.call(() => this.customEncoder!.encode(audioSample))
-					.then(() => {
-						this.customEncoderQueueSize--;
 
-						if (shouldClose) {
-							audioSample.close();
-						}
-					})
-					.catch((error: Error) => {
-						this.encoderError ??= error;
+				// We clone the sample so it cannot be closed on us from the outside before it reaches the encoder
+				const clonedSample = audioSample.clone();
+
+				const promise = this.customEncoderCallSerializer
+					.call(() => this.customEncoder!.encode(clonedSample))
+					.then(() => this.customEncoderQueueSize--)
+					.catch((error: Error) => this.encoderError ??= error)
+					.finally(() => {
+						clonedSample.close();
+						// `audioSample` gets closed in the finally block at the end of the method
 					});
 
 				if (this.customEncoderQueueSize >= 4) {
@@ -1128,6 +1128,7 @@ class AudioEncoderWrapper {
 						void this.muxer!.addEncodedAudioPacket(this.source._connectedTrack!, packet, meta);
 					},
 					error: (error) => {
+						error.stack = new Error().stack; // Provide a more useful stack trace
 						this.encoderError ??= error;
 					},
 				});
@@ -1266,7 +1267,6 @@ class AudioEncoderWrapper {
 
 	checkForEncoderError() {
 		if (this.encoderError) {
-			this.encoderError.stack = new Error().stack; // Provide a more useful stack trace
 			throw this.encoderError;
 		}
 	}
