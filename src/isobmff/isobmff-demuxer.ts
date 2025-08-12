@@ -1459,6 +1459,12 @@ export class IsobmffDemuxer extends Demuxer {
 					const sampleIndex = this.metadataReader.readU32() - 1; // Convert to 0-indexed
 					track.sampleTable.keySampleIndices.push(sampleIndex);
 				}
+
+				if (track.sampleTable.keySampleIndices[0] !== 0) {
+					// Some files don't mark the first sample a key sample, which is basically almost always incorrect.
+					// Here, we correct for that mistake:
+					track.sampleTable.keySampleIndices.unshift(0);
+				}
 			}; break;
 
 			case 'stsc': {

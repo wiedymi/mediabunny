@@ -158,7 +158,8 @@ export class EncodedVideoPacketSource extends VideoSource {
 	}
 
 	/**
-	 * Adds an encoded packet to the output video track.
+	 * Adds an encoded packet to the output video track. Packets must be added in *decode order*, while a packet's
+	 * timestamp must be its *presentation timestamp*. B-frames are handled automatically.
 	 *
 	 * @param meta - Additional metadata from the encoder. You should pass this for the first call, including a valid
 	 * decoder config.
@@ -788,7 +789,7 @@ export class EncodedAudioPacketSource extends AudioSource {
 	}
 
 	/**
-	 * Adds an encoded packet to the output audio track.
+	 * Adds an encoded packet to the output audio track. Packets must be added in *decode order*.
 	 *
 	 * @param meta - Additional metadata from the encoder. You should pass this for the first call, including a valid
 	 * decoder config.
