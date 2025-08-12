@@ -24,7 +24,7 @@
 			chunked: true,
 			chunkSize: 2**20
 		});
-		const outputFormat = new Mediabunny.Mp4OutputFormat({});
+		const outputFormat = new Mediabunny.Mp3OutputFormat({});
 
 		const button = document.createElement('button');
 		button.textContent = 'Cancel';
@@ -41,7 +41,7 @@
 				target
 			}),
 			audio: {
-				discard: true,
+				//discard: true,
 				//codec: 'opus',
 				//bitrate: 128000,
 				//numberOfChannels: 1,
@@ -94,8 +94,8 @@
 				//height: 100,
 			}),
 			trim: {
-				start: 0,
-				end: 20
+				//start: 0,
+				//end: 20
 			},
 		});
 		console.log(conversion);
