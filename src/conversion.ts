@@ -671,7 +671,7 @@ export class Conversion {
 						}
 
 						let adjustedSampleTimestamp = Math.max(timestamp - this._startTimestamp, 0);
-						lastCanvasEndTimestamp = timestamp + duration;
+						lastCanvasEndTimestamp = adjustedSampleTimestamp + duration;
 
 						if (frameRate !== undefined) {
 							// Logic for skipping/repeating frames when a frame rate is set
@@ -757,7 +757,7 @@ export class Conversion {
 						}
 
 						let adjustedSampleTimestamp = Math.max(sample.timestamp - this._startTimestamp, 0);
-						lastSampleEndTimestamp = sample.timestamp + sample.duration;
+						lastSampleEndTimestamp = adjustedSampleTimestamp + sample.duration;
 
 						if (frameRate !== undefined) {
 							// Logic for skipping/repeating frames when a frame rate is set
