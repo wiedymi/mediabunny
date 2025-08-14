@@ -314,7 +314,9 @@ export class UrlSource extends Source {
 		} else if (rangeResponse.status === 200) {
 			// The server just returned the whole thing
 			this._fullData = await rangeResponse.arrayBuffer();
-			return this._fullData.byteLength;
+			if (this._fullData.byteLength !== 1) {
+				return this._fullData.byteLength;
+			}
 		}
 
 		// If the range request didn't provide the size, make a full GET request
