@@ -316,6 +316,8 @@ export class UrlSource extends Source {
 			this._fullData = await rangeResponse.arrayBuffer();
 			if (this._fullData.byteLength !== 1) {
 				return this._fullData.byteLength;
+			} else {
+				// The server responded with 200, but returned only the requested range, so skip the response
 			}
 		}
 
