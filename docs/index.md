@@ -340,7 +340,7 @@ await conversion.execute();
 		<div class="flex flex-wrap mt-1 justify-center">
 			<a v-for="sponsor in sponsors.individual" :href="sponsor.url" target="_blank" class="flex gap-1 w-24 flex-col items-center p-2 rounded-xl hover:bg-(--vp-c-gray-3) !text-(--vp-c-text-1) !no-underline">
 				<img :src="sponsor.image" class="size-8 rounded-full">
-				<p class="!my-0 !font-medium text-xs !leading-4">{{ sponsor.name }}</p>
+				<p class="!my-0 !font-medium text-xs !leading-4 text-center">{{ sponsor.name }}</p>
 			</a>
 		</div>
 	</template>
