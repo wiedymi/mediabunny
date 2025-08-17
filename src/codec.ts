@@ -561,7 +561,15 @@ export const extractAudioCodecString = (trackInfo: {
 	throw new TypeError(`Unhandled codec '${codec}'.`);
 };
 
-export const parseAacAudioSpecificConfig = (bytes: Uint8Array | null) => {
+export type AacAudioSpecificConfig = {
+	objectType: number;
+	frequencyIndex: number;
+	sampleRate: number | null;
+	channelConfiguration: number;
+	numberOfChannels: number | null;
+};
+
+export const parseAacAudioSpecificConfig = (bytes: Uint8Array | null): AacAudioSpecificConfig => {
 	if (!bytes || bytes.byteLength < 2) {
 		throw new TypeError('AAC description must be at least 2 bytes long.');
 	}
