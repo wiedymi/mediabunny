@@ -19,7 +19,6 @@ export class AdtsMuxer extends Muxer {
 	private writer: Writer;
 	private header = new Uint8Array(7);
 	private headerBitstream = new Bitstream(this.header);
-
 	private audioSpecificConfig: AacAudioSpecificConfig | null = null;
 
 	constructor(output: Output, format: AdtsOutputFormat) {
