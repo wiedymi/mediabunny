@@ -7,7 +7,7 @@
  */
 
 import { AacAudioSpecificConfig, parseAacAudioSpecificConfig, validateAudioChunkMetadata } from '../codec';
-import { assert, toUint8Array } from '../misc';
+import { assert, Bitstream, toUint8Array } from '../misc';
 import { Muxer } from '../muxer';
 import { Output, OutputAudioTrack } from '../output';
 import { AdtsOutputFormat } from '../output-format';
@@ -18,6 +18,8 @@ export class AdtsMuxer extends Muxer {
 	private format: AdtsOutputFormat;
 	private writer: Writer;
 	private header = new Uint8Array(7);
+	private headerBitstream = new Bitstream(this.header);
+
 	private audioSpecificConfig: AacAudioSpecificConfig | null = null;
 
 	constructor(output: Output, format: AdtsOutputFormat) {
@@ -56,48 +58,31 @@ export class AdtsMuxer extends Muxer {
 				assert(description);
 
 				this.audioSpecificConfig = parseAacAudioSpecificConfig(toUint8Array(description));
+
+				const { objectType, frequencyIndex, channelConfiguration } = this.audioSpecificConfig;
+				const profile = objectType - 1;
+
+				this.headerBitstream.writeBits(12, 0b1111_11111111); // Syncword
+				this.headerBitstream.writeBits(1, 0); // MPEG Version
+				this.headerBitstream.writeBits(2, 0); // Layer
+				this.headerBitstream.writeBits(1, 1); // Protection absence
+				this.headerBitstream.writeBits(2, profile); // Profile
+				this.headerBitstream.writeBits(4, frequencyIndex); // MPEG-4 Sampling Frequency Index
+				this.headerBitstream.writeBits(1, 0); // Private bit
+				this.headerBitstream.writeBits(3, channelConfiguration); // MPEG-4 Channel Configuration
+				this.headerBitstream.writeBits(1, 0); // Originality
+				this.headerBitstream.writeBits(1, 0); // Home
+				this.headerBitstream.writeBits(1, 0); // Copyright ID bit
+				this.headerBitstream.writeBits(1, 0); // Copyright ID start
+				this.headerBitstream.skipBits(13); // Frame length
+				this.headerBitstream.writeBits(11, 0x7ff); // Buffer fullness
+				this.headerBitstream.writeBits(2, 0); // Number of AAC frames minus 1
+				// Omit CRC check
 			}
 
-			const syncword = 0b1111_11111111;
-			this.header[0] = (syncword >> 4);
-
-			const mpegVersion = 0;
-			const layer = 0;
-			const protectionAbsence = 1;
-			this.header[1] = (syncword << 4)
-				| (mpegVersion << 3)
-				| (layer << 1)
-				| protectionAbsence;
-
-			const privateBit = 0;
-			this.header[2] = (((this.audioSpecificConfig.objectType - 1) & 0b11) << 6)
-				| ((this.audioSpecificConfig.frequencyIndex & 0b1111) << 2)
-				| (privateBit << 1)
-				| ((this.audioSpecificConfig.channelConfiguration & 0b111) >> 2);
-
-			const originality = 0;
-			const homeUsage = 0;
-			const copyrightIdBit = 0;
-			const copyrightIdStart = 0;
-			const frameLength = (packet.data.byteLength + this.header.byteLength) & 0b11111_11111111;
-			this.header[3] = ((this.audioSpecificConfig.channelConfiguration & 0b111) << 6)
-				| (originality << 5)
-				| (homeUsage << 4)
-				| (copyrightIdBit << 3)
-				| (copyrightIdStart << 2)
-				| (frameLength >> 11);
-
-			this.header[4] = (frameLength >> 3);
-
-			const bufferFullness = 0x7ff; // Variable bitrate
-			this.header[5] = (frameLength << 5)
-				| (bufferFullness >> 6);
-
-			const numberOfAacFrames = 1;
-			this.header[6] = (bufferFullness << 2)
-				| (numberOfAacFrames - 1);
-
-			// Omit CRC check
+			const frameLength = packet.data.byteLength + this.header.byteLength;
+			this.headerBitstream.pos = 30;
+			this.headerBitstream.writeBits(13, frameLength);
 
 			const startPos = this.writer.getPos();
 			this.writer.write(this.header);
