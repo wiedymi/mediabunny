@@ -21,6 +21,8 @@
 
 		for await (const packet of sink.packets()) {
 			console.log(packet);
+
+			if (packet.timestamp > 135) break;
 		}
 
 		/*
