@@ -291,14 +291,20 @@ export class IsobmffDemuxer extends Demuxer {
 				const lastWord = this.metadataReader.readU32();
 				const potentialMfraPos = sourceSize - lastWord;
 
-				if (potentialMfraPos >= 0 && potentialMfraPos < sourceSize) {
-					await this.metadataReader.reader.loadRange(potentialMfraPos, sourceSize);
+				if (potentialMfraPos >= 0 && potentialMfraPos <= sourceSize - MAX_BOX_HEADER_SIZE) {
+					// Load the header and a bit more, likely covering the entire box
+					await this.metadataReader.reader.loadRange(potentialMfraPos, potentialMfraPos + 2 ** 16);
 
 					this.metadataReader.pos = potentialMfraPos;
 					const boxInfo = this.metadataReader.readBoxHeader();
 
 					if (boxInfo.name === 'mfra') {
-						// We found the mfra box, allowing for much better random access. Let's parse it:
+						// We found the mfra box, allowing for much better random access. Let's parse it.
+
+						await this.metadataReader.reader.loadRange(
+							potentialMfraPos,
+							potentialMfraPos + boxInfo.totalSize,
+						);
 						this.readContiguousBoxes(boxInfo.contentSize);
 					}
 				}
