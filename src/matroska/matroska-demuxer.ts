@@ -760,6 +760,7 @@ export class MatroskaDemuxer extends Demuxer {
 
 		while (reader.pos - startIndex <= totalSize - MIN_HEADER_SIZE) {
 			const foundElement = this.traverseElement(reader);
+
 			if (!foundElement) {
 				break;
 			}
