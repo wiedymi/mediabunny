@@ -1731,15 +1731,10 @@ abstract class MatroskaTrackBacking implements InputTrackBacking {
 				metadataReader.pos = dataStartPos + size;
 			}
 
-			let result: EncodedPacket | null = null;
 			const bestCluster = bestClusterIndex !== -1 ? this.internalTrack.clusters[bestClusterIndex]! : null;
-			if (bestCluster) {
-				// If we finished looping but didn't find a perfect match, still return the best match we found
-				result = await this.fetchPacketInCluster(bestCluster, bestBlockIndex, options);
-			}
 
 			// Catch faulty cue points
-			if (!result && cuePoint && (!bestCluster || bestCluster.elementStartPos < cuePoint.clusterPosition)) {
+			if (cuePoint && (!bestCluster || bestCluster.elementStartPos < cuePoint.clusterPosition)) {
 				// The cue point lied to us! We found a cue point but no cluster there that satisfied the match. In this
 				// case, let's search again but using the cue point before that.
 				const previousCuePoint = this.internalTrack.cuePoints[cuePointIndex - 1];
@@ -1747,7 +1742,12 @@ abstract class MatroskaTrackBacking implements InputTrackBacking {
 				return this.performClusterLookup(getBestMatch, newSearchTimestamp, latestTimestamp, options);
 			}
 
-			return result;
+			if (bestCluster) {
+				// If we finished looping but didn't find a perfect match, still return the best match we found
+				return this.fetchPacketInCluster(bestCluster, bestBlockIndex, options);
+			}
+
+			return null;
 		} finally {
 			release();
 		}
