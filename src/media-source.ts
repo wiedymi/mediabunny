@@ -347,8 +347,9 @@ class VideoEncoderWrapper {
 				if (!support.supported) {
 					throw new Error(
 						`This specific encoder configuration (${encoderConfig.codec}, ${encoderConfig.bitrate} bps,`
-						+ ` ${encoderConfig.width}x${encoderConfig.height}) is not supported by this browser. Consider`
-						+ ` using another codec or changing your video parameters.`,
+						+ ` ${encoderConfig.width}x${encoderConfig.height}, hardware acceleration:`
+						+ ` ${encoderConfig.hardwareAcceleration ?? 'no-preference'}) is not supported by this browser.`
+						+ ` Consider using another codec or changing your video parameters.`,
 					);
 				}
 
