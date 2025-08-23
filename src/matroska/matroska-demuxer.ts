@@ -1282,6 +1282,10 @@ abstract class MatroskaTrackBacking implements InputTrackBacking {
 		throw new Error('Not implemented on base class.');
 	}
 
+	getInternalCodecId() {
+		return this.internalTrack.codecId;
+	}
+
 	async computeDuration() {
 		const lastPacket = await this.getPacket(Infinity, { metadataOnly: true });
 		return (lastPacket?.timestamp ?? 0) + (lastPacket?.duration ?? 0);

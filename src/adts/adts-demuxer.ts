@@ -168,6 +168,12 @@ class AdtsAudioTrackBacking implements InputAudioTrackBacking {
 		return 'aac';
 	}
 
+	getInternalCodecId() {
+		assert(this.demuxer.firstFrameHeader);
+
+		return this.demuxer.firstFrameHeader.objectType;
+	}
+
 	getNumberOfChannels() {
 		assert(this.demuxer.firstFrameHeader);
 

@@ -71,6 +71,7 @@ type InternalTrack = {
 	durationInMovieTimescale: number;
 	durationInMediaTimescale: number;
 	rotation: Rotation;
+	internalCodecId: string | null;
 	name: string | null;
 	languageCode: string;
 	sampleTableByteOffset: number;
@@ -628,6 +629,7 @@ export class IsobmffDemuxer extends Demuxer {
 					durationInMovieTimescale: -1,
 					durationInMediaTimescale: -1,
 					rotation: 0,
+					internalCodecId: null,
 					name: null,
 					languageCode: UNDETERMINED_LANGUAGE,
 					sampleTableByteOffset: -1,
@@ -847,6 +849,7 @@ export class IsobmffDemuxer extends Demuxer {
 						break;
 					}
 
+					track.internalCodecId = sampleBoxInfo.name;
 					const lowercaseBoxName = sampleBoxInfo.name.toLowerCase();
 
 					if (track.info.type === 'video') {
@@ -1955,6 +1958,10 @@ abstract class IsobmffTrackBacking implements InputTrackBacking {
 
 	getCodec(): MediaCodec | null {
 		throw new Error('Not implemented on base class.');
+	}
+
+	getInternalCodecId() {
+		return this.internalTrack.internalCodecId;
 	}
 
 	getName() {
