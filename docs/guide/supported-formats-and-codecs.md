@@ -120,6 +120,8 @@ canEncodeAudio('aac', {
 }); // => Promise<boolean>
 ```
 
+Additionally, most properties of [`VideoEncodingConfig`](./media-sources#video-encoding-config) and [`AudioEncodingConfig`](./media-sources#audio-encoding-config) can be used here as well.
+
 ---
 
 In addition, you can use the following functions to check encodability for multiple codecs at once, getting back a list of supported codecs:

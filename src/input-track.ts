@@ -30,6 +30,8 @@ export type PacketStats = {
 export interface InputTrackBacking {
 	getId(): number;
 	getCodec(): MediaCodec | null;
+	getInternalCodecId(): string | number | Uint8Array | null;
+	getName(): string | null;
 	getLanguageCode(): string;
 	getTimeResolution(): number;
 	getFirstTimestamp(): Promise<number>;
@@ -84,9 +86,30 @@ export abstract class InputTrack {
 		return this._backing.getId();
 	}
 
+	/**
+	 * The identifier of the codec used internally by the container. It is not homogenized by Mediabunny
+	 * and depends entirely on the container format.
+	 *
+	 * This field can be used to determine the codec of a track in case Mediabunny doesn't know that codec.
+	 *
+	 * - For ISOBMFF files, this field returns the name of the Sample Description Box (e.g. 'avc1').
+	 * - For Matroska files, this field returns the value of the CodecID element.
+	 * - For WAVE files, this field returns the value of the format tag in the 'fmt ' chunk.
+	 * - For ADTS files, this field contains the MPEG-4 Audio Object Type.
+	 * - In all other cases, this field is `null`.
+	 */
+	get internalCodecId() {
+		return this._backing.getInternalCodecId();
+	}
+
 	/** The ISO 639-2/T language code for this track. If the language is unknown, this field is 'und' (undetermined). */
 	get languageCode() {
 		return this._backing.getLanguageCode();
+	}
+
+	/** A user-defined name for this track. */
+	get name() {
+		return this._backing.getName();
 	}
 
 	/**

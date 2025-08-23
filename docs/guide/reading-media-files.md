@@ -97,6 +97,9 @@ track.isAudioTrack(); // => boolean
 // Retrieve the track's language as an ISO 639-2/T language code.
 // Resolves to 'und' (undetermined) if the language isn't known.
 track.languageCode; // => string
+
+// A user-defined name for this track.
+track.name; // => string
 ```
 
 #### Codec information
@@ -105,7 +108,7 @@ You can query metadata related to the track's codec:
 ```ts
 track.codec; // => MediaCodec | null
 ```
-This field is `null` when the track's codec couldn't be recognized or is not supported by Mediabunny. See [Codecs](./supported-formats-and-codecs#codecs) for the full list of supported codecs.
+This field is `null` when the track's codec couldn't be recognized or is not supported by Mediabunny. See [Codecs](./supported-formats-and-codecs#codecs) for the full list of supported codecs. When Mediabunny doesn't recognize the format, you can still use the `internalCodecId` field to figure out the codec of the track, although its format depends on the container format used and is not homogenized by Mediabunny.
 
 You can also extract the full codec parameter string from the track, as specified in the [WebCodecs Codec Registry](https://www.w3.org/TR/webcodecs-codec-registry/):
 ```ts

@@ -145,6 +145,7 @@ type InternalTrack = {
 	codecId: string | null;
 	codecPrivate: Uint8Array | null;
 	defaultDuration: number | null;
+	name: string | null;
 	languageCode: string;
 	info:
 		| null
@@ -836,6 +837,7 @@ export class MatroskaDemuxer extends Demuxer {
 					codecId: null,
 					codecPrivate: null,
 					defaultDuration: null,
+					name: null,
 					languageCode: UNDETERMINED_LANGUAGE,
 					info: null,
 				};
@@ -1004,12 +1006,36 @@ export class MatroskaDemuxer extends Demuxer {
 					= this.currentTrack.segment.timestampFactor * reader.readUnsignedInt(size) / 1e9;
 			}; break;
 
+			case EBMLId.Name: {
+				if (!this.currentTrack) break;
+
+				this.currentTrack.name = reader.readUnicodeString(size);
+			}; break;
+
 			case EBMLId.Language: {
 				if (!this.currentTrack) break;
+				if (this.currentTrack.languageCode) break; // LanguageBCP47 was present, which takes precedence
 
 				this.currentTrack.languageCode = reader.readAsciiString(size);
 
 				if (!isIso639Dash2LanguageCode(this.currentTrack.languageCode)) {
+					this.currentTrack.languageCode = UNDETERMINED_LANGUAGE;
+				}
+			}; break;
+
+			case EBMLId.LanguageBCP47: {
+				if (!this.currentTrack) break;
+
+				const bcp47 = reader.readAsciiString(size);
+				const languageSubtag = bcp47.split('-')[0];
+
+				if (languageSubtag) {
+					// Technically invalid, for now: The language subtag might be a language code from ISO 639-1,
+					// ISO 639-2, ISO 639-3, ISO 639-5 or some other thing (source: Wikipedia). But, `languageCode` is
+					// documented as ISO 639-2. Changing the definition would be a breaking change. This will get
+					// cleaned up in the future by defining languageCode to be BCP 47 instead.
+					this.currentTrack.languageCode = languageSubtag;
+				} else {
 					this.currentTrack.languageCode = UNDETERMINED_LANGUAGE;
 				}
 			}; break;
@@ -1256,9 +1282,17 @@ abstract class MatroskaTrackBacking implements InputTrackBacking {
 		throw new Error('Not implemented on base class.');
 	}
 
+	getInternalCodecId() {
+		return this.internalTrack.codecId;
+	}
+
 	async computeDuration() {
 		const lastPacket = await this.getPacket(Infinity, { metadataOnly: true });
 		return (lastPacket?.timestamp ?? 0) + (lastPacket?.duration ?? 0);
+	}
+
+	getName() {
+		return this.internalTrack.name;
 	}
 
 	getLanguageCode() {
@@ -1731,15 +1765,10 @@ abstract class MatroskaTrackBacking implements InputTrackBacking {
 				metadataReader.pos = dataStartPos + size;
 			}
 
-			let result: EncodedPacket | null = null;
 			const bestCluster = bestClusterIndex !== -1 ? this.internalTrack.clusters[bestClusterIndex]! : null;
-			if (bestCluster) {
-				// If we finished looping but didn't find a perfect match, still return the best match we found
-				result = await this.fetchPacketInCluster(bestCluster, bestBlockIndex, options);
-			}
 
 			// Catch faulty cue points
-			if (!result && cuePoint && (!bestCluster || bestCluster.elementStartPos < cuePoint.clusterPosition)) {
+			if (cuePoint && (!bestCluster || bestCluster.elementStartPos < cuePoint.clusterPosition)) {
 				// The cue point lied to us! We found a cue point but no cluster there that satisfied the match. In this
 				// case, let's search again but using the cue point before that.
 				const previousCuePoint = this.internalTrack.cuePoints[cuePointIndex - 1];
@@ -1747,7 +1776,12 @@ abstract class MatroskaTrackBacking implements InputTrackBacking {
 				return this.performClusterLookup(getBestMatch, newSearchTimestamp, latestTimestamp, options);
 			}
 
-			return result;
+			if (bestCluster) {
+				// If we finished looping but didn't find a perfect match, still return the best match we found
+				return this.fetchPacketInCluster(bestCluster, bestBlockIndex, options);
+			}
+
+			return null;
 		} finally {
 			release();
 		}

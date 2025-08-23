@@ -431,6 +431,10 @@ class OggAudioTrackBacking implements InputAudioTrackBacking {
 		return this.bitstream.codecInfo.codec;
 	}
 
+	getInternalCodecId() {
+		return null;
+	}
+
 	async getDecoderConfig(): Promise<AudioDecoderConfig | null> {
 		assert(this.bitstream.codecInfo.codec);
 
@@ -440,6 +444,10 @@ class OggAudioTrackBacking implements InputAudioTrackBacking {
 			sampleRate: this.bitstream.sampleRate,
 			description: this.bitstream.description ?? undefined,
 		};
+	}
+
+	getName() {
+		return null;
 	}
 
 	getLanguageCode() {

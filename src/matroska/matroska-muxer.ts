@@ -29,6 +29,7 @@ import {
 	EBMLFloat64,
 	EBMLId,
 	EBMLSignedInt,
+	EBMLUnicodeString,
 	EBMLWriter,
 } from './ebml';
 import { buildMatroskaMimeType } from './matroska-misc';
@@ -272,6 +273,9 @@ export class MatroskaMuxer extends Muxer {
 				{ id: EBMLId.CodecID, data: codecId },
 				{ id: EBMLId.CodecDelay, data: 0 },
 				{ id: EBMLId.SeekPreRoll, data: seekPreRollNs },
+				trackData.track.metadata.name !== undefined
+					? { id: EBMLId.Name, data: new EBMLUnicodeString(trackData.track.metadata.name) }
+					: null,
 				(trackData.type === 'video' ? this.videoSpecificTrackInfo(trackData) : null),
 				(trackData.type === 'audio' ? this.audioSpecificTrackInfo(trackData) : null),
 				(trackData.type === 'subtitle' ? this.subtitleSpecificTrackInfo(trackData) : null),
@@ -812,8 +816,8 @@ export class MatroskaMuxer extends Muxer {
 
 		const msDuration = Math.round(1000 * chunk.duration);
 
-		if (msDuration === 0 && !chunk.additions) {
-			// No duration or additions, we can write out a SimpleBlock
+		if (!chunk.additions) {
+			// No additions, we can write out a SimpleBlock
 			view.setUint8(3, Number(chunk.type === 'key') << 7); // Flags (keyframe flag only present for SimpleBlock)
 
 			const simpleBlock = { id: EBMLId.SimpleBlock, data: [

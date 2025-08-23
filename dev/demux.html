@@ -17,6 +17,12 @@
 		});
 
 		const videoTrack = await input.getPrimaryVideoTrack();
+		console.log(await videoTrack.getFirstTimestamp(), await videoTrack.computeDuration());
+
+		console.log(videoTrack.name);
+		console.log(videoTrack.internalCodecId);
+
+		/*
 		const sink = new Mediabunny.EncodedPacketSink(videoTrack);
 
 		for await (const packet of sink.packets()) {
@@ -24,6 +30,7 @@
 
 			//if (packet.timestamp > 135) break;
 		}
+		*/
 
 		/*
 		const audioTrack = await input.getPrimaryAudioTrack();

@@ -56,6 +56,7 @@ import {
 	normalizeRotation,
 	Bitstream,
 	insertSorted,
+	textDecoder,
 } from '../misc';
 import { EncodedPacket, PLACEHOLDER_DATA } from '../packet';
 import { Reader } from '../reader';
@@ -70,6 +71,8 @@ type InternalTrack = {
 	durationInMovieTimescale: number;
 	durationInMediaTimescale: number;
 	rotation: Rotation;
+	internalCodecId: string | null;
+	name: string | null;
 	languageCode: string;
 	sampleTableByteOffset: number;
 	sampleTable: SampleTable | null;
@@ -596,7 +599,8 @@ export class IsobmffDemuxer extends Demuxer {
 			case 'minf':
 			case 'dinf':
 			case 'mfra':
-			case 'edts': {
+			case 'edts':
+			case 'udta': {
 				this.readContiguousBoxes(boxInfo.contentSize);
 			}; break;
 
@@ -625,6 +629,8 @@ export class IsobmffDemuxer extends Demuxer {
 					durationInMovieTimescale: -1,
 					durationInMediaTimescale: -1,
 					rotation: 0,
+					internalCodecId: null,
+					name: null,
 					languageCode: UNDETERMINED_LANGUAGE,
 					sampleTableByteOffset: -1,
 					sampleTable: null,
@@ -843,6 +849,7 @@ export class IsobmffDemuxer extends Demuxer {
 						break;
 					}
 
+					track.internalCodecId = sampleBoxInfo.name;
 					const lowercaseBoxName = sampleBoxInfo.name.toLowerCase();
 
 					if (track.info.type === 'video') {
@@ -1919,6 +1926,16 @@ export class IsobmffDemuxer extends Demuxer {
 
 				this.currentFragment.implicitBaseDataOffset = currentOffset;
 			}; break;
+
+			// These appear in udta:
+			case '©nam':
+			case 'name': {
+				if (!this.currentTrack) {
+					break;
+				}
+
+				this.currentTrack.name = textDecoder.decode(this.metadataReader.readBytes(boxInfo.contentSize));
+			}; break;
 		}
 
 		this.metadataReader.pos = boxEndPos;
@@ -1941,6 +1958,14 @@ abstract class IsobmffTrackBacking implements InputTrackBacking {
 
 	getCodec(): MediaCodec | null {
 		throw new Error('Not implemented on base class.');
+	}
+
+	getInternalCodecId() {
+		return this.internalTrack.internalCodecId;
+	}
+
+	getName() {
+		return this.internalTrack.name;
 	}
 
 	getLanguageCode() {
@@ -2460,15 +2485,10 @@ abstract class IsobmffTrackBacking implements InputTrackBacking {
 				metadataReader.pos = startPos + boxInfo.totalSize;
 			}
 
-			let result: EncodedPacket | null = null;
 			const bestFragment = bestFragmentIndex !== -1 ? this.internalTrack.fragments[bestFragmentIndex]! : null;
-			if (bestFragment) {
-				// If we finished looping but didn't find a perfect match, still return the best match we found
-				result = await this.fetchPacketInFragment(bestFragment, bestSampleIndex, options);
-			}
 
 			// Catch faulty lookup table entries
-			if (!result && lookupEntry && (!bestFragment || bestFragment.moofOffset < lookupEntry.moofOffset)) {
+			if (lookupEntry && (!bestFragment || bestFragment.moofOffset < lookupEntry.moofOffset)) {
 				// The lookup table entry lied to us! We found a lookup entry but no fragment there that satisfied
 				// the match. In this case, let's search again but using the lookup entry before that.
 				const previousLookupEntry = this.internalTrack.fragmentLookupTable![lookupEntryIndex - 1];
@@ -2476,7 +2496,12 @@ abstract class IsobmffTrackBacking implements InputTrackBacking {
 				return this.performFragmentedLookup(getBestMatch, newSearchTimestamp, latestTimestamp, options);
 			}
 
-			return result;
+			if (bestFragment) {
+				// If we finished looping but didn't find a perfect match, still return the best match we found
+				return this.fetchPacketInFragment(bestFragment, bestSampleIndex, options);
+			}
+
+			return null;
 		} finally {
 			release();
 		}

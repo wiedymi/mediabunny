@@ -222,6 +222,11 @@ class WaveAudioTrackBacking implements InputAudioTrackBacking {
 		return this.demuxer.getCodec();
 	}
 
+	getInternalCodecId() {
+		assert(this.demuxer.audioInfo);
+		return this.demuxer.audioInfo.format;
+	}
+
 	async getDecoderConfig(): Promise<AudioDecoderConfig | null> {
 		const codec = this.demuxer.getCodec();
 		if (!codec) {
@@ -253,6 +258,10 @@ class WaveAudioTrackBacking implements InputAudioTrackBacking {
 	getTimeResolution() {
 		assert(this.demuxer.audioInfo);
 		return this.demuxer.audioInfo.sampleRate;
+	}
+
+	getName() {
+		return null;
 	}
 
 	getLanguageCode() {

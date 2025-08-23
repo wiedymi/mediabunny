@@ -168,12 +168,20 @@ class Mp3AudioTrackBacking implements InputAudioTrackBacking {
 		return (lastPacket?.timestamp ?? 0) + (lastPacket?.duration ?? 0);
 	}
 
+	getName() {
+		return null;
+	}
+
 	getLanguageCode() {
 		return UNDETERMINED_LANGUAGE;
 	}
 
 	getCodec(): AudioCodec {
 		return 'mp3';
+	}
+
+	getInternalCodecId() {
+		return null;
 	}
 
 	getNumberOfChannels() {
