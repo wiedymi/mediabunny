@@ -97,6 +97,9 @@ track.isAudioTrack(); // => boolean
 // Retrieve the track's language as an ISO 639-2/T language code.
 // Resolves to 'und' (undetermined) if the language isn't known.
 track.languageCode; // => string
+
+// A user-defined name for this track.
+track.name; // => string
 ```
 
 #### Codec information

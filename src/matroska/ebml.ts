@@ -7,13 +7,22 @@
  */
 
 import { MediaCodec } from '../codec';
+import { assertNever, textDecoder, textEncoder } from '../misc';
 import { Reader } from '../reader';
 import { Writer } from '../writer';
 
 export interface EBMLElement {
 	id: number;
 	size?: number;
-	data: number | string | Uint8Array | EBMLFloat32 | EBMLFloat64 | EBMLSignedInt | (EBML | null)[];
+	data:
+		| number
+		| string
+		| Uint8Array
+		| EBMLFloat32
+		| EBMLFloat64
+		| EBMLSignedInt
+		| EBMLUnicodeString
+		| (EBML | null)[];
 }
 
 export type EBML = EBMLElement | Uint8Array | (EBML | null)[];
@@ -45,6 +54,10 @@ export class EBMLSignedInt {
 	}
 }
 
+export class EBMLUnicodeString {
+	constructor(public value: string) {}
+}
+
 /** Defines some of the EBML IDs used by Matroska files. */
 export enum EBMLId {
 	EBML = 0x1a45dfa3,
@@ -73,6 +86,7 @@ export enum EBMLId {
 	FlagDefault = 0x88,
 	FlagForced = 0x55aa,
 	FlagLacing = 0x9c,
+	Name = 0x536e,
 	Language = 0x22b59c,
 	CodecID = 0x86,
 	CodecPrivate = 0x63a2,
@@ -371,6 +385,12 @@ export class EBMLWriter {
 				const size = data.size ?? measureSignedInt(data.data.value);
 				this.writeVarInt(size);
 				this.writeSignedInt(data.data.value, size);
+			} else if (data.data instanceof EBMLUnicodeString) {
+				const bytes = textEncoder.encode(data.data.value);
+				this.writeVarInt(bytes.length);
+				this.writer.write(bytes);
+			} else {
+				assertNever(data.data);
 			}
 		}
 	}
@@ -512,6 +532,19 @@ export class EBMLReader {
 		}
 
 		return String.fromCharCode(...new Uint8Array(view.buffer, offset, strLength));
+	}
+
+	readUnicodeString(length: number) {
+		const { view, offset } = this.reader.getViewAndOffset(this.pos, this.pos + length);
+		this.pos += length;
+
+		// Actual string length might be shorter due to null terminators
+		let strLength = 0;
+		while (strLength < length && view.getUint8(offset + strLength) !== 0) {
+			strLength += 1;
+		}
+
+		return textDecoder.decode(new Uint8Array(view.buffer, offset, strLength));
 	}
 
 	readElementId() {

@@ -442,6 +442,10 @@ class OggAudioTrackBacking implements InputAudioTrackBacking {
 		};
 	}
 
+	getName() {
+		return null;
+	}
+
 	getLanguageCode() {
 		return UNDETERMINED_LANGUAGE;
 	}

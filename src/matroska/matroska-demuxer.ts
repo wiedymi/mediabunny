@@ -145,6 +145,7 @@ type InternalTrack = {
 	codecId: string | null;
 	codecPrivate: Uint8Array | null;
 	defaultDuration: number | null;
+	name: string | null;
 	languageCode: string;
 	info:
 		| null
@@ -836,6 +837,7 @@ export class MatroskaDemuxer extends Demuxer {
 					codecId: null,
 					codecPrivate: null,
 					defaultDuration: null,
+					name: null,
 					languageCode: UNDETERMINED_LANGUAGE,
 					info: null,
 				};
@@ -1002,6 +1004,12 @@ export class MatroskaDemuxer extends Demuxer {
 
 				this.currentTrack.defaultDuration
 					= this.currentTrack.segment.timestampFactor * reader.readUnsignedInt(size) / 1e9;
+			}; break;
+
+			case EBMLId.Name: {
+				if (!this.currentTrack) break;
+
+				this.currentTrack.name = reader.readUnicodeString(size);
 			}; break;
 
 			case EBMLId.Language: {
@@ -1259,6 +1267,10 @@ abstract class MatroskaTrackBacking implements InputTrackBacking {
 	async computeDuration() {
 		const lastPacket = await this.getPacket(Infinity, { metadataOnly: true });
 		return (lastPacket?.timestamp ?? 0) + (lastPacket?.duration ?? 0);
+	}
+
+	getName() {
+		return this.internalTrack.name;
 	}
 
 	getLanguageCode() {

@@ -19,6 +19,8 @@
 		const videoTrack = await input.getPrimaryVideoTrack();
 		console.log(await videoTrack.getFirstTimestamp(), await videoTrack.computeDuration());
 
+		console.log(videoTrack.name);
+
 		/*
 		const sink = new Mediabunny.EncodedPacketSink(videoTrack);
 

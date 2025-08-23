@@ -255,6 +255,10 @@ class WaveAudioTrackBacking implements InputAudioTrackBacking {
 		return this.demuxer.audioInfo.sampleRate;
 	}
 
+	getName() {
+		return null;
+	}
+
 	getLanguageCode() {
 		return UNDETERMINED_LANGUAGE;
 	}

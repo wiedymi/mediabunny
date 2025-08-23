@@ -56,6 +56,7 @@ import {
 	normalizeRotation,
 	Bitstream,
 	insertSorted,
+	textDecoder,
 } from '../misc';
 import { EncodedPacket, PLACEHOLDER_DATA } from '../packet';
 import { Reader } from '../reader';
@@ -70,6 +71,7 @@ type InternalTrack = {
 	durationInMovieTimescale: number;
 	durationInMediaTimescale: number;
 	rotation: Rotation;
+	name: string | null;
 	languageCode: string;
 	sampleTableByteOffset: number;
 	sampleTable: SampleTable | null;
@@ -596,7 +598,8 @@ export class IsobmffDemuxer extends Demuxer {
 			case 'minf':
 			case 'dinf':
 			case 'mfra':
-			case 'edts': {
+			case 'edts':
+			case 'udta': {
 				this.readContiguousBoxes(boxInfo.contentSize);
 			}; break;
 
@@ -625,6 +628,7 @@ export class IsobmffDemuxer extends Demuxer {
 					durationInMovieTimescale: -1,
 					durationInMediaTimescale: -1,
 					rotation: 0,
+					name: null,
 					languageCode: UNDETERMINED_LANGUAGE,
 					sampleTableByteOffset: -1,
 					sampleTable: null,
@@ -1919,6 +1923,16 @@ export class IsobmffDemuxer extends Demuxer {
 
 				this.currentFragment.implicitBaseDataOffset = currentOffset;
 			}; break;
+
+			// These appear in udta:
+			case '©nam':
+			case 'name': {
+				if (!this.currentTrack) {
+					break;
+				}
+
+				this.currentTrack.name = textDecoder.decode(this.metadataReader.readBytes(boxInfo.contentSize));
+			}; break;
 		}
 
 		this.metadataReader.pos = boxEndPos;
@@ -1941,6 +1955,10 @@ abstract class IsobmffTrackBacking implements InputTrackBacking {
 
 	getCodec(): MediaCodec | null {
 		throw new Error('Not implemented on base class.');
+	}
+
+	getName() {
+		return this.internalTrack.name;
 	}
 
 	getLanguageCode() {

@@ -30,6 +30,7 @@ export type PacketStats = {
 export interface InputTrackBacking {
 	getId(): number;
 	getCodec(): MediaCodec | null;
+	getName(): string | null;
 	getLanguageCode(): string;
 	getTimeResolution(): number;
 	getFirstTimestamp(): Promise<number>;
@@ -87,6 +88,11 @@ export abstract class InputTrack {
 	/** The ISO 639-2/T language code for this track. If the language is unknown, this field is 'und' (undetermined). */
 	get languageCode() {
 		return this._backing.getLanguageCode();
+	}
+
+	/** A user-defined name for this track. */
+	get name() {
+		return this._backing.getName();
 	}
 
 	/**
