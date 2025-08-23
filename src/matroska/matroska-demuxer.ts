@@ -1014,10 +1014,28 @@ export class MatroskaDemuxer extends Demuxer {
 
 			case EBMLId.Language: {
 				if (!this.currentTrack) break;
+				if (this.currentTrack.languageCode) break; // LanguageBCP47 was present, which takes precedence
 
 				this.currentTrack.languageCode = reader.readAsciiString(size);
 
 				if (!isIso639Dash2LanguageCode(this.currentTrack.languageCode)) {
+					this.currentTrack.languageCode = UNDETERMINED_LANGUAGE;
+				}
+			}; break;
+
+			case EBMLId.LanguageBCP47: {
+				if (!this.currentTrack) break;
+
+				const bcp47 = reader.readAsciiString(size);
+				const languageSubtag = bcp47.split('-')[0];
+
+				if (languageSubtag) {
+					// Technically invalid, for now: The language subtag might be a language code from ISO 639-1,
+					// ISO 639-2, ISO 639-3, ISO 639-5 or some other thing (source: Wikipedia). But, `languageCode` is
+					// documented as ISO 639-2. Changing the definition would be a breaking change. This will get
+					// cleaned up in the future by defining languageCode to be BCP 47 instead.
+					this.currentTrack.languageCode = languageSubtag;
+				} else {
 					this.currentTrack.languageCode = UNDETERMINED_LANGUAGE;
 				}
 			}; break;
