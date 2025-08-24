@@ -59,7 +59,7 @@ export type ConversionVideoOptions = {
 	 */
 	height?: number;
 	/**
-	 * The fitting algorithm in case both width and height are set.
+	 * The fitting algorithm in case both width and height are set, or if the input video changes its size over time.
 	 *
 	 * - 'fill' will stretch the image to fill the entire box, potentially altering aspect ratio.
 	 * - 'contain' will contain the entire image within the box while preserving aspect ratio. This may lead to
@@ -623,6 +623,7 @@ export class Conversion {
 			const encodingConfig: VideoEncodingConfig = {
 				codec: encodableCodec,
 				bitrate,
+				sizeChangeBehavior: trackOptions.fit ?? 'passThrough',
 				onEncodedPacket: sample => this._reportProgress(track.id, sample.timestamp + sample.duration),
 			};
 
@@ -811,6 +812,7 @@ export class Conversion {
 		this.output.addVideoTrack(videoSource, {
 			frameRate: trackOptions.frameRate,
 			languageCode: track.languageCode,
+			name: track.name ?? undefined,
 			rotation: needsRerender ? 0 : totalRotation, // Rerendering will bake the rotation into the output
 		});
 		this._addedCounts.video++;
@@ -980,6 +982,7 @@ export class Conversion {
 
 		this.output.addAudioTrack(audioSource, {
 			languageCode: track.languageCode,
+			name: track.name ?? undefined,
 		});
 		this._addedCounts.audio++;
 		this._totalTrackCount++;

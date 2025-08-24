@@ -2755,7 +2755,14 @@ const extractRotationFromMatrix = (matrix: TransformationMatrix) => {
 	const sinTheta = m21 / scaleX;
 
 	// Invert the rotation because matrices are post-multiplied in ISOBMFF
-	return -Math.atan2(sinTheta, cosTheta) * (180 / Math.PI);
+	const result = -Math.atan2(sinTheta, cosTheta) * (180 / Math.PI);
+
+	if (!Number.isFinite(result)) {
+		// Can happen if the entire matrix is 0, for example
+		return 0;
+	}
+
+	return result;
 };
 
 const sampleTableIsEmpty = (sampleTable: SampleTable) => {
