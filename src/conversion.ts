@@ -811,6 +811,7 @@ export class Conversion {
 		this.output.addVideoTrack(videoSource, {
 			frameRate: trackOptions.frameRate,
 			languageCode: track.languageCode,
+			name: track.name ?? undefined,
 			rotation: needsRerender ? 0 : totalRotation, // Rerendering will bake the rotation into the output
 		});
 		this._addedCounts.video++;
@@ -980,6 +981,7 @@ export class Conversion {
 
 		this.output.addAudioTrack(audioSource, {
 			languageCode: track.languageCode,
+			name: track.name ?? undefined,
 		});
 		this._addedCounts.audio++;
 		this._totalTrackCount++;
