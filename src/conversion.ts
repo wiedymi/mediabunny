@@ -37,7 +37,7 @@ import {
 	VideoSampleSource,
 	AudioSampleSource,
 } from './media-source';
-import { assert, clamp, MaybePromise, normalizeRotation, promiseWithResolvers, Rotation } from './misc';
+import { assert, clamp, isIso639Dash2LanguageCode, MaybePromise, normalizeRotation, promiseWithResolvers, Rotation } from './misc';
 import { Output, TrackType } from './output';
 import { AudioSample, VideoSample } from './sample';
 
@@ -811,7 +811,8 @@ export class Conversion {
 
 		this.output.addVideoTrack(videoSource, {
 			frameRate: trackOptions.frameRate,
-			languageCode: track.languageCode,
+			// TEMP: This condition can be removed when all demuxers properly homogenize to BCP47 in v2
+			languageCode: isIso639Dash2LanguageCode(track.languageCode) ? track.languageCode : undefined,
 			name: track.name ?? undefined,
 			rotation: needsRerender ? 0 : totalRotation, // Rerendering will bake the rotation into the output
 		});
@@ -981,7 +982,8 @@ export class Conversion {
 		}
 
 		this.output.addAudioTrack(audioSource, {
-			languageCode: track.languageCode,
+			// TEMP: This condition can be removed when all demuxers properly homogenize to BCP47 in v2
+			languageCode: isIso639Dash2LanguageCode(track.languageCode) ? track.languageCode : undefined,
 			name: track.name ?? undefined,
 		});
 		this._addedCounts.audio++;
