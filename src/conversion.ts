@@ -37,9 +37,46 @@ import {
 	VideoSampleSource,
 	AudioSampleSource,
 } from './media-source';
-import { assert, clamp, MaybePromise, normalizeRotation, promiseWithResolvers, Rotation } from './misc';
+import { assert, clamp, isIso639Dash2LanguageCode, MaybePromise, normalizeRotation, promiseWithResolvers, Rotation } from './misc';
 import { Output, TrackType } from './output';
 import { AudioSample, VideoSample } from './sample';
+
+/**
+ * The options for media file conversion.
+ * @public
+ */
+export type ConversionOptions = {
+	/** The input file. */
+	input: Input;
+	/** The output file. */
+	output: Output;
+
+	/**
+	 * Video-specific options. When passing an object, the same options are applied to all video tracks. When passing a
+	 * function, it will be invoked for each video track and is expected to return or resolve to the options
+	 * for that specific track. The function is passed an instance of `InputVideoTrack` as well as a number `n`, which
+	 * is the 1-based index of the track in the list of all video tracks.
+	 */
+	video?: ConversionVideoOptions
+		| ((track: InputVideoTrack, n: number) => MaybePromise<ConversionVideoOptions | undefined>);
+
+	/**
+	 * Audio-specific options. When passing an object, the same options are applied to all audio tracks. When passing a
+	 * function, it will be invoked for each audio track and is expected to return or resolve to the options
+	 * for that specific track. The function is passed an instance of `InputAudioTrack` as well as a number `n`, which
+	 * is the 1-based index of the track in the list of all audio tracks.
+	 */
+	audio?: ConversionAudioOptions
+		| ((track: InputAudioTrack, n: number) => MaybePromise<ConversionAudioOptions | undefined>);
+
+	/** Options to trim the input file. */
+	trim?: {
+		/** The time in the input file in seconds at which the output file should start. Must be less than `end`.  */
+		start: number;
+		/** The time in the input file in seconds at which the output file should end. Must be greater than `start`. */
+		end: number;
+	};
+};
 
 /**
  * Video-specific options.
@@ -160,43 +197,6 @@ const validateVideoOptions = (videoOptions: ConversionVideoOptions | undefined) 
 	) {
 		throw new TypeError('options.video.frameRate, when provided, must be a finite positive number.');
 	}
-};
-
-/**
- * The options for media file conversion.
- * @public
- */
-export type ConversionOptions = {
-	/** The input file. */
-	input: Input;
-	/** The output file. */
-	output: Output;
-
-	/**
-	 * Video-specific options. When passing an object, the same options are applied to all video tracks. When passing a
-	 * function, it will be invoked for each video track and is expected to return or resolve to the options
-	 * for that specific track. The function is passed an instance of `InputVideoTrack` as well as a number `n`, which
-	 * is the 1-based index of the track in the list of all video tracks.
-	 */
-	video?: ConversionVideoOptions
-		| ((track: InputVideoTrack, n: number) => MaybePromise<ConversionVideoOptions | undefined>);
-
-	/**
-	 * Audio-specific options. When passing an object, the same options are applied to all audio tracks. When passing a
-	 * function, it will be invoked for each audio track and is expected to return or resolve to the options
-	 * for that specific track. The function is passed an instance of `InputAudioTrack` as well as a number `n`, which
-	 * is the 1-based index of the track in the list of all audio tracks.
-	 */
-	audio?: ConversionAudioOptions
-		| ((track: InputAudioTrack, n: number) => MaybePromise<ConversionAudioOptions | undefined>);
-
-	/** Options to trim the input file. */
-	trim?: {
-		/** The time in the input file in seconds at which the output file should start. Must be less than `end`.  */
-		start: number;
-		/** The time in the input file in seconds at which the output file should end. Must be greater than `start`. */
-		end: number;
-	};
 };
 
 const validateAudioOptions = (audioOptions: ConversionAudioOptions | undefined) => {
@@ -811,7 +811,8 @@ export class Conversion {
 
 		this.output.addVideoTrack(videoSource, {
 			frameRate: trackOptions.frameRate,
-			languageCode: track.languageCode,
+			// TEMP: This condition can be removed when all demuxers properly homogenize to BCP47 in v2
+			languageCode: isIso639Dash2LanguageCode(track.languageCode) ? track.languageCode : undefined,
 			name: track.name ?? undefined,
 			rotation: needsRerender ? 0 : totalRotation, // Rerendering will bake the rotation into the output
 		});
@@ -981,7 +982,8 @@ export class Conversion {
 		}
 
 		this.output.addAudioTrack(audioSource, {
-			languageCode: track.languageCode,
+			// TEMP: This condition can be removed when all demuxers properly homogenize to BCP47 in v2
+			languageCode: isIso639Dash2LanguageCode(track.languageCode) ? track.languageCode : undefined,
 			name: track.name ?? undefined,
 		});
 		this._addedCounts.audio++;
