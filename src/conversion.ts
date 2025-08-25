@@ -37,7 +37,15 @@ import {
 	VideoSampleSource,
 	AudioSampleSource,
 } from './media-source';
-import { assert, clamp, isIso639Dash2LanguageCode, MaybePromise, normalizeRotation, promiseWithResolvers, Rotation } from './misc';
+import {
+	assert,
+	clamp,
+	isIso639Dash2LanguageCode,
+	MaybePromise,
+	normalizeRotation,
+	promiseWithResolvers,
+	Rotation,
+} from './misc';
 import { Output, TrackType } from './output';
 import { AudioSample, VideoSample } from './sample';
 
