@@ -104,5 +104,8 @@
     "audio",
     "subtitles",
     "webcodecs"
-  ]
+  ],
+  "prettier": {
+    "singleQuote": true
+  }
 }
