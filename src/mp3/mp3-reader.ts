@@ -350,6 +350,14 @@ export class Mp3Reader {
 					}
 				}; break;
 
+				case 'USLT':
+				case 'ULT': {
+					const encoding = reader.readU8();
+					reader.pos += 3; // Skip language
+					reader.readId3V2Text(encoding, frameEndPos); // Short content description
+					metadata.lyrics ??= reader.readId3V2Text(encoding, frameEndPos);
+				}; break;
+
 				case 'COMM':
 				case 'COM': {
 					const encoding = reader.readU8();

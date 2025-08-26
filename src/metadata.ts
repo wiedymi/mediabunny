@@ -9,6 +9,7 @@ export type MediaMetadata = {
 	discNumber?: number;
 	genre?: string;
 	releasedAt?: Date;
+	lyrics?: string;
 	images?: {
 		data: Uint8Array;
 		mimeType: string;
@@ -47,6 +48,9 @@ export const validateMediaMetadata = (metadata: MediaMetadata) => {
 	if (metadata.releasedAt !== undefined && !(metadata.releasedAt instanceof Date)) {
 		throw new TypeError('metadata.releasedAt, when provided, must be a Date.');
 	}
+	if (metadata.lyrics !== undefined && typeof metadata.lyrics !== 'string') {
+		throw new TypeError('metadata.lyrics, when provided, must be a string.');
+	}
 	if (metadata.comment !== undefined && typeof metadata.comment !== 'string') {
 		throw new TypeError('metadata.comment, when provided, must be a string.');
 	}
@@ -72,14 +76,15 @@ export const validateMediaMetadata = (metadata: MediaMetadata) => {
 };
 
 export const mediaMetadataIsEmpty = (metadata: MediaMetadata) => {
-	return !metadata.title
-		&& !metadata.artist
-		&& !metadata.album
-		&& !metadata.albumArtist
-		&& !metadata.trackNumber
-		&& !metadata.discNumber
-		&& !metadata.genre
-		&& !metadata.releasedAt
-		&& !metadata.comment
+	return metadata.title === undefined
+		&& metadata.artist === undefined
+		&& metadata.album === undefined
+		&& metadata.albumArtist === undefined
+		&& metadata.trackNumber === undefined
+		&& metadata.discNumber === undefined
+		&& metadata.genre === undefined
+		&& metadata.releasedAt === undefined
+		&& metadata.lyrics === undefined
+		&& metadata.comment === undefined
 		&& (!metadata.images || metadata.images.length === 0);
 };

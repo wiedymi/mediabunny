@@ -130,38 +130,41 @@ export class Mp3Muxer extends Muxer {
 
 		const startPos = this.writer.getPos();
 
-		if (metadata.title) {
+		if (metadata.title !== undefined) {
 			this.mp3Writer.writeId3V2TextFrame('TIT2', metadata.title);
 		}
-		if (metadata.artist) {
+		if (metadata.artist !== undefined) {
 			this.mp3Writer.writeId3V2TextFrame('TPE1', metadata.artist);
 		}
-		if (metadata.album) {
+		if (metadata.album !== undefined) {
 			this.mp3Writer.writeId3V2TextFrame('TALB', metadata.album);
 		}
-		if (metadata.albumArtist) {
+		if (metadata.albumArtist !== undefined) {
 			this.mp3Writer.writeId3V2TextFrame('TPE2', metadata.albumArtist);
 		}
-		if (metadata.trackNumber) {
+		if (metadata.trackNumber !== undefined) {
 			this.mp3Writer.writeId3V2TextFrame('TRCK', metadata.trackNumber.toString());
 		}
-		if (metadata.discNumber) {
+		if (metadata.discNumber !== undefined) {
 			this.mp3Writer.writeId3V2TextFrame('TPOS', metadata.discNumber.toString());
 		}
-		if (metadata.genre) {
+		if (metadata.genre !== undefined) {
 			this.mp3Writer.writeId3V2TextFrame('TCON', metadata.genre);
 		}
-		if (metadata.releasedAt) {
+		if (metadata.releasedAt !== undefined) {
 			this.mp3Writer.writeId3V2TextFrame('TDRC', metadata.releasedAt.toISOString().split('.')[0]!);
 		}
-		if (metadata.comment) {
+		if (metadata.lyrics !== undefined) {
+			this.mp3Writer.writeId3V2LyricsFrame(metadata.lyrics);
+		}
+		if (metadata.comment !== undefined) {
 			this.mp3Writer.writeId3V2CommentFrame(metadata.comment);
 		}
 		if (metadata.images) {
 			const pictureTypeMap = { coverFront: 0x03, coverBack: 0x04, unknown: 0x00 };
 			for (const image of metadata.images) {
 				const pictureType = pictureTypeMap[image.kind];
-				const description = image.description || '';
+				const description = image.description ?? '';
 				this.mp3Writer.writeId3V2ApicFrame(image.mimeType, pictureType, description, image.data);
 			}
 		}

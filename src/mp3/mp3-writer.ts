@@ -17,6 +17,7 @@ import {
 	SAMPLING_RATES,
 	XING,
 } from '../../shared/mp3-misc';
+import { Id3V2TextEncoding } from './mp3-reader';
 
 export type XingFrameData = {
 	mpegVersionId: number;
@@ -89,7 +90,7 @@ export class Mp3Writer {
 		this.writeSynchsafeU32(frameSize);
 		this.writeU16(0x0000);
 
-		this.writeU8(useIso88591 ? 0x00 : 0x03);
+		this.writeU8(useIso88591 ? Id3V2TextEncoding.ISO_8859_1 : Id3V2TextEncoding.UTF_8);
 		if (useIso88591) {
 			this.writeIsoString(text);
 		} else {
@@ -97,17 +98,38 @@ export class Mp3Writer {
 		}
 	}
 
+	writeId3V2LyricsFrame(lyrics: string) {
+		const useIso88591 = isIso88591Compatible(lyrics);
+		const shortDescription = '';
+		const frameSize = 1 + 3 + shortDescription.length + 1 + lyrics.length + 1;
+
+		this.writeAscii('USLT');
+		this.writeSynchsafeU32(frameSize);
+		this.writeU16(0x0000);
+
+		this.writeU8(useIso88591 ? Id3V2TextEncoding.ISO_8859_1 : Id3V2TextEncoding.UTF_8);
+		this.writeAscii('und');
+
+		if (useIso88591) {
+			this.writeIsoString(shortDescription);
+			this.writeIsoString(lyrics);
+		} else {
+			this.writeUtf8String(shortDescription);
+			this.writeUtf8String(lyrics);
+		}
+	}
+
 	writeId3V2CommentFrame(comment: string) {
 		const useIso88591 = isIso88591Compatible(comment);
 		const textDataLength = useIso88591 ? comment.length : textEncoder.encode(comment).byteLength;
-		const frameSize = 1 + 3 + 1 + textDataLength + 1;
 		const shortDescription = '';
+		const frameSize = 1 + 3 + shortDescription.length + 1 + textDataLength + 1;
 
 		this.writeAscii('COMM');
 		this.writeSynchsafeU32(frameSize);
 		this.writeU16(0x0000);
 
-		this.writeU8(useIso88591 ? 0x00 : 0x03);
+		this.writeU8(useIso88591 ? Id3V2TextEncoding.ISO_8859_1 : Id3V2TextEncoding.UTF_8);
 		this.writeU8(0x75); // 'u'
 		this.writeU8(0x6E); // 'n'
 		this.writeU8(0x64); // 'd'
@@ -130,7 +152,7 @@ export class Mp3Writer {
 		this.writeSynchsafeU32(frameSize);
 		this.writeU16(0x0000);
 
-		this.writeU8(useIso88591 ? 0x00 : 0x03);
+		this.writeU8(useIso88591 ? Id3V2TextEncoding.ISO_8859_1 : Id3V2TextEncoding.UTF_8);
 
 		if (useIso88591) {
 			this.writeIsoString(mimeType);
