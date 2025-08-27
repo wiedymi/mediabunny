@@ -1014,7 +1014,10 @@ export class MatroskaDemuxer extends Demuxer {
 
 			case EBMLId.Language: {
 				if (!this.currentTrack) break;
-				if (this.currentTrack.languageCode) break; // LanguageBCP47 was present, which takes precedence
+				if (this.currentTrack.languageCode !== UNDETERMINED_LANGUAGE) {
+					// LanguageBCP47 was present, which takes precedence
+					break;
+				}
 
 				this.currentTrack.languageCode = reader.readAsciiString(size);
 
