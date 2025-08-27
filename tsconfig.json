@@ -8,9 +8,7 @@
 		"noPropertyAccessFromIndexSignature": true,
 		"skipLibCheck": true,
 		"allowJs": true,
-		"noEmit": true
+		"noEmit": true,
 	},
-	"references": [
-		{ "path": "./tsconfig.vite.json" }
-	]
+	"references": [{ "path": "./tsconfig.vite.json" }]
 }
