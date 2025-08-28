@@ -9,18 +9,25 @@
 import { Demuxer } from './demuxer';
 import { Input } from './input';
 import { IsobmffDemuxer } from './isobmff/isobmff-demuxer';
-import { IsobmffReader } from './isobmff/isobmff-reader';
-import { EBMLId, EBMLReader, MIN_HEADER_SIZE } from './matroska/ebml';
+import {
+	EBMLId,
+	MAX_HEADER_SIZE,
+	MIN_HEADER_SIZE,
+	readAsciiString,
+	readElementHeader,
+	readElementSize,
+	readUnsignedInt,
+	readVarIntSize,
+} from './matroska/ebml';
 import { MatroskaDemuxer } from './matroska/matroska-demuxer';
 import { Mp3Demuxer } from './mp3/mp3-demuxer';
 import { FRAME_HEADER_SIZE } from '../shared/mp3-misc';
-import { Mp3Reader } from './mp3/mp3-reader';
+import { readId3, readNextFrameHeader } from './mp3/mp3-reader';
 import { OggDemuxer } from './ogg/ogg-demuxer';
-import { OggReader } from './ogg/ogg-reader';
-import { RiffReader } from './wave/riff-reader';
 import { WaveDemuxer } from './wave/wave-demuxer';
-import { AdtsReader, MAX_FRAME_HEADER_SIZE } from './adts/adts-reader';
+import { MAX_FRAME_HEADER_SIZE, MIN_FRAME_HEADER_SIZE, readFrameHeader } from './adts/adts-reader';
 import { AdtsDemuxer } from './adts/adts-demuxer';
+import { readAscii } from './reader2';
 
 /**
  * Base class representing an input media file format.
@@ -46,20 +53,18 @@ export abstract class InputFormat {
 export abstract class IsobmffInputFormat extends InputFormat {
 	/** @internal */
 	protected async _getMajorBrand(input: Input) {
-		const sourceSize = await input._mainReader.source.getSize();
-		if (sourceSize < 12) {
-			return null;
-		}
+		let slice = input._reader2.requestSlice(0, 12);
+		if (slice instanceof Promise) slice = await slice;
+		if (!slice) return null;
 
-		const isobmffReader = new IsobmffReader(input._mainReader);
-		isobmffReader.pos = 4;
-		const fourCc = isobmffReader.readAscii(4);
+		slice.skip(4);
+		const fourCc = readAscii(slice, 4);
 
 		if (fourCc !== 'ftyp') {
 			return null;
 		}
 
-		return isobmffReader.readAscii(4);
+		return readAscii(slice, 4);
 	}
 
 	/** @internal */
@@ -108,10 +113,6 @@ export class QuickTimeInputFormat extends IsobmffInputFormat {
 	}
 }
 
-function foo() {
-	return 5;
-}
-
 /**
  * Matroska file format.
  * @public
@@ -119,70 +120,71 @@ function foo() {
 export class MatroskaInputFormat extends InputFormat {
 	/** @internal */
 	protected async isSupportedEBMLOfDocType(input: Input, desiredDocType: string) {
-		const sourceSize = await input._mainReader.source.getSize();
-		if (sourceSize < 8) {
-			return false;
-		}
+		let headerSlice = input._reader2.requestSlice(0, MAX_HEADER_SIZE);
+		if (headerSlice instanceof Promise) headerSlice = await headerSlice;
+		if (!headerSlice) return false;
 
-		const ebmlReader = new EBMLReader(input._mainReader);
-		const varIntSize = ebmlReader.readVarIntSize();
+		const varIntSize = readVarIntSize(headerSlice);
 		if (varIntSize === null) {
 			return false;
 		}
-
-		foo();
 
 		if (varIntSize < 1 || varIntSize > 8) {
 			return false;
 		}
 
-		const id = ebmlReader.readUnsignedInt(varIntSize);
+		const id = readUnsignedInt(headerSlice, varIntSize);
 		if (id !== EBMLId.EBML) {
 			return false;
 		}
 
-		const dataSize = ebmlReader.readElementSize();
+		const dataSize = readElementSize(headerSlice);
 		if (dataSize === null) {
 			return false; // Miss me with that shit
 		}
 
-		const startPos = ebmlReader.pos;
-		while (ebmlReader.pos <= startPos + dataSize - MIN_HEADER_SIZE) {
-			const header = ebmlReader.readElementHeader();
+		let dataSlice = input._reader2.requestSlice(headerSlice.filePos, dataSize);
+		if (dataSlice instanceof Promise) dataSlice = await dataSlice;
+		if (!dataSlice) return false;
+
+		const startPos = headerSlice.filePos;
+
+		while (dataSlice.filePos <= startPos + dataSize - MIN_HEADER_SIZE) {
+			const header = readElementHeader(dataSlice);
 			if (!header) break;
 
 			const { id, size } = header;
-			const dataStartPos = ebmlReader.pos;
+			const dataStartPos = dataSlice.filePos;
 			if (size === null) return false;
 
 			switch (id) {
 				case EBMLId.EBMLVersion: {
-					const ebmlVersion = ebmlReader.readUnsignedInt(size);
+					const ebmlVersion = readUnsignedInt(dataSlice, size);
 					if (ebmlVersion !== 1) {
 						return false;
 					}
 				}; break;
 				case EBMLId.EBMLReadVersion: {
-					const ebmlReadVersion = ebmlReader.readUnsignedInt(size);
+					const ebmlReadVersion = readUnsignedInt(dataSlice, size);
 					if (ebmlReadVersion !== 1) {
 						return false;
 					}
 				}; break;
 				case EBMLId.DocType: {
-					const docType = ebmlReader.readAsciiString(size);
+					const docType = readAsciiString(dataSlice, size);
 					if (docType !== desiredDocType) {
 						return false;
 					}
 				}; break;
 				case EBMLId.DocTypeVersion: {
-					const docTypeVersion = ebmlReader.readUnsignedInt(size);
+					const docTypeVersion = readUnsignedInt(dataSlice, size);
 					if (docTypeVersion > 4) { // Support up to Matroska v4
 						return false;
 					}
 				}; break;
 			}
 
-			ebmlReader.pos = dataStartPos + size;
+			dataSlice.filePos = dataStartPos + size;
 		}
 
 		return true;
@@ -233,25 +235,20 @@ export class WebMInputFormat extends MatroskaInputFormat {
 export class Mp3InputFormat extends InputFormat {
 	/** @internal */
 	async _canReadInput(input: Input) {
-		const sourceSize = await input._mainReader.source.getSize();
-		if (sourceSize < 4) {
-			return false;
-		}
+		let slice = input._reader2.requestSlice(0, 10);
+		if (slice instanceof Promise) slice = await slice;
+		if (!slice) return false;
 
-		const mp3Reader = new Mp3Reader(input._mainReader);
-		mp3Reader.fileSize = sourceSize;
+		let currentPos = 0;
 
-		const id3Tag = mp3Reader.readId3();
+		const id3Tag = readId3(slice);
 
 		if (id3Tag) {
-			mp3Reader.pos += id3Tag.size;
+			currentPos = slice.filePos + id3Tag.size;
 		}
 
-		const framesStartPos = mp3Reader.pos;
-		await mp3Reader.reader.loadRange(mp3Reader.pos, mp3Reader.pos + 4096);
-
-		const firstHeader = mp3Reader.readNextFrameHeader(Math.min(framesStartPos + 4096, sourceSize));
-		if (!firstHeader) {
+		const firstResult = await readNextFrameHeader(input._reader2, currentPos, currentPos + 4096);
+		if (!firstResult) {
 			return false;
 		}
 
@@ -260,14 +257,17 @@ export class Mp3InputFormat extends InputFormat {
 			return true;
 		}
 
+		currentPos = firstResult.startPos += firstResult.header.totalSize;
+
 		// Fine, we found one frame header, but we're still not entirely sure this is MP3. Let's check if we can find
 		// another header right after it:
-		mp3Reader.pos = firstHeader.startPos + firstHeader.totalSize;
-		await mp3Reader.reader.loadRange(mp3Reader.pos, mp3Reader.pos + FRAME_HEADER_SIZE);
-		const secondHeader = mp3Reader.readNextFrameHeader(mp3Reader.pos + FRAME_HEADER_SIZE);
-		if (!secondHeader) {
+		const secondResult = await readNextFrameHeader(input._reader2, currentPos, currentPos + FRAME_HEADER_SIZE);
+		if (!secondResult) {
 			return false;
 		}
+
+		const firstHeader = firstResult.header;
+		const secondHeader = secondResult.header;
 
 		// In a well-formed MP3 file, we'd expect these two frames to share some similarities:
 		if (firstHeader.channel !== secondHeader.channel || firstHeader.sampleRate !== secondHeader.sampleRate) {
@@ -299,19 +299,18 @@ export class Mp3InputFormat extends InputFormat {
 export class WaveInputFormat extends InputFormat {
 	/** @internal */
 	async _canReadInput(input: Input) {
-		const sourceSize = await input._mainReader.source.getSize();
-		if (sourceSize < 12) {
-			return false;
-		}
+		let slice = input._reader2.requestSlice(0, 12);
+		if (slice instanceof Promise) slice = await slice;
+		if (!slice) return false;
 
-		const riffReader = new RiffReader(input._mainReader);
-		const riffType = riffReader.readAscii(4);
+		const riffType = readAscii(slice, 4);
 		if (riffType !== 'RIFF' && riffType !== 'RIFX' && riffType !== 'RF64') {
 			return false;
 		}
 
-		riffReader.pos = 8;
-		const format = riffReader.readAscii(4);
+		slice.skip(4);
+
+		const format = readAscii(slice, 4);
 		return format === 'WAVE';
 	}
 
@@ -336,13 +335,11 @@ export class WaveInputFormat extends InputFormat {
 export class OggInputFormat extends InputFormat {
 	/** @internal */
 	async _canReadInput(input: Input) {
-		const sourceSize = await input._mainReader.source.getSize();
-		if (sourceSize < 4) {
-			return false;
-		}
+		let slice = input._reader2.requestSlice(0, 4);
+		if (slice instanceof Promise) slice = await slice;
+		if (!slice) return false;
 
-		const oggReader = new OggReader(input._mainReader);
-		return oggReader.readAscii(4) === 'OggS';
+		return readAscii(slice, 4) === 'OggS';
 	}
 
 	/** @internal */
@@ -366,24 +363,20 @@ export class OggInputFormat extends InputFormat {
 export class AdtsInputFormat extends InputFormat {
 	/** @internal */
 	async _canReadInput(input: Input) {
-		const sourceSize = await input._mainReader.source.getSize();
-		if (sourceSize < MAX_FRAME_HEADER_SIZE) {
-			return false;
-		}
+		let slice = input._reader2.requestSliceRange(0, MIN_FRAME_HEADER_SIZE, MAX_FRAME_HEADER_SIZE);
+		if (slice instanceof Promise) slice = await slice;
+		if (!slice) return false;
 
-		const adtsReader = new AdtsReader(input._mainReader);
-		const firstHeader = adtsReader.readFrameHeader();
+		const firstHeader = readFrameHeader(slice);
 		if (!firstHeader) {
 			return false;
 		}
 
-		if (sourceSize < firstHeader.frameLength + MAX_FRAME_HEADER_SIZE) {
-			return false;
-		}
+		slice = input._reader2.requestSliceRange(firstHeader.frameLength, MIN_FRAME_HEADER_SIZE, MAX_FRAME_HEADER_SIZE);
+		if (slice instanceof Promise) slice = await slice;
+		if (!slice) return false;
 
-		adtsReader.pos = firstHeader.frameLength;
-		await adtsReader.reader.loadRange(adtsReader.pos, adtsReader.pos + MAX_FRAME_HEADER_SIZE);
-		const secondHeader = adtsReader.readFrameHeader();
+		const secondHeader = readFrameHeader(slice);
 		if (!secondHeader) {
 			return false;
 		}

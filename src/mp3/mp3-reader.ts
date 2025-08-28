@@ -6,78 +6,48 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-import { assert } from '../misc';
-import { Reader } from '../reader';
 import { FRAME_HEADER_SIZE, FrameHeader, readFrameHeader } from '../../shared/mp3-misc';
+import { FileSlice, readAscii, Reader2, readU32Be } from '../reader2';
 
-export class Mp3Reader {
-	pos = 0;
-	fileSize: number | null = null;
-
-	constructor(public reader: Reader) {}
-
-	readBytes(length: number) {
-		const { view, offset } = this.reader.getViewAndOffset(this.pos, this.pos + length);
-		this.pos += length;
-
-		return new Uint8Array(view.buffer, offset, length);
-	}
-
-	readU16() {
-		const { view, offset } = this.reader.getViewAndOffset(this.pos, this.pos + 2);
-		this.pos += 2;
-
-		return view.getUint16(offset, false);
-	}
-
-	readU32() {
-		const { view, offset } = this.reader.getViewAndOffset(this.pos, this.pos + 4);
-		this.pos += 4;
-
-		return view.getUint32(offset, false);
-	}
-
-	readAscii(length: number) {
-		const { view, offset } = this.reader.getViewAndOffset(this.pos, this.pos + length);
-		this.pos += length;
-
-		let str = '';
-		for (let i = 0; i < length; i++) {
-			str += String.fromCharCode(view.getUint8(offset + i));
-		}
-		return str;
-	}
-
-	readId3() {
-		const tag = this.readAscii(3);
-		if (tag !== 'ID3') {
-			this.pos -= 3;
-			return null;
-		}
-
-		this.pos += 3;
-
-		const size = decodeSynchsafe(this.readU32());
-		return { size };
-	}
-
-	readNextFrameHeader(until?: number): FrameHeader | null {
-		assert(this.fileSize);
-		until ??= this.fileSize;
-
-		while (this.pos <= until - FRAME_HEADER_SIZE) {
-			const word = this.readU32();
-			this.pos -= 4;
-
-			const header = readFrameHeader(word, this);
-			if (header) {
-				return header;
-			}
-		}
-
+export const readId3 = (slice: FileSlice) => {
+	const tag = readAscii(slice, 3);
+	if (tag !== 'ID3') {
+		slice.skip(-3);
 		return null;
 	}
-}
+
+	slice.skip(3);
+
+	const size = decodeSynchsafe(readU32Be(slice));
+	return { size };
+};
+
+export const readNextFrameHeader = async (reader: Reader2, startPos: number, until: number): Promise<{
+	header: FrameHeader;
+	startPos: number;
+} | null> => {
+	let fileSize = reader.requestSize();
+	if (fileSize instanceof Promise) fileSize = await fileSize;
+
+	let currentPos = startPos;
+
+	while (currentPos < until) {
+		let slice = reader.requestSlice(currentPos, FRAME_HEADER_SIZE);
+		if (slice instanceof Promise) slice = await slice;
+		if (!slice) break;
+
+		const word = readU32Be(slice);
+
+		const result = readFrameHeader(word, fileSize - currentPos);
+		if (result.header) {
+			return { header: result.header, startPos: currentPos };
+		}
+
+		currentPos += result.bytesAdvanced;
+	}
+
+	return null;
+};
 
 export const decodeSynchsafe = (synchsafed: number) => {
 	let mask = 0x7f000000;

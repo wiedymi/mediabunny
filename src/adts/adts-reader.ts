@@ -7,8 +7,9 @@
  */
 
 import { Bitstream } from '../misc';
-import { Reader } from '../reader';
+import { FileSlice, readBytes } from '../reader2';
 
+export const MIN_FRAME_HEADER_SIZE = 7;
 export const MAX_FRAME_HEADER_SIZE = 9;
 
 export type FrameHeader = {
@@ -21,76 +22,64 @@ export type FrameHeader = {
 	startPos: number;
 };
 
-export class AdtsReader {
-	pos = 0;
-	constructor(public reader: Reader) {}
+export const readFrameHeader = (slice: FileSlice): FrameHeader | null => {
+	// https://wiki.multimedia.cx/index.php/ADTS (last visited: 2025/08/17)
 
-	readBytes(length: number) {
-		const { view, offset } = this.reader.getViewAndOffset(this.pos, this.pos + length);
-		this.pos += length;
+	const startPos = slice.filePos;
 
-		return new Uint8Array(view.buffer, offset, length);
+	const bytes = readBytes(slice, 9); // 9 with CRC, 7 without CRC
+	const bitstream = new Bitstream(bytes);
+
+	const syncword = bitstream.readBits(12);
+	if (syncword !== 0b1111_11111111) {
+		return null;
 	}
 
-	readFrameHeader(): FrameHeader | null {
-		// https://wiki.multimedia.cx/index.php/ADTS (last visited: 2025/08/17)
-
-		const startPos = this.pos;
-
-		const bytes = this.readBytes(9); // 9 with CRC, 7 without CRC
-		const bitstream = new Bitstream(bytes);
-
-		const syncword = bitstream.readBits(12);
-		if (syncword !== 0b1111_11111111) {
-			return null;
-		}
-
-		bitstream.skipBits(1); // MPEG version
-		const layer = bitstream.readBits(2);
-		if (layer !== 0) {
-			return null;
-		}
-
-		const protectionAbsence = bitstream.readBits(1);
-		const objectType = bitstream.readBits(2) + 1;
-		const samplingFrequencyIndex = bitstream.readBits(4);
-		if (samplingFrequencyIndex === 15) {
-			return null;
-		}
-
-		bitstream.skipBits(1); // Private bit
-		const channelConfiguration = bitstream.readBits(3);
-		if (channelConfiguration === 0) {
-			throw new Error('ADTS frames with channel configuration 0 are not supported.');
-		}
-
-		bitstream.skipBits(1); // Originality
-		bitstream.skipBits(1); // Home
-		bitstream.skipBits(1); // Copyright ID bit
-		bitstream.skipBits(1); // Copyright ID start
-		const frameLength = bitstream.readBits(13);
-		bitstream.skipBits(11); // Buffer fullness
-		const numberOfAacFrames = bitstream.readBits(2) + 1;
-		if (numberOfAacFrames !== 1) {
-			throw new Error('ADTS frames with more than one AAC frame are not supported.');
-		}
-
-		let crcCheck: number | null = null;
-
-		if (protectionAbsence === 1) { // No CRC
-			this.pos -= 2;
-		} else { // CRC
-			crcCheck = bitstream.readBits(16);
-		}
-
-		return {
-			objectType,
-			samplingFrequencyIndex,
-			channelConfiguration,
-			frameLength,
-			numberOfAacFrames,
-			crcCheck,
-			startPos,
-		};
+	bitstream.skipBits(1); // MPEG version
+	const layer = bitstream.readBits(2);
+	if (layer !== 0) {
+		return null;
 	}
-}
+
+	const protectionAbsence = bitstream.readBits(1);
+	const objectType = bitstream.readBits(2) + 1;
+	const samplingFrequencyIndex = bitstream.readBits(4);
+	if (samplingFrequencyIndex === 15) {
+		return null;
+	}
+
+	bitstream.skipBits(1); // Private bit
+	const channelConfiguration = bitstream.readBits(3);
+	if (channelConfiguration === 0) {
+		throw new Error('ADTS frames with channel configuration 0 are not supported.');
+	}
+
+	bitstream.skipBits(1); // Originality
+	bitstream.skipBits(1); // Home
+	bitstream.skipBits(1); // Copyright ID bit
+	bitstream.skipBits(1); // Copyright ID start
+	const frameLength = bitstream.readBits(13);
+	bitstream.skipBits(11); // Buffer fullness
+	const numberOfAacFrames = bitstream.readBits(2) + 1;
+	if (numberOfAacFrames !== 1) {
+		throw new Error('ADTS frames with more than one AAC frame are not supported.');
+	}
+
+	let crcCheck: number | null = null;
+
+	if (protectionAbsence === 1) { // No CRC
+		slice.filePos -= 2;
+	} else { // CRC
+		crcCheck = bitstream.readBits(16);
+	}
+
+	return {
+		objectType,
+		samplingFrequencyIndex,
+		channelConfiguration,
+		frameLength,
+		numberOfAacFrames,
+		crcCheck,
+		startPos,
+	};
+};

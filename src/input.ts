@@ -10,6 +10,7 @@ import { Demuxer } from './demuxer';
 import { InputFormat } from './input-format';
 import { assert } from './misc';
 import { Reader } from './reader';
+import { Reader2 } from './reader2';
 import { Source } from './source';
 
 /**
@@ -39,6 +40,8 @@ export class Input<S extends Source = Source> {
 	/** @internal */
 	_format: InputFormat | null = null;
 
+	_reader2: Reader2;
+
 	constructor(options: InputOptions<S>) {
 		if (!options || typeof options !== 'object') {
 			throw new TypeError('options must be an object.');
@@ -53,6 +56,7 @@ export class Input<S extends Source = Source> {
 		this._formats = options.formats;
 		this._source = options.source;
 		this._mainReader = new Reader(options.source);
+		this._reader2 = new Reader2(options.source);
 	}
 
 	/** @internal */

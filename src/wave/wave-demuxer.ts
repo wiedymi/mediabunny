@@ -13,8 +13,7 @@ import { InputAudioTrack, InputAudioTrackBacking } from '../input-track';
 import { PacketRetrievalOptions } from '../media-sink';
 import { assert, UNDETERMINED_LANGUAGE } from '../misc';
 import { EncodedPacket, PLACEHOLDER_DATA } from '../packet';
-import { Reader } from '../reader';
-import { RiffReader } from './riff-reader';
+import { readAscii, readBytes, Reader2, readU16, readU32, readU64 } from '../reader2';
 
 export enum WaveFormat {
 	PCM = 0x0001,
@@ -25,8 +24,7 @@ export enum WaveFormat {
 }
 
 export class WaveDemuxer extends Demuxer {
-	metadataReader: RiffReader;
-	chunkReader: RiffReader;
+	reader: Reader2;
 
 	metadataPromise: Promise<void> | null = null;
 	dataStart = -1;
@@ -44,60 +42,66 @@ export class WaveDemuxer extends Demuxer {
 	constructor(input: Input) {
 		super(input);
 
-		this.metadataReader = new RiffReader(input._mainReader);
-		this.chunkReader = new RiffReader(new Reader(input.source, 64 * 2 ** 20));
+		this.reader = input._reader2;
 	}
 
 	async readMetadata() {
 		return this.metadataPromise ??= (async () => {
-			const actualFileSize = await this.metadataReader.reader.source.getSize();
+			let actualFileSize = this.reader.requestSize();
+			if (actualFileSize instanceof Promise) actualFileSize = await actualFileSize;
 
-			const riffType = this.metadataReader.readAscii(4);
-			this.metadataReader.littleEndian = riffType !== 'RIFX';
+			let slice = this.reader.requestSlice(0, 12);
+			if (slice instanceof Promise) slice = await slice;
+			assert(slice);
+
+			const riffType = readAscii(slice, 4);
+			const littleEndian = riffType !== 'RIFX';
 
 			const isRf64 = riffType === 'RF64';
 
-			const outerChunkSize = this.metadataReader.readU32();
+			const outerChunkSize = readU32(slice, littleEndian);
 
 			let totalFileSize = isRf64 ? actualFileSize : Math.min(outerChunkSize + 8, actualFileSize);
-			const format = this.metadataReader.readAscii(4);
+			const format = readAscii(slice, 4);
 
 			if (format !== 'WAVE') {
 				throw new Error('Invalid WAVE file - wrong format');
 			}
 
-			this.metadataReader.pos = 12;
 			let chunksRead = 0;
 			let dataChunkSize: number | null = null;
+			let currentPos = slice.filePos;
 
-			while (this.metadataReader.pos < totalFileSize) {
-				await this.metadataReader.reader.loadRange(this.metadataReader.pos, this.metadataReader.pos + 8);
+			while (currentPos < totalFileSize) {
+				let slice = this.reader.requestSlice(currentPos, 8);
+				if (slice instanceof Promise) slice = await slice;
+				if (!slice) break;
 
-				const chunkId = this.metadataReader.readAscii(4);
-				const chunkSize = this.metadataReader.readU32();
-				const startPos = this.metadataReader.pos;
+				const chunkId = readAscii(slice, 4);
+				const chunkSize = readU32(slice, littleEndian);
+				const startPos = slice.filePos;
 
 				if (isRf64 && chunksRead === 0 && chunkId !== 'ds64') {
 					throw new Error('Invalid RF64 file: First chunk must be "ds64".');
 				}
 
 				if (chunkId === 'fmt ') {
-					await this.parseFmtChunk(chunkSize);
+					await this.parseFmtChunk(startPos, chunkSize, littleEndian);
 				} else if (chunkId === 'data') {
 					dataChunkSize ??= chunkSize;
 
-					this.dataStart = this.metadataReader.pos;
+					this.dataStart = slice.filePos;
 					this.dataSize = Math.min(dataChunkSize, totalFileSize - this.dataStart);
 				} else if (chunkId === 'ds64') {
 					// File and data chunk sizes are defined in here instead
 
-					const riffChunkSize = this.metadataReader.readU64();
-					dataChunkSize = this.metadataReader.readU64();
+					const riffChunkSize = readU64(slice, littleEndian);
+					dataChunkSize = readU64(slice, littleEndian);
 
 					totalFileSize = Math.min(riffChunkSize + 8, actualFileSize);
 				}
 
-				this.metadataReader.pos = startPos + chunkSize + (chunkSize & 1); // Handle padding
+				currentPos = startPos + chunkSize + (chunkSize & 1); // Handle padding
 				chunksRead++;
 			}
 
@@ -115,33 +119,35 @@ export class WaveDemuxer extends Demuxer {
 		})();
 	}
 
-	private async parseFmtChunk(size: number) {
-		await this.metadataReader.reader.loadRange(this.metadataReader.pos, this.metadataReader.pos + size);
+	private async parseFmtChunk(startPos: number, size: number, littleEndian: boolean) {
+		let slice = this.reader.requestSlice(startPos, size);
+		if (slice instanceof Promise) slice = await slice;
+		if (!slice) return; // File too short
 
-		let formatTag = this.metadataReader.readU16();
-		const numChannels = this.metadataReader.readU16();
-		const sampleRate = this.metadataReader.readU32();
-		this.metadataReader.pos += 4; // Bytes per second
-		const blockAlign = this.metadataReader.readU16();
+		let formatTag = readU16(slice, littleEndian);
+		const numChannels = readU16(slice, littleEndian);
+		const sampleRate = readU32(slice, littleEndian);
+		slice.skip(4); // Bytes per second
+		const blockAlign = readU16(slice, littleEndian);
 
 		let bitsPerSample: number;
 
 		if (size === 14) { // Plain WAVEFORMAT
 			bitsPerSample = 8;
 		} else {
-			bitsPerSample = this.metadataReader.readU16();
+			bitsPerSample = readU16(slice, littleEndian);
 		}
 
 		// Handle WAVEFORMATEXTENSIBLE
 		if (size >= 18 && formatTag !== 0x0165) {
-			const cbSize = this.metadataReader.readU16();
+			const cbSize = readU16(slice, littleEndian);
 			const remainingSize = size - 18;
 			const extensionSize = Math.min(remainingSize, cbSize);
 
 			if (extensionSize >= 22 && formatTag === WaveFormat.EXTENSIBLE) {
 				// Parse WAVEFORMATEXTENSIBLE
-				this.metadataReader.pos += 2 + 4;
-				const subFormat = this.metadataReader.readBytes(16);
+				slice.skip(2 + 4);
+				const subFormat = readBytes(slice, 16);
 
 				// Get actual format from subFormat GUID
 				formatTag = subFormat[0]! | (subFormat[1]! << 8);
@@ -291,19 +297,11 @@ class WaveAudioTrackBacking implements InputAudioTrackBacking {
 		if (options.metadataOnly) {
 			data = PLACEHOLDER_DATA;
 		} else {
-			const sizeOfOnePacket = PACKET_SIZE_IN_FRAMES * this.demuxer.audioInfo.blockSizeInBytes;
-			const chunkSize = Math.ceil(2 ** 19 / sizeOfOnePacket) * sizeOfOnePacket;
-			const chunkStart = Math.floor(startOffset / chunkSize) * chunkSize;
-			const chunkEnd = chunkStart + chunkSize;
+			let slice = this.demuxer.reader.requestSlice(this.demuxer.dataStart + startOffset, sizeInBytes);
+			if (slice instanceof Promise) slice = await slice;
+			assert(slice);
 
-			// Always load large 0.5 MiB chunks instead of just the required packet
-			await this.demuxer.chunkReader.reader.loadRange(
-				this.demuxer.dataStart + chunkStart,
-				this.demuxer.dataStart + chunkEnd,
-			);
-
-			this.demuxer.chunkReader.pos = this.demuxer.dataStart + startOffset;
-			data = this.demuxer.chunkReader.readBytes(sizeInBytes);
+			data = readBytes(slice, sizeInBytes);
 		}
 
 		const timestamp = packetIndex * PACKET_SIZE_IN_FRAMES / this.demuxer.audioInfo.sampleRate;

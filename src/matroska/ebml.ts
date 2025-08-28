@@ -8,7 +8,7 @@
 
 import { MediaCodec } from '../codec';
 import { assertNever, textDecoder, textEncoder } from '../misc';
-import { Reader } from '../reader';
+import { FileSlice, readBytes, Reader2, readF32Be, readF64Be, readU8 } from '../reader2';
 import { Writer } from '../writer';
 
 export interface EBMLElement {
@@ -68,6 +68,7 @@ export enum EBMLId {
 	DocType = 0x4282,
 	DocTypeVersion = 0x4287,
 	DocTypeReadVersion = 0x4285,
+	Segment = 0x18538067,
 	SeekHead = 0x114d9b74,
 	Seek = 0x4dbb,
 	SeekID = 0x53ab,
@@ -101,7 +102,6 @@ export enum EBMLId {
 	SamplingFrequency = 0xb5,
 	Channels = 0x9f,
 	BitDepth = 0x6264,
-	Segment = 0x18538067,
 	SimpleBlock = 0xa3,
 	BlockGroup = 0xa0,
 	Block = 0xa1,
@@ -397,250 +397,215 @@ export class EBMLWriter {
 	}
 }
 
-const MAX_VAR_INT_SIZE = 8;
+export const MAX_VAR_INT_SIZE = 8;
 export const MIN_HEADER_SIZE = 2; // 1-byte ID and 1-byte size
 export const MAX_HEADER_SIZE = 2 * MAX_VAR_INT_SIZE; // 8-byte ID and 8-byte size
 
-export class EBMLReader {
-	pos = 0;
+export const readVarIntSize = (slice: FileSlice) => {
+	const firstByte = readU8(slice);
+	slice.skip(-1);
 
-	constructor(public reader: Reader) {}
-
-	readBytes(length: number) {
-		const { view, offset } = this.reader.getViewAndOffset(this.pos, this.pos + length);
-		this.pos += length;
-
-		return new Uint8Array(view.buffer, offset, length);
+	if (firstByte === 0) {
+		return null; // Invalid VINT
 	}
 
-	readU8() {
-		const { view, offset } = this.reader.getViewAndOffset(this.pos, this.pos + 1);
-		this.pos++;
-
-		return view.getUint8(offset);
+	let width = 1;
+	let mask = 0x80;
+	while ((firstByte & mask) === 0) {
+		width++;
+		mask >>= 1;
 	}
 
-	readS16() {
-		const { view, offset } = this.reader.getViewAndOffset(this.pos, this.pos + 2);
-		this.pos += 2;
+	return width;
+};
 
-		return view.getInt16(offset, false);
+export const readVarInt = (slice: FileSlice) => {
+	// Read the first byte to determine the width of the variable-length integer
+	const firstByte = readU8(slice);
+
+	if (firstByte === 0) {
+		return null; // Invalid VINT
 	}
 
-	readVarIntSize() {
-		const { view, offset } = this.reader.getViewAndOffset(this.pos, this.pos + 1);
-		const firstByte = view.getUint8(offset);
-
-		if (firstByte === 0) {
-			return null; // Invalid VINT
-		}
-
-		let width = 1;
-		let mask = 0x80;
-		while ((firstByte & mask) === 0) {
-			width++;
-			mask >>= 1;
-		}
-
-		return width;
+	// Find the position of VINT_MARKER, which determines the width
+	let width = 1;
+	let mask = 1 << 7;
+	while ((firstByte & mask) === 0) {
+		width++;
+		mask >>= 1;
 	}
 
-	readVarInt() {
-		// Read the first byte to determine the width of the variable-length integer
-		const { view, offset } = this.reader.getViewAndOffset(this.pos, this.pos + 1);
-		const firstByte = view.getUint8(offset);
+	// First byte's value needs the marker bit cleared
+	let value = firstByte & (mask - 1);
 
-		if (firstByte === 0) {
-			return null; // Invalid VINT
-		}
-
-		// Find the position of VINT_MARKER, which determines the width
-		let width = 1;
-		let mask = 1 << 7;
-		while ((firstByte & mask) === 0) {
-			width++;
-			mask >>= 1;
-		}
-
-		const { view: fullView, offset: fullOffset } = this.reader.getViewAndOffset(this.pos, this.pos + width);
-
-		// First byte's value needs the marker bit cleared
-		let value = firstByte & (mask - 1);
-
-		// Read remaining bytes
-		for (let i = 1; i < width; i++) {
-			value *= 1 << 8;
-			value += fullView.getUint8(fullOffset + i);
-		}
-
-		this.pos += width;
-		return value;
+	// Read remaining bytes
+	for (let i = 1; i < width; i++) {
+		value *= 1 << 8;
+		value += readU8(slice);
 	}
 
-	readUnsignedInt(width: number) {
-		if (width < 1 || width > 8) {
-			throw new Error('Bad unsigned int size ' + width);
-		}
+	return value;
+};
 
-		const { view, offset } = this.reader.getViewAndOffset(this.pos, this.pos + width);
-		let value = 0;
-
-		// Read bytes from most significant to least significant
-		for (let i = 0; i < width; i++) {
-			value *= 1 << 8;
-			value += view.getUint8(offset + i);
-		}
-
-		this.pos += width;
-		return value;
+export const readUnsignedInt = (slice: FileSlice, width: number) => {
+	if (width < 1 || width > 8) {
+		throw new Error('Bad unsigned int size ' + width);
 	}
 
-	readSignedInt(width: number) {
-		let value = this.readUnsignedInt(width);
+	let value = 0;
 
-		// If the highest bit is set, convert from two's complement
-		if (value & (1 << (width * 8 - 1))) {
-			value -= 2 ** (width * 8);
-		}
-
-		return value;
+	// Read bytes from most significant to least significant
+	for (let i = 0; i < width; i++) {
+		value *= 1 << 8;
+		value += readU8(slice);
 	}
 
-	readFloat(width: number) {
-		if (width === 0) {
-			return 0;
-		}
+	return value;
+};
 
-		if (width !== 4 && width !== 8) {
-			throw new Error('Bad float size ' + width);
-		}
+export const readSignedInt = (slice: FileSlice, width: number) => {
+	let value = readUnsignedInt(slice, width);
 
-		const { view, offset } = this.reader.getViewAndOffset(this.pos, this.pos + width);
-		const value = width === 4 ? view.getFloat32(offset, false) : view.getFloat64(offset, false);
-
-		this.pos += width;
-		return value;
+	// If the highest bit is set, convert from two's complement
+	if (value & (1 << (width * 8 - 1))) {
+		value -= 2 ** (width * 8);
 	}
 
-	readAsciiString(length: number) {
-		const { view, offset } = this.reader.getViewAndOffset(this.pos, this.pos + length);
-		this.pos += length;
+	return value;
+};
 
-		// Actual string length might be shorter due to null terminators
-		let strLength = 0;
-		while (strLength < length && view.getUint8(offset + strLength) !== 0) {
-			strLength += 1;
-		}
-
-		return String.fromCharCode(...new Uint8Array(view.buffer, offset, strLength));
+export const readElementId = (slice: FileSlice) => {
+	const size = readVarIntSize(slice);
+	if (size === null) {
+		return null;
 	}
 
-	readUnicodeString(length: number) {
-		const { view, offset } = this.reader.getViewAndOffset(this.pos, this.pos + length);
-		this.pos += length;
+	const id = readUnsignedInt(slice, size);
+	return id;
+};
 
-		// Actual string length might be shorter due to null terminators
-		let strLength = 0;
-		while (strLength < length && view.getUint8(offset + strLength) !== 0) {
-			strLength += 1;
-		}
+export const readElementSize = (slice: FileSlice) => {
+	let size: number | null = readU8(slice);
 
-		return textDecoder.decode(new Uint8Array(view.buffer, offset, strLength));
-	}
+	if (size === 0xff) {
+		size = null;
+	} else {
+		slice.skip(-1);
+		size = readVarInt(slice);
 
-	readElementId() {
-		const size = this.readVarIntSize();
-		if (size === null) {
-			return null;
-		}
-
-		const id = this.readUnsignedInt(size);
-		return id;
-	}
-
-	readElementSize() {
-		let size: number | null = this.readU8();
-
-		if (size === 0xff) {
+		// In some (livestreamed) files, this is the value of the size field. While this technically is just a very
+		// large number, it is intended to behave like the reserved size 0xFF, meaning the size is undefined. We
+		// catch the number here. Note that it cannot be perfectly represented as a double, but the comparison works
+		// nonetheless.
+		// eslint-disable-next-line no-loss-of-precision
+		if (size === 0x00ffffffffffffff) {
 			size = null;
-		} else {
-			this.pos--;
-			size = this.readVarInt();
-
-			// In some (livestreamed) files, this is the value of the size field. While this technically is just a very
-			// large number, it is intended to behave like the reserved size 0xFF, meaning the size is undefined. We
-			// catch the number here. Note that it cannot be perfectly represented as a double, but the comparison works
-			// nonetheless.
-			// eslint-disable-next-line no-loss-of-precision
-			if (size === 0x00ffffffffffffff) {
-				size = null;
-			}
 		}
-
-		return size;
 	}
 
-	readElementHeader() {
-		const id = this.readElementId();
-		if (id === null) {
-			return null;
-		}
+	return size;
+};
 
-		const size = this.readElementSize();
-
-		return { id, size };
-	}
-
-	/** Returns the byte offset in the file of the next element with a matching ID. */
-	async searchForNextElementId(ids: EBMLId[], until: number) {
-		const loadChunkSize = 2 ** 20; // 1 MiB
-		const idsSet = new Set(ids);
-
-		while (this.pos <= until - MIN_HEADER_SIZE) {
-			if (!this.reader.rangeIsLoaded(this.pos, Math.min(this.pos + MAX_HEADER_SIZE, until))) {
-				await this.reader.loadRange(this.pos, Math.min(this.pos + loadChunkSize, until));
-			}
-
-			const elementStartPos = this.pos;
-			const elementHeader = this.readElementHeader();
-			if (!elementHeader) {
-				break;
-			}
-
-			if (idsSet.has(elementHeader.id)) {
-				return elementStartPos;
-			}
-
-			assertDefinedSize(elementHeader.size);
-
-			this.pos += elementHeader.size;
-		}
-
+export const readElementHeader = (slice: FileSlice) => {
+	const id = readElementId(slice);
+	if (id === null) {
 		return null;
 	}
 
-	/** Searches for the next occurrence of an element ID using a naive byte-wise search. */
-	async resync(ids: EBMLId[], until: number) {
-		const loadChunkSize = 2 ** 20; // 1 MiB
-		const idsSet = new Set(ids);
+	const size = readElementSize(slice);
 
-		while (this.pos <= until - MIN_HEADER_SIZE) {
-			if (!this.reader.rangeIsLoaded(this.pos, Math.min(this.pos + MAX_HEADER_SIZE, until))) {
-				await this.reader.loadRange(this.pos, Math.min(this.pos + loadChunkSize, until));
-			}
+	return { id, size };
+};
 
-			const elementStartPos = this.pos;
-			const elementId = this.readElementId();
+export const readAsciiString = (slice: FileSlice, length: number) => {
+	const bytes = readBytes(slice, length);
+
+	// Actual string length might be shorter due to null terminators
+	let strLength = 0;
+	while (strLength < length && bytes[strLength] !== 0) {
+		strLength += 1;
+	}
+
+	return String.fromCharCode(...bytes.subarray(0, strLength));
+};
+
+export const readUnicodeString = (slice: FileSlice, length: number) => {
+	const bytes = readBytes(slice, length);
+
+	// Actual string length might be shorter due to null terminators
+	let strLength = 0;
+	while (strLength < length && bytes[strLength] !== 0) {
+		strLength += 1;
+	}
+
+	return textDecoder.decode(bytes.subarray(0, strLength));
+};
+
+export const readFloat = (slice: FileSlice, width: number) => {
+	if (width === 0) {
+		return 0;
+	}
+
+	if (width !== 4 && width !== 8) {
+		throw new Error('Bad float size ' + width);
+	}
+
+	return width === 4 ? readF32Be(slice) : readF64Be(slice);
+};
+
+/** Returns the byte offset in the file of the next element with a matching ID. */
+export const searchForNextElementId = async (reader: Reader2, startPos: number, ids: EBMLId[], until: number) => {
+	const idsSet = new Set(ids);
+	let currentPos = startPos;
+
+	while (currentPos < until) {
+		let slice = reader.requestSliceRange(currentPos, MIN_HEADER_SIZE, MAX_HEADER_SIZE);
+		if (slice instanceof Promise) slice = await slice;
+		if (!slice) break;
+
+		const elementHeader = readElementHeader(slice);
+		if (!elementHeader) {
+			break;
+		}
+
+		if (idsSet.has(elementHeader.id)) {
+			return currentPos;
+		}
+
+		assertDefinedSize(elementHeader.size);
+
+		currentPos = slice.filePos + elementHeader.size;
+	}
+
+	return null;
+};
+
+/** Searches for the next occurrence of an element ID using a naive byte-wise search. */
+export const resync = async (reader: Reader2, startPos: number, ids: EBMLId[], until: number) => {
+	const CHUNK_SIZE = 2 ** 16; // So we don't need to grab thousands of slices
+	const idsSet = new Set(ids);
+	let currentPos = startPos;
+
+	while (currentPos < until) {
+		let slice = reader.requestSliceRange(currentPos, 0, Math.min(CHUNK_SIZE, until - currentPos));
+		if (slice instanceof Promise) slice = await slice;
+		if (!slice) break;
+		if (slice.length < MAX_VAR_INT_SIZE) break;
+
+		for (let i = 0; i < slice.length - MAX_VAR_INT_SIZE; i++) {
+			slice.filePos = currentPos;
+
+			const elementId = readElementId(slice);
 			if (elementId !== null && idsSet.has(elementId)) {
-				return elementStartPos;
+				return currentPos;
 			}
 
-			this.pos = elementStartPos + 1;
+			currentPos++;
 		}
-
-		return null;
 	}
-}
+
+	return null;
+};
 
 export const CODEC_STRING_MAP: Partial<Record<MediaCodec, string>> = {
 	'avc': 'V_MPEG4/ISO/AVC',
@@ -665,38 +630,6 @@ export const CODEC_STRING_MAP: Partial<Record<MediaCodec, string>> = {
 	'pcm-f64': 'A_PCM/FLOAT/IEEE',
 
 	'webvtt': 'S_TEXT/WEBVTT',
-};
-
-export const readVarInt = (data: Uint8Array, offset: number) => {
-	if (offset >= data.length) {
-		throw new Error('Offset out of bounds.');
-	}
-
-	// Read the first byte to determine the width of the variable-length integer
-	const firstByte = data[offset]!;
-
-	// Find the position of VINT_MARKER, which determines the width
-	let width = 1;
-	let mask = 1 << 7;
-	while ((firstByte & mask) === 0 && width < 8) {
-		width++;
-		mask >>= 1;
-	}
-
-	if (offset + width > data.length) {
-		throw new Error('VarInt extends beyond data bounds.');
-	}
-
-	// First byte's value needs the marker bit cleared
-	let value = firstByte & (mask - 1);
-
-	// Read remaining bytes
-	for (let i = 1; i < width; i++) {
-		value *= 1 << 8;
-		value += data[offset + i]!;
-	}
-
-	return { value, width };
 };
 
 export function assertDefinedSize(size: number | null): asserts size is number {

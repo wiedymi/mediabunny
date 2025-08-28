@@ -49,19 +49,27 @@ import {
 	UNDETERMINED_LANGUAGE,
 } from '../misc';
 import { EncodedPacket, PLACEHOLDER_DATA } from '../packet';
-import { Reader } from '../reader';
 import {
 	assertDefinedSize,
 	CODEC_STRING_MAP,
 	EBMLId,
-	EBMLReader,
 	LEVEL_0_AND_1_EBML_IDS,
 	LEVEL_1_EBML_IDS,
 	MAX_HEADER_SIZE,
 	MIN_HEADER_SIZE,
+	readAsciiString,
+	readUnicodeString,
+	readElementHeader,
+	readElementId,
+	readFloat,
+	readSignedInt,
+	readUnsignedInt,
 	readVarInt,
+	resync,
+	searchForNextElementId,
 } from './ebml';
 import { buildMatroskaMimeType } from './matroska-misc';
+import { FileSlice, readBytes, Reader2, readI16Be, readU8 } from '../reader2';
 
 type Segment = {
 	seekHeadSeen: boolean;
@@ -180,8 +188,7 @@ const METADATA_ELEMENTS = [
 const MAX_RESYNC_LENGTH = 10 * 2 ** 20; // 10 MiB
 
 export class MatroskaDemuxer extends Demuxer {
-	metadataReader: EBMLReader;
-	clusterReader: EBMLReader;
+	reader: Reader2;
 
 	readMetadataPromise: Promise<void> | null = null;
 
@@ -197,10 +204,7 @@ export class MatroskaDemuxer extends Demuxer {
 	constructor(input: Input) {
 		super(input);
 
-		this.metadataReader = new EBMLReader(input._mainReader);
-
-		// Max 64 MiB of stored clusters
-		this.clusterReader = new EBMLReader(new Reader(input.source, 64 * 2 ** 20));
+		this.reader = input._reader2;
 	}
 
 	override async computeDuration() {
@@ -230,33 +234,35 @@ export class MatroskaDemuxer extends Demuxer {
 
 	readMetadata() {
 		return this.readMetadataPromise ??= (async () => {
-			this.metadataReader.pos = 0;
-
-			const fileSize = await this.input.source.getSize();
+			let fileSize = this.reader.requestSize();
+			if (fileSize instanceof Promise) fileSize = await fileSize;
 
 			// Loop over all top-level elements in the file
-			while (this.metadataReader.pos <= fileSize - MIN_HEADER_SIZE) {
-				await this.metadataReader.reader.loadRange(
-					this.metadataReader.pos,
-					this.metadataReader.pos + MAX_HEADER_SIZE,
-				);
+			let currentPos = 0;
+			while (currentPos < fileSize) {
+				let slice = this.reader.requestSliceRange(currentPos, MIN_HEADER_SIZE, MAX_HEADER_SIZE);
+				if (slice instanceof Promise) slice = await slice;
+				if (!slice) break;
 
-				const header = this.metadataReader.readElementHeader();
+				const header = readElementHeader(slice);
 				if (!header) {
 					break; // Zero padding at the end of the file triggers this, for example
 				}
 
 				const id = header.id;
 				let size = header.size;
-				const startPos = this.metadataReader.pos;
+				const dataStartPos = slice.filePos;
 
 				if (id === EBMLId.EBML) {
 					assertDefinedSize(size);
 
-					await this.metadataReader.reader.loadRange(this.metadataReader.pos, this.metadataReader.pos + size);
-					this.readContiguousElements(this.metadataReader, size);
+					let slice = this.reader.requestSlice(dataStartPos, size);
+					if (slice instanceof Promise) slice = await slice;
+					if (!slice) break;
+
+					this.readContiguousElements(slice);
 				} else if (id === EBMLId.Segment) { // Segment found!
-					await this.readSegment(size);
+					await this.readSegment(dataStartPos, size);
 
 					if (size === null) {
 						// Segment sizes can be undefined (common in livestreamed files), so assume this is the last
@@ -271,29 +277,29 @@ export class MatroskaDemuxer extends Demuxer {
 					if (size === null) {
 						// Just in case this is one of those weird sizeless clusters, let's do our best and still try to
 						// determine its size.
-						const nextElementPos = await this.clusterReader.searchForNextElementId(
+						const nextElementPos = await searchForNextElementId(
+							this.reader,
+							dataStartPos,
 							LEVEL_0_AND_1_EBML_IDS,
 							fileSize,
 						);
-						size = (nextElementPos ?? fileSize) - startPos;
+						size = (nextElementPos ?? fileSize) - dataStartPos;
 					}
 
 					const lastSegment = last(this.segments);
 					if (lastSegment) {
 						// Extend the previous segment's size
-						lastSegment.elementEndPos = startPos + size;
+						lastSegment.elementEndPos = dataStartPos + size;
 					}
 				}
 
 				assertDefinedSize(size);
-				this.metadataReader.pos = startPos + size;
+				currentPos = dataStartPos + size;
 			}
 		})();
 	}
 
-	async readSegment(dataSize: number | null) {
-		const segmentDataStart = this.metadataReader.pos;
-
+	async readSegment(segmentDataStart: number, dataSize: number | null) {
 		this.currentSegment = {
 			seekHeadSeen: false,
 			infoSeen: false,
@@ -318,33 +324,29 @@ export class MatroskaDemuxer extends Demuxer {
 		};
 		this.segments.push(this.currentSegment);
 
-		// Let's load a good amount of data, enough for all segment metadata to likely fit into (minus cues)
-		await this.metadataReader.reader.loadRange(
-			this.metadataReader.pos,
-			this.metadataReader.pos + 2 ** 14,
-		);
-
+		let currentPos = 0;
 		let clusterEncountered = false;
-		while (this.metadataReader.pos <= this.currentSegment.elementEndPos - MIN_HEADER_SIZE) {
-			await this.metadataReader.reader.loadRange(
-				this.metadataReader.pos,
-				this.metadataReader.pos + MAX_HEADER_SIZE,
-			);
 
-			const elementStartPos = this.metadataReader.pos;
-			const header = this.metadataReader.readElementHeader();
+		while (currentPos < this.currentSegment.elementEndPos) {
+			let slice = this.reader.requestSliceRange(currentPos, MIN_HEADER_SIZE, MAX_HEADER_SIZE);
+			if (slice instanceof Promise) slice = await slice;
+			if (!slice) break;
+
+			const elementStartPos = currentPos;
+			const header = readElementHeader(slice);
 
 			if (!header || !LEVEL_1_EBML_IDS.includes(header.id)) {
 				// Potential junk. Let's try to resync
 
-				this.metadataReader.pos = elementStartPos;
-				const nextPos = await this.metadataReader.resync(
+				const nextPos = await resync(
+					this.reader,
+					elementStartPos,
 					LEVEL_1_EBML_IDS,
-					Math.min(this.currentSegment.elementEndPos, this.metadataReader.pos + MAX_RESYNC_LENGTH),
+					Math.min(this.currentSegment.elementEndPos, elementStartPos + MAX_RESYNC_LENGTH),
 				);
 
 				if (nextPos) {
-					this.metadataReader.pos = nextPos;
+					currentPos = nextPos;
 					continue;
 				} else {
 					break; // Resync failed
@@ -352,7 +354,7 @@ export class MatroskaDemuxer extends Demuxer {
 			}
 
 			const { id, size } = header;
-			const dataStartPos = this.metadataReader.pos;
+			const dataStartPos = slice.filePos;
 
 			const metadataElementIndex = METADATA_ELEMENTS.findIndex(x => x.id === id);
 			if (metadataElementIndex !== -1) {
@@ -360,8 +362,13 @@ export class MatroskaDemuxer extends Demuxer {
 				this.currentSegment[field] = true;
 
 				assertDefinedSize(size);
-				await this.metadataReader.reader.loadRange(this.metadataReader.pos, this.metadataReader.pos + size);
-				this.readContiguousElements(this.metadataReader, size);
+
+				let slice = this.reader.requestSlice(dataStartPos, size);
+				if (slice instanceof Promise) slice = await slice;
+
+				if (slice) {
+					this.readContiguousElements(slice);
+				}
 			} else if (id === EBMLId.Cluster) {
 				if (!clusterEncountered) {
 					clusterEncountered = true;
@@ -370,7 +377,7 @@ export class MatroskaDemuxer extends Demuxer {
 			}
 
 			if (size !== null) {
-				this.metadataReader.pos = dataStartPos + size;
+				currentPos = dataStartPos + size;
 			}
 
 			if (this.currentSegment.infoSeen && this.currentSegment.tracksSeen && this.currentSegment.cuesSeen) {
@@ -411,7 +418,7 @@ export class MatroskaDemuxer extends Demuxer {
 				// The seek head points us to the first cluster, nice
 				this.currentSegment.clusterSeekStartPos = segmentDataStart + seekEntry.segmentPosition;
 			} else {
-				this.currentSegment.clusterSeekStartPos = this.metadataReader.pos;
+				this.currentSegment.clusterSeekStartPos = currentPos;
 			}
 		}
 
@@ -422,12 +429,15 @@ export class MatroskaDemuxer extends Demuxer {
 			const seekEntry = this.currentSegment.seekEntries.find(entry => entry.id === target.id);
 			if (!seekEntry) continue;
 
-			this.metadataReader.pos = segmentDataStart + seekEntry.segmentPosition;
-			await this.metadataReader.reader.loadRange(
-				this.metadataReader.pos,
-				this.metadataReader.pos + 2 ** 12, // Load a larger range, assuming the correct element will be there
+			let slice = this.reader.requestSliceRange(
+				segmentDataStart + seekEntry.segmentPosition,
+				MIN_HEADER_SIZE,
+				MAX_HEADER_SIZE,
 			);
-			const header = this.metadataReader.readElementHeader();
+			if (slice instanceof Promise) slice = await slice;
+			if (!slice) continue;
+
+			const header = readElementHeader(slice);
 			if (!header) continue;
 
 			const { id, size } = header;
@@ -436,8 +446,12 @@ export class MatroskaDemuxer extends Demuxer {
 			assertDefinedSize(size);
 
 			this.currentSegment[target.flag] = true;
-			await this.metadataReader.reader.loadRange(this.metadataReader.pos, this.metadataReader.pos + size);
-			this.readContiguousElements(this.metadataReader, size);
+
+			let dataSlice = this.reader.requestSlice(slice.filePos, size);
+			if (dataSlice instanceof Promise) dataSlice = await dataSlice;
+			if (!dataSlice) continue;
+
+			this.readContiguousElements(dataSlice);
 		}
 
 		if (this.currentSegment.timestampScale === -1) {
@@ -502,23 +516,26 @@ export class MatroskaDemuxer extends Demuxer {
 		this.currentSegment = null;
 	}
 
-	async readCluster(segment: Segment) {
-		await this.metadataReader.reader.loadRange(this.metadataReader.pos, this.metadataReader.pos + MAX_HEADER_SIZE);
+	async readCluster(startPos: number, segment: Segment) {
+		let headerSlice = this.reader.requestSliceRange(startPos, MIN_HEADER_SIZE, MAX_HEADER_SIZE);
+		if (headerSlice instanceof Promise) headerSlice = await headerSlice;
+		assert(headerSlice);
 
-		const elementStartPos = this.metadataReader.pos;
-		const elementHeader = this.metadataReader.readElementHeader();
+		const elementStartPos = startPos;
+		const elementHeader = readElementHeader(headerSlice);
 		assert(elementHeader);
 
 		const id = elementHeader.id;
 		let size = elementHeader.size;
-		const dataStartPos = this.metadataReader.pos;
+		const dataStartPos = headerSlice.filePos;
 
 		if (size === null) {
 			// The cluster's size is undefined (can happen in livestreamed files). We'd still like to know the size of
 			// it, so we have no other choice but to iterate over the EBML structure until we find an element at level
 			// 0 or 1, indicating the end of the cluster (all elements inside the cluster are at level 2).
-			this.clusterReader.pos = dataStartPos;
-			const nextElementPos = await this.clusterReader.searchForNextElementId(
+			const nextElementPos = await searchForNextElementId(
+				this.reader,
+				dataStartPos,
 				LEVEL_0_AND_1_EBML_IDS,
 				segment.elementEndPos,
 			);
@@ -529,8 +546,8 @@ export class MatroskaDemuxer extends Demuxer {
 		assert(id === EBMLId.Cluster);
 
 		// Load the entire cluster
-		this.clusterReader.pos = dataStartPos;
-		await this.clusterReader.reader.loadRange(this.clusterReader.pos, this.clusterReader.pos + size);
+		let dataSlice = this.reader.requestSlice(dataStartPos, size);
+		if (dataSlice instanceof Promise) dataSlice = await dataSlice;
 
 		const cluster: Cluster = {
 			elementStartPos,
@@ -542,7 +559,10 @@ export class MatroskaDemuxer extends Demuxer {
 			isKnownToBeFirstCluster: false,
 		};
 		this.currentCluster = cluster;
-		this.readContiguousElements(this.clusterReader, size);
+
+		if (dataSlice) {
+			this.readContiguousElements(dataSlice);
+		}
 
 		for (const [trackId, trackData] of cluster.trackData) {
 			const track = segment.tracks.find(x => x.id === trackId) ?? null;
@@ -651,12 +671,10 @@ export class MatroskaDemuxer extends Demuxer {
 				continue;
 			}
 
-			const data = originalBlock.data;
-			let pos = 0;
+			const slice = FileSlice.tempFromBytes(originalBlock.data);
 
 			const frameSizes: number[] = [];
-			const frameCount = data[pos]! + 1;
-			pos++;
+			const frameCount = readU8(slice) + 1;
 
 			switch (originalBlock.lacing) {
 				case BlockLacing.Xiph: {
@@ -666,10 +684,9 @@ export class MatroskaDemuxer extends Demuxer {
 					for (let i = 0; i < frameCount - 1; i++) {
 						let frameSize = 0;
 
-						while (pos < data.length) {
-							const value = data[pos]!;
+						while (slice.bufferPos < slice.length) {
+							const value = readU8(slice);
 							frameSize += value;
-							pos++;
 
 							if (value < 255) {
 								frameSizes.push(frameSize);
@@ -681,12 +698,12 @@ export class MatroskaDemuxer extends Demuxer {
 					}
 
 					// Compute the last frame's size from whatever's left
-					frameSizes.push(data.length - (pos + totalUsedSize));
+					frameSizes.push(slice.length - (slice.bufferPos + totalUsedSize));
 				}; break;
 
 				case BlockLacing.FixedSize: {
 					// Fixed size lacing: all frames have same size
-					const totalDataSize = data.length - 1; // Minus the frame count byte
+					const totalDataSize = slice.length - 1; // Minus the frame count byte
 					const frameSize = Math.floor(totalDataSize / frameCount);
 
 					for (let i = 0; i < frameCount; i++) {
@@ -696,28 +713,32 @@ export class MatroskaDemuxer extends Demuxer {
 
 				case BlockLacing.Ebml: {
 					// EBML lacing: first size absolute, subsequent ones are coded as signed differences from the last
-					const firstResult = readVarInt(data, pos);
-					let currentSize = firstResult.value;
+					const firstResult = readVarInt(slice);
+					assert(firstResult !== null); // Assume it's not an invalid VINT
+
+					let currentSize = firstResult;
 					frameSizes.push(currentSize);
-					pos += firstResult.width;
 
 					let totalUsedSize = currentSize;
 
 					for (let i = 1; i < frameCount - 1; i++) {
-						const diffResult = readVarInt(data, pos);
-						const unsignedDiff = diffResult.value;
-						const bias = (1 << (diffResult.width * 7 - 1)) - 1; // Typo-corrected version of 2^((7*n)-1)^-1
+						const startPos = slice.bufferPos;
+						const diffResult = readVarInt(slice);
+						assert(diffResult !== null);
+
+						const unsignedDiff = diffResult;
+						const width = slice.bufferPos - startPos;
+						const bias = (1 << (width * 7 - 1)) - 1; // Typo-corrected version of 2^((7*n)-1)^-1
 						const diff = unsignedDiff - bias;
 
 						currentSize += diff;
 						frameSizes.push(currentSize);
-						pos += diffResult.width;
 
 						totalUsedSize += currentSize;
 					}
 
 					// Compute the last frame's size from whatever's left
-					frameSizes.push(data.length - (pos + totalUsedSize));
+					frameSizes.push(slice.length - (slice.bufferPos + totalUsedSize));
 				}; break;
 
 				default: assert(false);
@@ -726,12 +747,11 @@ export class MatroskaDemuxer extends Demuxer {
 			assert(frameSizes.length === frameCount);
 
 			blocks.splice(blockIndex, 1); // Remove the original block
-			let dataOffset = pos;
 
 			// Now, let's insert each frame as its own block
 			for (let i = 0; i < frameCount; i++) {
 				const frameSize = frameSizes[i]!;
-				const frameData = data.subarray(dataOffset, dataOffset + frameSize);
+				const frameData = readBytes(slice, frameSize);
 
 				const blockDuration = originalBlock.duration || (frameCount * (track?.defaultDuration ?? 0));
 
@@ -747,8 +767,6 @@ export class MatroskaDemuxer extends Demuxer {
 					data: frameData,
 					lacing: BlockLacing.None,
 				});
-
-				dataOffset += frameSize;
 			}
 
 			blockIndex += frameCount; // Skip the blocks we just added
@@ -756,11 +774,11 @@ export class MatroskaDemuxer extends Demuxer {
 		}
 	}
 
-	readContiguousElements(reader: EBMLReader, totalSize: number) {
-		const startIndex = reader.pos;
+	readContiguousElements(slice: FileSlice) {
+		const startIndex = slice.filePos;
 
-		while (reader.pos - startIndex <= totalSize - MIN_HEADER_SIZE) {
-			const foundElement = this.traverseElement(reader);
+		while (slice.filePos - startIndex <= slice.length - MIN_HEADER_SIZE) {
+			const foundElement = this.traverseElement(slice);
 
 			if (!foundElement) {
 				break;
@@ -768,26 +786,26 @@ export class MatroskaDemuxer extends Demuxer {
 		}
 	}
 
-	traverseElement(reader: EBMLReader): boolean {
-		const header = reader.readElementHeader();
+	traverseElement(slice: FileSlice): boolean {
+		const header = readElementHeader(slice);
 		if (!header) {
 			return false;
 		}
 
 		const { id, size } = header;
-		const dataStartPos = reader.pos;
+		const dataStartPos = slice.filePos;
 		assertDefinedSize(size);
 
 		switch (id) {
 			case EBMLId.DocType: {
-				this.isWebM = reader.readAsciiString(size) === 'webm';
+				this.isWebM = readAsciiString(slice, size) === 'webm';
 			}; break;
 
 			case EBMLId.Seek: {
 				if (!this.currentSegment) break;
 				const seekEntry: SeekEntry = { id: -1, segmentPosition: -1 };
 				this.currentSegment.seekEntries.push(seekEntry);
-				this.readContiguousElements(reader, size);
+				this.readContiguousElements(slice.slice(dataStartPos, size));
 
 				if (seekEntry.id === -1 || seekEntry.segmentPosition === -1) {
 					this.currentSegment.seekEntries.pop();
@@ -798,27 +816,27 @@ export class MatroskaDemuxer extends Demuxer {
 				const lastSeekEntry = this.currentSegment?.seekEntries[this.currentSegment.seekEntries.length - 1];
 				if (!lastSeekEntry) break;
 
-				lastSeekEntry.id = reader.readUnsignedInt(size);
+				lastSeekEntry.id = readUnsignedInt(slice, size);
 			}; break;
 
 			case EBMLId.SeekPosition: {
 				const lastSeekEntry = this.currentSegment?.seekEntries[this.currentSegment.seekEntries.length - 1];
 				if (!lastSeekEntry) break;
 
-				lastSeekEntry.segmentPosition = reader.readUnsignedInt(size);
+				lastSeekEntry.segmentPosition = readUnsignedInt(slice, size);
 			}; break;
 
 			case EBMLId.TimestampScale: {
 				if (!this.currentSegment) break;
 
-				this.currentSegment.timestampScale = reader.readUnsignedInt(size);
+				this.currentSegment.timestampScale = readUnsignedInt(slice, size);
 				this.currentSegment.timestampFactor = 1e9 / this.currentSegment.timestampScale;
 			}; break;
 
 			case EBMLId.Duration: {
 				if (!this.currentSegment) break;
 
-				this.currentSegment.duration = reader.readFloat(size);
+				this.currentSegment.duration = readFloat(slice, size);
 			}; break;
 
 			case EBMLId.TrackEntry: {
@@ -842,7 +860,7 @@ export class MatroskaDemuxer extends Demuxer {
 					info: null,
 				};
 
-				this.readContiguousElements(reader, size);
+				this.readContiguousElements(slice.slice(dataStartPos, size));
 
 				if (
 					this.currentTrack
@@ -941,13 +959,13 @@ export class MatroskaDemuxer extends Demuxer {
 			case EBMLId.TrackNumber: {
 				if (!this.currentTrack) break;
 
-				this.currentTrack.id = reader.readUnsignedInt(size);
+				this.currentTrack.id = readUnsignedInt(slice, size);
 			}; break;
 
 			case EBMLId.TrackType: {
 				if (!this.currentTrack) break;
 
-				const type = reader.readUnsignedInt(size);
+				const type = readUnsignedInt(slice, size);
 				if (type === 1) {
 					this.currentTrack.info = {
 						type: 'video',
@@ -974,7 +992,7 @@ export class MatroskaDemuxer extends Demuxer {
 			case EBMLId.FlagEnabled: {
 				if (!this.currentTrack) break;
 
-				const enabled = reader.readUnsignedInt(size);
+				const enabled = readUnsignedInt(slice, size);
 				if (!enabled) {
 					this.currentSegment!.tracks.pop();
 					this.currentTrack = null;
@@ -984,32 +1002,32 @@ export class MatroskaDemuxer extends Demuxer {
 			case EBMLId.FlagDefault: {
 				if (!this.currentTrack) break;
 
-				this.currentTrack.isDefault = !!reader.readUnsignedInt(size);
+				this.currentTrack.isDefault = !!readUnsignedInt(slice, size);
 			}; break;
 
 			case EBMLId.CodecID: {
 				if (!this.currentTrack) break;
 
-				this.currentTrack.codecId = reader.readAsciiString(size);
+				this.currentTrack.codecId = readAsciiString(slice, size);
 			}; break;
 
 			case EBMLId.CodecPrivate: {
 				if (!this.currentTrack) break;
 
-				this.currentTrack.codecPrivate = reader.readBytes(size);
+				this.currentTrack.codecPrivate = readBytes(slice, size);
 			}; break;
 
 			case EBMLId.DefaultDuration: {
 				if (!this.currentTrack) break;
 
 				this.currentTrack.defaultDuration
-					= this.currentTrack.segment.timestampFactor * reader.readUnsignedInt(size) / 1e9;
+					= this.currentTrack.segment.timestampFactor * readUnsignedInt(slice, size) / 1e9;
 			}; break;
 
 			case EBMLId.Name: {
 				if (!this.currentTrack) break;
 
-				this.currentTrack.name = reader.readUnicodeString(size);
+				this.currentTrack.name = readUnicodeString(slice, size);
 			}; break;
 
 			case EBMLId.Language: {
@@ -1019,7 +1037,7 @@ export class MatroskaDemuxer extends Demuxer {
 					break;
 				}
 
-				this.currentTrack.languageCode = reader.readAsciiString(size);
+				this.currentTrack.languageCode = readAsciiString(slice, size);
 
 				if (!isIso639Dash2LanguageCode(this.currentTrack.languageCode)) {
 					this.currentTrack.languageCode = UNDETERMINED_LANGUAGE;
@@ -1029,7 +1047,7 @@ export class MatroskaDemuxer extends Demuxer {
 			case EBMLId.LanguageBCP47: {
 				if (!this.currentTrack) break;
 
-				const bcp47 = reader.readAsciiString(size);
+				const bcp47 = readAsciiString(slice, size);
 				const languageSubtag = bcp47.split('-')[0];
 
 				if (languageSubtag) {
@@ -1046,32 +1064,32 @@ export class MatroskaDemuxer extends Demuxer {
 			case EBMLId.Video: {
 				if (this.currentTrack?.info?.type !== 'video') break;
 
-				this.readContiguousElements(reader, size);
+				this.readContiguousElements(slice.slice(dataStartPos, size));
 			}; break;
 
 			case EBMLId.PixelWidth: {
 				if (this.currentTrack?.info?.type !== 'video') break;
 
-				this.currentTrack.info.width = reader.readUnsignedInt(size);
+				this.currentTrack.info.width = readUnsignedInt(slice, size);
 			}; break;
 
 			case EBMLId.PixelHeight: {
 				if (this.currentTrack?.info?.type !== 'video') break;
 
-				this.currentTrack.info.height = reader.readUnsignedInt(size);
+				this.currentTrack.info.height = readUnsignedInt(slice, size);
 			}; break;
 
 			case EBMLId.Colour: {
 				if (this.currentTrack?.info?.type !== 'video') break;
 
 				this.currentTrack.info.colorSpace = {};
-				this.readContiguousElements(reader, size);
+				this.readContiguousElements(slice.slice(dataStartPos, size));
 			}; break;
 
 			case EBMLId.MatrixCoefficients: {
 				if (this.currentTrack?.info?.type !== 'video' || !this.currentTrack.info.colorSpace) break;
 
-				const matrixCoefficients = reader.readUnsignedInt(size);
+				const matrixCoefficients = readUnsignedInt(slice, size);
 				const mapped = MATRIX_COEFFICIENTS_MAP_INVERSE[matrixCoefficients] ?? null;
 				this.currentTrack.info.colorSpace.matrix = mapped as VideoColorSpaceInit['matrix'];
 			}; break;
@@ -1079,13 +1097,13 @@ export class MatroskaDemuxer extends Demuxer {
 			case EBMLId.Range: {
 				if (this.currentTrack?.info?.type !== 'video' || !this.currentTrack.info.colorSpace) break;
 
-				this.currentTrack.info.colorSpace.fullRange = reader.readUnsignedInt(size) === 2;
+				this.currentTrack.info.colorSpace.fullRange = readUnsignedInt(slice, size) === 2;
 			}; break;
 
 			case EBMLId.TransferCharacteristics: {
 				if (this.currentTrack?.info?.type !== 'video' || !this.currentTrack.info.colorSpace) break;
 
-				const transferCharacteristics = reader.readUnsignedInt(size);
+				const transferCharacteristics = readUnsignedInt(slice, size);
 				const mapped = TRANSFER_CHARACTERISTICS_MAP_INVERSE[transferCharacteristics] ?? null;
 				this.currentTrack.info.colorSpace.transfer = mapped as VideoColorSpaceInit['transfer'];
 			}; break;
@@ -1093,7 +1111,7 @@ export class MatroskaDemuxer extends Demuxer {
 			case EBMLId.Primaries: {
 				if (this.currentTrack?.info?.type !== 'video' || !this.currentTrack.info.colorSpace) break;
 
-				const primaries = reader.readUnsignedInt(size);
+				const primaries = readUnsignedInt(slice, size);
 				const mapped = COLOR_PRIMARIES_MAP_INVERSE[primaries] ?? null;
 				this.currentTrack.info.colorSpace.primaries = mapped as VideoColorSpaceInit['primaries'];
 			}; break;
@@ -1101,13 +1119,13 @@ export class MatroskaDemuxer extends Demuxer {
 			case EBMLId.Projection: {
 				if (this.currentTrack?.info?.type !== 'video') break;
 
-				this.readContiguousElements(reader, size);
+				this.readContiguousElements(slice.slice(dataStartPos, size));
 			}; break;
 
 			case EBMLId.ProjectionPoseRoll: {
 				if (this.currentTrack?.info?.type !== 'video') break;
 
-				const rotation = reader.readFloat(size);
+				const rotation = readFloat(slice, size);
 				const flippedRotation = -rotation; // Convert counter-clockwise to clockwise
 
 				try {
@@ -1120,36 +1138,36 @@ export class MatroskaDemuxer extends Demuxer {
 			case EBMLId.Audio: {
 				if (this.currentTrack?.info?.type !== 'audio') break;
 
-				this.readContiguousElements(reader, size);
+				this.readContiguousElements(slice.slice(dataStartPos, size));
 			}; break;
 
 			case EBMLId.SamplingFrequency: {
 				if (this.currentTrack?.info?.type !== 'audio') break;
 
-				this.currentTrack.info.sampleRate = reader.readFloat(size);
+				this.currentTrack.info.sampleRate = readFloat(slice, size);
 			}; break;
 
 			case EBMLId.Channels: {
 				if (this.currentTrack?.info?.type !== 'audio') break;
 
-				this.currentTrack.info.numberOfChannels = reader.readUnsignedInt(size);
+				this.currentTrack.info.numberOfChannels = readUnsignedInt(slice, size);
 			}; break;
 
 			case EBMLId.BitDepth: {
 				if (this.currentTrack?.info?.type !== 'audio') break;
 
-				this.currentTrack.info.bitDepth = reader.readUnsignedInt(size);
+				this.currentTrack.info.bitDepth = readUnsignedInt(slice, size);
 			}; break;
 
 			case EBMLId.CuePoint: {
 				if (!this.currentSegment) break;
 
-				this.readContiguousElements(reader, size);
+				this.readContiguousElements(slice.slice(dataStartPos, size));
 				this.currentCueTime = null;
 			}; break;
 
 			case EBMLId.CueTime: {
-				this.currentCueTime = reader.readUnsignedInt(size);
+				this.currentCueTime = readUnsignedInt(slice, size);
 			}; break;
 
 			case EBMLId.CueTrackPositions: {
@@ -1158,7 +1176,7 @@ export class MatroskaDemuxer extends Demuxer {
 
 				const cuePoint: CuePoint = { time: this.currentCueTime, trackId: -1, clusterPosition: -1 };
 				this.currentSegment.cuePoints.push(cuePoint);
-				this.readContiguousElements(reader, size);
+				this.readContiguousElements(slice.slice(dataStartPos, size));
 
 				if (cuePoint.trackId === -1 || cuePoint.clusterPosition === -1) {
 					this.currentSegment.cuePoints.pop();
@@ -1169,7 +1187,7 @@ export class MatroskaDemuxer extends Demuxer {
 				const lastCuePoint = this.currentSegment?.cuePoints[this.currentSegment.cuePoints.length - 1];
 				if (!lastCuePoint) break;
 
-				lastCuePoint.trackId = reader.readUnsignedInt(size);
+				lastCuePoint.trackId = readUnsignedInt(slice, size);
 			}; break;
 
 			case EBMLId.CueClusterPosition: {
@@ -1177,24 +1195,24 @@ export class MatroskaDemuxer extends Demuxer {
 				if (!lastCuePoint) break;
 
 				assert(this.currentSegment);
-				lastCuePoint.clusterPosition = this.currentSegment.dataStartPos + reader.readUnsignedInt(size);
+				lastCuePoint.clusterPosition = this.currentSegment.dataStartPos + readUnsignedInt(slice, size);
 			}; break;
 
 			case EBMLId.Timestamp: {
 				if (!this.currentCluster) break;
 
-				this.currentCluster.timestamp = reader.readUnsignedInt(size);
+				this.currentCluster.timestamp = readUnsignedInt(slice, size);
 			}; break;
 
 			case EBMLId.SimpleBlock: {
 				if (!this.currentCluster) break;
 
-				const trackNumber = reader.readVarInt();
+				const trackNumber = readVarInt(slice);
 				if (trackNumber === null) break;
 
-				const relativeTimestamp = reader.readS16();
+				const relativeTimestamp = readI16Be(slice);
 
-				const flags = reader.readU8();
+				const flags = readU8(slice);
 				const isKeyFrame = !!(flags & 0x80);
 				const lacing = (flags >> 1) & 0x3 as BlockLacing; // If the block is laced, we'll expand it later
 
@@ -1204,7 +1222,7 @@ export class MatroskaDemuxer extends Demuxer {
 					duration: 0, // Will set later
 					isKeyFrame,
 					referencedTimestamps: [],
-					data: reader.readBytes(size - (reader.pos - dataStartPos)),
+					data: readBytes(slice, size - (slice.filePos - dataStartPos)),
 					lacing,
 				});
 			}; break;
@@ -1212,7 +1230,7 @@ export class MatroskaDemuxer extends Demuxer {
 			case EBMLId.BlockGroup: {
 				if (!this.currentCluster) break;
 
-				this.readContiguousElements(reader, size);
+				this.readContiguousElements(slice.slice(dataStartPos, size));
 
 				if (this.currentBlock) {
 					for (let i = 0; i < this.currentBlock.referencedTimestamps.length; i++) {
@@ -1226,12 +1244,12 @@ export class MatroskaDemuxer extends Demuxer {
 			case EBMLId.Block: {
 				if (!this.currentCluster) break;
 
-				const trackNumber = reader.readVarInt();
+				const trackNumber = readVarInt(slice);
 				if (trackNumber === null) break;
 
-				const relativeTimestamp = reader.readS16();
+				const relativeTimestamp = readI16Be(slice);
 
-				const flags = reader.readU8();
+				const flags = readU8(slice);
 				const lacing = (flags >> 1) & 0x3 as BlockLacing; // If the block is laced, we'll expand it later
 
 				const trackData = this.getTrackDataInCluster(this.currentCluster, trackNumber);
@@ -1240,7 +1258,7 @@ export class MatroskaDemuxer extends Demuxer {
 					duration: 0, // Will set later
 					isKeyFrame: true,
 					referencedTimestamps: [],
-					data: reader.readBytes(size - (reader.pos - dataStartPos)),
+					data: readBytes(slice, size - (slice.filePos - dataStartPos)),
 					lacing,
 				};
 				trackData.blocks.push(this.currentBlock);
@@ -1249,7 +1267,7 @@ export class MatroskaDemuxer extends Demuxer {
 			case EBMLId.BlockDuration: {
 				if (!this.currentBlock) break;
 
-				this.currentBlock.duration = reader.readUnsignedInt(size);
+				this.currentBlock.duration = readUnsignedInt(slice, size);
 			}; break;
 
 			case EBMLId.ReferenceBlock: {
@@ -1257,14 +1275,14 @@ export class MatroskaDemuxer extends Demuxer {
 
 				this.currentBlock.isKeyFrame = false;
 
-				const relativeTimestamp = reader.readSignedInt(size);
+				const relativeTimestamp = readSignedInt(slice, size);
 
 				// We'll offset this by the block's timestamp later
 				this.currentBlock.referencedTimestamps.push(relativeTimestamp);
 			}; break;
 		}
 
-		reader.pos = dataStartPos + size;
+		slice.filePos = dataStartPos + size;
 		return true;
 	}
 }
@@ -1618,10 +1636,6 @@ abstract class MatroskaTrackBacking implements InputTrackBacking {
 				return this.fetchPacketInCluster(cluster, blockIndex, options);
 			}
 
-			// We use the metadata reader to find the cluster, but the cluster reader to load the cluster
-			const metadataReader = demuxer.metadataReader;
-			const clusterReader = demuxer.clusterReader;
-
 			let prevCluster: Cluster | null = null;
 			let bestClusterIndex = clusterIndex;
 			let bestBlockIndex = blockIndex;
@@ -1635,24 +1649,25 @@ abstract class MatroskaTrackBacking implements InputTrackBacking {
 			);
 			const cuePoint = cuePointIndex !== -1 ? this.internalTrack.cuePoints[cuePointIndex]! : null;
 
+			let currentPos: number;
 			let nextClusterIsFirstCluster = false;
 
 			if (clusterIndex === -1) {
-				metadataReader.pos = cuePoint?.clusterPosition ?? segment.clusterSeekStartPos;
-				nextClusterIsFirstCluster = metadataReader.pos === segment.clusterSeekStartPos;
+				currentPos = cuePoint?.clusterPosition ?? segment.clusterSeekStartPos;
+				nextClusterIsFirstCluster = currentPos === segment.clusterSeekStartPos;
 			} else {
 				const cluster = this.internalTrack.clusters[clusterIndex]!;
 
 				if (!cuePoint || cluster.elementStartPos >= cuePoint.clusterPosition) {
-					metadataReader.pos = cluster.elementEndPos;
+					currentPos = cluster.elementEndPos;
 					prevCluster = cluster;
 				} else {
 					// Use the lookup entry
-					metadataReader.pos = cuePoint.clusterPosition;
+					currentPos = cuePoint.clusterPosition;
 				}
 			}
 
-			while (metadataReader.pos <= segment.elementEndPos - MIN_HEADER_SIZE) {
+			while (currentPos <= segment.elementEndPos - MIN_HEADER_SIZE) {
 				if (prevCluster) {
 					const trackData = prevCluster.trackData.get(this.internalTrack.id);
 					if (trackData && trackData.startTimestamp > latestTimestamp) {
@@ -1662,30 +1677,32 @@ abstract class MatroskaTrackBacking implements InputTrackBacking {
 
 					if (prevCluster.nextCluster) {
 						// Skip ahead quickly without needing to read the file again
-						metadataReader.pos = prevCluster.nextCluster.elementEndPos;
+						currentPos = prevCluster.nextCluster.elementEndPos;
 						prevCluster = prevCluster.nextCluster;
 						continue;
 					}
 				}
 
 				// Load the header
-				await metadataReader.reader.loadRange(metadataReader.pos, metadataReader.pos + MAX_HEADER_SIZE);
-				const elementStartPos = metadataReader.pos;
-				const elementHeader = metadataReader.readElementHeader();
+				let slice = demuxer.reader.requestSliceRange(currentPos, MIN_HEADER_SIZE, MAX_HEADER_SIZE);
+				if (slice instanceof Promise) slice = await slice;
+				if (!slice) break;
+
+				const elementStartPos = currentPos;
+				const elementHeader = readElementHeader(slice);
 
 				if (!elementHeader || !LEVEL_1_EBML_IDS.includes(elementHeader.id)) {
 					// There's an element here that shouldn't be here (or Void). Might be garbage. In this case, let's
 					// try and resync to the next valid element.
-
-					metadataReader.pos = elementStartPos;
-
-					const nextPos = await metadataReader.resync(
+					const nextPos = await resync(
+						demuxer.reader,
+						elementStartPos,
 						LEVEL_1_EBML_IDS,
-						Math.min(segment.elementEndPos, metadataReader.pos + MAX_RESYNC_LENGTH),
+						Math.min(segment.elementEndPos, elementStartPos + MAX_RESYNC_LENGTH),
 					);
 
 					if (nextPos) {
-						metadataReader.pos = nextPos;
+						currentPos = nextPos;
 						continue;
 					} else {
 						break; // Resync failed
@@ -1694,7 +1711,7 @@ abstract class MatroskaTrackBacking implements InputTrackBacking {
 
 				const id = elementHeader.id;
 				let size = elementHeader.size;
-				const dataStartPos = metadataReader.pos;
+				const dataStartPos = slice.filePos;
 
 				if (id === EBMLId.Cluster) {
 					const index = binarySearchExact(segment.clusters, elementStartPos, x => x.elementStartPos);
@@ -1702,8 +1719,7 @@ abstract class MatroskaTrackBacking implements InputTrackBacking {
 					let cluster: Cluster;
 					if (index === -1) {
 						// This is the first time we've seen this cluster
-						metadataReader.pos = elementStartPos;
-						cluster = await demuxer.readCluster(segment);
+						cluster = await demuxer.readCluster(elementStartPos, segment);
 					} else {
 						// We already know this cluster
 						cluster = segment.clusters[index]!;
@@ -1739,8 +1755,9 @@ abstract class MatroskaTrackBacking implements InputTrackBacking {
 						size = prevCluster.elementEndPos - dataStartPos;
 					} else {
 						// Search for the next element at level 0 or 1
-						clusterReader.pos = dataStartPos;
-						const nextElementPos = await clusterReader.searchForNextElementId(
+						const nextElementPos = await searchForNextElementId(
+							demuxer.reader,
+							dataStartPos,
 							LEVEL_0_AND_1_EBML_IDS,
 							segment.elementEndPos,
 						);
@@ -1756,8 +1773,12 @@ abstract class MatroskaTrackBacking implements InputTrackBacking {
 						// Check the next element. If it's a new segment, we know this segment ends here. The new
 						// segment is just ignored, since we're likely in a livestreamed file and thus only care about
 						// the first segment.
-						clusterReader.pos = endPos;
-						const elementId = clusterReader.readElementId();
+
+						let slice = demuxer.reader.requestSliceRange(endPos, MIN_HEADER_SIZE, MAX_HEADER_SIZE);
+						if (slice instanceof Promise) slice = await slice;
+						if (!slice) break;
+
+						const elementId = readElementId(slice);
 						if (elementId === EBMLId.Segment) {
 							segment.elementEndPos = endPos;
 							break;
@@ -1765,7 +1786,7 @@ abstract class MatroskaTrackBacking implements InputTrackBacking {
 					}
 				}
 
-				metadataReader.pos = dataStartPos + size;
+				currentPos = dataStartPos + size;
 			}
 
 			const bestCluster = bestClusterIndex !== -1 ? this.internalTrack.clusters[bestClusterIndex]! : null;
