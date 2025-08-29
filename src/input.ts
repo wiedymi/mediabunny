@@ -9,7 +9,7 @@
 import { Demuxer } from './demuxer';
 import { InputFormat } from './input-format';
 import { assert } from './misc';
-import { Reader } from './reader2';
+import { Reader } from './reader';
 import { Source } from './source';
 
 /**

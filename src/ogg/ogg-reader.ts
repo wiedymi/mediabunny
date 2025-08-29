@@ -6,7 +6,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-import { FileSlice, readI64Le, readU32Le, readU8 } from '../reader2';
+import { FileSlice, readI64Le, readU32Le, readU8 } from '../reader';
 import { OGGS } from './ogg-misc';
 
 export const MIN_PAGE_HEADER_SIZE = 27;

@@ -20,7 +20,7 @@ import {
 	UNDETERMINED_LANGUAGE,
 } from '../misc';
 import { EncodedPacket, PLACEHOLDER_DATA } from '../packet';
-import { readBytes, Reader } from '../reader2';
+import { readBytes, Reader } from '../reader';
 import { FrameHeader, MAX_FRAME_HEADER_SIZE, MIN_FRAME_HEADER_SIZE, readFrameHeader } from './adts-reader';
 
 const SAMPLES_PER_AAC_FRAME = 1024;

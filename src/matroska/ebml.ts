@@ -8,7 +8,7 @@
 
 import { MediaCodec } from '../codec';
 import { assertNever, textDecoder, textEncoder } from '../misc';
-import { FileSlice, readBytes, Reader, readF32Be, readF64Be, readU8 } from '../reader2';
+import { FileSlice, readBytes, Reader, readF32Be, readF64Be, readU8 } from '../reader';
 import { Writer } from '../writer';
 
 export interface EBMLElement {

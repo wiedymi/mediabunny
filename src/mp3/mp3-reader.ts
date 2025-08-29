@@ -7,7 +7,7 @@
  */
 
 import { FRAME_HEADER_SIZE, FrameHeader, readFrameHeader } from '../../shared/mp3-misc';
-import { FileSlice, readAscii, Reader, readU32Be } from '../reader2';
+import { FileSlice, readAscii, Reader, readU32Be } from '../reader';
 
 export const readId3 = (slice: FileSlice) => {
 	const tag = readAscii(slice, 3);

@@ -14,7 +14,7 @@ import { InputAudioTrack, InputAudioTrackBacking } from '../input-track';
 import { PacketRetrievalOptions } from '../media-sink';
 import { assert, findLast, roundToPrecision, toDataView, UNDETERMINED_LANGUAGE } from '../misc';
 import { EncodedPacket, PLACEHOLDER_DATA } from '../packet';
-import { readBytes, Reader } from '../reader2';
+import { readBytes, Reader } from '../reader';
 import { buildOggMimeType, computeOggPageCrc, extractSampleMetadata, OggCodecInfo } from './ogg-misc';
 import {
 	findNextPageHeader,

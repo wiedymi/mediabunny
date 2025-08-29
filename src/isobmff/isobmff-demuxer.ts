@@ -82,7 +82,7 @@ import {
 	readU64Be,
 	readU8,
 	readAscii,
-} from '../reader2';
+} from '../reader';
 
 type InternalTrack = {
 	id: number;

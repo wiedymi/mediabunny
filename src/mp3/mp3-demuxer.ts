@@ -15,7 +15,7 @@ import { assert, AsyncMutex, binarySearchExact, binarySearchLessOrEqual, UNDETER
 import { EncodedPacket, PLACEHOLDER_DATA } from '../packet';
 import { FrameHeader, getXingOffset, INFO, XING } from '../../shared/mp3-misc';
 import { readId3, readNextFrameHeader } from './mp3-reader';
-import { readBytes, Reader, readU32Be } from '../reader2';
+import { readBytes, Reader, readU32Be } from '../reader';
 
 type Sample = {
 	timestamp: number;

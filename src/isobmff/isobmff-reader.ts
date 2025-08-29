@@ -6,7 +6,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-import { FileSlice, readAscii, readI32Be, readU32Be, readU64Be, readU8 } from '../reader2';
+import { FileSlice, readAscii, readI32Be, readU32Be, readU64Be, readU8 } from '../reader';
 
 export const MIN_BOX_HEADER_SIZE = 8;
 export const MAX_BOX_HEADER_SIZE = 16;

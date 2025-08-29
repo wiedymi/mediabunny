@@ -93,165 +93,6 @@ export class BufferSource extends Source {
 	}
 }
 
-/**
- * Options for defining a StreamSource.
- * @public
- */
-export type StreamSourceOptions = {
-	/**
-	 * Called when data is requested. Must return or resolve to the bytes from the specified byte range, or a stream
-	 * that yields these bytes.
-	 */
-	read: (start: number, end: number) => MaybePromise<Uint8Array | ReadableStream<Uint8Array>>;
-
-	/** Called when the size of the entire file is requested. Must return or resolve to the size in bytes. */
-	getSize: () => MaybePromise<number>;
-
-	/** The maximum number of bytes the cache is allowed to hold in memory. Defaults to 8 MiB. */
-	maxCacheSize?: number;
-
-	/**
-	 * Specifies the prefetch profile that the reader should use with this source. A prefetch propfile specifies the
-	 * pattern with which bytes outside of the requested range are preloaded to reduce latency for future reads.
-	 *
-	 * - `'none'` (default): No prefetching; only the data needed in the moment is requested.
-	 * - `'fileSystem'`: File system-optimized prefetching: a small amount of data is prefetched bidirectionally.
-	 * - `'network'`: Network-optimized prefetching, or more generally, prefetching optimized for any high-latency
-	 * environment: tries to minimize the amount of read calls and aggressively prefetches data when sequential access
-	 * patterns are detected.
-	 */
-	prefetchProfile?: 'none' | 'fileSystem' | 'network';
-};
-
-/**
- * A general-purpose, callback-driven source that can get its data from anywhere.
- * @public
- */
-export class StreamSource extends Source {
-	/** @internal */
-	_options: StreamSourceOptions;
-	/** @internal */
-	_orchestrator: ReadOrchestrator;
-
-	constructor(options: StreamSourceOptions) {
-		if (!options || typeof options !== 'object') {
-			throw new TypeError('options must be an object.');
-		}
-		if (typeof options.read !== 'function') {
-			throw new TypeError('options.read must be a function.');
-		}
-		if (typeof options.getSize !== 'function') {
-			throw new TypeError('options.getSize must be a function.');
-		}
-		if (
-			options.maxCacheSize !== undefined
-			&& (!Number.isInteger(options.maxCacheSize) || options.maxCacheSize < 0)
-		) {
-			throw new TypeError('options.maxCacheSize, when provided, must be a non-negative integer.');
-		}
-		if (options.prefetchProfile && !['none', 'fileSystem', 'network'].includes(options.prefetchProfile)) {
-			throw new TypeError(
-				'options.prefetchProfile, when provided, must be one of \'none\', \'fileSystem\' or \'network\'.',
-			);
-		}
-
-		super();
-
-		this._options = options;
-
-		this._orchestrator = new ReadOrchestrator({
-			maxCacheSize: options.maxCacheSize ?? (8 * 2 ** 20 /* 8 MiB */),
-			maxWorkerCount: 2, // Fixed for now, *should* be fine
-			prefetchProfile: PREFETCH_PROFILES[options.prefetchProfile ?? 'none'],
-			runWorker: this._runWorker.bind(this),
-		});
-	}
-
-	/** @internal */
-	_retrieveSize(): MaybePromise<number> {
-		const result = this._options.getSize();
-
-		if (result instanceof Promise) {
-			return result.then((size) => {
-				if (!Number.isInteger(size) || size < 0) {
-					throw new TypeError('options.getSize must return or resolve to a non-negative integer.');
-				}
-
-				this._orchestrator.fileSize = size;
-				return size;
-			});
-		} else {
-			if (!Number.isInteger(result) || result < 0) {
-				throw new TypeError('options.getSize must return or resolve to a non-negative integer.');
-			}
-
-			this._orchestrator.fileSize = result;
-			return result;
-		}
-	}
-
-	/** @internal */
-	_read(start: number, end: number): MaybePromise<ReadResult> {
-		return this._orchestrator.read(start, end);
-	}
-
-	private async _runWorker(worker: ReadWorker) {
-		while (worker.currentPos < worker.targetPos && !worker.aborted) {
-			const originalCurrentPos = worker.currentPos;
-			const originalTargetPos = worker.targetPos;
-
-			let data = this._options.read(worker.currentPos, originalTargetPos);
-			if (data instanceof Promise) data = await data;
-
-			if (data instanceof Uint8Array) {
-				if (data.length !== originalTargetPos - worker.currentPos) {
-					// Yes, we're that strict
-					throw new Error(
-						`options.read returned a Uint8Array with unexpected length: Requested ${
-							originalTargetPos - worker.currentPos
-						} bytes, but got ${data.length}.`,
-					);
-				}
-
-				this.onread?.(worker.currentPos, worker.currentPos + data.length);
-				this._orchestrator.supplyWorkerData(worker, data);
-			} else if (data instanceof ReadableStream) {
-				const reader = data.getReader();
-
-				while (true) {
-					const { done, value } = await reader.read();
-					if (done) {
-						if (worker.currentPos < originalTargetPos) {
-							// Yes, we're *that* strict
-							throw new Error(
-								`ReadableStream returned by options.read ended before supplying enough data.`
-								+ ` Requested ${originalTargetPos - originalCurrentPos} bytes, but got ${
-									worker.currentPos - originalCurrentPos
-								}`,
-							);
-						}
-
-						break;
-					}
-
-					if (!(value instanceof Uint8Array)) {
-						throw new TypeError('ReadableStream returned by options.read must yield Uint8Array chunks.');
-					}
-
-					this.onread?.(worker.currentPos, worker.currentPos + value.length);
-					this._orchestrator.supplyWorkerData(worker, value);
-
-					if (worker.currentPos >= originalTargetPos || worker.aborted) {
-						break;
-					}
-				}
-			} else {
-				throw new TypeError('options.read must return or resolve to a Uint8Array or a ReadableStream.');
-			}
-		}
-	}
-}
-
 export type BlobSourceOptions = {
 	/** The maximum number of bytes the cache is allowed to hold in memory. Defaults to 8 MiB. */
 	maxCacheSize?: number;
@@ -561,6 +402,165 @@ export class UrlSource extends Source {
 					'Partial HTTP response (status 206) must surface either Content-Range or'
 					+ ' Content-Length header.',
 				);
+			}
+		}
+	}
+}
+
+/**
+ * Options for defining a StreamSource.
+ * @public
+ */
+export type StreamSourceOptions = {
+	/**
+	 * Called when data is requested. Must return or resolve to the bytes from the specified byte range, or a stream
+	 * that yields these bytes.
+	 */
+	read: (start: number, end: number) => MaybePromise<Uint8Array | ReadableStream<Uint8Array>>;
+
+	/** Called when the size of the entire file is requested. Must return or resolve to the size in bytes. */
+	getSize: () => MaybePromise<number>;
+
+	/** The maximum number of bytes the cache is allowed to hold in memory. Defaults to 8 MiB. */
+	maxCacheSize?: number;
+
+	/**
+	 * Specifies the prefetch profile that the reader should use with this source. A prefetch propfile specifies the
+	 * pattern with which bytes outside of the requested range are preloaded to reduce latency for future reads.
+	 *
+	 * - `'none'` (default): No prefetching; only the data needed in the moment is requested.
+	 * - `'fileSystem'`: File system-optimized prefetching: a small amount of data is prefetched bidirectionally.
+	 * - `'network'`: Network-optimized prefetching, or more generally, prefetching optimized for any high-latency
+	 * environment: tries to minimize the amount of read calls and aggressively prefetches data when sequential access
+	 * patterns are detected.
+	 */
+	prefetchProfile?: 'none' | 'fileSystem' | 'network';
+};
+
+/**
+ * A general-purpose, callback-driven source that can get its data from anywhere.
+ * @public
+ */
+export class StreamSource extends Source {
+	/** @internal */
+	_options: StreamSourceOptions;
+	/** @internal */
+	_orchestrator: ReadOrchestrator;
+
+	constructor(options: StreamSourceOptions) {
+		if (!options || typeof options !== 'object') {
+			throw new TypeError('options must be an object.');
+		}
+		if (typeof options.read !== 'function') {
+			throw new TypeError('options.read must be a function.');
+		}
+		if (typeof options.getSize !== 'function') {
+			throw new TypeError('options.getSize must be a function.');
+		}
+		if (
+			options.maxCacheSize !== undefined
+			&& (!Number.isInteger(options.maxCacheSize) || options.maxCacheSize < 0)
+		) {
+			throw new TypeError('options.maxCacheSize, when provided, must be a non-negative integer.');
+		}
+		if (options.prefetchProfile && !['none', 'fileSystem', 'network'].includes(options.prefetchProfile)) {
+			throw new TypeError(
+				'options.prefetchProfile, when provided, must be one of \'none\', \'fileSystem\' or \'network\'.',
+			);
+		}
+
+		super();
+
+		this._options = options;
+
+		this._orchestrator = new ReadOrchestrator({
+			maxCacheSize: options.maxCacheSize ?? (8 * 2 ** 20 /* 8 MiB */),
+			maxWorkerCount: 2, // Fixed for now, *should* be fine
+			prefetchProfile: PREFETCH_PROFILES[options.prefetchProfile ?? 'none'],
+			runWorker: this._runWorker.bind(this),
+		});
+	}
+
+	/** @internal */
+	_retrieveSize(): MaybePromise<number> {
+		const result = this._options.getSize();
+
+		if (result instanceof Promise) {
+			return result.then((size) => {
+				if (!Number.isInteger(size) || size < 0) {
+					throw new TypeError('options.getSize must return or resolve to a non-negative integer.');
+				}
+
+				this._orchestrator.fileSize = size;
+				return size;
+			});
+		} else {
+			if (!Number.isInteger(result) || result < 0) {
+				throw new TypeError('options.getSize must return or resolve to a non-negative integer.');
+			}
+
+			this._orchestrator.fileSize = result;
+			return result;
+		}
+	}
+
+	/** @internal */
+	_read(start: number, end: number): MaybePromise<ReadResult> {
+		return this._orchestrator.read(start, end);
+	}
+
+	private async _runWorker(worker: ReadWorker) {
+		while (worker.currentPos < worker.targetPos && !worker.aborted) {
+			const originalCurrentPos = worker.currentPos;
+			const originalTargetPos = worker.targetPos;
+
+			let data = this._options.read(worker.currentPos, originalTargetPos);
+			if (data instanceof Promise) data = await data;
+
+			if (data instanceof Uint8Array) {
+				if (data.length !== originalTargetPos - worker.currentPos) {
+					// Yes, we're that strict
+					throw new Error(
+						`options.read returned a Uint8Array with unexpected length: Requested ${
+							originalTargetPos - worker.currentPos
+						} bytes, but got ${data.length}.`,
+					);
+				}
+
+				this.onread?.(worker.currentPos, worker.currentPos + data.length);
+				this._orchestrator.supplyWorkerData(worker, data);
+			} else if (data instanceof ReadableStream) {
+				const reader = data.getReader();
+
+				while (true) {
+					const { done, value } = await reader.read();
+					if (done) {
+						if (worker.currentPos < originalTargetPos) {
+							// Yes, we're *that* strict
+							throw new Error(
+								`ReadableStream returned by options.read ended before supplying enough data.`
+								+ ` Requested ${originalTargetPos - originalCurrentPos} bytes, but got ${
+									worker.currentPos - originalCurrentPos
+								}`,
+							);
+						}
+
+						break;
+					}
+
+					if (!(value instanceof Uint8Array)) {
+						throw new TypeError('ReadableStream returned by options.read must yield Uint8Array chunks.');
+					}
+
+					this.onread?.(worker.currentPos, worker.currentPos + value.length);
+					this._orchestrator.supplyWorkerData(worker, value);
+
+					if (worker.currentPos >= originalTargetPos || worker.aborted) {
+						break;
+					}
+				}
+			} else {
+				throw new TypeError('options.read must return or resolve to a Uint8Array or a ReadableStream.');
 			}
 		}
 	}

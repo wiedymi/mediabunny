@@ -7,7 +7,7 @@
  */
 
 import { Bitstream } from '../misc';
-import { FileSlice, readBytes } from '../reader2';
+import { FileSlice, readBytes } from '../reader';
 
 export const MIN_FRAME_HEADER_SIZE = 7;
 export const MAX_FRAME_HEADER_SIZE = 9;

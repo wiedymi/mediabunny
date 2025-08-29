@@ -69,7 +69,7 @@ import {
 	searchForNextElementId,
 } from './ebml';
 import { buildMatroskaMimeType } from './matroska-misc';
-import { FileSlice, readBytes, Reader, readI16Be, readU8 } from '../reader2';
+import { FileSlice, readBytes, Reader, readI16Be, readU8 } from '../reader';
 
 type Segment = {
 	seekHeadSeen: boolean;
