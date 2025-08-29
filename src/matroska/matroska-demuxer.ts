@@ -69,7 +69,7 @@ import {
 	searchForNextElementId,
 } from './ebml';
 import { buildMatroskaMimeType } from './matroska-misc';
-import { FileSlice, readBytes, Reader2, readI16Be, readU8 } from '../reader2';
+import { FileSlice, readBytes, Reader, readI16Be, readU8 } from '../reader2';
 
 type Segment = {
 	seekHeadSeen: boolean;
@@ -188,7 +188,7 @@ const METADATA_ELEMENTS = [
 const MAX_RESYNC_LENGTH = 10 * 2 ** 20; // 10 MiB
 
 export class MatroskaDemuxer extends Demuxer {
-	reader: Reader2;
+	reader: Reader;
 
 	readMetadataPromise: Promise<void> | null = null;
 
@@ -204,7 +204,7 @@ export class MatroskaDemuxer extends Demuxer {
 	constructor(input: Input) {
 		super(input);
 
-		this.reader = input._reader2;
+		this.reader = input._reader;
 	}
 
 	override async computeDuration() {

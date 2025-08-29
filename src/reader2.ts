@@ -55,7 +55,7 @@ export class FileSlice {
 	}
 }
 
-export class Reader2 {
+export class Reader {
 	fileSize!: number;
 
 	constructor(public source: Source) {}
@@ -66,7 +66,7 @@ export class Reader2 {
 		}
 
 		const end = start + length;
-		const result = this.source._read2(start, end);
+		const result = this.source._read(start, end);
 
 		if (result instanceof Promise) {
 			return result.then((x) => {

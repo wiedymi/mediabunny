@@ -7,7 +7,7 @@
  */
 
 import { FRAME_HEADER_SIZE, FrameHeader, readFrameHeader } from '../../shared/mp3-misc';
-import { FileSlice, readAscii, Reader2, readU32Be } from '../reader2';
+import { FileSlice, readAscii, Reader, readU32Be } from '../reader2';
 
 export const readId3 = (slice: FileSlice) => {
 	const tag = readAscii(slice, 3);
@@ -22,7 +22,7 @@ export const readId3 = (slice: FileSlice) => {
 	return { size };
 };
 
-export const readNextFrameHeader = async (reader: Reader2, startPos: number, until: number): Promise<{
+export const readNextFrameHeader = async (reader: Reader, startPos: number, until: number): Promise<{
 	header: FrameHeader;
 	startPos: number;
 } | null> => {

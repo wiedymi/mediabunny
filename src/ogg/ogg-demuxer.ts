@@ -14,7 +14,7 @@ import { InputAudioTrack, InputAudioTrackBacking } from '../input-track';
 import { PacketRetrievalOptions } from '../media-sink';
 import { assert, findLast, roundToPrecision, toDataView, UNDETERMINED_LANGUAGE } from '../misc';
 import { EncodedPacket, PLACEHOLDER_DATA } from '../packet';
-import { readBytes, Reader2 } from '../reader2';
+import { readBytes, Reader } from '../reader2';
 import { buildOggMimeType, computeOggPageCrc, extractSampleMetadata, OggCodecInfo } from './ogg-misc';
 import {
 	findNextPageHeader,
@@ -43,7 +43,7 @@ type Packet = {
 };
 
 export class OggDemuxer extends Demuxer {
-	reader: Reader2;
+	reader: Reader;
 
 	metadataPromise: Promise<void> | null = null;
 	bitstreams: LogicalBitstream[] = [];
@@ -52,7 +52,7 @@ export class OggDemuxer extends Demuxer {
 	constructor(input: Input) {
 		super(input);
 
-		this.reader = input._reader2;
+		this.reader = input._reader;
 	}
 
 	async readMetadata() {

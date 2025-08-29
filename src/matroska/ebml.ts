@@ -8,7 +8,7 @@
 
 import { MediaCodec } from '../codec';
 import { assertNever, textDecoder, textEncoder } from '../misc';
-import { FileSlice, readBytes, Reader2, readF32Be, readF64Be, readU8 } from '../reader2';
+import { FileSlice, readBytes, Reader, readF32Be, readF64Be, readU8 } from '../reader2';
 import { Writer } from '../writer';
 
 export interface EBMLElement {
@@ -554,7 +554,7 @@ export const readFloat = (slice: FileSlice, width: number) => {
 };
 
 /** Returns the byte offset in the file of the next element with a matching ID. */
-export const searchForNextElementId = async (reader: Reader2, startPos: number, ids: EBMLId[], until: number) => {
+export const searchForNextElementId = async (reader: Reader, startPos: number, ids: EBMLId[], until: number) => {
 	const idsSet = new Set(ids);
 	let currentPos = startPos;
 
@@ -581,7 +581,7 @@ export const searchForNextElementId = async (reader: Reader2, startPos: number, 
 };
 
 /** Searches for the next occurrence of an element ID using a naive byte-wise search. */
-export const resync = async (reader: Reader2, startPos: number, ids: EBMLId[], until: number) => {
+export const resync = async (reader: Reader, startPos: number, ids: EBMLId[], until: number) => {
 	const CHUNK_SIZE = 2 ** 16; // So we don't need to grab thousands of slices
 	const idsSet = new Set(ids);
 	let currentPos = startPos;

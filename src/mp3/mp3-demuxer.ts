@@ -15,7 +15,7 @@ import { assert, AsyncMutex, binarySearchExact, binarySearchLessOrEqual, UNDETER
 import { EncodedPacket, PLACEHOLDER_DATA } from '../packet';
 import { FrameHeader, getXingOffset, INFO, XING } from '../../shared/mp3-misc';
 import { readId3, readNextFrameHeader } from './mp3-reader';
-import { readBytes, Reader2, readU32Be } from '../reader2';
+import { readBytes, Reader, readU32Be } from '../reader2';
 
 type Sample = {
 	timestamp: number;
@@ -25,7 +25,7 @@ type Sample = {
 };
 
 export class Mp3Demuxer extends Demuxer {
-	reader: Reader2;
+	reader: Reader;
 
 	metadataPromise: Promise<void> | null = null;
 	firstFrameHeader: FrameHeader | null = null;
@@ -41,7 +41,7 @@ export class Mp3Demuxer extends Demuxer {
 	constructor(input: Input) {
 		super(input);
 
-		this.reader = input._reader2;
+		this.reader = input._reader;
 	}
 
 	async readMetadata() {

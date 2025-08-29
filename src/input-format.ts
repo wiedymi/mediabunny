@@ -53,7 +53,7 @@ export abstract class InputFormat {
 export abstract class IsobmffInputFormat extends InputFormat {
 	/** @internal */
 	protected async _getMajorBrand(input: Input) {
-		let slice = input._reader2.requestSlice(0, 12);
+		let slice = input._reader.requestSlice(0, 12);
 		if (slice instanceof Promise) slice = await slice;
 		if (!slice) return null;
 
@@ -120,7 +120,7 @@ export class QuickTimeInputFormat extends IsobmffInputFormat {
 export class MatroskaInputFormat extends InputFormat {
 	/** @internal */
 	protected async isSupportedEBMLOfDocType(input: Input, desiredDocType: string) {
-		let headerSlice = input._reader2.requestSlice(0, MAX_HEADER_SIZE);
+		let headerSlice = input._reader.requestSlice(0, MAX_HEADER_SIZE);
 		if (headerSlice instanceof Promise) headerSlice = await headerSlice;
 		if (!headerSlice) return false;
 
@@ -143,7 +143,7 @@ export class MatroskaInputFormat extends InputFormat {
 			return false; // Miss me with that shit
 		}
 
-		let dataSlice = input._reader2.requestSlice(headerSlice.filePos, dataSize);
+		let dataSlice = input._reader.requestSlice(headerSlice.filePos, dataSize);
 		if (dataSlice instanceof Promise) dataSlice = await dataSlice;
 		if (!dataSlice) return false;
 
@@ -235,7 +235,7 @@ export class WebMInputFormat extends MatroskaInputFormat {
 export class Mp3InputFormat extends InputFormat {
 	/** @internal */
 	async _canReadInput(input: Input) {
-		let slice = input._reader2.requestSlice(0, 10);
+		let slice = input._reader.requestSlice(0, 10);
 		if (slice instanceof Promise) slice = await slice;
 		if (!slice) return false;
 
@@ -247,7 +247,7 @@ export class Mp3InputFormat extends InputFormat {
 			currentPos = slice.filePos + id3Tag.size;
 		}
 
-		const firstResult = await readNextFrameHeader(input._reader2, currentPos, currentPos + 4096);
+		const firstResult = await readNextFrameHeader(input._reader, currentPos, currentPos + 4096);
 		if (!firstResult) {
 			return false;
 		}
@@ -261,7 +261,7 @@ export class Mp3InputFormat extends InputFormat {
 
 		// Fine, we found one frame header, but we're still not entirely sure this is MP3. Let's check if we can find
 		// another header right after it:
-		const secondResult = await readNextFrameHeader(input._reader2, currentPos, currentPos + FRAME_HEADER_SIZE);
+		const secondResult = await readNextFrameHeader(input._reader, currentPos, currentPos + FRAME_HEADER_SIZE);
 		if (!secondResult) {
 			return false;
 		}
@@ -299,7 +299,7 @@ export class Mp3InputFormat extends InputFormat {
 export class WaveInputFormat extends InputFormat {
 	/** @internal */
 	async _canReadInput(input: Input) {
-		let slice = input._reader2.requestSlice(0, 12);
+		let slice = input._reader.requestSlice(0, 12);
 		if (slice instanceof Promise) slice = await slice;
 		if (!slice) return false;
 
@@ -335,7 +335,7 @@ export class WaveInputFormat extends InputFormat {
 export class OggInputFormat extends InputFormat {
 	/** @internal */
 	async _canReadInput(input: Input) {
-		let slice = input._reader2.requestSlice(0, 4);
+		let slice = input._reader.requestSlice(0, 4);
 		if (slice instanceof Promise) slice = await slice;
 		if (!slice) return false;
 
@@ -363,7 +363,7 @@ export class OggInputFormat extends InputFormat {
 export class AdtsInputFormat extends InputFormat {
 	/** @internal */
 	async _canReadInput(input: Input) {
-		let slice = input._reader2.requestSliceRange(0, MIN_FRAME_HEADER_SIZE, MAX_FRAME_HEADER_SIZE);
+		let slice = input._reader.requestSliceRange(0, MIN_FRAME_HEADER_SIZE, MAX_FRAME_HEADER_SIZE);
 		if (slice instanceof Promise) slice = await slice;
 		if (!slice) return false;
 
@@ -372,7 +372,7 @@ export class AdtsInputFormat extends InputFormat {
 			return false;
 		}
 
-		slice = input._reader2.requestSliceRange(firstHeader.frameLength, MIN_FRAME_HEADER_SIZE, MAX_FRAME_HEADER_SIZE);
+		slice = input._reader.requestSliceRange(firstHeader.frameLength, MIN_FRAME_HEADER_SIZE, MAX_FRAME_HEADER_SIZE);
 		if (slice instanceof Promise) slice = await slice;
 		if (!slice) return false;
 

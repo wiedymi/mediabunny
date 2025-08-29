@@ -20,7 +20,7 @@ import {
 	UNDETERMINED_LANGUAGE,
 } from '../misc';
 import { EncodedPacket, PLACEHOLDER_DATA } from '../packet';
-import { readBytes, Reader2 } from '../reader2';
+import { readBytes, Reader } from '../reader2';
 import { FrameHeader, MAX_FRAME_HEADER_SIZE, MIN_FRAME_HEADER_SIZE, readFrameHeader } from './adts-reader';
 
 const SAMPLES_PER_AAC_FRAME = 1024;
@@ -33,7 +33,7 @@ type Sample = {
 };
 
 export class AdtsDemuxer extends Demuxer {
-	reader: Reader2;
+	reader: Reader;
 
 	metadataPromise: Promise<void> | null = null;
 	firstFrameHeader: FrameHeader | null = null;
@@ -49,7 +49,7 @@ export class AdtsDemuxer extends Demuxer {
 	constructor(input: Input) {
 		super(input);
 
-		this.reader = input._reader2;
+		this.reader = input._reader;
 	}
 
 	async readMetadata() {

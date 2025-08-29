@@ -75,7 +75,7 @@ import {
 	readI16Be,
 	readI32Be,
 	readI64Be,
-	Reader2,
+	Reader,
 	readU16Be,
 	readU24Be,
 	readU32Be,
@@ -223,7 +223,7 @@ type Fragment = {
 };
 
 export class IsobmffDemuxer extends Demuxer {
-	reader: Reader2;
+	reader: Reader;
 	moovSlice: FileSlice | null = null;
 
 	currentTrack: InternalTrack | null = null;
@@ -242,7 +242,7 @@ export class IsobmffDemuxer extends Demuxer {
 	constructor(input: Input) {
 		super(input);
 
-		this.reader = input._reader2;
+		this.reader = input._reader;
 	}
 
 	override async computeDuration() {
