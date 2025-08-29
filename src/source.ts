@@ -93,6 +93,10 @@ export class BufferSource extends Source {
 	}
 }
 
+/**
+ * Options for BlobSource.
+ * @public
+ */
 export type BlobSourceOptions = {
 	/** The maximum number of bytes the cache is allowed to hold in memory. Defaults to 8 MiB. */
 	maxCacheSize?: number;
@@ -149,6 +153,7 @@ export class BlobSource extends Source {
 	/** @internal */
 	_readers = new WeakMap<ReadWorker, ReadableStreamDefaultReader<Uint8Array>>();
 
+	/** @internal */
 	private async _runWorker(worker: ReadWorker) {
 		let reader = this._readers.get(worker);
 		if (!reader) {
@@ -317,6 +322,7 @@ export class UrlSource extends Source {
 		return this._orchestrator.read(start, end);
 	}
 
+	/** @internal */
 	private async _runWorker(worker: ReadWorker) {
 		const existing = this._existingResponses.get(worker);
 
@@ -384,6 +390,7 @@ export class UrlSource extends Source {
 		// logic for that has vanished for now. Leaving a comment here if this becomes relevant again.
 	}
 
+	/** @internal */
 	private _getPartialLengthFromRangeResponse(response: Response) {
 		const contentRange = response.headers.get('Content-Range');
 		if (contentRange) {
@@ -509,6 +516,7 @@ export class StreamSource extends Source {
 		return this._orchestrator.read(start, end);
 	}
 
+	/** @internal */
 	private async _runWorker(worker: ReadWorker) {
 		while (worker.currentPos < worker.targetPos && !worker.aborted) {
 			const originalCurrentPos = worker.currentPos;

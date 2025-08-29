@@ -97,6 +97,7 @@ export {
 	StreamSource,
 	StreamSourceOptions,
 	BlobSource,
+	BlobSourceOptions,
 	UrlSource,
 	UrlSourceOptions,
 } from './source';
