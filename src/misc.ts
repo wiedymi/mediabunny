@@ -633,3 +633,7 @@ export const isSafari = () => {
  * @public
  */
 export type MaybePromise<T> = T | Promise<T>;
+
+export const closedIntervalsOverlap = (startA: number, endA: number, startB: number, endB: number) => {
+	return startA <= endB && startB <= endA;
+};

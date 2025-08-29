@@ -46,7 +46,6 @@ export class OggDemuxer extends Demuxer {
 	reader: Reader2;
 
 	metadataPromise: Promise<void> | null = null;
-	fileSize: number | null = null;
 	bitstreams: LogicalBitstream[] = [];
 	tracks: InputAudioTrack[] = [];
 
@@ -58,12 +57,8 @@ export class OggDemuxer extends Demuxer {
 
 	async readMetadata() {
 		return this.metadataPromise ??= (async () => {
-			let fileSize = this.reader.requestSize();
-			if (fileSize instanceof Promise) fileSize = await fileSize;
-			this.fileSize = fileSize;
-
 			let currentPos = 0;
-			while (currentPos <= this.fileSize - MIN_PAGE_HEADER_SIZE) {
+			while (currentPos <= this.reader.fileSize - MIN_PAGE_HEADER_SIZE) {
 				let slice = this.reader.requestSliceRange(currentPos, MIN_PAGE_HEADER_SIZE, MAX_PAGE_HEADER_SIZE);
 				if (slice instanceof Promise) slice = await slice;
 				if (!slice) break;
@@ -249,7 +244,6 @@ export class OggDemuxer extends Demuxer {
 
 	async readPacket(startPage: Page, startSegmentIndex: number): Promise<Packet | null> {
 		assert(startSegmentIndex < startPage.lacingValues.length);
-		assert(this.fileSize);
 
 		let startDataOffset = 0;
 		for (let i = 0; i < startSegmentIndex; i++) {
@@ -290,7 +284,7 @@ export class OggDemuxer extends Demuxer {
 			// The packet extends to the next page; let's find it
 			let currentPos = currentPage.headerStartPos + currentPage.totalSize;
 			while (true) {
-				if (currentPos > this.fileSize - MIN_PAGE_HEADER_SIZE) {
+				if (currentPos > this.reader.fileSize - MIN_PAGE_HEADER_SIZE) {
 					return null;
 				}
 
@@ -335,8 +329,6 @@ export class OggDemuxer extends Demuxer {
 	}
 
 	async findNextPacketStart(lastPacket: Packet) {
-		assert(this.fileSize !== null);
-
 		// If there's another segment in the same page, return it
 		if (lastPacket.endSegmentIndex < lastPacket.endPage.lacingValues.length - 1) {
 			return { startPage: lastPacket.endPage, startSegmentIndex: lastPacket.endSegmentIndex + 1 };
@@ -351,7 +343,7 @@ export class OggDemuxer extends Demuxer {
 		// Otherwise, search for the next page belonging to the same bitstream
 		let currentPos = lastPacket.endPage.headerStartPos + lastPacket.endPage.totalSize;
 		while (true) {
-			if (currentPos >= this.fileSize - MIN_PAGE_HEADER_SIZE) {
+			if (currentPos >= this.reader.fileSize - MIN_PAGE_HEADER_SIZE) {
 				return null;
 			}
 
@@ -565,8 +557,6 @@ class OggAudioTrackBacking implements InputAudioTrackBacking {
 	}
 
 	async getPacket(timestamp: number, options: PacketRetrievalOptions) {
-		assert(this.demuxer.fileSize !== null);
-
 		const timestampInSamples = roundToPrecision(timestamp * this.internalSampleRate, 14);
 		if (timestampInSamples === 0) {
 			// Fast path for timestamp 0 - avoids binary search when playing back from the start
@@ -584,7 +574,7 @@ class OggAudioTrackBacking implements InputAudioTrackBacking {
 		}
 
 		let lowPage = startPosition.startPage;
-		let high = this.demuxer.fileSize;
+		let high = this.demuxer.reader.fileSize;
 
 		const lowPages: Page[] = [lowPage];
 

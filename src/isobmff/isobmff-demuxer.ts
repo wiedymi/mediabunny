@@ -271,11 +271,8 @@ export class IsobmffDemuxer extends Demuxer {
 
 	readMetadata() {
 		return this.metadataPromise ??= (async () => {
-			let sourceSize = this.reader.requestSize();
-			if (sourceSize instanceof Promise) sourceSize = await sourceSize;
-
 			let currentPos = 0;
-			while (currentPos < sourceSize) {
+			while (currentPos < this.reader.fileSize) {
 				let slice = this.reader.requestSliceRange(currentPos, MIN_BOX_HEADER_SIZE, MAX_BOX_HEADER_SIZE);
 				if (slice instanceof Promise) slice = await slice;
 				if (!slice) break;
@@ -315,14 +312,14 @@ export class IsobmffDemuxer extends Demuxer {
 
 			if (this.isFragmented) {
 				// The last 4 bytes may contain the size of the mfra box at the end of the file
-				let lastWordSlice = this.reader.requestSlice(sourceSize - 4, 4);
+				let lastWordSlice = this.reader.requestSlice(this.reader.fileSize - 4, 4);
 				if (lastWordSlice instanceof Promise) lastWordSlice = await lastWordSlice;
 				assert(lastWordSlice);
 
 				const lastWord = readU32Be(lastWordSlice);
-				const potentialMfraPos = sourceSize - lastWord;
+				const potentialMfraPos = this.reader.fileSize - lastWord;
 
-				if (potentialMfraPos >= 0 && potentialMfraPos <= sourceSize - MAX_BOX_HEADER_SIZE) {
+				if (potentialMfraPos >= 0 && potentialMfraPos <= this.reader.fileSize - MAX_BOX_HEADER_SIZE) {
 					let mfraHeaderSlice = this.reader.requestSliceRange(
 						potentialMfraPos,
 						MIN_BOX_HEADER_SIZE,
@@ -2417,9 +2414,6 @@ abstract class IsobmffTrackBacking implements InputTrackBacking {
 				return this.fetchPacketInFragment(fragment, sampleIndex, options);
 			}
 
-			let sourceSize = demuxer.reader.requestSize();
-			if (sourceSize instanceof Promise) sourceSize = await sourceSize;
-
 			let prevFragment: Fragment | null = null;
 			let bestFragmentIndex = fragmentIndex;
 			let bestSampleIndex = sampleIndex;
@@ -2455,7 +2449,7 @@ abstract class IsobmffTrackBacking implements InputTrackBacking {
 				}
 			}
 
-			while (currentPos < sourceSize) {
+			while (currentPos < demuxer.reader.fileSize) {
 				if (prevFragment) {
 					const trackData = prevFragment.trackData.get(this.internalTrack.id);
 					if (trackData && trackData.startTimestamp > latestTimestamp) {

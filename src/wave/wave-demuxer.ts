@@ -47,9 +47,6 @@ export class WaveDemuxer extends Demuxer {
 
 	async readMetadata() {
 		return this.metadataPromise ??= (async () => {
-			let actualFileSize = this.reader.requestSize();
-			if (actualFileSize instanceof Promise) actualFileSize = await actualFileSize;
-
 			let slice = this.reader.requestSlice(0, 12);
 			if (slice instanceof Promise) slice = await slice;
 			assert(slice);
@@ -61,7 +58,7 @@ export class WaveDemuxer extends Demuxer {
 
 			const outerChunkSize = readU32(slice, littleEndian);
 
-			let totalFileSize = isRf64 ? actualFileSize : Math.min(outerChunkSize + 8, actualFileSize);
+			let totalFileSize = isRf64 ? this.reader.fileSize : Math.min(outerChunkSize + 8, this.reader.fileSize);
 			const format = readAscii(slice, 4);
 
 			if (format !== 'WAVE') {
@@ -98,7 +95,7 @@ export class WaveDemuxer extends Demuxer {
 					const riffChunkSize = readU64(slice, littleEndian);
 					dataChunkSize = readU64(slice, littleEndian);
 
-					totalFileSize = Math.min(riffChunkSize + 8, actualFileSize);
+					totalFileSize = Math.min(riffChunkSize + 8, this.reader.fileSize);
 				}
 
 				currentPos = startPos + chunkSize + (chunkSize & 1); // Handle padding

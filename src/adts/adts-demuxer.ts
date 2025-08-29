@@ -44,7 +44,6 @@ export class AdtsDemuxer extends Demuxer {
 	readingMutex = new AsyncMutex();
 	lastSampleLoaded = false;
 	lastLoadedPos = 0;
-	fileSize = 0;
 	nextTimestampInSamples = 0;
 
 	constructor(input: Input) {
@@ -55,10 +54,6 @@ export class AdtsDemuxer extends Demuxer {
 
 	async readMetadata() {
 		return this.metadataPromise ??= (async () => {
-			let fileSize = this.reader.requestSize();
-			if (fileSize instanceof Promise) fileSize = await fileSize;
-			this.fileSize = fileSize;
-
 			// Keep loading until we find the first frame header
 			while (!this.firstFrameHeader && !this.lastSampleLoaded) {
 				await this.advanceReader();
@@ -86,7 +81,7 @@ export class AdtsDemuxer extends Demuxer {
 			return;
 		}
 
-		if (header.startPos + header.frameLength > this.fileSize) {
+		if (header.startPos + header.frameLength > this.reader.fileSize) {
 			// Frame doesn't fit in the rest of the file
 			this.lastSampleLoaded = true;
 			return;

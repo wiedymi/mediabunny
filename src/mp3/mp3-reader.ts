@@ -26,9 +26,6 @@ export const readNextFrameHeader = async (reader: Reader2, startPos: number, unt
 	header: FrameHeader;
 	startPos: number;
 } | null> => {
-	let fileSize = reader.requestSize();
-	if (fileSize instanceof Promise) fileSize = await fileSize;
-
 	let currentPos = startPos;
 
 	while (currentPos < until) {
@@ -38,7 +35,7 @@ export const readNextFrameHeader = async (reader: Reader2, startPos: number, unt
 
 		const word = readU32Be(slice);
 
-		const result = readFrameHeader(word, fileSize - currentPos);
+		const result = readFrameHeader(word, reader.fileSize - currentPos);
 		if (result.header) {
 			return { header: result.header, startPos: currentPos };
 		}

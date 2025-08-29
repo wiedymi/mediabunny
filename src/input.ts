@@ -9,7 +9,6 @@
 import { Demuxer } from './demuxer';
 import { InputFormat } from './input-format';
 import { assert } from './misc';
-import { Reader } from './reader';
 import { Reader2 } from './reader2';
 import { Source } from './source';
 
@@ -34,13 +33,12 @@ export class Input<S extends Source = Source> {
 	/** @internal */
 	_formats: InputFormat[];
 	/** @internal */
-	_mainReader: Reader;
-	/** @internal */
 	_demuxerPromise: Promise<Demuxer> | null = null;
 	/** @internal */
 	_format: InputFormat | null = null;
 
 	_reader2: Reader2;
+	_size!: number;
 
 	constructor(options: InputOptions<S>) {
 		if (!options || typeof options !== 'object') {
@@ -55,14 +53,13 @@ export class Input<S extends Source = Source> {
 
 		this._formats = options.formats;
 		this._source = options.source;
-		this._mainReader = new Reader(options.source);
 		this._reader2 = new Reader2(options.source);
 	}
 
 	/** @internal */
 	_getDemuxer() {
 		return this._demuxerPromise ??= (async () => {
-			await this._mainReader.loadRange(0, 4096); // Load the first 4 kiB so we can determine the format
+			this._reader2.fileSize = await this._source.getSize();
 
 			for (const format of this._formats) {
 				const canRead = await format._canReadInput(this);

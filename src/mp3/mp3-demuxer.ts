@@ -36,7 +36,6 @@ export class Mp3Demuxer extends Demuxer {
 	readingMutex = new AsyncMutex();
 	lastSampleLoaded = false;
 	lastLoadedPos = 0;
-	fileSize = 0;
 	nextTimestampInSamples = 0;
 
 	constructor(input: Input) {
@@ -47,12 +46,8 @@ export class Mp3Demuxer extends Demuxer {
 
 	async readMetadata() {
 		return this.metadataPromise ??= (async () => {
-			let fileSize = this.reader.requestSize();
-			if (fileSize instanceof Promise) fileSize = await fileSize;
-			this.fileSize = fileSize;
-
 			// Keep loading until we find the first frame header
-			while (!this.firstFrameHeader && this.lastLoadedPos < this.fileSize) {
+			while (!this.firstFrameHeader && this.lastLoadedPos < this.reader.fileSize) {
 				await this.advanceReader();
 			}
 
@@ -82,7 +77,7 @@ export class Mp3Demuxer extends Demuxer {
 
 		const startPos = this.lastLoadedPos;
 
-		const result = await readNextFrameHeader(this.reader, startPos, this.fileSize);
+		const result = await readNextFrameHeader(this.reader, startPos, this.reader.fileSize);
 		if (!result) {
 			this.lastSampleLoaded = true;
 			return;

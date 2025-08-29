@@ -56,28 +56,15 @@ export class FileSlice {
 }
 
 export class Reader2 {
-	private size: number | null = null;
+	fileSize!: number;
 
-	constructor(public source: Source) {
-
-	}
-
-	requestSize(): MaybePromise<number> {
-		if (this.size !== null) {
-			return this.size;
-		}
-
-		const size = this.source._retrieveSize2();
-		if (size instanceof Promise) {
-			void size.then(x => this.size = x);
-			return size;
-		} else {
-			this.size = size;
-			return size;
-		}
-	}
+	constructor(public source: Source) {}
 
 	requestSlice(start: number, length: number): MaybePromise<FileSlice | null> {
+		if (start + length > this.fileSize) {
+			return null;
+		}
+
 		const end = start + length;
 		const result = this.source._read2(start, end);
 
@@ -99,19 +86,10 @@ export class Reader2 {
 	}
 
 	requestSliceRange(start: number, minLength: number, maxLength: number): MaybePromise<FileSlice | null> {
-		const fileSize = this.requestSize();
-
-		if (fileSize instanceof Promise) {
-			return fileSize.then(size => this.requestSlice(
-				start,
-				clamp(size - start, minLength, maxLength),
-			));
-		} else {
-			return this.requestSlice(
-				start,
-				clamp(fileSize - start, minLength, maxLength),
-			);
-		}
+		return this.requestSlice(
+			start,
+			clamp(this.fileSize - start, minLength, maxLength),
+		);
 	}
 }
 

@@ -234,12 +234,9 @@ export class MatroskaDemuxer extends Demuxer {
 
 	readMetadata() {
 		return this.readMetadataPromise ??= (async () => {
-			let fileSize = this.reader.requestSize();
-			if (fileSize instanceof Promise) fileSize = await fileSize;
-
 			// Loop over all top-level elements in the file
 			let currentPos = 0;
-			while (currentPos < fileSize) {
+			while (currentPos < this.reader.fileSize) {
 				let slice = this.reader.requestSliceRange(currentPos, MIN_HEADER_SIZE, MAX_HEADER_SIZE);
 				if (slice instanceof Promise) slice = await slice;
 				if (!slice) break;
@@ -281,9 +278,9 @@ export class MatroskaDemuxer extends Demuxer {
 							this.reader,
 							dataStartPos,
 							LEVEL_0_AND_1_EBML_IDS,
-							fileSize,
+							this.reader.fileSize,
 						);
-						size = (nextElementPos ?? fileSize) - dataStartPos;
+						size = (nextElementPos ?? this.reader.fileSize) - dataStartPos;
 					}
 
 					const lastSegment = last(this.segments);
@@ -422,12 +419,17 @@ export class MatroskaDemuxer extends Demuxer {
 			}
 		}
 
-		// Use the seek head to read missing metadata elements
-		for (const target of METADATA_ELEMENTS) {
-			if (this.currentSegment[target.flag]) continue;
+		// Sort the seek entries by file position so reading them exhibits a sequential pattern
+		this.currentSegment.seekEntries.sort((a, b) => a.segmentPosition - b.segmentPosition);
 
-			const seekEntry = this.currentSegment.seekEntries.find(entry => entry.id === target.id);
-			if (!seekEntry) continue;
+		// Use the seek head to read missing metadata elements
+		for (const seekEntry of this.currentSegment.seekEntries) {
+			const target = METADATA_ELEMENTS.find(x => x.id === seekEntry.id);
+			if (!target) {
+				continue;
+			}
+
+			if (this.currentSegment[target.flag]) continue;
 
 			let slice = this.reader.requestSliceRange(
 				segmentDataStart + seekEntry.segmentPosition,
