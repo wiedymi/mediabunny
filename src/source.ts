@@ -196,6 +196,8 @@ export type UrlSourceOptions = {
 	/**
 	 * A function that returns the delay (in seconds) before retrying a failed request. The function is called
 	 * with the number of previous, unsuccessful attempts. If the function returns `null`, no more retries will be made.
+	 *
+	 * By default, it uses an exponential backoff algorithm that never fully gives up.
 	 */
 	getRetryDelay?: (previousAttempts: number) => number | null;
 
@@ -204,9 +206,9 @@ export type UrlSourceOptions = {
 };
 
 /**
- * A source backed by a URL. This is useful for reading data from the network. Be careful using this source however,
- * as it typically comes with increased latency.
- * @beta
+ * A source backed by a URL. This is useful for reading data from the network. Requests will be made using an optimized
+ * reading and prefetching pattern to minimize request count and latency.
+ * @public
  */
 export class UrlSource extends Source {
 	/** @internal */
