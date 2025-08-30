@@ -545,7 +545,8 @@ export type StreamSourceOptions = {
 	 * pattern with which bytes outside of the requested range are preloaded to reduce latency for future reads.
 	 *
 	 * - `'none'` (default): No prefetching; only the data needed in the moment is requested.
-	 * - `'fileSystem'`: File system-optimized prefetching: a small amount of data is prefetched bidirectionally.
+	 * - `'fileSystem'`: File system-optimized prefetching: a small amount of data is prefetched bidirectionally,
+	 * aligned with page boundaries.
 	 * - `'network'`: Network-optimized prefetching, or more generally, prefetching optimized for any high-latency
 	 * environment: tries to minimize the amount of read calls and aggressively prefetches data when sequential access
 	 * patterns are detected.
