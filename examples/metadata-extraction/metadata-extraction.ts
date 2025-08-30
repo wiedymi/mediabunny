@@ -1,18 +1,22 @@
-import { Input, ALL_FORMATS, BlobSource } from 'mediabunny';
+import { Input, ALL_FORMATS, BlobSource, UrlSource } from 'mediabunny';
 
 import SampleFileUrl from '../../docs/assets/big-buck-bunny-trimmed.mp4';
 (document.querySelector('#sample-file-download') as HTMLAnchorElement).href = SampleFileUrl;
 
-const selectMediaButton = document.querySelector('button') as HTMLButtonElement;
+const selectMediaButton = document.querySelector('#select-file') as HTMLButtonElement;
+const loadUrlButton = document.querySelector('#load-url') as HTMLButtonElement;
 const fileNameElement = document.querySelector('#file-name') as HTMLParagraphElement;
 const horizontalRule = document.querySelector('hr') as HTMLHRElement;
 const bytesReadElement = document.querySelector('#bytes-read') as HTMLParagraphElement;
 const metadataContainer = document.querySelector('#metadata-container') as HTMLDivElement;
 
-const extractMetadata = (file: File) => {
-	// Create a new input from the file
+const extractMetadata = (resource: File | string) => {
+	// Create a new input from the resource
+	const source = resource instanceof File
+		? new BlobSource(resource)
+		: new UrlSource(resource);
 	const input = new Input({
-		source: new BlobSource(file),
+		source,
 		formats: ALL_FORMATS, // Accept all formats
 	});
 
@@ -78,7 +82,7 @@ const extractMetadata = (file: File) => {
 		}))),
 	};
 
-	fileNameElement.textContent = file.name;
+	fileNameElement.textContent = resource instanceof File ? resource.name : resource;
 	horizontalRule.style.display = '';
 	bytesReadElement.innerHTML = '';
 	metadataContainer.innerHTML = '';
@@ -168,6 +172,19 @@ selectMediaButton.addEventListener('click', () => {
 	});
 
 	fileInput.click();
+});
+
+loadUrlButton.addEventListener('click', () => {
+	const url = prompt(
+		'Please enter a URL of a media file. Note that it must support cross-origin requests, so have the right'
+		+ ' CORS headers set.',
+		'http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+	);
+	if (!url) {
+		return;
+	}
+
+	extractMetadata(url);
 });
 
 document.addEventListener('dragover', (event) => {

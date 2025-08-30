@@ -15,15 +15,22 @@
 		<h1 class="text-3xl font-bold text-teal-500 text-center">File compression example</h1>
 		<p class="max-w-lg text-center">Select or drop a media file, and Mediabunny will convert it to a heavily-compressed MP4 file.</p>
 
-		<div class="flex gap-2 mt-4">
-			<button class="rounded-lg bg-zinc-200 dark:bg-zinc-750 hover:bg-zinc-300 dark:hover:bg-zinc-700 px-5 py-2">
-				Select media file
-			</button>
+		<div class="flex flex-col items-center gap-1">
+			<div class="flex gap-2 mt-4">
+				<button id="select-file" class="rounded-lg bg-zinc-200 dark:bg-zinc-750 hover:bg-zinc-300 dark:hover:bg-zinc-700 px-5 py-2">
+					Select local file
+				</button>
 
-			<a id="sample-file-download" download="big-buck-bunny-trimmed.mp4" class="rounded-lg bg-zinc-200 dark:bg-zinc-750 hover:bg-zinc-300 dark:hover:bg-zinc-700 px-5 group grid place-items-center" title="Download sample file">
-				<img src="../../docs/assets/download-icon.svg" class="opacity-30 group-hover:opacity-80 dark:invert">
+				<button id="load-url" class="rounded-lg bg-zinc-200 dark:bg-zinc-750 hover:bg-zinc-300 dark:hover:bg-zinc-700 px-5 py-2">
+					Load remote URL
+				</button>
+			</div>
+
+			<a id="sample-file-download" download="big-buck-bunny-trimmed.mp4" class="hover:underline text-xs opacity-50 hover:opacity-70">
+				Download sample file
 			</a>
 		</div>
+
 		<p class="text-xs opacity-60 mt-2" id="file-name"></p>
 
 		<hr class="w-full max-w-96 my-4 border-zinc-300 dark:border-zinc-700" style="display: none;">
