@@ -240,7 +240,6 @@ class Mp3AudioTrackBacking implements InputAudioTrackBacking {
 				x => x.timestamp,
 			);
 			if (sampleIndex === -1) {
-				console.log('uh', packet, this.demuxer.loadedSamples);
 				throw new Error('Packet was not created from this track.');
 			}
 

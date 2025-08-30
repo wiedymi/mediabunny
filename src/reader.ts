@@ -9,6 +9,44 @@
 import { clamp, MaybePromise, toDataView } from './misc';
 import { Source } from './source';
 
+export class Reader {
+	fileSize!: number;
+
+	constructor(public source: Source) {}
+
+	requestSlice(start: number, length: number): MaybePromise<FileSlice | null> {
+		if (start + length > this.fileSize) {
+			return null;
+		}
+
+		const end = start + length;
+		const result = this.source._read(start, end);
+
+		if (result instanceof Promise) {
+			return result.then((x) => {
+				if (!x) {
+					return null;
+				}
+
+				return new FileSlice(x.bytes, x.view, x.offset, start, end);
+			});
+		} else {
+			if (!result) {
+				return null;
+			}
+
+			return new FileSlice(result.bytes, result.view, result.offset, start, end);
+		}
+	}
+
+	requestSliceRange(start: number, minLength: number, maxLength: number): MaybePromise<FileSlice | null> {
+		return this.requestSlice(
+			start,
+			clamp(this.fileSize - start, minLength, maxLength),
+		);
+	}
+}
+
 export class FileSlice {
 	bufferPos: number;
 
@@ -59,44 +97,6 @@ export class FileSlice {
 			this.offset,
 			filePos,
 			filePos + length,
-		);
-	}
-}
-
-export class Reader {
-	fileSize!: number;
-
-	constructor(public source: Source) {}
-
-	requestSlice(start: number, length: number): MaybePromise<FileSlice | null> {
-		if (start + length > this.fileSize) {
-			return null;
-		}
-
-		const end = start + length;
-		const result = this.source._read(start, end);
-
-		if (result instanceof Promise) {
-			return result.then((x) => {
-				if (!x) {
-					return null;
-				}
-
-				return new FileSlice(x.bytes, x.view, x.offset, start, end);
-			});
-		} else {
-			if (!result) {
-				return null;
-			}
-
-			return new FileSlice(result.bytes, result.view, result.offset, start, end);
-		}
-	}
-
-	requestSliceRange(start: number, minLength: number, maxLength: number): MaybePromise<FileSlice | null> {
-		return this.requestSlice(
-			start,
-			clamp(this.fileSize - start, minLength, maxLength),
 		);
 	}
 }
@@ -232,49 +232,3 @@ export const readAscii = (slice: FileSlice, length: number) => {
 
 	return str;
 };
-
-export class ReturnValue<T> {
-	isPending = true;
-	value!: T;
-
-	set(value: T): typeof symbol {
-		this.isPending = false;
-		this.value = value;
-
-		return symbol;
-	}
-}
-
-const symbol: unique symbol = Symbol();
-
-export type Uh = Promise<typeof symbol>;
-
-/*
-class ReturnValue<T> {
-	isSet = false;
-	value!: T;
-
-	set(value: T) {
-		this.isSet = true;
-		this.value = value;
-	}
-}
-
-const maybeWait = async (ret: ReturnValue<number>) => {
-	if (Math.random() < 0.5) {
-		await new Promise(resolve => setTimeout(resolve, 1000));
-	}
-
-	ret.set(Math.random());
-};
-
-const yo = async () => {
-	const waitResult = new ReturnValue<number>();
-	const promise = maybeWait(waitResult);
-	if (!waitResult.isSet) await promise;
-
-	console.log(waitResult.value);
-};
-
-yo();
-*/
