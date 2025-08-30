@@ -1057,6 +1057,8 @@ class ReadOrchestrator {
 				joined.set(previous.bytes, 0);
 				joined.set(entry.bytes, entry.start - previous.start);
 
+				this.currentCacheSize += entry.end - previous.end;
+
 				previous.bytes = joined;
 				previous.view = toDataView(joined);
 				previous.end = entry.end;
@@ -1064,8 +1066,6 @@ class ReadOrchestrator {
 				// Do the rest of the logic with the previous entry instead
 				insertionIndex--;
 				entry = previous;
-
-				this.currentCacheSize += entry.end - previous.end;
 			} else {
 				this.cache.splice(insertionIndex, 0, entry);
 				this.currentCacheSize += entry.bytes.length;
@@ -1095,12 +1095,12 @@ class ReadOrchestrator {
 			joined.set(entry.bytes, 0);
 			joined.set(next.bytes, next.start - entry.start);
 
+			this.currentCacheSize -= entry.end - next.start; // Subtract the overlap
+
 			entry.bytes = joined;
 			entry.view = toDataView(joined);
 			entry.end = next.end;
 			this.cache.splice(i, 1);
-
-			this.currentCacheSize -= entry.end - next.start;
 
 			break; // After the join case, we're done: the next entry cannot possibly overlap with the inserted one.
 		}
