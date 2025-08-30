@@ -6,6 +6,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
+import type { FileHandle } from 'node:fs/promises';
 import {
 	assert,
 	binarySearchLessOrEqual,
@@ -35,7 +36,7 @@ export abstract class Source {
 	abstract _read(start: number, end: number): MaybePromise<ReadResult>;
 
 	/** @internal */
-	_sizePromise: Promise<number> | null = null;
+	private _sizePromise: Promise<number> | null = null;
 
 	/**
 	 * Resolves with the total size of the file in bytes. This function is memoized, meaning only the first call
@@ -250,7 +251,9 @@ export class UrlSource extends Source {
 
 		super();
 
-		this._url = url instanceof URL ? url : new URL(url, location.href);
+		this._url = url instanceof URL
+			? url
+			: new URL(url, typeof location !== 'undefined' ? location.href : undefined);
 		this._options = options;
 		this._getRetryDelay = options.getRetryDelay ?? (previousAttempts => Math.min(2 ** (previousAttempts - 2), 8));
 
@@ -450,18 +453,89 @@ export class UrlSource extends Source {
 }
 
 /**
+ * Options for FilePathSource.
+ * @public
+ */
+export type FilePathSourceOptions = {
+	/** The maximum number of bytes the cache is allowed to hold in memory. Defaults to 8 MiB. */
+	maxCacheSize?: number;
+};
+
+/**
+ * A source backed by a path to a file. Intended for server-side usage in Node, Bun, or Deno.
+ * @public
+ */
+export class FilePathSource extends Source {
+	/** @internal */
+	_streamSource: StreamSource;
+
+	constructor(filePath: string, options: BlobSourceOptions = {}) {
+		if (typeof filePath !== 'string') {
+			throw new TypeError('filePath must be a string.');
+		}
+		if (!options || typeof options !== 'object') {
+			throw new TypeError('options must be an object.');
+		}
+		if (
+			options.maxCacheSize !== undefined
+			&& (!Number.isInteger(options.maxCacheSize) || options.maxCacheSize < 0)
+		) {
+			throw new TypeError('options.maxCacheSize, when provided, must be a non-negative integer.');
+		}
+
+		super();
+
+		let fileHandle: FileHandle | null = null;
+
+		// Let's back this source with a StreamSource, makes the implementation very simple
+		this._streamSource = new StreamSource({
+			getSize: async () => {
+				const FS_MODULE_NAME = 'node:fs/promises';
+				const fs = await import(FS_MODULE_NAME) as typeof import('node:fs/promises');
+				fileHandle = await fs.open(filePath, 'r');
+
+				const stats = await fileHandle.stat();
+				return stats.size;
+			},
+			read: async (start, end) => {
+				assert(fileHandle);
+
+				const buffer = Buffer.alloc(end - start);
+				await fileHandle.read(buffer, 0, end - start, start);
+				return buffer;
+			},
+			maxCacheSize: options.maxCacheSize,
+			prefetchProfile: 'fileSystem',
+		});
+	}
+
+	/** @internal */
+	_read(start: number, end: number): MaybePromise<ReadResult> {
+		return this._streamSource._read(start, end);
+	}
+
+	/** @internal */
+	_retrieveSize(): MaybePromise<number> {
+		return this._streamSource._retrieveSize();
+	}
+}
+
+/**
  * Options for defining a StreamSource.
  * @public
  */
 export type StreamSourceOptions = {
 	/**
+	 * Called when the size of the entire file is requested. Must return or resolve to the size in bytes. This function
+	 * is guaranteed to be called before `read`.
+	 */
+	getSize: () => MaybePromise<number>;
+
+	/**
 	 * Called when data is requested. Must return or resolve to the bytes from the specified byte range, or a stream
 	 * that yields these bytes.
 	 */
 	read: (start: number, end: number) => MaybePromise<Uint8Array | ReadableStream<Uint8Array>>;
-
-	/** Called when the size of the entire file is requested. Must return or resolve to the size in bytes. */
-	getSize: () => MaybePromise<number>;
 
 	/** The maximum number of bytes the cache is allowed to hold in memory. Defaults to 8 MiB. */
 	maxCacheSize?: number;

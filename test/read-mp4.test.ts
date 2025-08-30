@@ -1,30 +1,12 @@
 import { expect, test } from 'vitest';
-import { ALL_FORMATS, MP4, StreamSource, EncodedPacketSink, Input } from '../src/index.js';
-import { open } from 'node:fs/promises';
+import { ALL_FORMATS, MP4, EncodedPacketSink, Input, FilePathSource } from '../src/index.js';
 
 const __dirname = new URL('.', import.meta.url).pathname;
 
-const fileHandle = await open(
-	`${__dirname}/files/video.mp4`,
-	'r',
-);
-
-const source = new StreamSource({
-	read: async (start, end) => {
-		const buffer = Buffer.alloc(end - start);
-		await fileHandle.read(buffer, 0, end - start, start);
-		return buffer;
-	},
-	getSize: async () => {
-		const { size } = await fileHandle.stat();
-		return size;
-	},
-});
-
 test('Should be able to get packets from a .MP4 file', async () => {
 	const input = new Input({
+		source: new FilePathSource(`${__dirname}/files/video.mp4`),
 		formats: ALL_FORMATS,
-		source,
 	});
 
 	expect(await input.getFormat()).toBe(MP4);

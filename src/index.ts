@@ -94,12 +94,14 @@ export { Rotation, AnyIterable, SetRequired, MaybePromise } from './misc';
 export {
 	Source,
 	BufferSource,
-	StreamSource,
-	StreamSourceOptions,
 	BlobSource,
 	BlobSourceOptions,
 	UrlSource,
 	UrlSourceOptions,
+	FilePathSource,
+	FilePathSourceOptions,
+	StreamSource,
+	StreamSourceOptions,
 } from './source';
 export {
 	InputFormat,
