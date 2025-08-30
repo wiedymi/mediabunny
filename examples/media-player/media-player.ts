@@ -16,6 +16,7 @@ const selectMediaButton = document.querySelector('#select-file') as HTMLButtonEl
 const loadUrlButton = document.querySelector('#load-url') as HTMLButtonElement;
 const fileNameElement = document.querySelector('#file-name') as HTMLParagraphElement;
 const horizontalRule = document.querySelector('hr') as HTMLHRElement;
+const loadingElement = document.querySelector('#loading-element') as HTMLParagraphElement;
 const playerContainer = document.querySelector('#player') as HTMLDivElement;
 const canvas = document.querySelector('canvas') as HTMLCanvasElement;
 const controlsElement = document.querySelector('#controls') as HTMLDivElement;
@@ -83,6 +84,7 @@ const initMediaPlayer = async (resource: File | string) => {
 		fileLoaded = false;
 		fileNameElement.textContent = resource instanceof File ? resource.name : resource;
 		horizontalRule.style.display = '';
+		loadingElement.style.display = '';
 		playerContainer.style.display = 'none';
 		errorElement.textContent = '';
 		warningElement.textContent = '';
@@ -183,6 +185,7 @@ const initMediaPlayer = async (resource: File | string) => {
 			await play();
 		}
 
+		loadingElement.style.display = 'none';
 		playerContainer.style.display = '';
 
 		if (!videoSink) {
@@ -194,6 +197,7 @@ const initMediaPlayer = async (resource: File | string) => {
 		console.error(error);
 
 		errorElement.textContent = String(error);
+		loadingElement.style.display = 'none';
 		playerContainer.style.display = 'none';
 	}
 };
