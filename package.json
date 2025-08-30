@@ -8,11 +8,11 @@
     "packages/*"
   ],
   "main": "./dist/bundles/mediabunny.cjs",
-  "module": "./dist/bundles/mediabunny.mjs",
+  "module": "./dist/modules/src/index.js",
   "types": "./dist/modules/src/index.d.ts",
   "exports": {
     "types": "./dist/modules/src/index.d.ts",
-    "import": "./dist/bundles/mediabunny.mjs",
+    "import": "./dist/modules/src/index.js",
     "require": "./dist/bundles/mediabunny.cjs"
   },
   "files": [

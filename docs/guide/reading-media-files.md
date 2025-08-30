@@ -532,11 +532,13 @@ const source = new StreamSource({
 The options of `StreamSource` have the following type:
 ```ts
 type StreamSourceOptions = {
-	getSize: () => number | Promise<number>;
-	read: (start: number, end: number) => Uint8Array | Promise<Uint8Array>;
+	getSize: () => MaybePromise<number>;
+	read: (start: number, end: number) => MaybePromise<Uint8Array | ReadableStream<Uint8Array>>;
 	maxCacheSize?: number;
 	prefetchProfile?: 'none' | 'fileSystem' | 'network';
 };
+
+type MaybePromise<T> = T | Promise<T>;
 ```
 
 - `getSize`\
