@@ -212,6 +212,8 @@ export class UrlSource extends Source {
 	/** @internal */
 	_url: URL;
 	/** @internal */
+	_getRetryDelay: (previousAttempts: number) => number | null;
+	/** @internal */
 	_options: UrlSourceOptions;
 	/** @internal */
 	_orchestrator: ReadOrchestrator;
@@ -248,6 +250,7 @@ export class UrlSource extends Source {
 
 		this._url = url instanceof URL ? url : new URL(url, location.href);
 		this._options = options;
+		this._getRetryDelay = options.getRetryDelay ?? (previousAttempts => Math.min(2 ** (previousAttempts - 2), 8));
 
 		this._orchestrator = new ReadOrchestrator({
 			maxCacheSize: options.maxCacheSize ?? (64 * 2 ** 20 /* 64 MiB */),
@@ -277,7 +280,7 @@ export class UrlSource extends Source {
 				},
 				signal: abortController.signal,
 			}),
-			this._options.getRetryDelay ?? (() => null),
+			this._getRetryDelay,
 		);
 
 		if (!response.ok) {
@@ -324,64 +327,94 @@ export class UrlSource extends Source {
 
 	/** @internal */
 	private async _runWorker(worker: ReadWorker) {
-		const existing = this._existingResponses.get(worker);
+		// The outer loop is for resuming a request if it dies mid-response
+		while (!worker.aborted) {
+			const existing = this._existingResponses.get(worker);
+			this._existingResponses.delete(worker);
 
-		let abortController = existing?.abortController;
-		let response = existing?.response;
+			let abortController = existing?.abortController;
+			let response = existing?.response;
 
-		if (!abortController) {
-			abortController = new AbortController();
-			response = await retriedFetch(
-				this._url,
-				mergeObjectsDeeply(this._options.requestInit ?? {}, {
-					headers: {
-						Range: `bytes=${worker.currentPos}-`,
-					},
-					signal: abortController.signal,
-				}),
-				this._options.getRetryDelay ?? (() => null),
-			);
-		}
-
-		assert(response);
-
-		if (!response.ok) {
-			throw new Error(`Error fetching ${this._url}: ${response.status} ${response.statusText}`);
-		}
-
-		const length = this._getPartialLengthFromRangeResponse(response);
-		const required = worker.targetPos - worker.currentPos;
-		if (length < required) {
-			throw new Error(
-				`HTTP response unexpectedly too short: Needed at least ${required} bytes, got only ${length}.`,
-			);
-		}
-
-		if (!response.body) {
-			throw new Error('Missing HTTP response body.');
-		}
-
-		const reader = response.body.getReader();
-
-		while (true) {
-			const { done, value } = await reader.read();
-			if (done) {
-				this._orchestrator.forgetWorker(worker);
-
-				if (worker.currentPos < worker.targetPos) {
-					throw new Error('Response stream reader stopped unexpectedly before all requested data was read.');
-				}
-
-				break;
+			if (!abortController) {
+				abortController = new AbortController();
+				response = await retriedFetch(
+					this._url,
+					mergeObjectsDeeply(this._options.requestInit ?? {}, {
+						headers: {
+							Range: `bytes=${worker.currentPos}-`,
+						},
+						signal: abortController.signal,
+					}),
+					this._getRetryDelay,
+				);
 			}
 
-			this.onread?.(worker.currentPos, worker.currentPos + value.length);
-			this._orchestrator.supplyWorkerData(worker, value);
+			assert(response);
 
-			if (worker.currentPos >= worker.targetPos || worker.aborted) {
-				abortController.abort();
-				this._existingResponses.delete(worker);
-				break;
+			if (!response.ok) {
+				throw new Error(`Error fetching ${this._url}: ${response.status} ${response.statusText}`);
+			}
+
+			if (worker.currentPos > 0 && response.status !== 206) {
+				throw new Error(
+					'HTTP server did not respond with 206 Partial Content to a range request. To enable efficient media'
+					+ ' file streaming across a network, please make sure your server supports range requests.',
+				);
+			}
+
+			const length = this._getPartialLengthFromRangeResponse(response);
+			const required = worker.targetPos - worker.currentPos;
+			if (length < required) {
+				throw new Error(
+					`HTTP response unexpectedly too short: Needed at least ${required} bytes, got only ${length}.`,
+				);
+			}
+
+			if (!response.body) {
+				throw new Error('Missing HTTP response body.');
+			}
+
+			const reader = response.body.getReader();
+
+			while (true) {
+				let readResult: ReadableStreamReadResult<Uint8Array>;
+
+				try {
+					readResult = await reader.read();
+				} catch (error) {
+					const retryDelayInSeconds = this._getRetryDelay(1);
+					if (retryDelayInSeconds !== null) {
+						console.error('Error while reading response stream. Attempting to resume.', error);
+						await new Promise(resolve => setTimeout(resolve, 1000 * retryDelayInSeconds));
+
+						break;
+					} else {
+						throw error;
+					}
+				}
+
+				const { done, value } = readResult;
+
+				if (done) {
+					this._orchestrator.forgetWorker(worker);
+
+					if (worker.currentPos < worker.targetPos) {
+						throw new Error(
+							'Response stream reader stopped unexpectedly before all requested data was read.',
+						);
+					}
+
+					return;
+				}
+
+				this.onread?.(worker.currentPos, worker.currentPos + value.length);
+				this._orchestrator.supplyWorkerData(worker, value);
+
+				if (worker.currentPos >= worker.targetPos || worker.aborted) {
+					abortController.abort();
+
+					return;
+				}
 			}
 		}
 
@@ -913,13 +946,16 @@ class ReadOrchestrator {
 		worker.age = this.nextAge++;
 
 		void this.options.runWorker(worker)
-			.then(() => worker.running = false)
 			.catch((error) => {
 				if (worker.pendingSlices.length > 0) {
 					worker.pendingSlices.forEach(x => x.reject(error)); // Make sure to propagate any errors
+					worker.pendingSlices.length = 0;
 				} else {
 					throw error; // So it doesn't get swallowed
 				}
+			})
+			.finally(() => {
+				worker.running = false;
 			});
 	}
 
@@ -936,6 +972,7 @@ class ReadOrchestrator {
 			age: this.nextAge++,
 		});
 		worker.currentPos += bytes.length;
+		worker.targetPos = Math.max(worker.targetPos, worker.currentPos); // In case it overshoots
 
 		// Now, let's see if we can use the read bytes to fill any pending slice
 		for (let i = 0; i < worker.pendingSlices.length; i++) {
@@ -970,6 +1007,22 @@ class ReadOrchestrator {
 				// The slice has been fulfilled, everything has been read. Let's resolve the promise
 				pendingSlice.resolve(pendingSlice.bytes);
 				worker.pendingSlices.splice(i, 1);
+				i--;
+			}
+		}
+
+		// Remove other idle workers if we "ate" into their territory
+		for (let i = 0; i < this.workers.length; i++) {
+			const otherWorker = this.workers[i]!;
+			if (worker === otherWorker || otherWorker.running) {
+				continue;
+			}
+
+			if (closedIntervalsOverlap(
+				start, end,
+				otherWorker.currentPos, otherWorker.targetPos, // These should typically be equal when the worker's idle
+			)) {
+				this.workers.splice(i, 1);
 				i--;
 			}
 		}
