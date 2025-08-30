@@ -79,7 +79,15 @@ export const validateVideoEncodingConfig = (config: VideoEncodingConfig) => {
 	) {
 		throw new TypeError('config.keyFrameInterval, when provided, must be a non-negative number.');
 	}
-	// todo here
+	if (
+		config.sizeChangeBehavior !== undefined
+		&& !['deny', 'passThrough', 'fill', 'contain', 'cover'].includes(config.sizeChangeBehavior)
+	) {
+		throw new TypeError(
+			'config.sizeChangeBehavior, when provided, must be \'deny\', \'passThrough\', \'fill\', \'contain\''
+			+ ' or \'cover\'.',
+		);
+	}
 	if (config.onEncodedPacket !== undefined && typeof config.onEncodedPacket !== 'function') {
 		throw new TypeError('config.onEncodedChunk, when provided, must be a function.');
 	}
