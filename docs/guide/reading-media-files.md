@@ -420,7 +420,7 @@ This source is the fastest but requires the entire input file to be held in memo
 
 ### `BlobSource`
 
-This source is backed by an underlying [`Blob`](https://developer.mozilla.org/en-US/docs/Web/API/Blob) object. Since [`File`](https://developer.mozilla.org/en-US/docs/Web/API/File) extends `Blob`, this source is perfect for reading data directly from disk.
+This source is backed by an underlying [`Blob`](https://developer.mozilla.org/en-US/docs/Web/API/Blob) object. Since [`File`](https://developer.mozilla.org/en-US/docs/Web/API/File) extends `Blob`, this source is perfect for reading data directly from disk (in the browser).
 ```ts
 import { BlobSource } from 'mediabunny';
 
@@ -430,20 +430,25 @@ fileInput.addEventListener('change', (event) => {
 });
 ```
 
-### `UrlSource` <Badge type="warning" text="beta" />
+`BlobSource` accepts additional options as a second parameter:
+```ts
+type BlobSourceOptions = {
+	// The maximum number of bytes the cache is allowed to hold
+	// in memory. Defaults to 8 MiB.
+	maxCacheSize?: number;
+};
+```
 
-::: warning
-This is a **beta** feature. `UrlSource` tends to make tons of requests and is potentially slow. This is something that will be fixed in the near future.
+### `UrlSource`
 
-It still works, but keep in mind it's going to be much higher-latency than reading directly from disk or from memory.
-:::
-
-This source fetches data from a URL. This is useful for reading files over the network.
+This source fetches data from a remote URL, useful for reading files over the network.
 ```ts
 import { UrlSource } from 'mediabunny';
 
 const source = new UrlSource('https://example.com/bigbuckbunny.mp4');
 ```
+
+`UrlSource` will do some pretty crazy stuff to prefetch data intelligently based on observed access patterns to minimize request count and latency.
 
 ::: warning
 If you're using this source in the browser and the URL is on a different origin, make sure [CORS](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS) is properly configured.
@@ -454,6 +459,10 @@ If you're using this source in the browser and the URL is on a different origin,
 type UrlSourceOptions = {
 	requestInit?: RequestInit;
 	getRetryDelay?: (previousAttempts: number) => number | null;
+
+	// The maximum number of bytes the cache is allowed to hold
+	// in memory. Defaults to 8 MiB.
+	maxCacheSize?: number;
 };
 ```
 
@@ -476,13 +485,31 @@ const source = new UrlSource('https://example.com/bigbuckbunny.mp4', {
 });
 ```
 
-Not setting `getRetryDelay` means requests will not be retried.
+Not setting `getRetryDelay` will default to an infinite, capped exponential backoff pattern.
+
+### `FilePathSource`
+
+This input source can be used to load data directly from a file, given a file path. It requires a server-side environment such as Node, Bun, or Deno.
+```ts
+import { FilePathSource } from 'mediabunny';
+
+const source = new FilePathSource('/home/david/Downloads/bigbuckbunny.mp4');
+```
+
+`FilePathSource` accepts additional options as a second parameter:
+```ts
+type FilePathSourceOptions = {
+	// The maximum number of bytes the cache is allowed to hold
+	// in memory. Defaults to 8 MiB.
+	maxCacheSize?: number;
+};
+```
 
 ### `StreamSource`
 
-This is a general-purpose input source you can use to read data from anywhere. All other input sources can be implemented on top of `StreamSource`.
+This is a general-purpose input source you can use to read data from anywhere.
 
-For example, here we're reading a file from disk using the Node.js file system:
+For example, here we're reading a file from disk using the Node.js file system (although you should use [`FilePathSource`](#filepathsource) for that):
 ```ts
 import { StreamSource } from 'mediabunny';
 import { open } from 'node:fs/promises';
@@ -505,11 +532,23 @@ const source = new StreamSource({
 The options of `StreamSource` have the following type:
 ```ts
 type StreamSourceOptions = {
-	// Called when data is requested.
-	// Should return or resolve to the bytes from the specified byte range.
-	read: (start: number, end: number) => Uint8Array | Promise<Uint8Array>;
-	// Called when the size of the entire file is requested.
-	// Should return or resolve to the size in bytes.
-	getSize: () => number | Promise<number>;
+	getSize: () => MaybePromise<number>;
+	read: (start: number, end: number) => MaybePromise<Uint8Array | ReadableStream<Uint8Array>>;
+	maxCacheSize?: number;
+	prefetchProfile?: 'none' | 'fileSystem' | 'network';
 };
+
+type MaybePromise<T> = T | Promise<T>;
 ```
+
+- `getSize`\
+	Called when the size of the entire file is requested. Must return or resolve to the size in bytes. This function is guaranteed to be called before `read`.
+- `read`\
+	Called when data is requested. Must return or resolve to the bytes from the specified byte range, or a stream that yields these bytes.
+- `maxCacheSize`\
+	The maximum number of bytes the cache is allowed to hold in memory. Defaults to 8 MiB.
+- `prefetchProfile`\
+	Specifies the prefetch profile that the reader should use with this source. A prefetch propfile specifies the pattern with which bytes outside of the requested range are preloaded to reduce latency for future reads.
+	- `'none'` (default): No prefetching; only the data needed in the moment is requested.
+	- `'fileSystem'`: File system-optimized prefetching: a small amount of data is prefetched bidirectionally, aligned with page boundaries.
+	- `'network'`: Network-optimized prefetching, or more generally, prefetching optimized for any high-latency environment: tries to minimize the amount of read calls and aggressively prefetches data when sequential access patterns are detected.

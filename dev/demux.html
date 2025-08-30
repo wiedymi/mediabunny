@@ -16,11 +16,32 @@
 			source
 		});
 
+		const audioTrack = await input.getPrimaryAudioTrack();
+
+		for (let i = 0; i < 10; i++) {
+			console.time()
+			const stats = await audioTrack.computePacketStats();
+			console.log(stats)
+			console.timeEnd()
+		}
+		//console.log(stats);
+
+		/*
 		const videoTrack = await input.getPrimaryVideoTrack();
 		console.log(await videoTrack.getFirstTimestamp(), await videoTrack.computeDuration());
 
 		console.log(videoTrack.name);
 		console.log(videoTrack.internalCodecId);
+		*/
+
+		/*
+
+		const sink = new Mediabunny.AudioSampleSink(await input.getPrimaryAudioTrack());
+		for await (const sample of sink.samples()) {
+			console.log(sample)
+			break;
+		}
+		*/
 
 		/*
 		const sink = new Mediabunny.EncodedPacketSink(videoTrack);
