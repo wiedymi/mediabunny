@@ -642,6 +642,13 @@ const formatSeconds = (seconds: number) => {
 	return result;
 };
 
+window.addEventListener('resize', () => {
+	if (totalDuration) {
+		updateProgressBarTime(getPlaybackTime());
+		durationElement.textContent = formatSeconds(totalDuration);
+	}
+});
+
 /** === FILE SELECTION LOGIC === */
 
 selectMediaButton.addEventListener('click', () => {
