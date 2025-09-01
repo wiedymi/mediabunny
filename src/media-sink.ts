@@ -1217,6 +1217,10 @@ class AudioDecoderWrapper extends DecoderWrapper<AudioSample> {
 	customDecoderCallSerializer = new CallSerializer();
 	customDecoderQueueSize = 0;
 
+	// Internal state to accumulate a precise current timestamp based on audio durations, not the (potentially
+	// inaccurate) packet timestamps.
+	currentTimestamp: number | null = null;
+
 	constructor(
 		onSample: (sample: AudioSample) => unknown,
 		onError: (error: DOMException) => unknown,
@@ -1226,6 +1230,17 @@ class AudioDecoderWrapper extends DecoderWrapper<AudioSample> {
 		super(onSample, onError);
 
 		const sampleHandler = (sample: AudioSample) => {
+			if (
+				this.currentTimestamp === null
+				|| Math.abs(sample.timestamp - this.currentTimestamp) >= sample.duration
+			) {
+				// We need to sync with the sample timestamp again
+				this.currentTimestamp = sample.timestamp;
+			}
+
+			const preciseTimestamp = this.currentTimestamp;
+			this.currentTimestamp += sample.duration;
+
 			if (sample.numberOfFrames === 0) {
 				// We skip zero-data (empty) AudioSamples. These are sometimes emitted, for example, by Firefox when it
 				// decodes Vorbis (at the start).
@@ -1235,7 +1250,7 @@ class AudioDecoderWrapper extends DecoderWrapper<AudioSample> {
 
 			// Round the timestamp to the sample rate
 			const sampleRate = decoderConfig.sampleRate;
-			sample.setTimestamp(Math.round(sample.timestamp * sampleRate) / sampleRate);
+			sample.setTimestamp(Math.round(preciseTimestamp * sampleRate) / sampleRate);
 
 			onSample(sample);
 		};
@@ -1320,7 +1335,7 @@ class PcmAudioDecoderWrapper extends DecoderWrapper<AudioSample> {
 	writeOutputValue: (view: DataView, byteOffset: number, value: number) => void;
 
 	// Internal state to accumulate a precise current timestamp based on audio durations, not the (potentially
-	// inaccurate) sample timestamps.
+	// inaccurate) packet timestamps.
 	currentTimestamp: number | null = null;
 
 	constructor(
