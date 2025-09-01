@@ -424,23 +424,28 @@ const updateProgressBarTime = (seconds: number) => {
 
 progressBarContainer.addEventListener('pointerdown', (event) => {
 	draggingProgressBar = true;
+	progressBarContainer.setPointerCapture(event.pointerId);
 
 	const rect = progressBarContainer.getBoundingClientRect();
 	const completion = Math.max(Math.min((event.clientX - rect.left) / rect.width, 1), 0);
 	updateProgressBarTime(completion * totalDuration);
 
+	clearTimeout(hideControlsTimeout);
+
 	window.addEventListener('pointerup', (event) => {
 		draggingProgressBar = false;
+		progressBarContainer.releasePointerCapture(event.pointerId);
 
 		const rect = progressBarContainer.getBoundingClientRect();
 		const completion = Math.max(Math.min((event.clientX - rect.left) / rect.width, 1), 0);
 		const newTime = completion * totalDuration;
 
 		void seekToTime(newTime);
+		showControlsTemporarily();
 	}, { once: true });
 });
 
-window.addEventListener('pointermove', (event) => {
+progressBarContainer.addEventListener('pointermove', (event) => {
 	if (draggingProgressBar) {
 		const rect = progressBarContainer.getBoundingClientRect();
 		const completion = Math.max(Math.min((event.clientX - rect.left) / rect.width, 1), 0);
@@ -465,18 +470,24 @@ const updateVolume = () => {
 
 volumeBarContainer.addEventListener('pointerdown', (event) => {
 	draggingVolumeBar = true;
+	volumeBarContainer.setPointerCapture(event.pointerId);
 
 	const rect = volumeBarContainer.getBoundingClientRect();
 	volume = Math.max(Math.min((event.clientX - rect.left) / rect.width, 1), 0);
 	volumeMuted = false;
 	updateVolume();
 
+	clearTimeout(hideControlsTimeout);
+
 	window.addEventListener('pointerup', (event) => {
 		draggingVolumeBar = false;
+		volumeBarContainer.releasePointerCapture(event.pointerId);
 
 		const rect = volumeBarContainer.getBoundingClientRect();
 		volume = Math.max(Math.min((event.clientX - rect.left) / rect.width, 1), 0);
 		updateVolume();
+
+		showControlsTemporarily();
 	}, { once: true });
 });
 
@@ -485,7 +496,7 @@ volumeButton.addEventListener('click', () => {
 	updateVolume();
 });
 
-window.addEventListener('pointermove', (event) => {
+volumeBarContainer.addEventListener('pointermove', (event) => {
 	if (draggingVolumeBar) {
 		const rect = volumeBarContainer.getBoundingClientRect();
 		volume = Math.max(Math.min((event.clientX - rect.left) / rect.width, 1), 0);
@@ -502,26 +513,43 @@ const showControlsTemporarily = () => {
 	}
 
 	controlsElement.style.opacity = '1';
+	controlsElement.style.pointerEvents = '';
 	playerContainer.style.cursor = '';
 
 	clearTimeout(hideControlsTimeout);
 	hideControlsTimeout = window.setTimeout(() => {
-		controlsElement.style.opacity = '0';
+		if (draggingProgressBar) {
+			return;
+		}
+
+		hideControls();
 		playerContainer.style.cursor = 'none';
 	}, 2000);
 };
 
+const hideControls = () => {
+	controlsElement.style.opacity = '0';
+	controlsElement.style.pointerEvents = 'none';
+};
+hideControls();
+
 let hideControlsTimeout = -1;
-playerContainer.addEventListener('pointermove', () => {
-	showControlsTemporarily();
+playerContainer.addEventListener('pointermove', (event) => {
+	if (event.pointerType !== 'touch') {
+		showControlsTemporarily();
+	}
 });
-playerContainer.addEventListener('pointerleave', () => {
+playerContainer.addEventListener('pointerleave', (event) => {
 	if (!videoSink) {
 		// Shouldn't run if there's only an audio track
 		return;
 	}
 
-	controlsElement.style.opacity = '0';
+	if (draggingProgressBar || draggingVolumeBar || event.pointerType === 'touch') {
+		return;
+	}
+
+	hideControls();
 	clearTimeout(hideControlsTimeout);
 });
 
@@ -563,17 +591,35 @@ fullscreenButton.addEventListener('click', () => {
 	}
 });
 
+// I'm sorry for this
+const isTouchDevice = () => {
+	return (('ontouchstart' in window)
+		|| (navigator.maxTouchPoints > 0)
+		|| ('msMaxTouchPoints' in navigator && (navigator.msMaxTouchPoints as number) > 0));
+};
+
 playerContainer.addEventListener('click', () => {
-	togglePlay();
+	if (isTouchDevice()) {
+		if (controlsElement.style.opacity === '1') {
+			hideControls();
+		} else {
+			showControlsTemporarily();
+		}
+	} else {
+		togglePlay();
+	}
 });
 controlsElement.addEventListener('click', (event) => {
 	// Make sure this does NOT toggle play
 	event.stopPropagation();
+	showControlsTemporarily();
 });
 
 /** === UTILS === */
 
 const formatSeconds = (seconds: number) => {
+	const showMilliseconds = window.innerWidth >= 640;
+
 	seconds = Math.round(seconds * 1000) / 1000; // Round to milliseconds
 
 	const hours = Math.floor(seconds / 3600);
@@ -581,11 +627,19 @@ const formatSeconds = (seconds: number) => {
 	const remainingSeconds = Math.floor(seconds % 60);
 	const millisecs = Math.floor(1000 * seconds % 1000).toString().padStart(3, '0');
 
+	let result: string;
 	if (hours > 0) {
-		return `${hours}:${minutes.toString().padStart(2, '0')}`
-			+ `:${remainingSeconds.toString().padStart(2, '0')}.${millisecs}`;
+		result = `${hours}:${minutes.toString().padStart(2, '0')}`
+			+ `:${remainingSeconds.toString().padStart(2, '0')}`;
+	} else {
+		result = `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
 	}
-	return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}.${millisecs}`;
+
+	if (showMilliseconds) {
+		result += `.${millisecs}`;
+	}
+
+	return result;
 };
 
 /** === FILE SELECTION LOGIC === */

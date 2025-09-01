@@ -50,31 +50,33 @@
 					</div>
 				</button>
 
-				<button class="p-2 ml-4 mr-1" id="volume-button">
-					<div class="size-6 invert group-hover:scale-110" id="volume-icon-wrapper">
-						<img src="../../docs/assets/volume-off-icon.svg" class="size-full">
-						<img src="../../docs/assets/volume-x-icon.svg" class="size-full">
-						<img src="../../docs/assets/volume-0-icon.svg" class="size-full">
-						<img src="../../docs/assets/volume-1-icon.svg" class="size-full">
-						<img src="../../docs/assets/volume-2-icon.svg" class="size-full">
-					</div>
-				</button>
+				<div class="hidden sm:flex items-center">
+					<button class="p-2 mr-1 group" id="volume-button">
+						<div class="size-6 invert group-hover:scale-110" id="volume-icon-wrapper">
+							<img src="../../docs/assets/volume-off-icon.svg" class="size-full">
+							<img src="../../docs/assets/volume-x-icon.svg" class="size-full">
+							<img src="../../docs/assets/volume-0-icon.svg" class="size-full">
+							<img src="../../docs/assets/volume-1-icon.svg" class="size-full">
+							<img src="../../docs/assets/volume-2-icon.svg" class="size-full">
+						</div>
+					</button>
 
-				<div class="w-16 mr-2 relative rounded-full bg-zinc-800/75 h-1.5 group" id="volume-bar-container">
-					<div class="absolute h-full top-0 left-0 rounded-full bg-zinc-200 group-hover:bg-white" id="volume-bar">
-						<div class="size-3 rounded-full bg-zinc-200 absolute top-1/2 right-0 -translate-y-1/2 translate-x-1/2 group-hover:scale-110 group-hover:bg-white group-hover:shadow"></div>
+					<div class="w-16 relative rounded-full bg-zinc-800/75 h-1.5 group touch-none" id="volume-bar-container">
+						<div class="absolute h-full top-0 left-0 rounded-full bg-zinc-200 group-hover:bg-white" id="volume-bar">
+							<div class="size-3 rounded-full bg-zinc-200 absolute top-1/2 right-0 -translate-y-1/2 translate-x-1/2 group-hover:scale-110 group-hover:bg-white group-hover:shadow"></div>
+						</div>
 					</div>
 				</div>
 
-				<p id="current-time" class="tabular-nums w-24 text-right text-sm"></p>
+				<p id="current-time" class="tabular-nums w-10 sm:w-24 text-right text-sm"></p>
 
-				<div class="flex-1 relative rounded-full bg-zinc-800/75 h-2 mx-4 group" id="progress-bar-container">
+				<div class="flex-1 relative rounded-full bg-zinc-800/75 h-2 mx-4 group touch-none" id="progress-bar-container">
 					<div class="absolute h-full top-0 left-0 rounded-full bg-zinc-200 group-hover:bg-white" id="progress-bar">
 						<div class="size-4 rounded-full bg-zinc-200 absolute top-1/2 right-0 -translate-y-1/2 translate-x-1/2 group-hover:scale-110 group-hover:bg-white group-hover:shadow"></div>
 					</div>
 				</div>
 
-				<p id="duration" class="tabular-nums w-24 text-sm"></p>
+				<p id="duration" class="tabular-nums w-10 sm:w-24 text-sm"></p>
 
 				<button class="p-2 group outline-none" id="fullscreen-button">
 					<div class="size-6 invert group-hover:scale-110">

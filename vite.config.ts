@@ -28,6 +28,7 @@ export default defineConfig({
 	],
 	server: {
 		hmr: false,
+		allowedHosts: true,
 	},
 	build: {
 		outDir: 'dist-docs', // Build them directly into the docs build folder
