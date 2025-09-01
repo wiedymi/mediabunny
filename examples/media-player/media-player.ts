@@ -4,6 +4,7 @@ import {
 	BlobSource,
 	CanvasSink,
 	Input,
+	UrlSource,
 	WrappedAudioBuffer,
 	WrappedCanvas,
 } from 'mediabunny';
@@ -11,9 +12,11 @@ import {
 import SampleFileUrl from '../../docs/assets/big-buck-bunny-trimmed.mp4';
 (document.querySelector('#sample-file-download') as HTMLAnchorElement).href = SampleFileUrl;
 
-const selectMediaButton = document.querySelector('button') as HTMLButtonElement;
+const selectMediaButton = document.querySelector('#select-file') as HTMLButtonElement;
+const loadUrlButton = document.querySelector('#load-url') as HTMLButtonElement;
 const fileNameElement = document.querySelector('#file-name') as HTMLParagraphElement;
 const horizontalRule = document.querySelector('hr') as HTMLHRElement;
+const loadingElement = document.querySelector('#loading-element') as HTMLParagraphElement;
 const playerContainer = document.querySelector('#player') as HTMLDivElement;
 const canvas = document.querySelector('canvas') as HTMLCanvasElement;
 const controlsElement = document.querySelector('#controls') as HTMLDivElement;
@@ -66,7 +69,7 @@ let volumeMuted = false;
 
 /** === INIT LOGIC === */
 
-const initMediaPlayer = async (file: File) => {
+const initMediaPlayer = async (resource: File | string) => {
 	try {
 		// First, dispose any ongoing playback:
 
@@ -79,15 +82,19 @@ const initMediaPlayer = async (file: File) => {
 		asyncId++;
 
 		fileLoaded = false;
-		fileNameElement.textContent = file.name;
+		fileNameElement.textContent = resource instanceof File ? resource.name : resource;
 		horizontalRule.style.display = '';
+		loadingElement.style.display = '';
 		playerContainer.style.display = 'none';
 		errorElement.textContent = '';
 		warningElement.textContent = '';
 
-		// Create an Input from the file
+		// Create an Input from the resource
+		const source = resource instanceof File
+			? new BlobSource(resource)
+			: new UrlSource(resource);
 		const input = new Input({
-			source: new BlobSource(file),
+			source,
 			formats: ALL_FORMATS,
 		});
 
@@ -178,6 +185,7 @@ const initMediaPlayer = async (file: File) => {
 			await play();
 		}
 
+		loadingElement.style.display = 'none';
 		playerContainer.style.display = '';
 
 		if (!videoSink) {
@@ -189,6 +197,7 @@ const initMediaPlayer = async (file: File) => {
 		console.error(error);
 
 		errorElement.textContent = String(error);
+		loadingElement.style.display = 'none';
 		playerContainer.style.display = 'none';
 	}
 };
@@ -595,6 +604,19 @@ selectMediaButton.addEventListener('click', () => {
 	});
 
 	fileInput.click();
+});
+
+loadUrlButton.addEventListener('click', () => {
+	const url = prompt(
+		'Please enter a URL of a media file. Note that it must support cross-origin requests, so have the right'
+		+ ' CORS headers set.',
+		'http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+	);
+	if (!url) {
+		return;
+	}
+
+	void initMediaPlayer(url);
 });
 
 document.addEventListener('dragover', (event) => {

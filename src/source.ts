@@ -6,7 +6,24 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-import { mergeObjectsDeeply, retriedFetch } from './misc';
+import type { FileHandle } from 'node:fs/promises';
+import {
+	assert,
+	binarySearchLessOrEqual,
+	closedIntervalsOverlap,
+	MaybePromise,
+	mergeObjectsDeeply,
+	promiseWithResolvers,
+	retriedFetch,
+	toDataView,
+} from './misc';
+
+export type ReadResult = {
+	bytes: Uint8Array;
+	view: DataView;
+	/** The offset of the bytes in the file. */
+	offset: number;
+};
 
 /**
  * The source base class, representing a resource from which bytes can be read.
@@ -14,22 +31,22 @@ import { mergeObjectsDeeply, retriedFetch } from './misc';
  */
 export abstract class Source {
 	/** @internal */
-	abstract _read(start: number, end: number): Promise<Uint8Array>;
+	abstract _retrieveSize(): MaybePromise<number>;
 	/** @internal */
-	abstract _retrieveSize(): Promise<number>;
+	abstract _read(start: number, end: number): MaybePromise<ReadResult>;
 
 	/** @internal */
-	_sizePromise: Promise<number> | null = null;
+	private _sizePromise: Promise<number> | null = null;
 
 	/**
 	 * Resolves with the total size of the file in bytes. This function is memoized, meaning only the first call
 	 * will retrieve the size.
 	 */
-	getSize() {
-		return this._sizePromise ??= this._retrieveSize();
+	async getSize() {
+		return this._sizePromise ??= Promise.resolve(this._retrieveSize());
 	}
 
-	/** Called each time data is requested from the source. */
+	/** Called each time data is retrieved from the source. Will be called with the retrieved range. */
 	onread: ((start: number, end: number) => unknown) | null = null;
 }
 
@@ -40,6 +57,10 @@ export abstract class Source {
 export class BufferSource extends Source {
 	/** @internal */
 	_bytes: Uint8Array;
+	/** @internal */
+	_view: DataView;
+	/** @internal */
+	_onreadCalled = false;
 
 	constructor(buffer: ArrayBuffer | Uint8Array) {
 		if (!(buffer instanceof ArrayBuffer) && !(buffer instanceof Uint8Array)) {
@@ -49,64 +70,38 @@ export class BufferSource extends Source {
 		super();
 
 		this._bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+		this._view = toDataView(this._bytes);
 	}
 
 	/** @internal */
-	async _read(start: number, end: number) {
-		return this._bytes.subarray(start, end);
-	}
-
-	/** @internal */
-	async _retrieveSize() {
+	_retrieveSize(): number {
 		return this._bytes.byteLength;
 	}
+
+	/** @internal */
+	_read(): ReadResult {
+		if (!this._onreadCalled) {
+			// We just say the first read retrives all bytes from the source (which, I mean, it does)
+			this.onread?.(0, this._bytes.byteLength);
+			this._onreadCalled = true;
+		}
+
+		return {
+			bytes: this._bytes,
+			view: this._view,
+			offset: 0,
+		};
+	}
 }
 
 /**
- * Options for defining a StreamSource.
+ * Options for BlobSource.
  * @public
  */
-export type StreamSourceOptions = {
-	/** Called when data is requested. Should return or resolve to the bytes from the specified byte range. */
-	read: (start: number, end: number) => Uint8Array | Promise<Uint8Array>;
-	/** Called when the size of the entire file is requested. Should return or resolve to the size in bytes. */
-	getSize: () => number | Promise<number>;
+export type BlobSourceOptions = {
+	/** The maximum number of bytes the cache is allowed to hold in memory. Defaults to 8 MiB. */
+	maxCacheSize?: number;
 };
-
-/**
- * A general-purpose, callback-driven source that can get its data from anywhere.
- * @public
- */
-export class StreamSource extends Source {
-	/** @internal */
-	_options: StreamSourceOptions;
-
-	constructor(options: StreamSourceOptions) {
-		if (!options || typeof options !== 'object') {
-			throw new TypeError('options must be an object.');
-		}
-		if (typeof options.read !== 'function') {
-			throw new TypeError('options.read must be a function.');
-		}
-		if (typeof options.getSize !== 'function') {
-			throw new TypeError('options.getSize must be a function.');
-		}
-
-		super();
-
-		this._options = options;
-	}
-
-	/** @internal */
-	async _read(start: number, end: number) {
-		return this._options.read(start, end);
-	}
-
-	/** @internal */
-	async _retrieveSize() {
-		return this._options.getSize();
-	}
-}
 
 /**
  * A source backed by a Blob. Since Files are also Blobs, this is the source to use when reading files off the disk.
@@ -115,29 +110,78 @@ export class StreamSource extends Source {
 export class BlobSource extends Source {
 	/** @internal */
 	_blob: Blob;
+	/** @internal */
+	_orchestrator: ReadOrchestrator;
 
-	constructor(blob: Blob) {
+	constructor(blob: Blob, options: BlobSourceOptions = {}) {
 		if (!(blob instanceof Blob)) {
 			throw new TypeError('blob must be a Blob.');
+		}
+		if (!options || typeof options !== 'object') {
+			throw new TypeError('options must be an object.');
+		}
+		if (
+			options.maxCacheSize !== undefined
+			&& (!Number.isInteger(options.maxCacheSize) || options.maxCacheSize < 0)
+		) {
+			throw new TypeError('options.maxCacheSize, when provided, must be a non-negative integer.');
 		}
 
 		super();
 
 		this._blob = blob;
+		this._orchestrator = new ReadOrchestrator({
+			maxCacheSize: options.maxCacheSize ?? (8 * 2 ** 20 /* 8 MiB */),
+			maxWorkerCount: 4,
+			runWorker: this._runWorker.bind(this),
+			prefetchProfile: PREFETCH_PROFILES.fileSystem,
+		});
 	}
 
 	/** @internal */
-	async _read(start: number, end: number) {
-		const slice = this._blob.slice(start, end);
-		const buffer = await slice.arrayBuffer();
-		return new Uint8Array(buffer);
+	_retrieveSize(): number {
+		const size = this._blob.size;
+		this._orchestrator.fileSize = size;
+
+		return size;
 	}
 
 	/** @internal */
-	async _retrieveSize() {
-		return this._blob.size;
+	_read(start: number, end: number): MaybePromise<ReadResult> {
+		return this._orchestrator.read(start, end);
+	}
+
+	/** @internal */
+	_readers = new WeakMap<ReadWorker, ReadableStreamDefaultReader<Uint8Array>>();
+
+	/** @internal */
+	private async _runWorker(worker: ReadWorker) {
+		let reader = this._readers.get(worker);
+		if (!reader) {
+			// Get a reader of the blob starting at the required offset, and then keep it around
+			reader = this._blob.slice(worker.currentPos).stream().getReader();
+			this._readers.set(worker, reader);
+		}
+
+		while (worker.currentPos < worker.targetPos && !worker.aborted) {
+			const { done, value } = await reader.read();
+			if (done) {
+				this._orchestrator.forgetWorker(worker);
+
+				if (worker.currentPos < worker.targetPos) { // I think this `if` should always hit?
+					throw new Error('Blob reader stopped unexpectedly before all requested data was read.');
+				}
+
+				break;
+			}
+
+			this.onread?.(worker.currentPos, worker.currentPos + value.length);
+			this._orchestrator.supplyWorkerData(worker, value);
+		}
 	}
 }
+
+const URL_SOURCE_MIN_LOAD_AMOUNT = 0.5 * 2 ** 20; // 0.5 MiB
 
 /**
  * Options for UrlSource.
@@ -153,24 +197,34 @@ export type UrlSourceOptions = {
 	/**
 	 * A function that returns the delay (in seconds) before retrying a failed request. The function is called
 	 * with the number of previous, unsuccessful attempts. If the function returns `null`, no more retries will be made.
+	 *
+	 * By default, it uses an exponential backoff algorithm that never fully gives up.
 	 */
 	getRetryDelay?: (previousAttempts: number) => number | null;
+
+	/** The maximum number of bytes the cache is allowed to hold in memory. Defaults to 64 MiB. */
+	maxCacheSize?: number;
 };
 
 /**
- * A source backed by a URL. This is useful for reading data from the network. Be careful using this source however,
- * as it typically comes with increased latency.
- * @beta
+ * A source backed by a URL. This is useful for reading data from the network. Requests will be made using an optimized
+ * reading and prefetching pattern to minimize request count and latency.
+ * @public
  */
 export class UrlSource extends Source {
 	/** @internal */
-	private _url: URL;
+	_url: URL;
 	/** @internal */
-	private _options: UrlSourceOptions;
+	_getRetryDelay: (previousAttempts: number) => number | null;
 	/** @internal */
-	private _fullData: ArrayBuffer | null = null;
+	_options: UrlSourceOptions;
 	/** @internal */
-	private _nextUrlVersion: number | null = null;
+	_orchestrator: ReadOrchestrator;
+	/** @internal */
+	_existingResponses = new WeakMap<ReadWorker, {
+		response: Response;
+		abortController: AbortController;
+	}>();
 
 	constructor(
 		url: string | URL,
@@ -188,141 +242,972 @@ export class UrlSource extends Source {
 		if (options.getRetryDelay !== undefined && typeof options.getRetryDelay !== 'function') {
 			throw new TypeError('options.getRetryDelay, when provided, must be a function.');
 		}
+		if (
+			options.maxCacheSize !== undefined
+			&& (!Number.isInteger(options.maxCacheSize) || options.maxCacheSize < 0)
+		) {
+			throw new TypeError('options.maxCacheSize, when provided, must be a non-negative integer.');
+		}
 
 		super();
 
-		this._url = url instanceof URL ? url : new URL(url, location.href);
+		this._url = url instanceof URL
+			? url
+			: new URL(url, typeof location !== 'undefined' ? location.href : undefined);
 		this._options = options;
+		this._getRetryDelay = options.getRetryDelay ?? (previousAttempts => Math.min(2 ** (previousAttempts - 2), 8));
+
+		this._orchestrator = new ReadOrchestrator({
+			maxCacheSize: options.maxCacheSize ?? (64 * 2 ** 20 /* 64 MiB */),
+			// Most files in the real-world have a single sequential access pattern, but having two in parallel can
+			// also happen
+			maxWorkerCount: 2,
+			runWorker: this._runWorker.bind(this),
+			prefetchProfile: PREFETCH_PROFILES.network,
+		});
 	}
 
 	/** @internal */
-	private async _makeRequest(
-		range?: { start: number; end: number },
-	): Promise<{ response: ArrayBuffer; statusCode: number }> {
-		const headers: HeadersInit = {};
+	async _retrieveSize(): Promise<number> {
+		// Retrieving the resource size for UrlSource is optimized: Almost always (= always), the first bytes we have to
+		// read are the start of the file. This means it's smart to combine size fetching with fetching the start of the
+		// file. We additionally use this step to probe if the server supports range requests, killing three birds with
+		// one stone.
 
-		if (range) {
-			headers['Range'] = `bytes=${range.start}-${range.end - 1}`;
-		}
-
-		if (this._nextUrlVersion !== null) {
-			this._url.searchParams.set('mediabunny_version', this._nextUrlVersion.toString());
-			this._nextUrlVersion++;
-		}
-
+		const abortController = new AbortController();
 		const response = await retriedFetch(
 			this._url,
 			mergeObjectsDeeply(this._options.requestInit ?? {}, {
-				method: 'GET',
-				headers,
+				headers: {
+					// We could also send a non-range request to request the same bytes (all of them), but doing it like
+					// this is an easy way to check if the server supports range requests in the first place
+					Range: 'bytes=0-',
+				},
+				signal: abortController.signal,
 			}),
-			this._options.getRetryDelay ?? (() => null),
+			this._getRetryDelay,
 		);
 
 		if (!response.ok) {
 			throw new Error(`Error fetching ${this._url}: ${response.status} ${response.statusText}`);
 		}
 
-		const buffer = await response.arrayBuffer();
+		let worker: ReadWorker;
+		let fileSize: number;
 
+		if (response.status === 206) {
+			fileSize = this._getPartialLengthFromRangeResponse(response);
+			worker = this._orchestrator.createWorker(0, URL_SOURCE_MIN_LOAD_AMOUNT);
+		} else {
+			// Server probably returned a 200.
+
+			const contentLength = response.headers.get('Content-Length');
+			if (contentLength) {
+				fileSize = Number(contentLength);
+				worker = this._orchestrator.createWorker(0, fileSize);
+				this._orchestrator.options.maxCacheSize = Infinity; // 🤷
+
+				console.warn(
+					'HTTP server did not respond with 206 Partial Content, meaning the entire remote resource now has'
+					+ ' to be downloaded. For efficient media file streaming across a network, please make sure your'
+					+ ' server supports range requests.',
+				);
+			} else {
+				throw new Error(`HTTP response (status ${response.status}) must surface Content-Length header.`);
+			}
+		}
+
+		this._orchestrator.fileSize = fileSize;
+
+		this._existingResponses.set(worker, { response, abortController });
+		this._orchestrator.runWorker(worker);
+
+		return fileSize;
+	}
+
+	/** @internal */
+	_read(start: number, end: number): MaybePromise<ReadResult> {
+		return this._orchestrator.read(start, end);
+	}
+
+	/** @internal */
+	private async _runWorker(worker: ReadWorker) {
+		// The outer loop is for resuming a request if it dies mid-response
+		while (!worker.aborted) {
+			const existing = this._existingResponses.get(worker);
+			this._existingResponses.delete(worker);
+
+			let abortController = existing?.abortController;
+			let response = existing?.response;
+
+			if (!abortController) {
+				abortController = new AbortController();
+				response = await retriedFetch(
+					this._url,
+					mergeObjectsDeeply(this._options.requestInit ?? {}, {
+						headers: {
+							Range: `bytes=${worker.currentPos}-`,
+						},
+						signal: abortController.signal,
+					}),
+					this._getRetryDelay,
+				);
+			}
+
+			assert(response);
+
+			if (!response.ok) {
+				throw new Error(`Error fetching ${this._url}: ${response.status} ${response.statusText}`);
+			}
+
+			if (worker.currentPos > 0 && response.status !== 206) {
+				throw new Error(
+					'HTTP server did not respond with 206 Partial Content to a range request. To enable efficient media'
+					+ ' file streaming across a network, please make sure your server supports range requests.',
+				);
+			}
+
+			const length = this._getPartialLengthFromRangeResponse(response);
+			const required = worker.targetPos - worker.currentPos;
+			if (length < required) {
+				throw new Error(
+					`HTTP response unexpectedly too short: Needed at least ${required} bytes, got only ${length}.`,
+				);
+			}
+
+			if (!response.body) {
+				throw new Error('Missing HTTP response body.');
+			}
+
+			const reader = response.body.getReader();
+
+			while (true) {
+				let readResult: ReadableStreamReadResult<Uint8Array>;
+
+				try {
+					readResult = await reader.read();
+				} catch (error) {
+					const retryDelayInSeconds = this._getRetryDelay(1);
+					if (retryDelayInSeconds !== null) {
+						console.error('Error while reading response stream. Attempting to resume.', error);
+						await new Promise(resolve => setTimeout(resolve, 1000 * retryDelayInSeconds));
+
+						break;
+					} else {
+						throw error;
+					}
+				}
+
+				const { done, value } = readResult;
+
+				if (done) {
+					this._orchestrator.forgetWorker(worker);
+
+					if (worker.currentPos < worker.targetPos) {
+						throw new Error(
+							'Response stream reader stopped unexpectedly before all requested data was read.',
+						);
+					}
+
+					return;
+				}
+
+				this.onread?.(worker.currentPos, worker.currentPos + value.length);
+				this._orchestrator.supplyWorkerData(worker, value);
+
+				if (worker.currentPos >= worker.targetPos || worker.aborted) {
+					abortController.abort();
+
+					return;
+				}
+			}
+		}
+
+		// The previous UrlSource had logic for circumventing https://issues.chromium.org/issues/436025873; I haven't
+		// been able to observe this bug with the new UrlSource (maybe because we're using response streaming), so the
+		// logic for that has vanished for now. Leaving a comment here if this becomes relevant again.
+	}
+
+	/** @internal */
+	private _getPartialLengthFromRangeResponse(response: Response) {
+		const contentRange = response.headers.get('Content-Range');
+		if (contentRange) {
+			const match = /\/(\d+)/.exec(contentRange);
+			if (match) {
+				return Number(match[1]);
+			} else {
+				throw new Error(`Invalid Content-Range header: ${contentRange}`);
+			}
+		} else {
+			const contentLength = response.headers.get('Content-Length');
+			if (contentLength) {
+				return Number(contentLength);
+			} else {
+				throw new Error(
+					'Partial HTTP response (status 206) must surface either Content-Range or'
+					+ ' Content-Length header.',
+				);
+			}
+		}
+	}
+}
+
+/**
+ * Options for FilePathSource.
+ * @public
+ */
+export type FilePathSourceOptions = {
+	/** The maximum number of bytes the cache is allowed to hold in memory. Defaults to 8 MiB. */
+	maxCacheSize?: number;
+};
+
+/**
+ * A source backed by a path to a file. Intended for server-side usage in Node, Bun, or Deno.
+ * @public
+ */
+export class FilePathSource extends Source {
+	/** @internal */
+	_streamSource: StreamSource;
+
+	constructor(filePath: string, options: BlobSourceOptions = {}) {
+		if (typeof filePath !== 'string') {
+			throw new TypeError('filePath must be a string.');
+		}
+		if (!options || typeof options !== 'object') {
+			throw new TypeError('options must be an object.');
+		}
 		if (
-			response.status === 206
-			&& range
-			&& buffer.byteLength !== range.end - range.start
-			&& this._nextUrlVersion === null
+			options.maxCacheSize !== undefined
+			&& (!Number.isInteger(options.maxCacheSize) || options.maxCacheSize < 0)
 		) {
-			// We did a range request but it resolved with the wrong range; in Chromium, this can be due to a caching
-			// bug (https://issues.chromium.org/issues/436025873). Let's circumvent the cache for the rest of the
-			// session by appending a version to the URL.
-			this._nextUrlVersion = 1;
-			return this._makeRequest(range);
+			throw new TypeError('options.maxCacheSize, when provided, must be a non-negative integer.');
 		}
 
-		if (response.status === 200) {
-			// The server didn't return 206 Partial Content, so it's not a range response
-			this._fullData = buffer;
-		}
+		super();
 
-		return {
-			response: buffer,
-			statusCode: response.status,
-		};
+		let fileHandle: FileHandle | null = null;
+
+		// Let's back this source with a StreamSource, makes the implementation very simple
+		this._streamSource = new StreamSource({
+			getSize: async () => {
+				const FS_MODULE_NAME = 'node:fs/promises';
+				const fs = await import(/* @vite-ignore */ FS_MODULE_NAME) as typeof import('node:fs/promises');
+				fileHandle = await fs.open(filePath, 'r');
+
+				const stats = await fileHandle.stat();
+				return stats.size;
+			},
+			read: async (start, end) => {
+				assert(fileHandle);
+
+				const buffer = Buffer.alloc(end - start);
+				await fileHandle.read(buffer, 0, end - start, start);
+				return buffer;
+			},
+			maxCacheSize: options.maxCacheSize,
+			prefetchProfile: 'fileSystem',
+		});
 	}
 
 	/** @internal */
-	async _read(start: number, end: number): Promise<Uint8Array> {
-		if (this._fullData) {
-			return new Uint8Array(this._fullData, start, end - start);
-		}
-
-		const { response, statusCode } = await this._makeRequest({ start, end });
-
-		// If server doesn't support range requests, it will return 200 instead of 206. In that case, let's manually
-		// slice the response.
-		if (statusCode === 200) {
-			const fullData = new Uint8Array(response);
-			return fullData.subarray(start, end);
-		}
-
-		return new Uint8Array(response);
+	_read(start: number, end: number): MaybePromise<ReadResult> {
+		return this._streamSource._read(start, end);
 	}
 
 	/** @internal */
-	async _retrieveSize(): Promise<number> {
-		if (this._fullData) {
-			return this._fullData.byteLength;
+	_retrieveSize(): MaybePromise<number> {
+		return this._streamSource._retrieveSize();
+	}
+}
+
+/**
+ * Options for defining a StreamSource.
+ * @public
+ */
+export type StreamSourceOptions = {
+	/**
+	 * Called when the size of the entire file is requested. Must return or resolve to the size in bytes. This function
+	 * is guaranteed to be called before `read`.
+	 */
+	getSize: () => MaybePromise<number>;
+
+	/**
+	 * Called when data is requested. Must return or resolve to the bytes from the specified byte range, or a stream
+	 * that yields these bytes.
+	 */
+	read: (start: number, end: number) => MaybePromise<Uint8Array | ReadableStream<Uint8Array>>;
+
+	/** The maximum number of bytes the cache is allowed to hold in memory. Defaults to 8 MiB. */
+	maxCacheSize?: number;
+
+	/**
+	 * Specifies the prefetch profile that the reader should use with this source. A prefetch propfile specifies the
+	 * pattern with which bytes outside of the requested range are preloaded to reduce latency for future reads.
+	 *
+	 * - `'none'` (default): No prefetching; only the data needed in the moment is requested.
+	 * - `'fileSystem'`: File system-optimized prefetching: a small amount of data is prefetched bidirectionally,
+	 * aligned with page boundaries.
+	 * - `'network'`: Network-optimized prefetching, or more generally, prefetching optimized for any high-latency
+	 * environment: tries to minimize the amount of read calls and aggressively prefetches data when sequential access
+	 * patterns are detected.
+	 */
+	prefetchProfile?: 'none' | 'fileSystem' | 'network';
+};
+
+/**
+ * A general-purpose, callback-driven source that can get its data from anywhere.
+ * @public
+ */
+export class StreamSource extends Source {
+	/** @internal */
+	_options: StreamSourceOptions;
+	/** @internal */
+	_orchestrator: ReadOrchestrator;
+
+	constructor(options: StreamSourceOptions) {
+		if (!options || typeof options !== 'object') {
+			throw new TypeError('options must be an object.');
+		}
+		if (typeof options.read !== 'function') {
+			throw new TypeError('options.read must be a function.');
+		}
+		if (typeof options.getSize !== 'function') {
+			throw new TypeError('options.getSize must be a function.');
+		}
+		if (
+			options.maxCacheSize !== undefined
+			&& (!Number.isInteger(options.maxCacheSize) || options.maxCacheSize < 0)
+		) {
+			throw new TypeError('options.maxCacheSize, when provided, must be a non-negative integer.');
+		}
+		if (options.prefetchProfile && !['none', 'fileSystem', 'network'].includes(options.prefetchProfile)) {
+			throw new TypeError(
+				'options.prefetchProfile, when provided, must be one of \'none\', \'fileSystem\' or \'network\'.',
+			);
 		}
 
-		// First, try a HEAD request to get the size
-		try {
-			const headResponse = await retriedFetch(
-				this._url,
-				mergeObjectsDeeply(this._options.requestInit ?? {}, {
-					method: 'HEAD',
-				}),
-				this._options.getRetryDelay ?? (() => null),
+		super();
+
+		this._options = options;
+
+		this._orchestrator = new ReadOrchestrator({
+			maxCacheSize: options.maxCacheSize ?? (8 * 2 ** 20 /* 8 MiB */),
+			maxWorkerCount: 2, // Fixed for now, *should* be fine
+			prefetchProfile: PREFETCH_PROFILES[options.prefetchProfile ?? 'none'],
+			runWorker: this._runWorker.bind(this),
+		});
+	}
+
+	/** @internal */
+	_retrieveSize(): MaybePromise<number> {
+		const result = this._options.getSize();
+
+		if (result instanceof Promise) {
+			return result.then((size) => {
+				if (!Number.isInteger(size) || size < 0) {
+					throw new TypeError('options.getSize must return or resolve to a non-negative integer.');
+				}
+
+				this._orchestrator.fileSize = size;
+				return size;
+			});
+		} else {
+			if (!Number.isInteger(result) || result < 0) {
+				throw new TypeError('options.getSize must return or resolve to a non-negative integer.');
+			}
+
+			this._orchestrator.fileSize = result;
+			return result;
+		}
+	}
+
+	/** @internal */
+	_read(start: number, end: number): MaybePromise<ReadResult> {
+		return this._orchestrator.read(start, end);
+	}
+
+	/** @internal */
+	private async _runWorker(worker: ReadWorker) {
+		while (worker.currentPos < worker.targetPos && !worker.aborted) {
+			const originalCurrentPos = worker.currentPos;
+			const originalTargetPos = worker.targetPos;
+
+			let data = this._options.read(worker.currentPos, originalTargetPos);
+			if (data instanceof Promise) data = await data;
+
+			if (data instanceof Uint8Array) {
+				if (data.length !== originalTargetPos - worker.currentPos) {
+					// Yes, we're that strict
+					throw new Error(
+						`options.read returned a Uint8Array with unexpected length: Requested ${
+							originalTargetPos - worker.currentPos
+						} bytes, but got ${data.length}.`,
+					);
+				}
+
+				this.onread?.(worker.currentPos, worker.currentPos + data.length);
+				this._orchestrator.supplyWorkerData(worker, data);
+			} else if (data instanceof ReadableStream) {
+				const reader = data.getReader();
+
+				while (true) {
+					const { done, value } = await reader.read();
+					if (done) {
+						if (worker.currentPos < originalTargetPos) {
+							// Yes, we're *that* strict
+							throw new Error(
+								`ReadableStream returned by options.read ended before supplying enough data.`
+								+ ` Requested ${originalTargetPos - originalCurrentPos} bytes, but got ${
+									worker.currentPos - originalCurrentPos
+								}`,
+							);
+						}
+
+						break;
+					}
+
+					if (!(value instanceof Uint8Array)) {
+						throw new TypeError('ReadableStream returned by options.read must yield Uint8Array chunks.');
+					}
+
+					this.onread?.(worker.currentPos, worker.currentPos + value.length);
+					this._orchestrator.supplyWorkerData(worker, value);
+
+					if (worker.currentPos >= originalTargetPos || worker.aborted) {
+						break;
+					}
+				}
+			} else {
+				throw new TypeError('options.read must return or resolve to a Uint8Array or a ReadableStream.');
+			}
+		}
+	}
+}
+
+type PrefetchProfile = (start: number, end: number, workers: ReadWorker[]) => {
+	start: number;
+	end: number;
+};
+
+const PREFETCH_PROFILES = {
+	none: (start, end) => ({ start, end }),
+	fileSystem: (start, end) => {
+		const padding = 2 ** 16;
+
+		start = Math.floor((start - padding) / padding) * padding;
+		end = Math.ceil((end + padding) / padding) * padding;
+
+		return { start, end };
+	},
+	network: (start, end, workers) => {
+		// Add a slight bit of start padding because backwards reading is painful
+		const paddingStart = 2 ** 16;
+		start = Math.max(0, Math.floor((start - paddingStart) / paddingStart) * paddingStart);
+
+		// Remote resources have extreme latency (relatively speaking), so the benefit from intelligent
+		// prefetching is great. The network prefetch strategy is as follows: When we notice
+		// successive reads to a worker's read region, we prefetch more data at the end of that region,
+		// growing exponentially (up to a cap). This performs well for real-world use cases: Either we read a
+		// small part of the file once and then never need it again, in which case the requested about of data
+		// is small. Or, we're repeatedly doing a sequential access pattern (common in media files), in which
+		// case we can become more and more confident to prefetch more and more data.
+		for (const worker of workers) {
+			const maxExtensionAmount = 8 * 2 ** 20; // 8 MiB
+
+			// When the read region cross the threshold point, we trigger a prefetch. This point is typically
+			// in the middle of the worker's read region, or a fixed offset from the end if the region has grown
+			// really large.
+			const thresholdPoint = Math.max(
+				(worker.startPos + worker.targetPos) / 2,
+				worker.targetPos - maxExtensionAmount,
 			);
 
-			if (headResponse.ok) {
-				const contentLength = headResponse.headers.get('Content-Length');
-				if (contentLength) {
-					return parseInt(contentLength);
-				}
+			if (closedIntervalsOverlap(
+				start, end,
+				thresholdPoint, worker.targetPos,
+			)) {
+				const size = worker.targetPos - worker.startPos;
+
+				// If we extend by maxExtensionAmount
+				const a = Math.ceil((size + 1) / maxExtensionAmount) * maxExtensionAmount;
+				// If we extend to the next power of 2
+				const b = 2 ** Math.ceil(Math.log2(size + 1));
+
+				const extent = Math.min(b, a);
+				end = Math.max(end, worker.startPos + extent);
 			}
-		} catch {
-			// We tried
 		}
 
-		// Try a range request to get the Content-Range header
-		const rangeResponse = await retriedFetch(
-			this._url,
-			mergeObjectsDeeply(this._options.requestInit ?? {}, {
-				method: 'GET',
-				headers: { Range: 'bytes=0-0' },
-			}),
-			this._options.getRetryDelay ?? (() => null),
-		);
+		end = Math.max(end, start + URL_SOURCE_MIN_LOAD_AMOUNT);
 
-		if (rangeResponse.status === 206) {
-			const contentRange = rangeResponse.headers.get('Content-Range');
-			if (contentRange) {
-				const match = contentRange.match(/bytes \d+-\d+\/(\d+)/);
-				if (match && match[1]) {
-					return parseInt(match[1]);
+		return {
+			start,
+			end,
+		};
+	},
+} satisfies Record<string, PrefetchProfile>;
+
+type PendingSlice = {
+	start: number;
+	bytes: Uint8Array;
+	holes: {
+		start: number;
+		end: number;
+	}[];
+	resolve: (bytes: Uint8Array) => void;
+	reject: (error: unknown) => void;
+};
+
+type CacheEntry = {
+	start: number;
+	end: number;
+	bytes: Uint8Array;
+	view: DataView;
+	age: number;
+};
+
+type ReadWorker = {
+	startPos: number;
+	currentPos: number;
+	targetPos: number;
+	running: boolean;
+	aborted: boolean;
+	pendingSlices: PendingSlice[];
+	age: number;
+};
+
+/**
+ * Godclass for orchestrating complex, cached read operations. The reading model is as follows: Any reading task is
+ * delegated to a *worker*, which is a sequential reader positioned somewhere along the file. All workers run in
+ * parallel and can be stopped and resumed in their forward movement. When read requests come in, this orchestrator will
+ * first try to satisfy the request with only the cached data. If this isn't possible, workers are spun up for all
+ * missing parts (or existing workers are repurposed), and these workers will then fill the holes in the data as they
+ * march along the file.
+ */
+class ReadOrchestrator {
+	fileSize: number | null = null;
+	nextAge = 0; // Used for LRU eviction of both cache entries and workers
+	workers: ReadWorker[] = [];
+	cache: CacheEntry[] = [];
+	currentCacheSize = 0;
+
+	constructor(public options: {
+		maxCacheSize: number;
+		runWorker: (worker: ReadWorker) => Promise<void>;
+		prefetchProfile: PrefetchProfile;
+		maxWorkerCount: number;
+	}) {}
+
+	read(innerStart: number, innerEnd: number): MaybePromise<ReadResult> {
+		assert(this.fileSize !== null);
+
+		const prefetchRange = this.options.prefetchProfile(innerStart, innerEnd, this.workers);
+		const outerStart = Math.max(prefetchRange.start, 0);
+		const outerEnd = Math.min(prefetchRange.end, this.fileSize);
+		assert(outerStart <= innerStart && innerEnd <= outerEnd);
+
+		let result: MaybePromise<{
+			bytes: Uint8Array;
+			view: DataView;
+			offset: number;
+		}> | null = null;
+
+		const innerCacheStartIndex = binarySearchLessOrEqual(this.cache, innerStart, x => x.start);
+		const innerStartEntry = innerCacheStartIndex !== -1 ? this.cache[innerCacheStartIndex] : null;
+
+		// See if the read request can be satisfied by a single cache entry
+		if (innerStartEntry && innerStartEntry.start <= innerStart && innerEnd <= innerStartEntry.end) {
+			innerStartEntry.age = this.nextAge++;
+
+			result = {
+				bytes: innerStartEntry.bytes,
+				view: innerStartEntry.view,
+				offset: innerStartEntry.start,
+			};
+			// Can't return yet though, still need to check if the prefetch range might lie outside the cached area
+		}
+
+		const outerCacheStartIndex = binarySearchLessOrEqual(this.cache, outerStart, x => x.start);
+
+		const bytes = result ? null : new Uint8Array(innerEnd - innerStart);
+		let contiguousBytesWriteEnd = 0; // Used to track if the cache is able to completely cover the bytes
+
+		let lastEnd = outerStart;
+		// The "holes" in the cache (the parts we need to load)
+		const outerHoles: {
+			start: number;
+			end: number;
+		}[] = [];
+
+		// Loop over the cache and build up the list of holes
+		if (outerCacheStartIndex !== -1) {
+			for (let i = outerCacheStartIndex; i < this.cache.length; i++) {
+				const entry = this.cache[i]!;
+				if (entry.start >= outerEnd) {
+					break;
+				}
+				if (entry.end <= outerStart) {
+					continue;
+				}
+
+				const cappedOuterStart = Math.max(outerStart, entry.start);
+				const cappedOuterEnd = Math.min(outerEnd, entry.end);
+				assert(cappedOuterStart <= cappedOuterEnd);
+
+				if (lastEnd < cappedOuterStart) {
+					outerHoles.push({ start: lastEnd, end: cappedOuterStart });
+				}
+				lastEnd = cappedOuterEnd;
+
+				if (bytes) {
+					const cappedInnerStart = Math.max(innerStart, entry.start);
+					const cappedInnerEnd = Math.min(innerEnd, entry.end);
+
+					if (cappedInnerStart < cappedInnerEnd) {
+						const relativeOffset = cappedInnerStart - innerStart;
+
+						// Fill the relevant section of the bytes with the cached data
+						bytes.set(
+							entry.bytes.subarray(cappedInnerStart - entry.start, cappedInnerEnd - entry.start),
+							relativeOffset,
+						);
+
+						if (relativeOffset === contiguousBytesWriteEnd) {
+							contiguousBytesWriteEnd = cappedInnerEnd - innerStart;
+						}
+					}
+				}
+				entry.age = this.nextAge++;
+			}
+
+			if (lastEnd < outerEnd) {
+				outerHoles.push({ start: lastEnd, end: outerEnd });
+			}
+		} else {
+			outerHoles.push({ start: outerStart, end: outerEnd });
+		}
+
+		if (bytes && contiguousBytesWriteEnd >= bytes.length) {
+			// Multiple cache entries were able to completely cover the requested bytes!
+			result = {
+				bytes,
+				view: toDataView(bytes),
+				offset: innerStart,
+			};
+		}
+
+		if (outerHoles.length === 0) {
+			assert(result);
+			return result;
+		}
+
+		// We need to read more data, so now we're in async land
+		const { promise, resolve, reject } = promiseWithResolvers<Uint8Array>();
+
+		const innerHoles: typeof outerHoles = [];
+		for (const outerHole of outerHoles) {
+			const cappedStart = Math.max(innerStart, outerHole.start);
+			const cappedEnd = Math.min(innerEnd, outerHole.end);
+
+			if (cappedStart === outerHole.start && cappedEnd === outerHole.end) {
+				innerHoles.push(outerHole); // Can reuse without allocating a new object
+			} else if (cappedStart < cappedEnd) {
+				innerHoles.push({ start: cappedStart, end: cappedEnd });
+			}
+		}
+
+		// Fire off workers to take care of patching the holes
+		for (const outerHole of outerHoles) {
+			const pendingSlice: PendingSlice | null = bytes && {
+				start: innerStart,
+				bytes,
+				holes: innerHoles,
+				resolve,
+				reject,
+			};
+
+			let workerFound = false;
+			for (const worker of this.workers) {
+				// A small tolerance in the case that the requested region is *just* after the target position of an
+				// existing worker. In that case, it's probably more efficient to repurpose that worker than to spawn
+				// another one so close to it
+				const gapTolerance = 2 ** 17;
+
+				if (closedIntervalsOverlap(
+					outerHole.start - gapTolerance, outerHole.start,
+					worker.currentPos, worker.targetPos,
+				)) {
+					worker.targetPos = Math.max(worker.targetPos, outerHole.end); // Update the worker's target position
+					workerFound = true;
+
+					if (pendingSlice && !worker.pendingSlices.includes(pendingSlice)) {
+						worker.pendingSlices.push(pendingSlice);
+					}
+
+					if (!worker.running) {
+						// Kick it off if it's idle
+						this.runWorker(worker);
+					}
+
+					break;
 				}
 			}
-		} else if (rangeResponse.status === 200) {
-			// The server just returned the whole thing
-			this._fullData = await rangeResponse.arrayBuffer();
-			if (this._fullData.byteLength !== 1) {
-				return this._fullData.byteLength;
+
+			if (!workerFound) {
+				// We need to spawn a new worker
+				const newWorker = this.createWorker(outerHole.start, outerHole.end);
+				if (pendingSlice) {
+					newWorker.pendingSlices = [pendingSlice];
+				}
+
+				this.runWorker(newWorker);
+			}
+		}
+
+		if (!result) {
+			assert(bytes);
+			result = promise.then(bytes => ({
+				bytes,
+				view: toDataView(bytes),
+				offset: innerStart,
+			}));
+		} else {
+			// The requested region was satisfied by the cache, but the entire prefetch region was not
+		}
+
+		return result;
+	}
+
+	createWorker(startPos: number, targetPos: number) {
+		const worker: ReadWorker = {
+			startPos,
+			currentPos: startPos,
+			targetPos,
+			running: false,
+			aborted: false,
+			pendingSlices: [],
+			age: this.nextAge++,
+		};
+		this.workers.push(worker);
+
+		// LRU eviction of the other workers
+		while (this.workers.length > this.options.maxWorkerCount) {
+			let oldestIndex = 0;
+			let oldestWorker = this.workers[0]!;
+
+			for (let i = 1; i < this.workers.length; i++) {
+				const worker = this.workers[i]!;
+
+				if (worker.age < oldestWorker.age) {
+					oldestIndex = i;
+					oldestWorker = worker;
+				}
+			}
+
+			if (oldestWorker.running && oldestWorker.pendingSlices.length > 0) {
+				break;
+			}
+
+			oldestWorker.aborted = true;
+			this.workers.splice(oldestIndex, 1);
+		}
+
+		return worker;
+	}
+
+	runWorker(worker: ReadWorker) {
+		assert(!worker.running);
+		assert(worker.currentPos < worker.targetPos);
+
+		worker.running = true;
+		worker.age = this.nextAge++;
+
+		void this.options.runWorker(worker)
+			.catch((error) => {
+				if (worker.pendingSlices.length > 0) {
+					worker.pendingSlices.forEach(x => x.reject(error)); // Make sure to propagate any errors
+					worker.pendingSlices.length = 0;
+				} else {
+					throw error; // So it doesn't get swallowed
+				}
+			})
+			.finally(() => {
+				worker.running = false;
+			});
+	}
+
+	/** Called by a worker when it has read some data. */
+	supplyWorkerData(worker: ReadWorker, bytes: Uint8Array) {
+		const start = worker.currentPos;
+		const end = start + bytes.length;
+
+		this.insertIntoCache({
+			start,
+			end,
+			bytes,
+			view: toDataView(bytes),
+			age: this.nextAge++,
+		});
+		worker.currentPos += bytes.length;
+		worker.targetPos = Math.max(worker.targetPos, worker.currentPos); // In case it overshoots
+
+		// Now, let's see if we can use the read bytes to fill any pending slice
+		for (let i = 0; i < worker.pendingSlices.length; i++) {
+			const pendingSlice = worker.pendingSlices[i]!;
+
+			const clampedStart = Math.max(start, pendingSlice.start);
+			const clampedEnd = Math.min(end, pendingSlice.start + pendingSlice.bytes.length);
+
+			if (clampedStart < clampedEnd) {
+				pendingSlice.bytes.set(
+					bytes.subarray(clampedStart - start, clampedEnd - start),
+					clampedStart - pendingSlice.start,
+				);
+			}
+
+			for (let j = 0; j < pendingSlice.holes.length; j++) {
+				// The hole is intentionally not modified here if the read section starts somewhere in the middle of
+				// the hole. We don't need to do "hole splitting", since the workers are spawned *by* the holes,
+				// meaning there's always a worker which will consume the hole left to right.
+				const hole = pendingSlice.holes[j]!;
+				if (start <= hole.start && end > hole.start) {
+					hole.start = end;
+				}
+
+				if (hole.end <= hole.start) {
+					pendingSlice.holes.splice(j, 1);
+					j--;
+				}
+			}
+
+			if (pendingSlice.holes.length === 0) {
+				// The slice has been fulfilled, everything has been read. Let's resolve the promise
+				pendingSlice.resolve(pendingSlice.bytes);
+				worker.pendingSlices.splice(i, 1);
+				i--;
+			}
+		}
+
+		// Remove other idle workers if we "ate" into their territory
+		for (let i = 0; i < this.workers.length; i++) {
+			const otherWorker = this.workers[i]!;
+			if (worker === otherWorker || otherWorker.running) {
+				continue;
+			}
+
+			if (closedIntervalsOverlap(
+				start, end,
+				otherWorker.currentPos, otherWorker.targetPos, // These should typically be equal when the worker's idle
+			)) {
+				this.workers.splice(i, 1);
+				i--;
+			}
+		}
+	}
+
+	forgetWorker(worker: ReadWorker) {
+		const index = this.workers.indexOf(worker);
+		assert(index !== -1);
+
+		this.workers.splice(index, 1);
+	}
+
+	insertIntoCache(entry: CacheEntry) {
+		if (this.options.maxCacheSize === 0) {
+			return; // No caching
+		}
+
+		let insertionIndex = binarySearchLessOrEqual(this.cache, entry.start, x => x.start) + 1;
+
+		if (insertionIndex > 0) {
+			const previous = this.cache[insertionIndex - 1]!;
+			if (previous.end >= entry.end) {
+				// Previous entry swallows the one to be inserted; we don't need to do anything
+				return;
+			}
+
+			if (previous.end > entry.start) {
+				// Partial overlap with the previous entry, let's join
+				const joined = new Uint8Array(entry.end - previous.start);
+				joined.set(previous.bytes, 0);
+				joined.set(entry.bytes, entry.start - previous.start);
+
+				this.currentCacheSize += entry.end - previous.end;
+
+				previous.bytes = joined;
+				previous.view = toDataView(joined);
+				previous.end = entry.end;
+
+				// Do the rest of the logic with the previous entry instead
+				insertionIndex--;
+				entry = previous;
 			} else {
-				// The server responded with 200, but returned only the requested range, so skip the response
+				this.cache.splice(insertionIndex, 0, entry);
+				this.currentCacheSize += entry.bytes.length;
 			}
+		} else {
+			this.cache.splice(insertionIndex, 0, entry);
+			this.currentCacheSize += entry.bytes.length;
 		}
 
-		// If the range request didn't provide the size, make a full GET request
-		const { response } = await this._makeRequest();
-		return response.byteLength;
+		for (let i = insertionIndex + 1; i < this.cache.length; i++) {
+			const next = this.cache[i]!;
+			if (entry.end <= next.start) {
+				// Even if they touch, we don't wanna merge them, no need
+				break;
+			}
+
+			if (entry.end >= next.end) {
+				// The inserted entry completely swallows the next entry
+				this.cache.splice(i, 1);
+				this.currentCacheSize -= next.bytes.length;
+				i--;
+				continue;
+			}
+
+			// Partial overlap, let's join
+			const joined = new Uint8Array(next.end - entry.start);
+			joined.set(entry.bytes, 0);
+			joined.set(next.bytes, next.start - entry.start);
+
+			this.currentCacheSize -= entry.end - next.start; // Subtract the overlap
+
+			entry.bytes = joined;
+			entry.view = toDataView(joined);
+			entry.end = next.end;
+			this.cache.splice(i, 1);
+
+			break; // After the join case, we're done: the next entry cannot possibly overlap with the inserted one.
+		}
+
+		// LRU eviction of cache entries
+		while (this.currentCacheSize > this.options.maxCacheSize) {
+			if (this.cache.length > 1) {
+				let oldestIndex = 0;
+				let oldestEntry = this.cache[0]!;
+
+				for (let i = 1; i < this.cache.length; i++) {
+					const entry = this.cache[i]!;
+
+					if (entry.age < oldestEntry.age) {
+						oldestIndex = i;
+						oldestEntry = entry;
+					}
+				}
+
+				this.cache.splice(oldestIndex, 1);
+				this.currentCacheSize -= oldestEntry.bytes.length;
+			} else {
+				// The single entry that's left is too big for the cache, let's trim it
+				const entry = this.cache[0]!;
+				assert(entry.bytes.length > this.options.maxCacheSize);
+
+				entry.bytes = entry.bytes.slice(0, this.options.maxCacheSize);
+				entry.view = toDataView(entry.bytes);
+				entry.end = entry.start + entry.bytes.length;
+
+				this.currentCacheSize = entry.bytes.length;
+			}
+		}
 	}
 }

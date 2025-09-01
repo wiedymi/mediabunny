@@ -40,10 +40,10 @@ export default async function inlineWorker(scriptText) {
 
 		let Worker;
 		try {
-		Worker = (await import('worker_threads')).Worker;
+			Worker = (await import('worker_threads')).Worker;
 		} catch {
-		const workerModule = 'worker_threads';
-		Worker = require(workerModule).Worker;
+			const workerModule = 'worker_threads';
+			Worker = require(workerModule).Worker;
 		}
 		
 		const worker = new Worker(scriptText, { eval: true });

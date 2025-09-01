@@ -143,8 +143,11 @@ export class VideoSample {
 			this._data = data;
 
 			this.format = data.format;
-			this.codedWidth = data.codedWidth;
-			this.codedHeight = data.codedHeight;
+			// Copying the display dimensions here, assuming no innate VideoFrame rotation
+			this.codedWidth = data.displayWidth;
+			this.codedHeight = data.displayHeight;
+			// The VideoFrame's rotation is ignored here. It's still a new field, and I'm not sure of any application
+			// where the browser makes use of it. If a case gets found, I'll add it.
 			this.rotation = init?.rotation ?? 0;
 			this.timestamp = init?.timestamp ?? data.timestamp / 1e6;
 			this.duration = init?.duration ?? (data.duration ?? 0) / 1e6;

@@ -136,7 +136,7 @@ class Mp3Encoder extends CustomAudioEncoder {
 		let pos = 0;
 		while (pos <= this.currentBufferOffset - FRAME_HEADER_SIZE) {
 			const word = new DataView(this.buffer.buffer).getUint32(pos, false);
-			const header = readFrameHeader(word, { pos, fileSize: null });
+			const header = readFrameHeader(word, null).header;
 			if (!header) {
 				break;
 			}
