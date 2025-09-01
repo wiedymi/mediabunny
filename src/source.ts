@@ -491,7 +491,7 @@ export class FilePathSource extends Source {
 		this._streamSource = new StreamSource({
 			getSize: async () => {
 				const FS_MODULE_NAME = 'node:fs/promises';
-				const fs = await import(FS_MODULE_NAME) as typeof import('node:fs/promises');
+				const fs = await import(/* @vite-ignore */ FS_MODULE_NAME) as typeof import('node:fs/promises');
 				fileHandle = await fs.open(filePath, 'r');
 
 				const stats = await fileHandle.stat();
