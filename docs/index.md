@@ -88,6 +88,7 @@ const bundleSizes = [
 
 const sponsors = {
 	gold: [
+		{ image: '/sponsors/remotion.png', name: 'Remotion', url: 'https://remotion.dev/' },
 		{ image: '/sponsors/gling.svg', name: 'Gling AI', url: 'https://www.gling.ai/' },
 		{ image: '/sponsors/diffusionstudio.png', name: 'Diffusion Studio', url: 'https://diffusion.studio/' },
 		{ image: '/sponsors/kino.jpg', name: 'Kino', url: 'https://kino.ai/' },
