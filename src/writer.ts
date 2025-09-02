@@ -459,3 +459,24 @@ export class StreamTargetWriter extends Writer {
 		return this.writer?.close();
 	}
 }
+
+export class NullTargetWriter extends Writer {
+	private pos = 0;
+
+	write(data: Uint8Array) {
+		this.maybeTrackWrites(data);
+		this.pos += data.byteLength;
+	}
+
+	getPos() {
+		return this.pos;
+	}
+
+	seek(newPos: number) {
+		this.pos = newPos;
+	}
+
+	async flush() {}
+	async finalize() {}
+	async close() {}
+}

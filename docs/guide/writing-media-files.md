@@ -297,6 +297,45 @@ const output = new Output({
 await output.finalize(); // Will automatically close the writable stream
 ```
 
+### `NullTarget`
+
+This target simply discards all data that is passed into it. It is useful for when you need an `Output` but extract data from it differently, for example through output format-specific callbacks or encoder events.
+
+As an example, here we create a fragmented MP4 file and directly handle the individual fragments:
+```ts
+import { Output, NullTarget, Mp4OutputFormat } from 'mediabunny';
+
+let ftyp: Uint8Array;
+let lastMoof: Uint8Array;
+
+const output = new Output({
+	target: new NullTarget(),
+	format: new Mp4OutputFormat({
+		fastStart: 'fragmented',
+		onFtyp: (data) => {
+			ftyp = data;
+		},
+		onMoov: (data) => {
+			const header = new Uint8Array(ftyp.length + data.length);
+			header.set(ftyp, 0);
+			header.set(data, ftyp.length);
+
+			// Do something with the header...
+		},
+		onMoof: (data) => {
+			lastMoof = data;
+		},
+		onMdat: (data) => {
+			const segment = new Uint8Array(lastMoof.length + data.length);
+			segment.set(lastMoof, 0);
+			segment.set(data, lastMoof.length);
+
+			// Do something with the segment...
+		},
+	}),
+});
+```
+
 ## Packet buffering
 
 Some [output formats](./output-formats) require *packet buffering* for multi-track outputs. Packet buffering occurs because the `Output` must wait for data from all tracks for a given timestamp to continue writing data. For example, should you first encode all your video frames and then encode the audio afterward, the `Output` will have to hold all of the video frames in memory until the audio packets start coming in. This might lead to memory exhaustion should your video be very long. When there is only one media track, this issue does not arise.

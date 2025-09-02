@@ -6,7 +6,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-import { BufferTargetWriter, StreamTargetWriter, Writer } from './writer';
+import { BufferTargetWriter, NullTargetWriter, StreamTargetWriter, Writer } from './writer';
 import { Output } from './output';
 
 /**
@@ -102,5 +102,17 @@ export class StreamTarget extends Target {
 	/** @internal */
 	_createWriter() {
 		return new StreamTargetWriter(this);
+	}
+}
+
+/**
+ * This target just discards all incoming data. It is useful for when you need an `Output` but extract data from it
+ * differently, for example through format-specific callbacks (`onMoof`, `onMdat`, ...) or encoder events.
+ * @public
+ */
+export class NullTarget extends Target {
+	/** @internal */
+	_createWriter() {
+		return new NullTargetWriter();
 	}
 }
