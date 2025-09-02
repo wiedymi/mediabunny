@@ -178,6 +178,8 @@ export class BlobSource extends Source {
 			this.onread?.(worker.currentPos, worker.currentPos + value.length);
 			this._orchestrator.supplyWorkerData(worker, value);
 		}
+
+		worker.running = false;
 	}
 }
 
@@ -409,6 +411,7 @@ export class UrlSource extends Source {
 						);
 					}
 
+					worker.running = false;
 					return;
 				}
 
@@ -418,10 +421,13 @@ export class UrlSource extends Source {
 				if (worker.currentPos >= worker.targetPos || worker.aborted) {
 					abortController.abort();
 
+					worker.running = false;
 					return;
 				}
 			}
 		}
+
+		worker.running = false;
 
 		// The previous UrlSource had logic for circumventing https://issues.chromium.org/issues/436025873; I haven't
 		// been able to observe this bug with the new UrlSource (maybe because we're using response streaming), so the
@@ -681,6 +687,8 @@ export class StreamSource extends Source {
 				throw new TypeError('options.read must return or resolve to a Uint8Array or a ReadableStream.');
 			}
 		}
+
+		worker.running = false;
 	}
 }
 
@@ -933,6 +941,7 @@ class ReadOrchestrator {
 				// another one so close to it
 				const gapTolerance = 2 ** 17;
 
+				// This check also implies worker.currentPos <= outerHole.start, a critical condition
 				if (closedIntervalsOverlap(
 					outerHole.start - gapTolerance, outerHole.start,
 					worker.currentPos, worker.targetPos,
@@ -1024,15 +1033,14 @@ class ReadOrchestrator {
 
 		void this.options.runWorker(worker)
 			.catch((error) => {
+				worker.running = false;
+
 				if (worker.pendingSlices.length > 0) {
 					worker.pendingSlices.forEach(x => x.reject(error)); // Make sure to propagate any errors
 					worker.pendingSlices.length = 0;
 				} else {
 					throw error; // So it doesn't get swallowed
 				}
-			})
-			.finally(() => {
-				worker.running = false;
 			});
 	}
 

@@ -24,7 +24,7 @@
 			chunked: true,
 			chunkSize: 2**20
 		});
-		const outputFormat = new Mediabunny.Mp4OutputFormat({});
+		const outputFormat = new Mediabunny.WavOutputFormat({});
 
 		const button = document.createElement('button');
 		button.textContent = 'Cancel';
@@ -74,7 +74,7 @@
 			},
 			*/
 			video: () => ({
-				codec: 'avc',
+				//codec: 'avc',
 				//fit: 'contain',
 				//frameRate: 27.123,
 				//width: 320,
