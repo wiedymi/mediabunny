@@ -102,6 +102,8 @@ export {
 	FilePathSourceOptions,
 	StreamSource,
 	StreamSourceOptions,
+	ReadableStreamSource,
+	ReadableStreamSourceOptions,
 } from './source';
 export {
 	InputFormat,
