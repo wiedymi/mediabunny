@@ -197,7 +197,18 @@ output.state; // => 'pending' | 'started' | 'canceled' | 'finalizing' | 'finaliz
 
 ## Output targets
 
-The _output target_ determines where the data created by the `Output` will be written. This library offers two targets:
+The _output target_ determines where the data created by the `Output` will be written. This library offers a couple of targets.
+
+---
+
+All targets have an optional `onwrite` callback you can set to monitor which byte regions are being written to:
+```ts
+target.onwrite = (start, end) => {
+	// ...
+};
+```
+
+You can use this to track the size of the output file as it grows. But be warned, this function is chatty and gets called *extremely* frequently.
 
 ### `BufferTarget`
 

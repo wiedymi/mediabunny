@@ -63,7 +63,7 @@ export abstract class Source {
 		return result;
 	}
 
-	/** Called each time data is retrieved from the source. Will be called with the retrieved range. */
+	/** Called each time data is retrieved from the source. Will be called with the retrieved range (end exclusive). */
 	onread: ((start: number, end: number) => unknown) | null = null;
 }
 

@@ -19,6 +19,14 @@ export abstract class Target {
 
 	/** @internal */
 	abstract _createWriter(): Writer;
+
+	/**
+	 * Called each time data is written to the target. Will be called with the byte range into which data was written.
+	 *
+	 * Use this callback to track the size of the output file as it grows. But be warned, this function is chatty and
+	 * gets called *extremely* often.
+	 */
+	onwrite: ((start: number, end: number) => unknown) | null = null;
 }
 
 /**
@@ -113,6 +121,6 @@ export class StreamTarget extends Target {
 export class NullTarget extends Target {
 	/** @internal */
 	_createWriter() {
-		return new NullTargetWriter();
+		return new NullTargetWriter(this);
 	}
 }

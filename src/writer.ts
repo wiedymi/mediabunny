@@ -6,7 +6,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-import { BufferTarget, StreamTarget, StreamTargetChunk } from './target';
+import { BufferTarget, NullTarget, StreamTarget, StreamTargetChunk } from './target';
 import { assert } from './misc';
 
 export abstract class Writer {
@@ -156,8 +156,9 @@ export class BufferTargetWriter extends Writer {
 		this.ensureSize(this.pos + data.byteLength);
 
 		this.bytes.set(data, this.pos);
-		this.pos += data.byteLength;
+		this.target.onwrite?.(this.pos, this.pos + data.byteLength);
 
+		this.pos += data.byteLength;
 		this.maxPos = Math.max(this.maxPos, this.pos);
 	}
 
@@ -250,6 +251,8 @@ export class StreamTargetWriter extends Writer {
 			data: data.slice(),
 			start: this.pos,
 		});
+		this.target.onwrite?.(this.pos, this.pos + data.byteLength);
+
 		this.pos += data.byteLength;
 
 		this.lastWriteEnd = Math.max(this.lastWriteEnd, this.pos);
@@ -463,8 +466,13 @@ export class StreamTargetWriter extends Writer {
 export class NullTargetWriter extends Writer {
 	private pos = 0;
 
+	constructor(private target: NullTarget) {
+		super();
+	}
+
 	write(data: Uint8Array) {
 		this.maybeTrackWrites(data);
+		this.target.onwrite?.(this.pos, this.pos + data.byteLength);
 		this.pos += data.byteLength;
 	}
 
