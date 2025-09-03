@@ -16,7 +16,6 @@ import {
 	inferCodecFromCodecString,
 	MediaCodec,
 	PCM_AUDIO_CODECS,
-	Quality,
 	SUBTITLE_CODECS,
 	SubtitleCodec,
 	VIDEO_CODECS,
@@ -27,13 +26,14 @@ import { EncodedPacket } from './packet';
 
 /**
  * Configuration object that controls video encoding. Can be used to set codec, quality, and more.
+ * @group Encoding
  * @public
  */
 export type VideoEncodingConfig = {
 	/** The video codec that should be used for encoding the video samples (frames). */
 	codec: VideoCodec;
 	/**
-	 * The target bitrate for the encoded video, in bits per second. Alternatively, a subjective Quality can
+	 * The target bitrate for the encoded video, in bits per second. Alternatively, a subjective {@link Quality} can
 	 * be provided.
 	 */
 	bitrate: number | Quality;
@@ -44,14 +44,14 @@ export type VideoEncodingConfig = {
 	 */
 	keyFrameInterval?: number;
 	/**
-	 * Video frames may change size overtime. This field controls the behavior in case this happens.
+	 * Video frames may change size over time. This field controls the behavior in case this happens.
 	 *
-	 * - 'deny' (default) will throw an error, requiring all frames to have the exact same dimensions.
-	 * - 'passThrough' will allow the change and directly pass the frame to the encoder.
-	 * - 'fill' will stretch the image to fill the entire original box, potentially altering aspect ratio.
-	 * - 'contain' will contain the entire image within the  originalbox while preserving aspect ratio. This may lead to
-	 * letterboxing.
-	 * - 'cover' will scale the image until the entire original box is filled, while preserving aspect ratio.
+	 * - `'deny'` (default) will throw an error, requiring all frames to have the exact same dimensions.
+	 * - `'passThrough'` will allow the change and directly pass the frame to the encoder.
+	 * - `'fill'` will stretch the image to fill the entire original box, potentially altering aspect ratio.
+	 * - `'contain'` will contain the entire image within the original box while preserving aspect ratio. This may lead
+	 * to letterboxing.
+	 * - `'cover'` will scale the image until the entire original box is filled, while preserving aspect ratio.
 	 *
 	 * The "original box" refers to the dimensions of the first encoded frame.
 	 */
@@ -59,7 +59,10 @@ export type VideoEncodingConfig = {
 
 	/** Called for each successfully encoded packet. Both the packet and the encoding metadata are passed. */
 	onEncodedPacket?: (packet: EncodedPacket, meta: EncodedVideoChunkMetadata | undefined) => unknown;
-	/** Called when the internal encoder config, as used by the WebCodecs API, is created. */
+	/**
+	 * Called when the internal [encoder config](https://www.w3.org/TR/webcodecs/#video-encoder-config), as used by the
+	 * WebCodecs API, is created.
+	 */
 	onEncoderConfig?: (config: VideoEncoderConfig) => unknown;
 } & VideoEncodingAdditionalOptions;
 
@@ -100,30 +103,33 @@ export const validateVideoEncodingConfig = (config: VideoEncodingConfig) => {
 
 /**
  * Additional options that control audio encoding.
+ * @group Encoding
  * @public
  */
 export type VideoEncodingAdditionalOptions = {
 	/** Configures the bitrate mode. */
 	bitrateMode?: 'constant' | 'variable';
 	/** The latency mode used by the encoder; controls the performance-quality tradeoff. */
-	latencyMode?: VideoEncoderConfig['latencyMode'];
+	latencyMode?: 'quality' | 'realtime';
 	/**
 	 * The full codec string as specified in the WebCodecs Codec Registry. This string must match the codec
 	 * specified in `codec`. When not set, a fitting codec string will be constructed automatically by the library.
 	 */
 	fullCodecString?: string;
-	/** A hint that configures the hardware acceleration method of this codec. This is best left on 'no-preference'. */
-	hardwareAcceleration?: VideoEncoderConfig['hardwareAcceleration'];
+	/**
+	 * A hint that configures the hardware acceleration method of this codec. This is best left on `'no-preference'`.
+	 */
+	hardwareAcceleration?: 'no-preference' | 'prefer-hardware' | 'prefer-software';
 	/**
 	 * An encoding scalability mode identifier as defined by
 	 * [WebRTC-SVC](https://w3c.github.io/webrtc-svc/#scalabilitymodes*).
 	 */
-	scalabilityMode?: VideoEncoderConfig['scalabilityMode'];
+	scalabilityMode?: string;
 	/**
 	 * An encoding video content hint as defined by
 	 * [mst-content-hint](https://w3c.github.io/mst-content-hint/#video-content-hints).
 	 */
-	contentHint?: VideoEncoderConfig['contentHint'];
+	contentHint?: string;
 };
 
 export const validateVideoEncodingAdditionalOptions = (codec: VideoCodec, options: VideoEncodingAdditionalOptions) => {
@@ -194,20 +200,24 @@ export const buildVideoEncoderConfig = (options: {
 
 /**
  * Configuration object that controls audio encoding. Can be used to set codec, quality, and more.
+ * @group Encoding
  * @public
  */
 export type AudioEncodingConfig = {
 	/** The audio codec that should be used for encoding the audio samples. */
 	codec: AudioCodec;
 	/**
-	 * The target bitrate for the encoded audio, in bits per second. Alternatively, a subjective Quality can
+	 * The target bitrate for the encoded audio, in bits per second. Alternatively, a subjective {@link Quality} can
 	 * be provided. Required for compressed audio codecs, unused for PCM codecs.
 	 */
 	bitrate?: number | Quality;
 
 	/** Called for each successfully encoded packet. Both the packet and the encoding metadata are passed. */
 	onEncodedPacket?: (packet: EncodedPacket, meta: EncodedAudioChunkMetadata | undefined) => unknown;
-	/** Called when the internal encoder config, as used by the WebCodecs API, is created. */
+	/**
+	 * Called when the internal [encoder config](https://www.w3.org/TR/webcodecs/#audio-encoder-config), as used by the
+	 * WebCodecs API, is created.
+	 */
 	onEncoderConfig?: (config: AudioEncoderConfig) => unknown;
 } & AudioEncodingAdditionalOptions;
 
@@ -243,6 +253,7 @@ export const validateAudioEncodingConfig = (config: AudioEncodingConfig) => {
 
 /**
  * Additional options that control audio encoding.
+ * @group Encoding
  * @public
  */
 export type AudioEncodingAdditionalOptions = {
@@ -297,7 +308,118 @@ export const buildAudioEncoderConfig = (options: {
 };
 
 /**
+ * Represents a subjective media quality level.
+ * @group Encoding
+ * @public
+ */
+export class Quality {
+	/** @internal */
+	_factor: number;
+
+	/** @internal */
+	constructor(factor: number) {
+		this._factor = factor;
+	}
+
+	/** @internal */
+	_toVideoBitrate(codec: VideoCodec, width: number, height: number) {
+		const pixels = width * height;
+
+		const codecEfficiencyFactors = {
+			avc: 1.0, // H.264/AVC (baseline)
+			hevc: 0.6, // H.265/HEVC (~40% more efficient than AVC)
+			vp9: 0.6, // Similar to HEVC
+			av1: 0.4, // ~60% more efficient than AVC
+			vp8: 1.2, // Slightly less efficient than AVC
+		};
+
+		const referencePixels = 1920 * 1080;
+		const referenceBitrate = 3000000;
+		const scaleFactor = Math.pow(pixels / referencePixels, 0.95); // Slight non-linear scaling
+		const baseBitrate = referenceBitrate * scaleFactor;
+
+		const codecAdjustedBitrate = baseBitrate * codecEfficiencyFactors[codec];
+		const finalBitrate = codecAdjustedBitrate * this._factor;
+
+		return Math.ceil(finalBitrate / 1000) * 1000;
+	}
+
+	/** @internal */
+	_toAudioBitrate(codec: AudioCodec) {
+		if ((PCM_AUDIO_CODECS as readonly string[]).includes(codec) || codec === 'flac') {
+			return undefined;
+		}
+
+		const baseRates = {
+			aac: 128000, // 128kbps base for AAC
+			opus: 64000, // 64kbps base for Opus
+			mp3: 160000, // 160kbps base for MP3
+			vorbis: 64000, // 64kbps base for Vorbis
+		};
+
+		const baseBitrate = baseRates[codec as keyof typeof baseRates];
+		if (!baseBitrate) {
+			throw new Error(`Unhandled codec: ${codec}`);
+		}
+
+		let finalBitrate = baseBitrate * this._factor;
+
+		if (codec === 'aac') {
+			// AAC only works with specific bitrates, let's find the closest
+			const validRates = [96000, 128000, 160000, 192000];
+			finalBitrate = validRates.reduce((prev, curr) =>
+				Math.abs(curr - finalBitrate) < Math.abs(prev - finalBitrate) ? curr : prev,
+			);
+		} else if (codec === 'opus' || codec === 'vorbis') {
+			finalBitrate = Math.max(6000, finalBitrate);
+		} else if (codec === 'mp3') {
+			const validRates = [
+				8000, 16000, 24000, 32000, 40000, 48000, 64000, 80000,
+				96000, 112000, 128000, 160000, 192000, 224000, 256000, 320000,
+			];
+			finalBitrate = validRates.reduce((prev, curr) =>
+				Math.abs(curr - finalBitrate) < Math.abs(prev - finalBitrate) ? curr : prev,
+			);
+		}
+
+		return Math.round(finalBitrate / 1000) * 1000;
+	}
+}
+
+/**
+ * Represents a very low media quality.
+ * @group Encoding
+ * @public
+ */
+export const QUALITY_VERY_LOW = new Quality(0.3);
+/**
+ * Represents a low media quality.
+ * @group Encoding
+ * @public
+ */
+export const QUALITY_LOW = new Quality(0.6);
+/**
+ * Represents a medium media quality.
+ * @group Encoding
+ * @public
+ */
+export const QUALITY_MEDIUM = new Quality(1);
+/**
+ * Represents a high media quality.
+ * @group Encoding
+ * @public
+ */
+export const QUALITY_HIGH = new Quality(2);
+/**
+ * Represents a very high media quality.
+ * @group Encoding
+ * @public
+ */
+export const QUALITY_VERY_HIGH = new Quality(4);
+
+/**
  * Checks if the browser is able to encode the given codec.
+ * @group Encoding
  * @public
  */
 export const canEncode = (codec: MediaCodec) => {
@@ -314,18 +436,24 @@ export const canEncode = (codec: MediaCodec) => {
 
 /**
  * Checks if the browser is able to encode the given video codec with the given parameters.
+ * @group Encoding
  * @public
  */
-export const canEncodeVideo = async (codec: VideoCodec, {
-	width = 1280,
-	height = 720,
-	bitrate = 1e6,
-	...restOptions
-}: {
-	width?: number;
-	height?: number;
-	bitrate?: number | Quality;
-} & VideoEncodingAdditionalOptions = {}) => {
+export const canEncodeVideo = async (
+	codec: VideoCodec,
+	options: {
+		width?: number;
+		height?: number;
+		bitrate?: number | Quality;
+	} & VideoEncodingAdditionalOptions = {},
+) => {
+	const {
+		width = 1280,
+		height = 720,
+		bitrate = 1e6,
+		...restOptions
+	} = options;
+
 	if (!VIDEO_CODECS.includes(codec)) {
 		return false;
 	}
@@ -377,18 +505,24 @@ export const canEncodeVideo = async (codec: VideoCodec, {
 
 /**
  * Checks if the browser is able to encode the given audio codec with the given parameters.
+ * @group Encoding
  * @public
  */
-export const canEncodeAudio = async (codec: AudioCodec, {
-	numberOfChannels = 2,
-	sampleRate = 48000,
-	bitrate = 128e3,
-	...restOptions
-}: {
-	numberOfChannels?: number;
-	sampleRate?: number;
-	bitrate?: number | Quality;
-} & AudioEncodingAdditionalOptions = {}) => {
+export const canEncodeAudio = async (
+	codec: AudioCodec,
+	options: {
+		numberOfChannels?: number;
+		sampleRate?: number;
+		bitrate?: number | Quality;
+	} & AudioEncodingAdditionalOptions = {},
+) => {
+	const {
+		numberOfChannels = 2,
+		sampleRate = 48000,
+		bitrate = 128e3,
+		...restOptions
+	} = options;
+
 	if (!AUDIO_CODECS.includes(codec)) {
 		return false;
 	}
@@ -442,6 +576,7 @@ export const canEncodeAudio = async (codec: AudioCodec, {
 
 /**
  * Checks if the browser is able to encode the given subtitle codec.
+ * @group Encoding
  * @public
  */
 export const canEncodeSubtitles = async (codec: SubtitleCodec) => {
@@ -454,6 +589,7 @@ export const canEncodeSubtitles = async (codec: SubtitleCodec) => {
 
 /**
  * Returns the list of all media codecs that can be encoded by the browser.
+ * @group Encoding
  * @public
  */
 export const getEncodableCodecs = async (): Promise<MediaCodec[]> => {
@@ -468,10 +604,11 @@ export const getEncodableCodecs = async (): Promise<MediaCodec[]> => {
 
 /**
  * Returns the list of all video codecs that can be encoded by the browser.
+ * @group Encoding
  * @public
  */
 export const getEncodableVideoCodecs = async (
-	checkedCodecs = VIDEO_CODECS as unknown as VideoCodec[],
+	checkedCodecs: VideoCodec[] = VIDEO_CODECS as unknown as VideoCodec[],
 	options?: {
 		width?: number;
 		height?: number;
@@ -484,10 +621,11 @@ export const getEncodableVideoCodecs = async (
 
 /**
  * Returns the list of all audio codecs that can be encoded by the browser.
+ * @group Encoding
  * @public
  */
 export const getEncodableAudioCodecs = async (
-	checkedCodecs = AUDIO_CODECS as unknown as AudioCodec[],
+	checkedCodecs: AudioCodec[] = AUDIO_CODECS as unknown as AudioCodec[],
 	options?: {
 		numberOfChannels?: number;
 		sampleRate?: number;
@@ -500,10 +638,11 @@ export const getEncodableAudioCodecs = async (
 
 /**
  * Returns the list of all subtitle codecs that can be encoded by the browser.
+ * @group Encoding
  * @public
  */
 export const getEncodableSubtitleCodecs = async (
-	checkedCodecs = SUBTITLE_CODECS as unknown as SubtitleCodec[],
+	checkedCodecs: SubtitleCodec[] = SUBTITLE_CODECS as unknown as SubtitleCodec[],
 ): Promise<SubtitleCodec[]> => {
 	const bools = await Promise.all(checkedCodecs.map(canEncodeSubtitles));
 	return checkedCodecs.filter((_, i) => bools[i]);
@@ -511,6 +650,7 @@ export const getEncodableSubtitleCodecs = async (
 
 /**
  * Returns the first video codec from the given list that can be encoded by the browser.
+ * @group Encoding
  * @public
  */
 export const getFirstEncodableVideoCodec = async (
@@ -532,6 +672,7 @@ export const getFirstEncodableVideoCodec = async (
 
 /**
  * Returns the first audio codec from the given list that can be encoded by the browser.
+ * @group Encoding
  * @public
  */
 export const getFirstEncodableAudioCodec = async (
@@ -553,6 +694,7 @@ export const getFirstEncodableAudioCodec = async (
 
 /**
  * Returns the first subtitle codec from the given list that can be encoded by the browser.
+ * @group Encoding
  * @public
  */
 export const getFirstEncodableSubtitleCodec = async (

@@ -15,6 +15,9 @@ hero:
       text: Hop in
       link: /guide/introduction
     - theme: alt
+      text: API
+      link: /api
+    - theme: alt
       text: Examples
       link: /examples
     - theme: alt

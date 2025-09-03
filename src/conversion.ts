@@ -10,15 +10,14 @@ import {
 	AUDIO_CODECS,
 	AudioCodec,
 	NON_PCM_AUDIO_CODECS,
-	Quality,
-	QUALITY_HIGH,
 	VIDEO_CODECS,
 	VideoCodec,
 } from './codec';
 import {
-	AudioEncodingConfig,
 	getEncodableAudioCodecs,
 	getFirstEncodableVideoCodec,
+	Quality,
+	QUALITY_HIGH,
 	VideoEncodingConfig,
 } from './encode';
 import { Input } from './input';
@@ -51,6 +50,7 @@ import { AudioSample, VideoSample } from './sample';
 
 /**
  * The options for media file conversion.
+ * @group Conversion
  * @public
  */
 export type ConversionOptions = {
@@ -62,8 +62,8 @@ export type ConversionOptions = {
 	/**
 	 * Video-specific options. When passing an object, the same options are applied to all video tracks. When passing a
 	 * function, it will be invoked for each video track and is expected to return or resolve to the options
-	 * for that specific track. The function is passed an instance of `InputVideoTrack` as well as a number `n`, which
-	 * is the 1-based index of the track in the list of all video tracks.
+	 * for that specific track. The function is passed an instance of {@link InputVideoTrack} as well as a number `n`,
+	 * which is the 1-based index of the track in the list of all video tracks.
 	 */
 	video?: ConversionVideoOptions
 		| ((track: InputVideoTrack, n: number) => MaybePromise<ConversionVideoOptions | undefined>);
@@ -71,8 +71,8 @@ export type ConversionOptions = {
 	/**
 	 * Audio-specific options. When passing an object, the same options are applied to all audio tracks. When passing a
 	 * function, it will be invoked for each audio track and is expected to return or resolve to the options
-	 * for that specific track. The function is passed an instance of `InputAudioTrack` as well as a number `n`, which
-	 * is the 1-based index of the track in the list of all audio tracks.
+	 * for that specific track. The function is passed an instance of {@link InputAudioTrack} as well as a number `n`,
+	 * which is the 1-based index of the track in the list of all audio tracks.
 	 */
 	audio?: ConversionAudioOptions
 		| ((track: InputAudioTrack, n: number) => MaybePromise<ConversionAudioOptions | undefined>);
@@ -88,10 +88,11 @@ export type ConversionOptions = {
 
 /**
  * Video-specific options.
+ * @group Conversion
  * @public
  */
 export type ConversionVideoOptions = {
-	/** If true, all video tracks will be discarded and will not be present in the output. */
+	/** If `true`, all video tracks will be discarded and will not be present in the output. */
 	discard?: boolean;
 	/**
 	 * The desired width of the output video in pixels, defaulting to the video's natural display width. If height
@@ -106,10 +107,10 @@ export type ConversionVideoOptions = {
 	/**
 	 * The fitting algorithm in case both width and height are set, or if the input video changes its size over time.
 	 *
-	 * - 'fill' will stretch the image to fill the entire box, potentially altering aspect ratio.
-	 * - 'contain' will contain the entire image within the box while preserving aspect ratio. This may lead to
+	 * - `'fill'` will stretch the image to fill the entire box, potentially altering aspect ratio.
+	 * - `'contain'` will contain the entire image within the box while preserving aspect ratio. This may lead to
 	 * letterboxing.
-	 * - 'cover' will scale the image until the entire box is filled, while preserving aspect ratio.
+	 * - `'cover'` will scale the image until the entire box is filled, while preserving aspect ratio.
 	 */
 	fit?: 'fill' | 'contain' | 'cover';
 	/**
@@ -125,17 +126,18 @@ export type ConversionVideoOptions = {
 	/** The desired output video codec. */
 	codec?: VideoCodec;
 	/** The desired bitrate of the output video. */
-	bitrate?: VideoEncodingConfig['bitrate'];
-	/** When true, video will always be re-encoded instead of directly copying over the encoded samples. */
+	bitrate?: number | Quality;
+	/** When `true`, video will always be re-encoded instead of directly copying over the encoded samples. */
 	forceTranscode?: boolean;
 };
 
 /**
  * Audio-specific options.
+ * @group Conversion
  * @public
  */
 export type ConversionAudioOptions = {
-	/** If true, all audio tracks will be discarded and will not be present in the output. */
+	/** If `true`, all audio tracks will be discarded and will not be present in the output. */
 	discard?: boolean;
 	/** The desired channel count of the output audio. */
 	numberOfChannels?: number;
@@ -144,8 +146,8 @@ export type ConversionAudioOptions = {
 	/** The desired output audio codec. */
 	codec?: AudioCodec;
 	/** The desired bitrate of the output audio. */
-	bitrate?: AudioEncodingConfig['bitrate'];
-	/** When true, audio will always be re-encoded instead of directly copying over the encoded samples. */
+	bitrate?: number | Quality;
+	/** When `true`, audio will always be re-encoded instead of directly copying over the encoded samples. */
 	forceTranscode?: boolean;
 };
 
@@ -247,8 +249,40 @@ const FALLBACK_NUMBER_OF_CHANNELS = 2;
 const FALLBACK_SAMPLE_RATE = 48000;
 
 /**
+ * An input track that was discarded (excluded) from a {@link Conversion} alongside the discard reason.
+ * @group Conversion
+ * @public
+ */
+export type DiscardedTrack = {
+	/** The track that was discarded. */
+	track: InputTrack;
+	/**
+	 * The reason for discarding the track.
+	 *
+	 * - `'discarded_by_user'`: You discarded this track by setting `discard: true`.
+	 * - `'max_track_count_reached'`: The output had no more room for another track.
+	 * - `'max_track_count_of_type_reached'`: The output had no more room for another track of this type, or the output
+	 * doesn't support this track type at all.
+	 * - `'unknown_source_codec'`: We don't know the codec of the input track and therefore don't know what to do
+	 * with it.
+	 * - `'undecodable_source_codec'`: The input track's codec is known, but we are unable to decode it.
+	 * - `'no_encodable_target_codec'`: We can't find a codec that we are able to encode and that can be contained
+	 * within the output format. This reason can be hit if the environment doesn't support the necessary encoders, or if
+	 * you requested a codec that cannot be contained within the output format.
+	 */
+	reason:
+		| 'discarded_by_user'
+		| 'max_track_count_reached'
+		| 'max_track_count_of_type_reached'
+		| 'unknown_source_codec'
+		| 'undecodable_source_codec'
+		| 'no_encodable_target_codec';
+};
+
+/**
  * Represents a media file conversion process, used to convert one media file into another. In addition to conversion,
  * this class can be used to resize and rotate video, resample audio, drop tracks, or trim to a specific time range.
+ * @group Conversion
  * @public
  */
 export class Conversion {
@@ -298,7 +332,7 @@ export class Conversion {
 	/**
 	 * A callback that is fired whenever the conversion progresses. Returns a number between 0 and 1, indicating the
 	 * completion of the conversion. Note that a progress of 1 doesn't necessarily mean the conversion is complete;
-	 * the conversion is complete once `execute` resolves.
+	 * the conversion is complete once `execute()` resolves.
 	 *
 	 * In order for progress to be computed, this property must be set before `execute` is called.
 	 */
@@ -311,18 +345,7 @@ export class Conversion {
 	/** The list of tracks that are included in the output file. */
 	readonly utilizedTracks: InputTrack[] = [];
 	/** The list of tracks from the input file that have been discarded, alongside the discard reason. */
-	readonly discardedTracks: {
-		/** The track that was discarded. */
-		track: InputTrack;
-		/** The reason for discarding the track. */
-		reason:
-			| 'discarded_by_user'
-			| 'max_track_count_reached'
-			| 'max_track_count_of_type_reached'
-			| 'unknown_source_codec'
-			| 'undecodable_source_codec'
-			| 'no_encodable_target_codec';
-	}[] = [];
+	readonly discardedTracks: DiscardedTrack[] = [];
 
 	/** Initializes a new conversion process without starting the conversion. */
 	static async init(options: ConversionOptions) {
@@ -332,6 +355,7 @@ export class Conversion {
 		return conversion;
 	}
 
+	/** Creates a new Conversion instance (duh). */
 	private constructor(options: ConversionOptions) {
 		if (!options || typeof options !== 'object') {
 			throw new TypeError('options must be an object.');

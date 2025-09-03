@@ -16,6 +16,7 @@ import {
 	promiseWithResolvers,
 	retriedFetch,
 	toDataView,
+	toUint8Array,
 } from './misc';
 
 export type ReadResult = {
@@ -27,6 +28,7 @@ export type ReadResult = {
 
 /**
  * The source base class, representing a resource from which bytes can be read.
+ * @group Input sources
  * @public
  */
 export abstract class Source {
@@ -69,6 +71,7 @@ export abstract class Source {
 
 /**
  * A source backed by an ArrayBuffer or ArrayBufferView, with the entire file held in memory.
+ * @group Input sources
  * @public
  */
 export class BufferSource extends Source {
@@ -79,15 +82,16 @@ export class BufferSource extends Source {
 	/** @internal */
 	_onreadCalled = false;
 
-	constructor(buffer: ArrayBuffer | Uint8Array) {
-		if (!(buffer instanceof ArrayBuffer) && !(buffer instanceof Uint8Array)) {
-			throw new TypeError('buffer must be an ArrayBuffer or Uint8Array.');
+	/** Creates a new {@link BufferSource} backed the specified `ArrayBuffer` or `ArrayBufferView`. */
+	constructor(buffer: ArrayBuffer | ArrayBufferView) {
+		if (!(buffer instanceof ArrayBuffer) && !ArrayBuffer.isView(buffer)) {
+			throw new TypeError('buffer must be an ArrayBuffer or ArrayBufferView.');
 		}
 
 		super();
 
-		this._bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
-		this._view = toDataView(this._bytes);
+		this._bytes = toUint8Array(buffer);
+		this._view = toDataView(buffer);
 	}
 
 	/** @internal */
@@ -112,7 +116,8 @@ export class BufferSource extends Source {
 }
 
 /**
- * Options for BlobSource.
+ * Options for {@link BlobSource}.
+ * @group Input sources
  * @public
  */
 export type BlobSourceOptions = {
@@ -121,7 +126,10 @@ export type BlobSourceOptions = {
 };
 
 /**
- * A source backed by a Blob. Since Files are also Blobs, this is the source to use when reading files off the disk.
+ * A source backed by a [`Blob`](https://developer.mozilla.org/en-US/docs/Web/API/Blob). Since a
+ * [`File`](https://developer.mozilla.org/en-US/docs/Web/API/File) is also a `Blob`, this is the source to use when
+ * reading files off the disk.
+ * @group Input sources
  * @public
  */
 export class BlobSource extends Source {
@@ -130,6 +138,10 @@ export class BlobSource extends Source {
 	/** @internal */
 	_orchestrator: ReadOrchestrator;
 
+	/**
+	 * Creates a new {@link BlobSource} backed by the specified
+	 * [`Blob`](https://developer.mozilla.org/en-US/docs/Web/API/Blob).
+	 */
 	constructor(blob: Blob, options: BlobSourceOptions = {}) {
 		if (!(blob instanceof Blob)) {
 			throw new TypeError('blob must be a Blob.');
@@ -203,13 +215,14 @@ export class BlobSource extends Source {
 const URL_SOURCE_MIN_LOAD_AMOUNT = 0.5 * 2 ** 20; // 0.5 MiB
 
 /**
- * Options for UrlSource.
+ * Options for {@link UrlSource}.
+ * @group Input sources
  * @public
  */
 export type UrlSourceOptions = {
 	/**
-	 * The RequestInit used by the Fetch API. Can be used to further control the requests, such as setting
-	 * custom headers.
+	 * The [`RequestInit`](https://developer.mozilla.org/en-US/docs/Web/API/RequestInit) used by the Fetch API. Can be
+	 * used to further control the requests, such as setting custom headers.
 	 */
 	requestInit?: RequestInit;
 
@@ -228,6 +241,7 @@ export type UrlSourceOptions = {
 /**
  * A source backed by a URL. This is useful for reading data from the network. Requests will be made using an optimized
  * reading and prefetching pattern to minimize request count and latency.
+ * @group Input sources
  * @public
  */
 export class UrlSource extends Source {
@@ -245,6 +259,7 @@ export class UrlSource extends Source {
 		abortController: AbortController;
 	}>();
 
+	/** Creates a new {@link UrlSource} backed by the resource at the specified URL. */
 	constructor(
 		url: string | URL,
 		options: UrlSourceOptions = {},
@@ -476,7 +491,8 @@ export class UrlSource extends Source {
 }
 
 /**
- * Options for FilePathSource.
+ * Options for {@link FilePathSource}.
+ * @group Input sources
  * @public
  */
 export type FilePathSourceOptions = {
@@ -486,12 +502,14 @@ export type FilePathSourceOptions = {
 
 /**
  * A source backed by a path to a file. Intended for server-side usage in Node, Bun, or Deno.
+ * @group Input sources
  * @public
  */
 export class FilePathSource extends Source {
 	/** @internal */
 	_streamSource: StreamSource;
 
+	/** Creates a new {@link FilePathSource} backed by the file at the specified file path. */
 	constructor(filePath: string, options: BlobSourceOptions = {}) {
 		if (typeof filePath !== 'string') {
 			throw new TypeError('filePath must be a string.');
@@ -544,7 +562,8 @@ export class FilePathSource extends Source {
 }
 
 /**
- * Options for defining a StreamSource.
+ * Options for defining a {@link StreamSource}.
+ * @group Input sources
  * @public
  */
 export type StreamSourceOptions = {
@@ -564,7 +583,7 @@ export type StreamSourceOptions = {
 	maxCacheSize?: number;
 
 	/**
-	 * Specifies the prefetch profile that the reader should use with this source. A prefetch propfile specifies the
+	 * Specifies the prefetch profile that the reader should use with this source. A prefetch profile specifies the
 	 * pattern with which bytes outside of the requested range are preloaded to reduce latency for future reads.
 	 *
 	 * - `'none'` (default): No prefetching; only the data needed in the moment is requested.
@@ -579,6 +598,7 @@ export type StreamSourceOptions = {
 
 /**
  * A general-purpose, callback-driven source that can get its data from anywhere.
+ * @group Input sources
  * @public
  */
 export class StreamSource extends Source {
@@ -587,6 +607,7 @@ export class StreamSource extends Source {
 	/** @internal */
 	_orchestrator: ReadOrchestrator;
 
+	/** Creates a new {@link StreamSource} whose behavior is specified by `options`.  */
 	constructor(options: StreamSourceOptions) {
 		if (!options || typeof options !== 'object') {
 			throw new TypeError('options must be an object.');
@@ -718,7 +739,8 @@ type ReadableStreamSourcePendingSlice = {
 };
 
 /**
- * Options for ReadableStreamSource.
+ * Options for {@link ReadableStreamSource}.
+ * @group Input sources
  * @public
  */
 export type ReadableStreamSourceOptions = {
@@ -727,16 +749,17 @@ export type ReadableStreamSourceOptions = {
 };
 
 /**
- * A source backed by a `ReadableStream` of `Uint8Array`, representing an append-only byte stream of unknown
- * length. This is the source to use for incrementally streaming in input files that are still being constructed and
- * whose size we don't yet know, like for example the output chunks of
- * [MediaRecorder](https://developer.mozilla.org/en-US/docs/Web/API/MediaRecorder).
+ * A source backed by a [`ReadableStream`](https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream) of
+ * `Uint8Array`, representing an append-only byte stream of unknown length. This is the source to use for incrementally
+ * streaming in input files that are still being constructed and whose size we don't yet know, like for example the
+ * output chunks of [MediaRecorder](https://developer.mozilla.org/en-US/docs/Web/API/MediaRecorder).
  *
  * This source is *unsized*, meaning calls to `.getSize()` will throw and readers are more limited due to the
  * lack of random file access. You should only use this source with sequential access patterns, such as reading all
  * packets from start to end. This source does not work well with random access patterns unless you increase its
  * max cache size.
  *
+ * @group Input sources
  * @public
  */
 export class ReadableStreamSource extends Source {
@@ -761,6 +784,7 @@ export class ReadableStreamSource extends Source {
 	/** @internal */
 	_pulling = false;
 
+	/** Creates a new {@link ReadableStreamSource} backed by the specified `ReadableStream<Uint8Array>`. */
 	constructor(stream: ReadableStream<Uint8Array>, options: ReadableStreamSourceOptions = {}) {
 		if (!(stream instanceof ReadableStream)) {
 			throw new TypeError('stream must be a ReadableStream.');

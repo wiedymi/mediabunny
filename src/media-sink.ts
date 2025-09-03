@@ -32,11 +32,12 @@ import { AudioSample, VideoSample } from './sample';
 
 /**
  * Additional options for controlling packet retrieval.
+ * @group Media sinks
  * @public
  */
 export type PacketRetrievalOptions = {
 	/**
-	 * When set to true, only packet metadata (like timestamp) will be retrieved - the actual packet data will not
+	 * When set to `true`, only packet metadata (like timestamp) will be retrieved - the actual packet data will not
 	 * be loaded.
 	 */
 	metadataOnly?: boolean;
@@ -97,12 +98,14 @@ const maybeFixPacketType = (
 
 /**
  * Sink for retrieving encoded packets from an input track.
+ * @group Media sinks
  * @public
  */
 export class EncodedPacketSink {
 	/** @internal */
 	_track: InputTrack;
 
+	/** Creates a new {@link EncodedPacketSink} for the given {@link InputTrack}. */
 	constructor(track: InputTrack) {
 		if (!(track instanceof InputTrack)) {
 			throw new TypeError('track must be an InputTrack.');
@@ -342,6 +345,7 @@ abstract class DecoderWrapper<
 
 /**
  * Base class for decoded media sample sinks.
+ * @group Media sinks
  * @public
  */
 export abstract class BaseMediaSampleSink<
@@ -894,12 +898,14 @@ class VideoDecoderWrapper extends DecoderWrapper<VideoSample> {
 
 /**
  * A sink that retrieves decoded video samples (video frames) from a video track.
+ * @group Media sinks
  * @public
  */
 export class VideoSampleSink extends BaseMediaSampleSink<VideoSample> {
 	/** @internal */
 	_videoTrack: InputVideoTrack;
 
+	/** Creates a new {@link VideoSampleSink} for the given {@link InputVideoTrack}. */
 	constructor(videoTrack: InputVideoTrack) {
 		if (!(videoTrack instanceof InputVideoTrack)) {
 			throw new TypeError('videoTrack must be an InputVideoTrack.');
@@ -978,6 +984,7 @@ export class VideoSampleSink extends BaseMediaSampleSink<VideoSample> {
 
 /**
  * A canvas with additional timing information (timestamp & duration).
+ * @group Media sinks
  * @public
  */
 export type WrappedCanvas = {
@@ -991,6 +998,7 @@ export type WrappedCanvas = {
 
 /**
  * Options for constructing a CanvasSink.
+ * @group Media sinks
  * @public
  */
 export type CanvasSinkOptions = {
@@ -1007,10 +1015,10 @@ export type CanvasSinkOptions = {
 	/**
 	 * The fitting algorithm in case both width and height are set.
 	 *
-	 * - 'fill' will stretch the image to fill the entire box, potentially altering aspect ratio.
-	 * - 'contain' will contain the entire image within the box while preserving aspect ratio. This may lead to
+	 * - `'fill'` will stretch the image to fill the entire box, potentially altering aspect ratio.
+	 * - `'contain'` will contain the entire image within the box while preserving aspect ratio. This may lead to
 	 * letterboxing.
-	 * - 'cover' will scale the image until the entire box is filled, while preserving aspect ratio.
+	 * - `'cover'` will scale the image until the entire box is filled, while preserving aspect ratio.
 	 */
 	fit?: 'fill' | 'contain' | 'cover';
 	/**
@@ -1032,7 +1040,9 @@ export type CanvasSinkOptions = {
  * directly retrieving frames, as it comes with common preprocessing steps such as resizing or applying rotation
  * metadata.
  *
- * This sink will yield HTMLCanvasElements when in a DOM context, and OffscreenCanvases otherwise.
+ * This sink will yield `HTMLCanvasElement`s when in a DOM context, and `OffscreenCanvas`es otherwise.
+ *
+ * @group Media sinks
  * @public
  */
 export class CanvasSink {
@@ -1053,6 +1063,7 @@ export class CanvasSink {
 	/** @internal */
 	_nextCanvasIndex = 0;
 
+	/** Creates a new {@link CanvasSink} for the given {@link InputVideoTrack}. */
 	constructor(videoTrack: InputVideoTrack, options: CanvasSinkOptions = {}) {
 		if (!(videoTrack instanceof InputVideoTrack)) {
 			throw new TypeError('videoTrack must be an InputVideoTrack.');
@@ -1509,12 +1520,14 @@ class PcmAudioDecoderWrapper extends DecoderWrapper<AudioSample> {
 
 /**
  * Sink for retrieving decoded audio samples from an audio track.
+ * @group Media sinks
  * @public
  */
 export class AudioSampleSink extends BaseMediaSampleSink<AudioSample> {
 	/** @internal */
 	_audioTrack: InputAudioTrack;
 
+	/** Creates a new {@link AudioSampleSink} for the given {@link InputAudioTrack}. */
 	constructor(audioTrack: InputAudioTrack) {
 		if (!(audioTrack instanceof InputAudioTrack)) {
 			throw new TypeError('audioTrack must be an InputAudioTrack.');
@@ -1595,6 +1608,7 @@ export class AudioSampleSink extends BaseMediaSampleSink<AudioSample> {
 
 /**
  * An AudioBuffer with additional timing information (timestamp & duration).
+ * @group Media sinks
  * @public
  */
 export type WrappedAudioBuffer = {
@@ -1607,14 +1621,17 @@ export type WrappedAudioBuffer = {
 };
 
 /**
- * A sink that retrieves decoded audio samples from an audio track and converts them to AudioBuffers. This is often
- * more useful than directly retrieving audio samples, as AudioBuffers can be directly used with the Web Audio API.
+ * A sink that retrieves decoded audio samples from an audio track and converts them to `AudioBuffer` instances. This is
+ * often more useful than directly retrieving audio samples, as audio buffers can be directly used with the
+ * Web Audio API.
+ * @group Media sinks
  * @public
  */
 export class AudioBufferSink {
 	/** @internal */
 	_audioSampleSink: AudioSampleSink;
 
+	/** Creates a new {@link AudioBufferSink} for the given {@link InputAudioTrack}. */
 	constructor(audioTrack: InputAudioTrack) {
 		if (!(audioTrack instanceof InputAudioTrack)) {
 			throw new TypeError('audioTrack must be an InputAudioTrack.');

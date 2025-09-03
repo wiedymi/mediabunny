@@ -16,6 +16,7 @@ import { EncodedPacket, PacketType } from './packet';
 
 /**
  * Contains aggregate statistics about the encoded packets of a track.
+ * @group Input files & tracks
  * @public
  */
 export type PacketStats = {
@@ -46,6 +47,7 @@ export interface InputTrackBacking {
 
 /**
  * Represents a media track in an input file.
+ * @group Input files & tracks
  * @public
  */
 export abstract class InputTrack {
@@ -71,12 +73,12 @@ export abstract class InputTrack {
 	 */
 	abstract determinePacketType(packet: EncodedPacket): Promise<PacketType | null>;
 
-	/** Returns true iff this track is a video track. */
+	/** Returns true if and only if this track is a video track. */
 	isVideoTrack(): this is InputVideoTrack {
 		return this instanceof InputVideoTrack;
 	}
 
-	/** Returns true iff this track is an audio track. */
+	/** Returns true if and only if this track is an audio track. */
 	isAudioTrack(): this is InputAudioTrack {
 		return this instanceof InputAudioTrack;
 	}
@@ -92,17 +94,19 @@ export abstract class InputTrack {
 	 *
 	 * This field can be used to determine the codec of a track in case Mediabunny doesn't know that codec.
 	 *
-	 * - For ISOBMFF files, this field returns the name of the Sample Description Box (e.g. 'avc1').
-	 * - For Matroska files, this field returns the value of the CodecID element.
-	 * - For WAVE files, this field returns the value of the format tag in the 'fmt ' chunk.
-	 * - For ADTS files, this field contains the MPEG-4 Audio Object Type.
+	 * - For ISOBMFF files, this field returns the name of the Sample Description Box (e.g. `'avc1'`).
+	 * - For Matroska files, this field returns the value of the `CodecID` element.
+	 * - For WAVE files, this field returns the value of the format tag in the `'fmt '` chunk.
+	 * - For ADTS files, this field contains the `MPEG-4 Audio Object Type`.
 	 * - In all other cases, this field is `null`.
 	 */
 	get internalCodecId() {
 		return this._backing.getInternalCodecId();
 	}
 
-	/** The ISO 639-2/T language code for this track. If the language is unknown, this field is 'und' (undetermined). */
+	/**
+	 * The ISO 639-2/T language code for this track. If the language is unknown, this field is `'und'` (undetermined).
+	 */
 	get languageCode() {
 		return this._backing.getLanguageCode();
 	}
@@ -189,6 +193,7 @@ export interface InputVideoTrackBacking extends InputTrackBacking {
 
 /**
  * Represents a video track in an input file.
+ * @group Input files & tracks
  * @public
  */
 export class InputVideoTrack extends InputTrack {
@@ -206,7 +211,7 @@ export class InputVideoTrack extends InputTrack {
 		return 'video';
 	}
 
-	get codec() {
+	get codec(): VideoCodec | null {
 		return this._backing.getCodec();
 	}
 
@@ -252,8 +257,8 @@ export class InputVideoTrack extends InputTrack {
 	}
 
 	/**
-	 * Returns the decoder configuration for decoding the track's packets using a VideoDecoder. Returns null if the
-	 * track's codec is unknown.
+	 * Returns the [decoder configuration](https://www.w3.org/TR/webcodecs/#video-decoder-config) for decoding the
+	 * track's packets using a VideoDecoder. Returns null if the track's codec is unknown.
 	 */
 	getDecoderConfig() {
 		return this._backing.getDecoderConfig();
@@ -315,6 +320,7 @@ export interface InputAudioTrackBacking extends InputTrackBacking {
 
 /**
  * Represents an audio track in an input file.
+ * @group Input files & tracks
  * @public
  */
 export class InputAudioTrack extends InputTrack {
@@ -347,8 +353,8 @@ export class InputAudioTrack extends InputTrack {
 	}
 
 	/**
-	 * Returns the decoder configuration for decoding the track's packets using an AudioDecoder. Returns null if the
-	 * track's codec is unknown.
+	 * Returns the [decoder configuration](https://www.w3.org/TR/webcodecs/#audio-decoder-config) for decoding the
+	 * track's packets using an AudioDecoder. Returns null if the track's codec is unknown.
 	 */
 	getDecoderConfig() {
 		return this._backing.getDecoderConfig();

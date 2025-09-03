@@ -184,6 +184,7 @@ npm run build # Production build with type definitions
 npm run check # Type checking
 npm run lint # ESLint
 
+npm run docs:generate # Generates API docs
 npm run docs:dev # Start docs development server
 npm run dev # Start examples development server
 

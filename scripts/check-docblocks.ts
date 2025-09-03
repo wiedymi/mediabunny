@@ -16,6 +16,7 @@ const checkDocblocks = (filePath: string) => {
 		if (
 			ts.isInterfaceDeclaration(node)
 			|| ts.isClassDeclaration(node)
+			|| ts.isConstructorDeclaration(node)
 			|| ts.isMethodDeclaration(node)
 			|| ts.isGetAccessorDeclaration(node)
 			|| ts.isSetAccessorDeclaration(node)
@@ -60,7 +61,13 @@ const checkDocblocks = (filePath: string) => {
 			let name = 'anonymous';
 			const kind = ts.SyntaxKind[node.kind].replace(/Declaration|Statement/g, '').toLowerCase();
 
-			if ('name' in node && node.name) {
+			if (ts.isConstructorDeclaration(node)) {
+				// For constructors, use the parent class name
+				const parent = node.parent;
+				if (ts.isClassDeclaration(parent) && parent.name) {
+					name = parent.name.text;
+				}
+			} else if ('name' in node && node.name) {
 				if (ts.isIdentifier(node.name)) {
 					name = node.name.text;
 				} else if ('getText' in node.name) {
@@ -137,9 +144,22 @@ const checkDocblocks = (filePath: string) => {
 
 		for (const node of jsDocNodes) {
 			if (ts.isJSDoc(node)) {
-				const commentText = node.comment ?? '';
-				if (typeof commentText !== 'string') {
-					throw new Error('Can\'t handle this yet!');
+				let commentText = '';
+
+				if (typeof node.comment === 'string') {
+					commentText = node.comment;
+				} else if (Array.isArray(node.comment)) {
+					// Handle JSDoc comment parts (including @link tags)
+					commentText = node.comment
+						.map((part) => {
+							if (typeof part === 'string') {
+								return part;
+							} else if (part && typeof part === 'object' && 'text' in part) {
+								return part.text || '';
+							}
+							return '';
+						})
+						.join('');
 				}
 
 				// Remove all @tags with regex

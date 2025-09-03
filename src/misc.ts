@@ -14,6 +14,7 @@ export function assert(x: unknown): asserts x {
 
 /**
  * Represents a clockwise rotation in degrees.
+ * @group Miscellaneous
  * @public
  */
 export type Rotation = 0 | 90 | 180 | 270;
@@ -355,6 +356,7 @@ export const findLastIndex = <T>(arr: T[], predicate: (x: T) => boolean) => {
 
 /**
  * Sync or async iterable.
+ * @group Miscellaneous
  * @public
  */
 export type AnyIterable<T> =
@@ -501,6 +503,7 @@ export const SECOND_TO_MICROSECOND_FACTOR = 1e6 * (1 + Number.EPSILON);
 
 /**
  * Sets all keys K of T to be required.
+ * @group Miscellaneous
  * @public
  */
 export type SetRequired<T, K extends keyof T> = T & Required<Pick<T, K>>;
@@ -630,6 +633,7 @@ export const isSafari = () => {
 
 /**
  * T or a promise that resolves to T.
+ * @group Miscellaneous
  * @public
  */
 export type MaybePromise<T> = T | Promise<T>;
