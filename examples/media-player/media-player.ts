@@ -2,7 +2,6 @@ import {
 	ALL_FORMATS,
 	AudioBufferSink,
 	BlobSource,
-	BufferSource,
 	CanvasSink,
 	Input,
 	UrlSource,
@@ -92,7 +91,7 @@ const initMediaPlayer = async (resource: File | string) => {
 
 		// Create an Input from the resource
 		const source = resource instanceof File
-			? new BufferSource(await resource.arrayBuffer())// new BlobSource(resource)
+			? new BlobSource(resource)
 			: new UrlSource(resource);
 		const input = new Input({
 			source,
