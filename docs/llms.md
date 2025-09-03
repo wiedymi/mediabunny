@@ -23,6 +23,6 @@ This file contains the entire public TypeScript API of Mediabunny and is comment
 
 This file provides an index of Mediabunny's guide, which the AI can then further dive into if it wants to.
 
-### [llms_full.txt](/llms-full.txt)
+### [llms-full.txt](/llms-full.txt)
 
 This is just the entire Mediabunny guide in a single file.
