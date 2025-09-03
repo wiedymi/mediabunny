@@ -35,6 +35,7 @@ export default withMermaid({
 		nav: [
 			{ text: 'Guide', link: '/guide/introduction', activeMatch: '/guide' },
 			{ text: 'API', link: '/api', activeMatch: '/api' },
+			{ text: 'LLMs', link: '/llms', activeMatch: '/llms' },
 			{ text: 'Examples', link: '/examples', activeMatch: '/examples' },
 			{ text: 'Sponsors', link: '/#sponsors', activeMatch: '/#sponsors' },
 			{ text: 'License', link: 'https://github.com/Vanilagy/mediabunny#license' },
@@ -121,7 +122,11 @@ export default withMermaid({
 		plugins: [
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			tailwindcss() as any,
-			llmstxt(),
+			llmstxt({
+				ignoreFiles: [
+					'api/*',
+				],
+			}),
 		],
 	},
 	outDir: '../dist-docs',
