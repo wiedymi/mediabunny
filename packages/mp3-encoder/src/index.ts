@@ -200,6 +200,7 @@ class Mp3Encoder extends CustomAudioEncoder {
  * }
  * ```
  *
+ * @group \@mediabunny/mp3-encoder
  * @public
  */
 export const registerMp3Encoder = () => {

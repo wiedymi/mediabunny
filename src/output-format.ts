@@ -29,6 +29,7 @@ import { WaveMuxer } from './wave/wave-muxer';
 
 /**
  * Specifies an inclusive range of integers.
+ * @group Miscellaneous
  * @public
  */
 export type InclusiveIntegerRange = {
@@ -40,6 +41,7 @@ export type InclusiveIntegerRange = {
 
 /**
  * Specifies the number of tracks (for each track type and in total) that an output format supports.
+ * @group Output formats
  * @public
  */
 export type TrackCountLimits = {
@@ -51,6 +53,7 @@ export type TrackCountLimits = {
 
 /**
  * Base class representing an output media file format.
+ * @group Output formats
  * @public
  */
 export abstract class OutputFormat {
@@ -97,6 +100,7 @@ export abstract class OutputFormat {
 
 /**
  * ISOBMFF-specific output options.
+ * @group Output formats
  * @public
  */
 export type IsobmffOutputFormatOptions = {
@@ -168,12 +172,14 @@ export type IsobmffOutputFormatOptions = {
 
 /**
  * Format representing files compatible with the ISO base media file format (ISOBMFF), like MP4 or MOV files.
+ * @group Output formats
  * @public
  */
 export abstract class IsobmffOutputFormat extends OutputFormat {
 	/** @internal */
 	_options: IsobmffOutputFormatOptions;
 
+	/** Internal constructor. */
 	constructor(options: IsobmffOutputFormatOptions = {}) {
 		if (!options || typeof options !== 'object') {
 			throw new TypeError('options must be an object.');
@@ -225,10 +231,16 @@ export abstract class IsobmffOutputFormat extends OutputFormat {
 }
 
 /**
- * MPEG-4 Part 14 (MP4) file format. Supports all codecs except PCM audio codecs.
+ * MPEG-4 Part 14 (MP4) file format. Supports most codecs.
+ * @group Output formats
  * @public
  */
 export class Mp4OutputFormat extends IsobmffOutputFormat {
+	/** Creates a new {@link Mp4OutputFormat} configured with the specified `options`. */
+	constructor(options?: IsobmffOutputFormatOptions) {
+		super(options);
+	}
+
 	/** @internal */
 	get _name() {
 		return 'MP4';
@@ -273,9 +285,15 @@ export class Mp4OutputFormat extends IsobmffOutputFormat {
 
 /**
  * QuickTime File Format (QTFF), often called MOV. Supports all video and audio codecs, but not subtitle codecs.
+ * @group Output formats
  * @public
  */
 export class MovOutputFormat extends IsobmffOutputFormat {
+	/** Creates a new {@link MovOutputFormat} configured with the specified `options`. */
+	constructor(options?: IsobmffOutputFormatOptions) {
+		super(options);
+	}
+
 	/** @internal */
 	get _name() {
 		return 'MOV';
@@ -308,6 +326,7 @@ export class MovOutputFormat extends IsobmffOutputFormat {
 
 /**
  * Matroska-specific output options.
+ * @group Output formats
  * @public
  */
 export type MkvOutputFormatOptions = {
@@ -353,12 +372,14 @@ export type MkvOutputFormatOptions = {
 
 /**
  * Matroska file format.
+ * @group Output formats
  * @public
  */
 export class MkvOutputFormat extends OutputFormat {
 	/** @internal */
 	_options: MkvOutputFormatOptions;
 
+	/** Creates a new {@link MkvOutputFormat} configured with the specified `options`. */
 	constructor(options: MkvOutputFormatOptions = {}) {
 		if (!options || typeof options !== 'object') {
 			throw new TypeError('options must be an object.');
@@ -431,15 +452,22 @@ export class MkvOutputFormat extends OutputFormat {
 
 /**
  * WebM-specific output options.
+ * @group Output formats
  * @public
  */
 export type WebMOutputFormatOptions = MkvOutputFormatOptions;
 
 /**
  * WebM file format, based on Matroska.
+ * @group Output formats
  * @public
  */
 export class WebMOutputFormat extends MkvOutputFormat {
+	/** Creates a new {@link WebMOutputFormat} configured with the specified `options`. */
+	constructor(options?: MkvOutputFormatOptions) {
+		super(options);
+	}
+
 	override getSupportedCodecs(): MediaCodec[] {
 		return [
 			...VIDEO_CODECS.filter(codec => ['vp8', 'vp9', 'av1'].includes(codec)),
@@ -473,12 +501,13 @@ export class WebMOutputFormat extends MkvOutputFormat {
 
 /**
  * MP3-specific output options.
+ * @group Output formats
  * @public
  */
 export type Mp3OutputFormatOptions = {
 	/**
 	 * Controls whether the Xing header, which contains additional metadata as well as an index, is written to the start
-	 * of the MP3 file. When disabled, the writing process becomes append-only. Defaults to true.
+	 * of the MP3 file. When disabled, the writing process becomes append-only. Defaults to `true`.
 	 */
 	xingHeader?: boolean;
 
@@ -493,12 +522,14 @@ export type Mp3OutputFormatOptions = {
 
 /**
  * MP3 file format.
+ * @group Output formats
  * @public
  */
 export class Mp3OutputFormat extends OutputFormat {
 	/** @internal */
 	_options: Mp3OutputFormatOptions;
 
+	/** Creates a new {@link Mp3OutputFormat} configured with the specified `options`. */
 	constructor(options: Mp3OutputFormatOptions = {}) {
 		if (!options || typeof options !== 'object') {
 			throw new TypeError('options must be an object.');
@@ -553,12 +584,13 @@ export class Mp3OutputFormat extends OutputFormat {
 
 /**
  * WAVE-specific output options.
+ * @group Output formats
  * @public
  */
 export type WavOutputFormatOptions = {
 	/**
-	 * When enabled, an RF64 file be written, allowing for file sizes to exceed 4 GiB, which is otherwise not possible
-	 * for regular WAVE files.
+	 * When enabled, an RF64 file will be written, allowing for file sizes to exceed 4 GiB, which is otherwise not
+	 * possible for regular WAVE files.
 	 */
 	large?: boolean;
 
@@ -571,12 +603,14 @@ export type WavOutputFormatOptions = {
 
 /**
  * WAVE file format, based on RIFF.
+ * @group Output formats
  * @public
  */
 export class WavOutputFormat extends OutputFormat {
 	/** @internal */
 	_options: WavOutputFormatOptions;
 
+	/** Creates a new {@link WavOutputFormat} configured with the specified `options`. */
 	constructor(options: WavOutputFormatOptions = {}) {
 		if (!options || typeof options !== 'object') {
 			throw new TypeError('options must be an object.');
@@ -635,6 +669,7 @@ export class WavOutputFormat extends OutputFormat {
 
 /**
  * Ogg-specific output options.
+ * @group Output formats
  * @public
  */
 export type OggOutputFormatOptions = {
@@ -643,19 +678,21 @@ export type OggOutputFormatOptions = {
 	 *
 	 * @param data - The raw bytes.
 	 * @param position - The byte offset of the data in the file.
-	 * @param source - The media source backing the page's logical bitstream (track).
+	 * @param source - The {@link MediaSource} backing the page's logical bitstream (track).
 	 */
 	onPage?: (data: Uint8Array, position: number, source: MediaSource) => unknown;
 };
 
 /**
  * Ogg file format.
+ * @group Output formats
  * @public
  */
 export class OggOutputFormat extends OutputFormat {
 	/** @internal */
 	_options: OggOutputFormatOptions;
 
+	/** Creates a new {@link OggOutputFormat} configured with the specified `options`. */
 	constructor(options: OggOutputFormatOptions = {}) {
 		if (!options || typeof options !== 'object') {
 			throw new TypeError('options must be an object.');
@@ -709,6 +746,7 @@ export class OggOutputFormat extends OutputFormat {
 
 /**
  * ADTS-specific output options.
+ * @group Output formats
  * @public
  */
 export type AdtsOutputFormatOptions = {
@@ -723,12 +761,14 @@ export type AdtsOutputFormatOptions = {
 
 /**
  * ADTS file format.
+ * @group Output formats
  * @public
  */
 export class AdtsOutputFormat extends OutputFormat {
 	/** @internal */
 	_options: AdtsOutputFormatOptions;
 
+	/** Creates a new {@link AdtsOutputFormat} configured with the specified `options`. */
 	constructor(options: AdtsOutputFormatOptions = {}) {
 		if (!options || typeof options !== 'object') {
 			throw new TypeError('options must be an object.');

@@ -31,6 +31,7 @@ import { readAscii } from './reader';
 
 /**
  * Base class representing an input media file format.
+ * @group Input formats
  * @public
  */
 export abstract class InputFormat {
@@ -48,6 +49,7 @@ export abstract class InputFormat {
 
 /**
  * Format representing files compatible with the ISO base media file format (ISOBMFF), like MP4 or MOV files.
+ * @group Input formats
  * @public
  */
 export abstract class IsobmffInputFormat extends InputFormat {
@@ -75,6 +77,10 @@ export abstract class IsobmffInputFormat extends InputFormat {
 
 /**
  * MPEG-4 Part 14 (MP4) file format.
+ *
+ * Do not instantiate this class; use the {@link MP4} singleton instead.
+ *
+ * @group Input formats
  * @public
  */
 export class Mp4InputFormat extends IsobmffInputFormat {
@@ -95,6 +101,10 @@ export class Mp4InputFormat extends IsobmffInputFormat {
 
 /**
  * QuickTime File Format (QTFF), often called MOV.
+ *
+ * Do not instantiate this class; use the {@link QTFF} singleton instead.
+ *
+ * @group Input formats
  * @public
  */
 export class QuickTimeInputFormat extends IsobmffInputFormat {
@@ -115,6 +125,10 @@ export class QuickTimeInputFormat extends IsobmffInputFormat {
 
 /**
  * Matroska file format.
+ *
+ * Do not instantiate this class; use the {@link MATROSKA} singleton instead.
+ *
+ * @group Input formats
  * @public
  */
 export class MatroskaInputFormat extends InputFormat {
@@ -211,6 +225,10 @@ export class MatroskaInputFormat extends InputFormat {
 
 /**
  * WebM file format, based on Matroska.
+ *
+ * Do not instantiate this class; use the {@link WEBM} singleton instead.
+ *
+ * @group Input formats
  * @public
  */
 export class WebMInputFormat extends MatroskaInputFormat {
@@ -230,6 +248,10 @@ export class WebMInputFormat extends MatroskaInputFormat {
 
 /**
  * MP3 file format.
+ *
+ * Do not instantiate this class; use the {@link MP3} singleton instead.
+ *
+ * @group Input formats
  * @public
  */
 export class Mp3InputFormat extends InputFormat {
@@ -294,6 +316,10 @@ export class Mp3InputFormat extends InputFormat {
 
 /**
  * WAVE file format, based on RIFF.
+ *
+ * Do not instantiate this class; use the {@link WAVE} singleton instead.
+ *
+ * @group Input formats
  * @public
  */
 export class WaveInputFormat extends InputFormat {
@@ -330,6 +356,10 @@ export class WaveInputFormat extends InputFormat {
 
 /**
  * Ogg file format.
+ *
+ * Do not instantiate this class; use the {@link OGG} singleton instead.
+ *
+ * @group Input formats
  * @public
  */
 export class OggInputFormat extends InputFormat {
@@ -358,6 +388,10 @@ export class OggInputFormat extends InputFormat {
 
 /**
  * ADTS file format.
+ *
+ * Do not instantiate this class; use the {@link ADTS} singleton instead.
+ *
+ * @group Input formats
  * @public
  */
 export class AdtsInputFormat extends InputFormat {
@@ -402,41 +436,49 @@ export class AdtsInputFormat extends InputFormat {
 
 /**
  * MP4 input format singleton.
+ * @group Input formats
  * @public
  */
 export const MP4 = new Mp4InputFormat();
 /**
  * QuickTime File Format input format singleton.
+ * @group Input formats
  * @public
  */
 export const QTFF = new QuickTimeInputFormat();
 /**
  * Matroska input format singleton.
+ * @group Input formats
  * @public
  */
 export const MATROSKA = new MatroskaInputFormat();
 /**
  * WebM input format singleton.
+ * @group Input formats
  * @public
  */
 export const WEBM = new WebMInputFormat();
 /**
  * MP3 input format singleton.
+ * @group Input formats
  * @public
  */
 export const MP3 = new Mp3InputFormat();
 /**
  * WAVE input format singleton.
+ * @group Input formats
  * @public
  */
 export const WAVE = new WaveInputFormat();
 /**
  * Ogg input format singleton.
+ * @group Input formats
  * @public
  */
 export const OGG = new OggInputFormat();
 /**
  * ADTS input format singleton.
+ * @group Input formats
  * @public
  */
 export const ADTS = new AdtsInputFormat();
@@ -444,6 +486,7 @@ export const ADTS = new AdtsInputFormat();
 /**
  * List of all input format singletons. If you don't need to support all input formats, you should specify the
  * formats individually for better tree shaking.
+ * @group Input formats
  * @public
  */
 export const ALL_FORMATS: InputFormat[] = [MP4, QTFF, MATROSKA, WEBM, WAVE, OGG, MP3, ADTS];

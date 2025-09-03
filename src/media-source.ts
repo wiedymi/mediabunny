@@ -41,6 +41,7 @@ import {
 
 /**
  * Base class for media sources. Media sources are used to add media samples to an output file.
+ * @group Media sources
  * @public
  */
 export abstract class MediaSource {
@@ -131,6 +132,7 @@ export abstract class MediaSource {
 
 /**
  * Base class for video sources - sources for video tracks.
+ * @group Media sources
  * @public
  */
 export abstract class VideoSource extends MediaSource {
@@ -139,6 +141,7 @@ export abstract class VideoSource extends MediaSource {
 	/** @internal */
 	_codec: VideoCodec;
 
+	/** Internal constructor. */
 	constructor(codec: VideoCodec) {
 		super();
 
@@ -152,9 +155,11 @@ export abstract class VideoSource extends MediaSource {
 
 /**
  * The most basic video source; can be used to directly pipe encoded packets into the output file.
+ * @group Media sources
  * @public
  */
 export class EncodedVideoPacketSource extends VideoSource {
+	/** Creates a new {@link EncodedVideoPacketSource} whose packets are encoded using `codec`. */
 	constructor(codec: VideoCodec) {
 		super(codec);
 	}
@@ -458,12 +463,17 @@ class VideoEncoderWrapper {
 /**
  * This source can be used to add raw, unencoded video samples (frames) to an output video track. These frames will
  * automatically be encoded and then piped into the output.
+ * @group Media sources
  * @public
  */
 export class VideoSampleSource extends VideoSource {
 	/** @internal */
 	private _encoder: VideoEncoderWrapper;
 
+	/**
+	 * Creates a new {@link VideoSampleSource} whose samples are encoded according to the specified
+	 * {@link VideoEncodingConfig}.
+	 */
 	constructor(encodingConfig: VideoEncodingConfig) {
 		validateVideoEncodingConfig(encodingConfig);
 
@@ -493,7 +503,8 @@ export class VideoSampleSource extends VideoSource {
 
 /**
  * This source can be used to add video frames to the output track from a fixed canvas element. Since canvases are often
- * used for rendering, this source provides a convenient wrapper around VideoSampleSource.
+ * used for rendering, this source provides a convenient wrapper around {@link VideoSampleSource}.
+ * @group Media sources
  * @public
  */
 export class CanvasSource extends VideoSource {
@@ -502,6 +513,10 @@ export class CanvasSource extends VideoSource {
 	/** @internal */
 	private _canvas: HTMLCanvasElement | OffscreenCanvas;
 
+	/**
+	 * Creates a new {@link CanvasSource} from a canvas element or `OffscreenCanvas` whose samples are encoded
+	 * according to the specified {@link VideoEncodingConfig}.
+	 */
 	constructor(canvas: HTMLCanvasElement | OffscreenCanvas, encodingConfig: VideoEncodingConfig) {
 		if (
 			!(typeof HTMLCanvasElement !== 'undefined' && canvas instanceof HTMLCanvasElement)
@@ -544,10 +559,12 @@ export class CanvasSource extends VideoSource {
 }
 
 /**
- * Video source that encodes the frames of a MediaStreamVideoTrack and pipes them into the output. This is useful for
- * capturing live or real-time data such as webcams or screen captures. Frames will automatically start being captured
- * once the connected Output is started, and will keep being captured until the Output is finalized or this source
- * is closed.
+ * Video source that encodes the frames of a
+ * [`MediaStreamVideoTrack`](https://developer.mozilla.org/en-US/docs/Web/API/MediaStreamTrack) and pipes them into the
+ * output. This is useful for capturing live or real-time data such as webcams or screen captures. Frames will
+ * automatically start being captured once the connected {@link Output} is started, and will keep being captured until
+ * the {@link Output} is finalized or this source is closed.
+ * @group Media sources
  * @public
  */
 export class MediaStreamVideoTrackSource extends VideoSource {
@@ -572,6 +589,11 @@ export class MediaStreamVideoTrackSource extends VideoSource {
 		return this._promiseWithResolvers.promise;
 	}
 
+	/**
+	 * Creates a new {@link MediaStreamVideoTrackSource} from a
+	 * [`MediaStreamVideoTrack`](https://developer.mozilla.org/en-US/docs/Web/API/MediaStreamTrack), which will pull
+	 * video samples from the stream in real time and encode them according to {@link VideoEncodingConfig}.
+	 */
 	constructor(track: MediaStreamVideoTrack, encodingConfig: VideoEncodingConfig) {
 		if (!(track instanceof MediaStreamTrack) || track.kind !== 'video') {
 			throw new TypeError('track must be a video MediaStreamTrack.');
@@ -726,6 +748,7 @@ export class MediaStreamVideoTrackSource extends VideoSource {
 
 /**
  * Base class for audio sources - sources for audio tracks.
+ * @group Media sources
  * @public
  */
 export abstract class AudioSource extends MediaSource {
@@ -734,6 +757,7 @@ export abstract class AudioSource extends MediaSource {
 	/** @internal */
 	_codec: AudioCodec;
 
+	/** Internal constructor. */
 	constructor(codec: AudioCodec) {
 		super();
 
@@ -747,9 +771,11 @@ export abstract class AudioSource extends MediaSource {
 
 /**
  * The most basic audio source; can be used to directly pipe encoded packets into the output file.
+ * @group Media sources
  * @public
  */
 export class EncodedAudioPacketSource extends AudioSource {
+	/** Creates a new {@link EncodedAudioPacketSource} whose packets are encoded using `codec`. */
 	constructor(codec: AudioCodec) {
 		super(codec);
 	}
@@ -1171,12 +1197,17 @@ class AudioEncoderWrapper {
 /**
  * This source can be used to add raw, unencoded audio samples to an output audio track. These samples will
  * automatically be encoded and then piped into the output.
+ * @group Media sources
  * @public
  */
 export class AudioSampleSource extends AudioSource {
 	/** @internal */
 	private _encoder: AudioEncoderWrapper;
 
+	/**
+	 * Creates a new {@link AudioSampleSource} whose samples are encoded according to the specified
+	 * {@link AudioEncodingConfig}.
+	 */
 	constructor(encodingConfig: AudioEncodingConfig) {
 		validateAudioEncodingConfig(encodingConfig);
 
@@ -1207,6 +1238,7 @@ export class AudioSampleSource extends AudioSource {
 /**
  * This source can be used to add audio data from an AudioBuffer to the output track. This is useful when working with
  * the Web Audio API.
+ * @group Media sources
  * @public
  */
 export class AudioBufferSource extends AudioSource {
@@ -1215,6 +1247,10 @@ export class AudioBufferSource extends AudioSource {
 	/** @internal */
 	private _accumulatedTime = 0;
 
+	/**
+	 * Creates a new {@link AudioBufferSource} whose `AudioBuffer` instances are encoded according to the specified
+	 * {@link AudioEncodingConfig}.
+	 */
 	constructor(encodingConfig: AudioEncodingConfig) {
 		validateAudioEncodingConfig(encodingConfig);
 
@@ -1250,10 +1286,12 @@ export class AudioBufferSource extends AudioSource {
 }
 
 /**
- * Audio source that encodes the data of a MediaStreamAudioTrack and pipes it into the output. This is useful for
- * capturing live or real-time audio such as microphones or audio from other media elements. Audio will automatically
- * start being captured once the connected Output is started, and will keep being captured until the Output is
- * finalized or this source is closed.
+ * Audio source that encodes the data of a
+ * [`MediaStreamAudioTrack`](https://developer.mozilla.org/en-US/docs/Web/API/MediaStreamTrack) and pipes it into the
+ * output. This is useful for capturing live or real-time audio such as microphones or audio from other media elements.
+ * Audio will automatically start being captured once the connected {@link Output} is started, and will keep being
+ * captured until the {@link Output} is finalized or this source is closed.
+ * @group Media sources
  * @public
  */
 export class MediaStreamAudioTrackSource extends AudioSource {
@@ -1278,6 +1316,10 @@ export class MediaStreamAudioTrackSource extends AudioSource {
 		return this._promiseWithResolvers.promise;
 	}
 
+	/**
+	 * Creates a new {@link MediaStreamAudioTrackSource} from a `MediaStreamAudioTrack`, which will pull audio samples
+	 * from the stream in real time and encode them according to {@link AudioEncodingConfig}.
+	 */
 	constructor(track: MediaStreamAudioTrack, encodingConfig: AudioEncodingConfig) {
 		if (!(track instanceof MediaStreamTrack) || track.kind !== 'audio') {
 			throw new TypeError('track must be an audio MediaStreamTrack.');
@@ -1572,6 +1614,7 @@ const sendMessageToMediaStreamTrackProcessorWorker = (
 
 /**
  * Base class for subtitle sources - sources for subtitle tracks.
+ * @group Media sources
  * @public
  */
 export abstract class SubtitleSource extends MediaSource {
@@ -1580,6 +1623,7 @@ export abstract class SubtitleSource extends MediaSource {
 	/** @internal */
 	_codec: SubtitleCodec;
 
+	/** Internal constructor. */
 	constructor(codec: SubtitleCodec) {
 		super();
 
@@ -1593,12 +1637,14 @@ export abstract class SubtitleSource extends MediaSource {
 
 /**
  * This source can be used to add subtitles from a subtitle text file.
+ * @group Media sources
  * @public
  */
 export class TextSubtitleSource extends SubtitleSource {
 	/** @internal */
 	private _parser: SubtitleParser;
 
+	/** Creates a new {@link TextSubtitleSource} where added text chunks are in the specified `codec`. */
 	constructor(codec: SubtitleCodec) {
 		super(codec);
 

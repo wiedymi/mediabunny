@@ -28,6 +28,7 @@ import { SubtitleMetadata } from './subtitles';
 
 /**
  * List of known video codecs, ordered by encoding preference.
+ * @group Codecs
  * @public
  */
 export const VIDEO_CODECS = [
@@ -39,6 +40,7 @@ export const VIDEO_CODECS = [
 ] as const;
 /**
  * List of known PCM (uncompressed) audio codecs, ordered by encoding preference.
+ * @group Codecs
  * @public
  */
 export const PCM_AUDIO_CODECS = [
@@ -59,6 +61,7 @@ export const PCM_AUDIO_CODECS = [
 ] as const;
 /**
  * List of known compressed audio codecs, ordered by encoding preference.
+ * @group Codecs
  * @public
  */
 export const NON_PCM_AUDIO_CODECS = [
@@ -70,6 +73,7 @@ export const NON_PCM_AUDIO_CODECS = [
 ] as const;
 /**
  * List of known audio codecs, ordered by encoding preference.
+ * @group Codecs
  * @public
  */
 export const AUDIO_CODECS = [
@@ -78,6 +82,7 @@ export const AUDIO_CODECS = [
 ] as const;
 /**
  * List of known subtitle codecs, ordered by encoding preference.
+ * @group Codecs
  * @public
  */
 export const SUBTITLE_CODECS = [
@@ -86,22 +91,26 @@ export const SUBTITLE_CODECS = [
 
 /**
  * Union type of known video codecs.
+ * @group Codecs
  * @public
  */
 export type VideoCodec = typeof VIDEO_CODECS[number];
 /**
  * Union type of known audio codecs.
+ * @group Codecs
  * @public
  */
 export type AudioCodec = typeof AUDIO_CODECS[number];
 export type PcmAudioCodec = typeof PCM_AUDIO_CODECS[number];
 /**
  * Union type of known subtitle codecs.
+ * @group Codecs
  * @public
  */
 export type SubtitleCodec = typeof SUBTITLE_CODECS[number];
 /**
  * Union type of known media codecs.
+ * @group Codecs
  * @public
  */
 export type MediaCodec = VideoCodec | AudioCodec | SubtitleCodec;
@@ -725,110 +734,6 @@ export const getAudioEncoderConfigExtension = (codec: AudioCodec) => {
 
 	return {};
 };
-
-/**
- * Represents a subjective media quality level.
- * @public
- */
-export class Quality {
-	/** @internal */
-	_factor: number;
-
-	/** @internal */
-	constructor(factor: number) {
-		this._factor = factor;
-	}
-
-	/** @internal */
-	_toVideoBitrate(codec: VideoCodec, width: number, height: number) {
-		const pixels = width * height;
-
-		const codecEfficiencyFactors = {
-			avc: 1.0, // H.264/AVC (baseline)
-			hevc: 0.6, // H.265/HEVC (~40% more efficient than AVC)
-			vp9: 0.6, // Similar to HEVC
-			av1: 0.4, // ~60% more efficient than AVC
-			vp8: 1.2, // Slightly less efficient than AVC
-		};
-
-		const referencePixels = 1920 * 1080;
-		const referenceBitrate = 3000000;
-		const scaleFactor = Math.pow(pixels / referencePixels, 0.95); // Slight non-linear scaling
-		const baseBitrate = referenceBitrate * scaleFactor;
-
-		const codecAdjustedBitrate = baseBitrate * codecEfficiencyFactors[codec];
-		const finalBitrate = codecAdjustedBitrate * this._factor;
-
-		return Math.ceil(finalBitrate / 1000) * 1000;
-	}
-
-	/** @internal */
-	_toAudioBitrate(codec: AudioCodec) {
-		if ((PCM_AUDIO_CODECS as readonly string[]).includes(codec) || codec === 'flac') {
-			return undefined;
-		}
-
-		const baseRates = {
-			aac: 128000, // 128kbps base for AAC
-			opus: 64000, // 64kbps base for Opus
-			mp3: 160000, // 160kbps base for MP3
-			vorbis: 64000, // 64kbps base for Vorbis
-		};
-
-		const baseBitrate = baseRates[codec as keyof typeof baseRates];
-		if (!baseBitrate) {
-			throw new Error(`Unhandled codec: ${codec}`);
-		}
-
-		let finalBitrate = baseBitrate * this._factor;
-
-		if (codec === 'aac') {
-			// AAC only works with specific bitrates, let's find the closest
-			const validRates = [96000, 128000, 160000, 192000];
-			finalBitrate = validRates.reduce((prev, curr) =>
-				Math.abs(curr - finalBitrate) < Math.abs(prev - finalBitrate) ? curr : prev,
-			);
-		} else if (codec === 'opus' || codec === 'vorbis') {
-			finalBitrate = Math.max(6000, finalBitrate);
-		} else if (codec === 'mp3') {
-			const validRates = [
-				8000, 16000, 24000, 32000, 40000, 48000, 64000, 80000,
-				96000, 112000, 128000, 160000, 192000, 224000, 256000, 320000,
-			];
-			finalBitrate = validRates.reduce((prev, curr) =>
-				Math.abs(curr - finalBitrate) < Math.abs(prev - finalBitrate) ? curr : prev,
-			);
-		}
-
-		return Math.round(finalBitrate / 1000) * 1000;
-	}
-}
-
-/**
- * Represents a very low media quality.
- * @public
- */
-export const QUALITY_VERY_LOW = new Quality(0.3);
-/**
- * Represents a low media quality.
- * @public
- */
-export const QUALITY_LOW = new Quality(0.6);
-/**
- * Represents a medium media quality.
- * @public
- */
-export const QUALITY_MEDIUM = new Quality(1);
-/**
- * Represents a high media quality.
- * @public
- */
-export const QUALITY_HIGH = new Quality(2);
-/**
- * Represents a very high media quality.
- * @public
- */
-export const QUALITY_VERY_HIGH = new Quality(4);
 
 const VALID_VIDEO_CODEC_STRING_PREFIXES = ['avc1', 'avc3', 'hev1', 'hvc1', 'vp8', 'vp09', 'av01'];
 const AVC_CODEC_STRING_REGEX = /^(avc1|avc3)\.[0-9a-fA-F]{6}$/;
