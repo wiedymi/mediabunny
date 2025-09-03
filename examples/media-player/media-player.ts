@@ -2,6 +2,7 @@ import {
 	ALL_FORMATS,
 	AudioBufferSink,
 	BlobSource,
+	BufferSource,
 	CanvasSink,
 	Input,
 	UrlSource,
@@ -91,7 +92,7 @@ const initMediaPlayer = async (resource: File | string) => {
 
 		// Create an Input from the resource
 		const source = resource instanceof File
-			? new BlobSource(resource)
+			? new BufferSource(await resource.arrayBuffer())// new BlobSource(resource)
 			: new UrlSource(resource);
 		const input = new Input({
 			source,
@@ -191,6 +192,7 @@ const initMediaPlayer = async (resource: File | string) => {
 		if (!videoSink) {
 			// If there's only an audio track, always show the controls
 			controlsElement.style.opacity = '1';
+			controlsElement.style.pointerEvents = '';
 			playerContainer.style.cursor = '';
 		}
 	} catch (error) {
