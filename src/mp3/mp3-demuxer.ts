@@ -88,9 +88,7 @@ export class Mp3Demuxer extends Demuxer {
 			}
 		}
 
-		const startPos = this.lastLoadedPos;
-
-		const result = await readNextFrameHeader(this.reader, startPos, this.reader.fileSize);
+		const result = await readNextFrameHeader(this.reader, this.lastLoadedPos, this.reader.fileSize);
 		if (!result) {
 			this.lastSampleLoaded = true;
 			return;
@@ -102,16 +100,16 @@ export class Mp3Demuxer extends Demuxer {
 
 		const xingOffset = getXingOffset(header.mpegVersionId, header.channel);
 
-		let slice = this.reader.requestSlice(startPos + xingOffset, 4);
+		let slice = this.reader.requestSlice(result.startPos + xingOffset, 4);
 		if (slice instanceof Promise) slice = await slice;
-		assert(slice);
+		if (slice) {
+			const word = readU32Be(slice);
+			const isXing = word === XING || word === INFO;
 
-		const word = readU32Be(slice);
-		const isXing = word === XING || word === INFO;
-
-		if (isXing) {
-			// There's no actual audio data in this frame, so let's skip it
-			return;
+			if (isXing) {
+				// There's no actual audio data in this frame, so let's skip it
+				return;
+			}
 		}
 
 		if (!this.firstFrameHeader) {
@@ -122,7 +120,7 @@ export class Mp3Demuxer extends Demuxer {
 		const sample: Sample = {
 			timestamp: this.nextTimestampInSamples / header.sampleRate,
 			duration: sampleDuration,
-			dataStart: startPos,
+			dataStart: result.startPos,
 			dataSize: header.totalSize,
 		};
 

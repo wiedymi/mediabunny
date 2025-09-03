@@ -191,6 +191,7 @@ const initMediaPlayer = async (resource: File | string) => {
 		if (!videoSink) {
 			// If there's only an audio track, always show the controls
 			controlsElement.style.opacity = '1';
+			controlsElement.style.pointerEvents = '';
 			playerContainer.style.cursor = '';
 		}
 	} catch (error) {
