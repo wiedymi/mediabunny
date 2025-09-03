@@ -1069,7 +1069,7 @@ export type Av1CodecInfo = {
 };
 
 /** Iterates over all OBUs in an AV1 packet bistream. */
-export function* iterateAv1PacketObus(packet: Uint8Array) {
+export const iterateAv1PacketObus = function* (packet: Uint8Array) {
 	// https://aomediacodec.github.io/av1-spec/av1-spec.pdf
 
 	const bitstream = new Bitstream(packet);

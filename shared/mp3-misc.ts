@@ -40,7 +40,6 @@ export const XING = 0x58696e67;
 export const INFO = 0x496e666f;
 
 export type FrameHeader = {
-	startPos: number;
 	totalSize: number;
 	mpegVersionId: number;
 	layer: number;
@@ -70,27 +69,28 @@ export const getXingOffset = (mpegVersionId: number, channel: number) => {
 		: (channel === 3 ? 13 : 21);
 };
 
-export const readFrameHeader = (word: number, reader: { pos: number; fileSize: number | null }): FrameHeader | null => {
-	const startPos = reader.pos;
-
+export const readFrameHeader = (word: number, remainingBytes: number | null): {
+	header: FrameHeader | null;
+	bytesAdvanced: number;
+} => {
 	const firstByte = word >>> 24;
 	const secondByte = (word >>> 16) & 0xff;
 	const thirdByte = (word >>> 8) & 0xff;
 	const fourthByte = word & 0xff;
 
 	if (firstByte !== 0xff && secondByte !== 0xff && thirdByte !== 0xff && fourthByte !== 0xff) {
-		reader.pos += 4;
-		return null;
+		return {
+			header: null,
+			bytesAdvanced: 4,
+		};
 	}
 
-	reader.pos += 1;
-
 	if (firstByte !== 0xff) {
-		return null;
+		return { header: null, bytesAdvanced: 1 };
 	}
 
 	if ((secondByte & 0xe0) !== 0xe0) {
-		return null;
+		return { header: null, bytesAdvanced: 1 };
 	}
 
 	const mpegVersionId = (secondByte >> 3) & 0x3;
@@ -110,21 +110,21 @@ export const readFrameHeader = (word: number, reader: { pos: number; fileSize: n
 		? MPEG_V1_BITRATES[layer]?.[bitrateIndex]
 		: MPEG_V2_BITRATES[layer]?.[bitrateIndex];
 	if (!kilobitRate || kilobitRate === -1) {
-		return null;
+		return { header: null, bytesAdvanced: 1 };
 	}
 
 	const bitrate = kilobitRate * 1000;
 
 	const sampleRate = SAMPLING_RATES[mpegVersionId]?.[frequencyIndex];
 	if (!sampleRate || sampleRate === -1) {
-		return null;
+		return { header: null, bytesAdvanced: 1 };
 	}
 
 	const frameLength = computeMp3FrameSize(layer, bitrate, sampleRate, padding);
 
-	if (reader.fileSize !== null && reader.fileSize - startPos < frameLength) {
+	if (remainingBytes !== null && remainingBytes < frameLength) {
 		// The frame doesn't fit into the rest of the file
-		return null;
+		return { header: null, bytesAdvanced: 1 };
 	}
 
 	let audioSamplesInFrame: number;
@@ -141,19 +141,21 @@ export const readFrameHeader = (word: number, reader: { pos: number; fileSize: n
 	}
 
 	return {
-		startPos: startPos,
-		totalSize: frameLength,
-		mpegVersionId,
-		layer,
-		bitrate,
-		frequencyIndex,
-		sampleRate,
-		channel,
-		modeExtension,
-		copyright,
-		original,
-		emphasis,
-		audioSamplesInFrame,
+		header: {
+			totalSize: frameLength,
+			mpegVersionId,
+			layer,
+			bitrate,
+			frequencyIndex,
+			sampleRate,
+			channel,
+			modeExtension,
+			copyright,
+			original,
+			emphasis,
+			audioSamplesInFrame,
+		},
+		bytesAdvanced: 1,
 	};
 };
 

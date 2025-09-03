@@ -14,6 +14,7 @@ import { Source } from './source';
 
 /**
  * The options for creating an Input object.
+ * @group Input files & tracks
  * @public
  */
 export type InputOptions<S extends Source = Source> = {
@@ -25,6 +26,7 @@ export type InputOptions<S extends Source = Source> = {
 
 /**
  * Represents an input media file. This is the root object from which all media read operations start.
+ * @group Input files & tracks
  * @public
  */
 export class Input<S extends Source = Source> {
@@ -33,12 +35,16 @@ export class Input<S extends Source = Source> {
 	/** @internal */
 	_formats: InputFormat[];
 	/** @internal */
-	_mainReader: Reader;
-	/** @internal */
 	_demuxerPromise: Promise<Demuxer> | null = null;
 	/** @internal */
 	_format: InputFormat | null = null;
+	/** @internal */
+	_reader: Reader;
 
+	/**
+	 * Creates a new input file from the specified options. No reading operations will be performed until methods are
+	 * called on this instance.
+	 */
 	constructor(options: InputOptions<S>) {
 		if (!options || typeof options !== 'object') {
 			throw new TypeError('options must be an object.');
@@ -52,13 +58,13 @@ export class Input<S extends Source = Source> {
 
 		this._formats = options.formats;
 		this._source = options.source;
-		this._mainReader = new Reader(options.source);
+		this._reader = new Reader(options.source);
 	}
 
 	/** @internal */
 	_getDemuxer() {
 		return this._demuxerPromise ??= (async () => {
-			await this._mainReader.loadRange(0, 4096); // Load the first 4 kiB so we can determine the format
+			this._reader.fileSize = await this._source.getSizeOrNull();
 
 			for (const format of this._formats) {
 				const canRead = await format._canReadInput(this);
@@ -81,9 +87,9 @@ export class Input<S extends Source = Source> {
 	}
 
 	/**
-	 * Returns the format of the input file. You can compare this result directly to the InputFormat singletons or use
-	 * `instanceof` checks for subset-aware logic (for example, `format instanceof MatroskaInputFormat` is true for
-	 * both MKV and WebM).
+	 * Returns the format of the input file. You can compare this result directly to the {@link InputFormat} singletons
+	 * or use `instanceof` checks for subset-aware logic (for example, `format instanceof MatroskaInputFormat` is true
+	 * for both MKV and WebM).
 	 */
 	async getFormat() {
 		await this._getDemuxer();
@@ -112,16 +118,16 @@ export class Input<S extends Source = Source> {
 		return tracks.filter(x => x.isVideoTrack());
 	}
 
-	/** Returns the primary video track of this input file, or null if there are no video tracks. */
-	async getPrimaryVideoTrack() {
-		const tracks = await this.getTracks();
-		return tracks.find(x => x.isVideoTrack()) ?? null;
-	}
-
 	/** Returns the list of all audio tracks of this input file. */
 	async getAudioTracks() {
 		const tracks = await this.getTracks();
 		return tracks.filter(x => x.isAudioTrack());
+	}
+
+	/** Returns the primary video track of this input file, or null if there are no video tracks. */
+	async getPrimaryVideoTrack() {
+		const tracks = await this.getTracks();
+		return tracks.find(x => x.isVideoTrack()) ?? null;
 	}
 
 	/** Returns the primary audio track of this input file, or null if there are no audio tracks. */

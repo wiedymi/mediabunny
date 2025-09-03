@@ -3,6 +3,8 @@ import footnote from 'markdown-it-footnote';
 import tailwindcss from '@tailwindcss/vite';
 import llmstxt from 'vitepress-plugin-llms';
 import { HeadConfig } from 'vitepress';
+// @ts-expect-error This file gets generated once docs:generate is run
+import apiRoutes from '../api/index.json';
 
 const DESCRIPTION = 'A JavaScript library for reading, writing, and converting media files. Directly in the browser,'
 	+ ' and faster than anybunny else.';
@@ -32,56 +34,62 @@ export default withMermaid({
 		// https://vitepress.dev/reference/default-theme-config
 		nav: [
 			{ text: 'Guide', link: '/guide/introduction', activeMatch: '/guide' },
+			{ text: 'API', link: '/api', activeMatch: '/api' },
+			{ text: 'LLMs', link: '/llms', activeMatch: '/llms' },
 			{ text: 'Examples', link: '/examples', activeMatch: '/examples' },
 			{ text: 'Sponsors', link: '/#sponsors', activeMatch: '/#sponsors' },
 			{ text: 'License', link: 'https://github.com/Vanilagy/mediabunny#license' },
 		],
 
-		sidebar: [
-			{
-				text: 'Getting started',
-				items: [
-					{ text: 'Introduction', link: '/guide/introduction' },
-					{ text: 'Installation', link: '/guide/installation' },
-					{ text: 'Quick start', link: '/guide/quick-start' },
-				],
-			},
-			{
-				text: 'Reading',
-				items: [
-					{ text: 'Reading media files', link: '/guide/reading-media-files' },
-					{ text: 'Media sinks', link: '/guide/media-sinks' },
-					{ text: 'Input formats', link: '/guide/input-formats' },
-				],
-			},
-			{
-				text: 'Writing',
-				items: [
-					{ text: 'Writing media files', link: '/guide/writing-media-files' },
-					{ text: 'Media sources', link: '/guide/media-sources' },
-					{ text: 'Output formats', link: '/guide/output-formats' },
-				],
-			},
-			{
-				text: 'Conversion',
-				items: [
-					{ text: 'Converting media files', link: '/guide/converting-media-files' },
-				],
-			},
-			{
-				text: 'Miscellaneous',
-				items: [
-					{ text: 'Packets & samples', link: '/guide/packets-and-samples' },
-					{ text: 'Supported formats & codecs', link: '/guide/supported-formats-and-codecs' },
-				],
-			},
-			{
-				text: 'Extensions',
-				items: [
-					{ text: 'mp3-encoder', link: '/guide/extensions/mp3-encoder' },
-				],
-			},
-		],
+		sidebar: {
+			'/guide': [
+				{
+					text: 'Getting started',
+					items: [
+						{ text: 'Introduction', link: '/guide/introduction' },
+						{ text: 'Installation', link: '/guide/installation' },
+						{ text: 'Quick start', link: '/guide/quick-start' },
+					],
+				},
+				{
+					text: 'Reading',
+					items: [
+						{ text: 'Reading media files', link: '/guide/reading-media-files' },
+						{ text: 'Media sinks', link: '/guide/media-sinks' },
+						{ text: 'Input formats', link: '/guide/input-formats' },
+					],
+				},
+				{
+					text: 'Writing',
+					items: [
+						{ text: 'Writing media files', link: '/guide/writing-media-files' },
+						{ text: 'Media sources', link: '/guide/media-sources' },
+						{ text: 'Output formats', link: '/guide/output-formats' },
+					],
+				},
+				{
+					text: 'Conversion',
+					items: [
+						{ text: 'Converting media files', link: '/guide/converting-media-files' },
+					],
+				},
+				{
+					text: 'Miscellaneous',
+					items: [
+						{ text: 'Packets & samples', link: '/guide/packets-and-samples' },
+						{ text: 'Supported formats & codecs', link: '/guide/supported-formats-and-codecs' },
+					],
+				},
+				{
+					text: 'Extensions',
+					items: [
+						{ text: 'mp3-encoder', link: '/guide/extensions/mp3-encoder' },
+					],
+				},
+			],
+			// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+			'/api': apiRoutes,
+		},
 
 		socialLinks: [
 			{ icon: 'github', link: 'https://github.com/Vanilagy/mediabunny' },
@@ -114,7 +122,11 @@ export default withMermaid({
 		plugins: [
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			tailwindcss() as any,
-			llmstxt(),
+			llmstxt({
+				ignoreFiles: [
+					'api/*',
+				],
+			}),
 		],
 	},
 	outDir: '../dist-docs',

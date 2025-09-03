@@ -13,13 +13,17 @@ export const PLACEHOLDER_DATA = new Uint8Array(0);
 /**
  * The type of a packet. Key packets can be decoded without previous packets, while delta packets depend on previous
  * packets.
+ * @group Packets
  * @public
  */
 export type PacketType = 'key' | 'delta';
 
 /**
- * Represents an encoded chunk of media. Mainly used as an expressive wrapper around WebCodecs API's EncodedVideoChunk
- * and EncodedAudioChunk, but can also be used standalone.
+ * Represents an encoded chunk of media. Mainly used as an expressive wrapper around WebCodecs API's
+ * [`EncodedVideoChunk`](https://developer.mozilla.org/en-US/docs/Web/API/EncodedVideoChunk) and
+ * [`EncodedAudioChunk`](https://developer.mozilla.org/en-US/docs/Web/API/EncodedAudioChunk), but can also be used
+ * standalone.
+ * @group Packets
  * @public
  */
 export class EncodedPacket {
@@ -29,6 +33,7 @@ export class EncodedPacket {
 	 */
 	readonly byteLength: number;
 
+	/** Creates a new {@link EncodedPacket} from raw bytes and timing information. */
 	constructor(
 		/** The encoded data of this packet. */
 		public readonly data: Uint8Array,

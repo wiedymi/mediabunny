@@ -6,10 +6,10 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-import { assert, coalesceIndex, textDecoder } from '../misc';
-import { Reader } from '../reader';
 import { decodeSynchsafe, FRAME_HEADER_SIZE, FrameHeader, readFrameHeader } from '../../shared/mp3-misc';
 import { MediaMetadata } from '../metadata';
+import { coalesceIndex, textDecoder } from '../misc';
+import { FileSlice, readAscii, readBytes, Reader, readU32Be, readU8 } from '../reader';
 
 export type Id3V2Header = {
 	majorVersion: number;
@@ -65,353 +65,335 @@ export const ID3_V1_GENRES = [
 	'Dubstep', 'Garage rock', 'Psybient',
 ];
 
-export class Mp3Reader {
-	pos = 0;
-	fileSize: number | null = null;
-
-	constructor(public reader: Reader) {}
-
-	readBytes(length: number) {
-		const { view, offset } = this.reader.getViewAndOffset(this.pos, this.pos + length);
-		this.pos += length;
-
-		return new Uint8Array(view.buffer, offset, length);
-	}
-
-	readU8() {
-		const { view, offset } = this.reader.getViewAndOffset(this.pos, this.pos + 1);
-		this.pos += 1;
-
-		return view.getUint8(offset);
-	}
-
-	readU32() {
-		const { view, offset } = this.reader.getViewAndOffset(this.pos, this.pos + 4);
-		this.pos += 4;
-
-		return view.getUint32(offset, false);
-	}
-
-	readAscii(length: number) {
-		const { view, offset } = this.reader.getViewAndOffset(this.pos, this.pos + length);
-		this.pos += length;
-
-		let str = '';
-		for (let i = 0; i < length; i++) {
-			str += String.fromCharCode(view.getUint8(offset + i));
-		}
-		return str;
-	}
-
-	readNextFrameHeader(until?: number): FrameHeader | null {
-		assert(this.fileSize);
-		until ??= this.fileSize;
-
-		while (this.pos <= until - FRAME_HEADER_SIZE) {
-			const word = this.readU32();
-			this.pos -= 4;
-
-			const header = readFrameHeader(word, this);
-			if (header) {
-				return header;
-			}
-		}
-
+/*
+export const readId3 = (slice: FileSlice) => {
+	const tag = readAscii(slice, 3);
+	if (tag !== 'ID3') {
+		slice.skip(-3);
 		return null;
 	}
 
-	parseId3V1Tag(metadata: MediaMetadata) {
-		const title = this.readId3V1String(30);
-		if (title) metadata.title ??= title;
+	slice.skip(3);
 
-		const artist = this.readId3V1String(30);
-		if (artist) metadata.artist ??= artist;
+	const size = decodeSynchsafe(readU32Be(slice));
+	return { size };
+};
+*/
 
-		const album = this.readId3V1String(30);
-		if (album) metadata.album ??= album;
+export const readNextFrameHeader = async (reader: Reader, startPos: number, until: number | null): Promise<{
+	header: FrameHeader;
+	startPos: number;
+} | null> => {
+	let currentPos = startPos;
 
-		const yearText = this.readId3V1String(4);
-		const year = Number.parseInt(yearText, 10);
-		if (Number.isInteger(year) && year > 0) {
-			metadata.releasedAt ??= new Date(year, 0, 1);
+	while (until === null || currentPos < until) {
+		let slice = reader.requestSlice(currentPos, FRAME_HEADER_SIZE);
+		if (slice instanceof Promise) slice = await slice;
+		if (!slice) break;
+
+		const word = readU32Be(slice);
+
+		const result = readFrameHeader(word, reader.fileSize !== null ? reader.fileSize - currentPos : null);
+		if (result.header) {
+			return { header: result.header, startPos: currentPos };
 		}
 
-		const commentBytes = this.readBytes(30);
-		let comment: string;
+		currentPos += result.bytesAdvanced;
+	}
 
-		// Check for the ID3v1.1 track number format:
-		// The 29th byte (index 28) is a null terminator, and the 30th byte is the track number.
-		if (commentBytes[28] === 0 && commentBytes[29] !== 0) {
-			const trackNum = commentBytes[29]!;
-			if (trackNum > 0) {
-				metadata.trackNumber ??= trackNum;
-			}
+	return null;
+};
 
-			this.pos -= 30;
-			comment = this.readId3V1String(28);
-			this.pos += 2;
+export const parseId3V1Tag = (slice: FileSlice, metadata: MediaMetadata) => {
+	const title = readId3V1String(slice, 30);
+	if (title) metadata.title ??= title;
+
+	const artist = readId3V1String(slice, 30);
+	if (artist) metadata.artist ??= artist;
+
+	const album = readId3V1String(slice, 30);
+	if (album) metadata.album ??= album;
+
+	const yearText = readId3V1String(slice, 4);
+	const year = Number.parseInt(yearText, 10);
+	if (Number.isInteger(year) && year > 0) {
+		metadata.releasedAt ??= new Date(year, 0, 1);
+	}
+
+	const commentBytes = readBytes(slice, 30);
+	let comment: string;
+
+	// Check for the ID3v1.1 track number format:
+	// The 29th byte (index 28) is a null terminator, and the 30th byte is the track number.
+	if (commentBytes[28] === 0 && commentBytes[29] !== 0) {
+		const trackNum = commentBytes[29]!;
+		if (trackNum > 0) {
+			metadata.trackNumber ??= trackNum;
+		}
+
+		slice.skip(-30);
+		comment = readId3V1String(slice, 28);
+		slice.skip(2);
+	} else {
+		slice.skip(-30);
+		comment = readId3V1String(slice, 30);
+	}
+
+	if (comment) metadata.comment ??= comment;
+
+	const genreIndex = readU8(slice);
+	if (genreIndex < ID3_V1_GENRES.length) {
+		metadata.genre ??= ID3_V1_GENRES[genreIndex];
+	}
+};
+
+export const readId3V1String = (slice: FileSlice, length: number) => {
+	const bytes = readBytes(slice, length);
+
+	const endIndex = coalesceIndex(bytes.indexOf(0), bytes.length);
+	const relevantBytes = bytes.subarray(0, endIndex);
+
+	// Decode as ISO-8859-1
+	let str = '';
+	for (let i = 0; i < relevantBytes.length; i++) {
+		str += String.fromCharCode(relevantBytes[i]!);
+	}
+
+	return str.trimEnd(); // String also may be padded with spaces
+};
+
+export const readId3V2Header = (slice: FileSlice): Id3V2Header | null => {
+	const startPos = slice.filePos;
+
+	const tag = readAscii(slice, 3);
+	const majorVersion = readU8(slice);
+	const revision = readU8(slice);
+	const flags = readU8(slice);
+	const sizeRaw = readU32Be(slice);
+
+	if (tag !== 'ID3' || majorVersion === 0xff || revision === 0xff || (sizeRaw & 0x80808080) !== 0) {
+		slice.filePos = startPos;
+		return null;
+	}
+
+	const size = decodeSynchsafe(sizeRaw);
+
+	return { majorVersion, revision, flags, size };
+};
+
+export const parseId3V2Tag = (slice: FileSlice, header: Id3V2Header, metadata: MediaMetadata) => {
+	// https://id3.org/id3v2.3.0
+
+	if (![2, 3, 4].includes(header.majorVersion)) {
+		console.warn(`Unsupported ID3v2 major version: ${header.majorVersion}`);
+		return;
+	}
+
+	const bytes = readBytes(slice, header.size);
+	const reader = new Id3V2Reader(header, bytes);
+
+	if (header.flags & Id3V2HeaderFlags.Footer) {
+		reader.removeFooter();
+	}
+
+	if ((header.flags & Id3V2HeaderFlags.Unsynchronisation) && header.majorVersion === 3) {
+		reader.ununsynchronizeAll();
+	}
+
+	if (header.flags & Id3V2HeaderFlags.ExtendedHeader) {
+		const extendedHeaderSize = reader.readU32();
+
+		if (header.majorVersion === 3) {
+			reader.pos += extendedHeaderSize; // The extended header size excludes itself
 		} else {
-			this.pos -= 30;
-			comment = this.readId3V1String(30);
-		}
-
-		if (comment) metadata.comment ??= comment;
-
-		const genreIndex = this.readU8();
-		if (genreIndex < ID3_V1_GENRES.length) {
-			metadata.genre ??= ID3_V1_GENRES[genreIndex];
+			reader.pos += extendedHeaderSize - 4; // The extended header size includes itself
 		}
 	}
 
-	readId3V1String(length: number): string {
-		const bytes = this.readBytes(length);
-
-		const endIndex = coalesceIndex(bytes.indexOf(0), bytes.length);
-		const relevantBytes = bytes.subarray(0, endIndex);
-
-		// Decode as ISO-8859-1
-		let str = '';
-		for (let i = 0; i < relevantBytes.length; i++) {
-			str += String.fromCharCode(relevantBytes[i]!);
+	while (reader.pos <= reader.bytes.length - reader.frameHeaderSize()) {
+		const frame = reader.readId3V2Frame();
+		if (!frame) {
+			break;
 		}
 
-		return str.trimEnd(); // String also may be padded with spaces
-	}
+		const frameEndPos = reader.pos + frame.size;
 
-	readId3V2Header(): Id3V2Header | null {
-		const startPos = this.pos;
+		let	frameEncrypted = false;
+		let frameCompressed = false;
+		let frameUnsynchronized = false;
 
-		const tag = this.readAscii(3);
-		const majorVersion = this.readU8();
-		const revision = this.readU8();
-		const flags = this.readU8();
-		const sizeRaw = this.readU32();
-
-		if (tag !== 'ID3' || majorVersion === 0xff || revision === 0xff || (sizeRaw & 0x80808080) !== 0) {
-			this.pos = startPos;
-			return null;
+		if (header.majorVersion === 3) {
+			frameEncrypted = !!(frame.flags & (1 << 6));
+			frameCompressed = !!(frame.flags & (1 << 7));
+		} else if (header.majorVersion === 4) {
+			frameEncrypted = !!(frame.flags & (1 << 2));
+			frameCompressed = !!(frame.flags & (1 << 3));
+			frameUnsynchronized = !!(frame.flags & (1 << 1))
+				|| !!(header.flags & Id3V2HeaderFlags.Unsynchronisation);
 		}
 
-		const size = decodeSynchsafe(sizeRaw);
-
-		return { majorVersion, revision, flags, size };
-	}
-
-	parseId3V2Tag(header: Id3V2Header, metadata: MediaMetadata) {
-		// https://id3.org/id3v2.3.0
-
-		if (![2, 3, 4].includes(header.majorVersion)) {
-			console.warn(`Unsupported ID3v2 major version: ${header.majorVersion}`);
-			return;
-		}
-
-		this.pos = ID3_V2_HEADER_SIZE;
-		const bytes = this.readBytes(header.size);
-		const reader = new Id3V2Reader(header, bytes);
-
-		if (header.flags & Id3V2HeaderFlags.Footer) {
-			reader.removeFooter();
-		}
-
-		if ((header.flags & Id3V2HeaderFlags.Unsynchronisation) && header.majorVersion === 3) {
-			reader.ununsynchronizeAll();
-		}
-
-		if (header.flags & Id3V2HeaderFlags.ExtendedHeader) {
-			const extendedHeaderSize = reader.readU32();
-
-			if (header.majorVersion === 3) {
-				reader.pos += extendedHeaderSize; // The extended header size excludes itself
-			} else {
-				reader.pos += extendedHeaderSize - 4; // The extended header size includes itself
-			}
-		}
-
-		while (reader.pos <= reader.bytes.length - reader.frameHeaderSize()) {
-			const frame = reader.readId3V2Frame();
-			if (!frame) {
-				break;
-			}
-
-			const frameEndPos = reader.pos + frame.size;
-
-			let	frameEncrypted = false;
-			let frameCompressed = false;
-			let frameUnsynchronized = false;
-
-			if (header.majorVersion === 3) {
-				frameEncrypted = !!(frame.flags & (1 << 6));
-				frameCompressed = !!(frame.flags & (1 << 7));
-			} else if (header.majorVersion === 4) {
-				frameEncrypted = !!(frame.flags & (1 << 2));
-				frameCompressed = !!(frame.flags & (1 << 3));
-				frameUnsynchronized = !!(frame.flags & (1 << 1))
-					|| !!(header.flags & Id3V2HeaderFlags.Unsynchronisation);
-			}
-
-			if (frameEncrypted) {
-				console.warn(`Skipping encrypted ID3v2 frame ${frame.id}`);
-				reader.pos = frameEndPos;
-				continue;
-			}
-
-			if (frameCompressed) {
-				console.warn(`Skipping compressed ID3v2 frame ${frame.id}`); // Maybe someday? Idk
-				reader.pos = frameEndPos;
-				continue;
-			}
-
-			if (frameUnsynchronized) {
-				reader.ununsynchronizeRegion(reader.pos, frameEndPos);
-			}
-
-			switch (frame.id) {
-				case 'TIT2':
-				case 'TT2': {
-					metadata.title ??= reader.readId3V2EncodingAndText(frameEndPos);
-				}; break;
-
-				case 'TPE1':
-				case 'TP1': {
-					metadata.artist ??= reader.readId3V2EncodingAndText(frameEndPos);
-				}; break;
-
-				case 'TALB':
-				case 'TAL': {
-					metadata.album ??= reader.readId3V2EncodingAndText(frameEndPos);
-				}; break;
-
-				case 'TPE2':
-				case 'TP2': {
-					metadata.albumArtist ??= reader.readId3V2EncodingAndText(frameEndPos);
-				}; break;
-
-				case 'TRCK':
-				case 'TRK': {
-					const trackText = reader.readId3V2EncodingAndText(frameEndPos);
-					const trackNum = Number.parseInt(trackText, 10);
-
-					if (Number.isInteger(trackNum) && trackNum > 0) {
-						metadata.trackNumber ??= trackNum;
-					}
-				}; break;
-
-				case 'TPOS':
-				case 'TPA': {
-					const discText = reader.readId3V2EncodingAndText(frameEndPos);
-					const discNum = Number.parseInt(discText, 10);
-
-					if (Number.isInteger(discNum) && discNum > 0) {
-						metadata.discNumber ??= discNum;
-					}
-				}; break;
-
-				case 'TCON':
-				case 'TCO': {
-					const genreText = reader.readId3V2EncodingAndText(frameEndPos);
-					let match = /^\((\d+)\)/.exec(genreText);
-					if (match) {
-						const genreNumber = Number.parseInt(match[1]!);
-						if (ID3_V1_GENRES[genreNumber] !== undefined) {
-							metadata.genre ??= ID3_V1_GENRES[genreNumber];
-							break;
-						}
-					}
-
-					match = /^\d+$/.exec(genreText);
-					if (match) {
-						const genreNumber = Number.parseInt(match[0]);
-						if (ID3_V1_GENRES[genreNumber] !== undefined) {
-							metadata.genre ??= ID3_V1_GENRES[genreNumber];
-							break;
-						}
-					}
-
-					metadata.genre ??= genreText;
-				}; break;
-
-				case 'TDRC':
-				case 'TDAT': {
-					const dateText = reader.readId3V2EncodingAndText(frameEndPos);
-					const date = new Date(dateText);
-
-					if (!Number.isNaN(date.getTime())) {
-						metadata.releasedAt ??= date;
-					}
-				}; break;
-
-				case 'TYER':
-				case 'TYE': {
-					const yearText = reader.readId3V2EncodingAndText(frameEndPos);
-					const year = Number.parseInt(yearText, 10);
-
-					if (Number.isInteger(year)) {
-						metadata.releasedAt ??= new Date(year, 0, 1);
-					}
-				}; break;
-
-				case 'USLT':
-				case 'ULT': {
-					const encoding = reader.readU8();
-					reader.pos += 3; // Skip language
-					reader.readId3V2Text(encoding, frameEndPos); // Short content description
-					metadata.lyrics ??= reader.readId3V2Text(encoding, frameEndPos);
-				}; break;
-
-				case 'COMM':
-				case 'COM': {
-					const encoding = reader.readU8();
-					reader.pos += 3; // Skip language
-					reader.readId3V2Text(encoding, frameEndPos); // Short content description
-					metadata.comment ??= reader.readId3V2Text(encoding, frameEndPos);
-				}; break;
-
-				case 'APIC':
-				case 'PIC': {
-					const encoding = reader.readId3V2TextEncoding();
-
-					let mimeType: string;
-					if (header.majorVersion === 2) {
-						const imageFormat = reader.readAscii(3);
-						mimeType = imageFormat === 'PNG'
-							? 'image/png'
-							: imageFormat === 'JPG'
-								? 'image/jpeg'
-								: 'image/*';
-					} else {
-						mimeType = reader.readId3V2Text(encoding, frameEndPos);
-					}
-
-					const pictureType = reader.readU8();
-					const description = reader.readId3V2Text(encoding, frameEndPos).trimEnd(); // Trim ending spaces
-
-					const imageDataSize = frameEndPos - reader.pos;
-					if (imageDataSize >= 0) {
-						const imageData = reader.readBytes(imageDataSize);
-
-						if (!metadata.images) metadata.images = [];
-						metadata.images.push({
-							data: imageData,
-							mimeType,
-							kind: pictureType === 3
-								? 'coverFront'
-								: pictureType === 4
-									? 'coverBack'
-									: 'unknown',
-							description,
-						});
-					}
-				}; break;
-
-				default: {
-					reader.pos += frame.size;
-				}; break;
-			}
-
+		if (frameEncrypted) {
+			console.warn(`Skipping encrypted ID3v2 frame ${frame.id}`);
 			reader.pos = frameEndPos;
+			continue;
 		}
+
+		if (frameCompressed) {
+			console.warn(`Skipping compressed ID3v2 frame ${frame.id}`); // Maybe someday? Idk
+			reader.pos = frameEndPos;
+			continue;
+		}
+
+		if (frameUnsynchronized) {
+			reader.ununsynchronizeRegion(reader.pos, frameEndPos);
+		}
+
+		switch (frame.id) {
+			case 'TIT2':
+			case 'TT2': {
+				metadata.title ??= reader.readId3V2EncodingAndText(frameEndPos);
+			}; break;
+
+			case 'TPE1':
+			case 'TP1': {
+				metadata.artist ??= reader.readId3V2EncodingAndText(frameEndPos);
+			}; break;
+
+			case 'TALB':
+			case 'TAL': {
+				metadata.album ??= reader.readId3V2EncodingAndText(frameEndPos);
+			}; break;
+
+			case 'TPE2':
+			case 'TP2': {
+				metadata.albumArtist ??= reader.readId3V2EncodingAndText(frameEndPos);
+			}; break;
+
+			case 'TRCK':
+			case 'TRK': {
+				const trackText = reader.readId3V2EncodingAndText(frameEndPos);
+				const trackNum = Number.parseInt(trackText, 10);
+
+				if (Number.isInteger(trackNum) && trackNum > 0) {
+					metadata.trackNumber ??= trackNum;
+				}
+			}; break;
+
+			case 'TPOS':
+			case 'TPA': {
+				const discText = reader.readId3V2EncodingAndText(frameEndPos);
+				const discNum = Number.parseInt(discText, 10);
+
+				if (Number.isInteger(discNum) && discNum > 0) {
+					metadata.discNumber ??= discNum;
+				}
+			}; break;
+
+			case 'TCON':
+			case 'TCO': {
+				const genreText = reader.readId3V2EncodingAndText(frameEndPos);
+				let match = /^\((\d+)\)/.exec(genreText);
+				if (match) {
+					const genreNumber = Number.parseInt(match[1]!);
+					if (ID3_V1_GENRES[genreNumber] !== undefined) {
+						metadata.genre ??= ID3_V1_GENRES[genreNumber];
+						break;
+					}
+				}
+
+				match = /^\d+$/.exec(genreText);
+				if (match) {
+					const genreNumber = Number.parseInt(match[0]);
+					if (ID3_V1_GENRES[genreNumber] !== undefined) {
+						metadata.genre ??= ID3_V1_GENRES[genreNumber];
+						break;
+					}
+				}
+
+				metadata.genre ??= genreText;
+			}; break;
+
+			case 'TDRC':
+			case 'TDAT': {
+				const dateText = reader.readId3V2EncodingAndText(frameEndPos);
+				const date = new Date(dateText);
+
+				if (!Number.isNaN(date.getTime())) {
+					metadata.releasedAt ??= date;
+				}
+			}; break;
+
+			case 'TYER':
+			case 'TYE': {
+				const yearText = reader.readId3V2EncodingAndText(frameEndPos);
+				const year = Number.parseInt(yearText, 10);
+
+				if (Number.isInteger(year)) {
+					metadata.releasedAt ??= new Date(year, 0, 1);
+				}
+			}; break;
+
+			case 'USLT':
+			case 'ULT': {
+				const encoding = reader.readU8();
+				reader.pos += 3; // Skip language
+				reader.readId3V2Text(encoding, frameEndPos); // Short content description
+				metadata.lyrics ??= reader.readId3V2Text(encoding, frameEndPos);
+			}; break;
+
+			case 'COMM':
+			case 'COM': {
+				const encoding = reader.readU8();
+				reader.pos += 3; // Skip language
+				reader.readId3V2Text(encoding, frameEndPos); // Short content description
+				metadata.comment ??= reader.readId3V2Text(encoding, frameEndPos);
+			}; break;
+
+			case 'APIC':
+			case 'PIC': {
+				const encoding = reader.readId3V2TextEncoding();
+
+				let mimeType: string;
+				if (header.majorVersion === 2) {
+					const imageFormat = reader.readAscii(3);
+					mimeType = imageFormat === 'PNG'
+						? 'image/png'
+						: imageFormat === 'JPG'
+							? 'image/jpeg'
+							: 'image/*';
+				} else {
+					mimeType = reader.readId3V2Text(encoding, frameEndPos);
+				}
+
+				const pictureType = reader.readU8();
+				const description = reader.readId3V2Text(encoding, frameEndPos).trimEnd(); // Trim ending spaces
+
+				const imageDataSize = frameEndPos - reader.pos;
+				if (imageDataSize >= 0) {
+					const imageData = reader.readBytes(imageDataSize);
+
+					if (!metadata.images) metadata.images = [];
+					metadata.images.push({
+						data: imageData,
+						mimeType,
+						kind: pictureType === 3
+							? 'coverFront'
+							: pictureType === 4
+								? 'coverBack'
+								: 'unknown',
+						description,
+					});
+				}
+			}; break;
+
+			default: {
+				reader.pos += frame.size;
+			}; break;
+		}
+
+		reader.pos = frameEndPos;
 	}
-}
+};
 
 // https://id3.org/id3v2.3.0
 export class Id3V2Reader {

@@ -7,12 +7,14 @@
  */
 
 import { AudioCodec, VideoCodec } from './codec';
+import { MaybePromise } from './misc';
 import { EncodedPacket } from './packet';
 import { AudioSample, VideoSample } from './sample';
 
 /**
  * Base class for custom video decoders. To add your own custom video decoder, extend this class, implement the
- * abstract methods and static `supports` method, and register the decoder using `registerDecoder`.
+ * abstract methods and static `supports` method, and register the decoder using {@link registerDecoder}.
+ * @group Custom coders
  * @public
  */
 export abstract class CustomVideoDecoder {
@@ -23,25 +25,26 @@ export abstract class CustomVideoDecoder {
 	/** The callback to call when a decoded VideoSample is available. */
 	readonly onSample!: (sample: VideoSample) => unknown;
 
-	/** Returns true iff the decoder can decode the given codec configuration. */
+	/** Returns true if and only if the decoder can decode the given codec configuration. */
 	// eslint-disable-next-line @typescript-eslint/no-unused-vars
 	static supports(codec: VideoCodec, config: VideoDecoderConfig): boolean {
 		return false;
 	}
 
 	/** Called after decoder creation; can be used for custom initialization logic. */
-	abstract init(): Promise<void> | void;
+	abstract init(): MaybePromise<void>;
 	/** Decodes the provided encoded packet. */
-	abstract decode(packet: EncodedPacket): Promise<void> | void;
+	abstract decode(packet: EncodedPacket): MaybePromise<void>;
 	/** Decodes all remaining packets and then resolves. */
-	abstract flush(): Promise<void> | void;
+	abstract flush(): MaybePromise<void>;
 	/** Called when the decoder is no longer needed and its resources can be freed. */
-	abstract close(): Promise<void> | void;
+	abstract close(): MaybePromise<void>;
 }
 
 /**
  * Base class for custom audio decoders. To add your own custom audio decoder, extend this class, implement the
- * abstract methods and static `supports` method, and register the decoder using `registerDecoder`.
+ * abstract methods and static `supports` method, and register the decoder using {@link registerDecoder}.
+ * @group Custom coders
  * @public
  */
 export abstract class CustomAudioDecoder {
@@ -52,25 +55,26 @@ export abstract class CustomAudioDecoder {
 	/** The callback to call when a decoded AudioSample is available. */
 	readonly onSample!: (sample: AudioSample) => unknown;
 
-	/** Returns true iff the decoder can decode the given codec configuration. */
+	/** Returns true if and only if the decoder can decode the given codec configuration. */
 	// eslint-disable-next-line @typescript-eslint/no-unused-vars
 	static supports(codec: AudioCodec, config: AudioDecoderConfig): boolean {
 		return false;
 	}
 
 	/** Called after decoder creation; can be used for custom initialization logic. */
-	abstract init(): Promise<void> | void;
+	abstract init(): MaybePromise<void>;
 	/** Decodes the provided encoded packet. */
-	abstract decode(packet: EncodedPacket): Promise<void> | void;
+	abstract decode(packet: EncodedPacket): MaybePromise<void>;
 	/** Decodes all remaining packets and then resolves. */
-	abstract flush(): Promise<void> | void;
+	abstract flush(): MaybePromise<void>;
 	/** Called when the decoder is no longer needed and its resources can be freed. */
-	abstract close(): Promise<void> | void;
+	abstract close(): MaybePromise<void>;
 }
 
 /**
  * Base class for custom video encoders. To add your own custom video encoder, extend this class, implement the
- * abstract methods and static `supports` method, and register the encoder using `registerEncoder`.
+ * abstract methods and static `supports` method, and register the encoder using {@link registerEncoder}.
+ * @group Custom coders
  * @public
  */
 export abstract class CustomVideoEncoder {
@@ -81,25 +85,26 @@ export abstract class CustomVideoEncoder {
 	/** The callback to call when an EncodedPacket is available. */
 	readonly onPacket!: (packet: EncodedPacket, meta?: EncodedVideoChunkMetadata) => unknown;
 
-	/** Returns true iff the encoder can encode the given codec configuration. */
+	/** Returns true if and only if the encoder can encode the given codec configuration. */
 	// eslint-disable-next-line @typescript-eslint/no-unused-vars
 	static supports(codec: VideoCodec, config: VideoEncoderConfig): boolean {
 		return false;
 	}
 
 	/** Called after encoder creation; can be used for custom initialization logic. */
-	abstract init(): Promise<void> | void;
+	abstract init(): MaybePromise<void>;
 	/** Encodes the provided video sample. */
-	abstract encode(videoSample: VideoSample, options: VideoEncoderEncodeOptions): Promise<void> | void;
+	abstract encode(videoSample: VideoSample, options: VideoEncoderEncodeOptions): MaybePromise<void>;
 	/** Encodes all remaining video samples and then resolves. */
-	abstract flush(): Promise<void> | void;
+	abstract flush(): MaybePromise<void>;
 	/** Called when the encoder is no longer needed and its resources can be freed. */
-	abstract close(): Promise<void> | void;
+	abstract close(): MaybePromise<void>;
 }
 
 /**
  * Base class for custom audio encoders. To add your own custom audio encoder, extend this class, implement the
- * abstract methods and static `supports` method, and register the encoder using `registerEncoder`.
+ * abstract methods and static `supports` method, and register the encoder using {@link registerEncoder}.
+ * @group Custom coders
  * @public
  */
 export abstract class CustomAudioEncoder {
@@ -110,20 +115,20 @@ export abstract class CustomAudioEncoder {
 	/** The callback to call when an EncodedPacket is available. */
 	readonly onPacket!: (packet: EncodedPacket, meta?: EncodedAudioChunkMetadata) => unknown;
 
-	/** Returns true iff the encoder can encode the given codec configuration. */
+	/** Returns true if and only if the encoder can encode the given codec configuration. */
 	// eslint-disable-next-line @typescript-eslint/no-unused-vars
 	static supports(codec: AudioCodec, config: AudioEncoderConfig): boolean {
 		return false;
 	}
 
 	/** Called after encoder creation; can be used for custom initialization logic. */
-	abstract init(): Promise<void> | void;
+	abstract init(): MaybePromise<void>;
 	/** Encodes the provided audio sample. */
-	abstract encode(audioSample: AudioSample): Promise<void> | void;
+	abstract encode(audioSample: AudioSample): MaybePromise<void>;
 	/** Encodes all remaining audio samples and then resolves. */
-	abstract flush(): Promise<void> | void;
+	abstract flush(): MaybePromise<void>;
 	/** Called when the encoder is no longer needed and its resources can be freed. */
-	abstract close(): Promise<void> | void;
+	abstract close(): MaybePromise<void>;
 }
 
 export const customVideoDecoders: typeof CustomVideoDecoder[] = [];
@@ -134,6 +139,7 @@ export const customAudioEncoders: typeof CustomAudioEncoder[] = [];
 /**
  * Registers a custom video or audio decoder. Registered decoders will automatically be used for decoding whenever
  * possible.
+ * @group Custom coders
  * @public
  */
 export const registerDecoder = (decoder: typeof CustomVideoDecoder | typeof CustomAudioDecoder) => {
@@ -163,6 +169,7 @@ export const registerDecoder = (decoder: typeof CustomVideoDecoder | typeof Cust
 /**
  * Registers a custom video or audio encoder. Registered encoders will automatically be used for encoding whenever
  * possible.
+ * @group Custom coders
  * @public
  */
 export const registerEncoder = (encoder: typeof CustomVideoEncoder | typeof CustomAudioEncoder) => {

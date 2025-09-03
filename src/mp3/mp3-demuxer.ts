@@ -15,7 +15,15 @@ import { PacketRetrievalOptions } from '../media-sink';
 import { assert, AsyncMutex, binarySearchExact, binarySearchLessOrEqual, UNDETERMINED_LANGUAGE } from '../misc';
 import { EncodedPacket, PLACEHOLDER_DATA } from '../packet';
 import { FrameHeader, getXingOffset, INFO, XING } from '../../shared/mp3-misc';
-import { ID3_V1_TAG_SIZE, ID3_V2_HEADER_SIZE, Mp3Reader } from './mp3-reader';
+import {
+	ID3_V1_TAG_SIZE,
+	ID3_V2_HEADER_SIZE,
+	parseId3V1Tag,
+	parseId3V2Tag,
+	readId3V2Header,
+	readNextFrameHeader,
+} from './mp3-reader';
+import { readAscii, readBytes, Reader, readU32Be } from '../reader';
 
 type Sample = {
 	timestamp: number;
@@ -25,7 +33,7 @@ type Sample = {
 };
 
 export class Mp3Demuxer extends Demuxer {
-	reader: Mp3Reader;
+	reader: Reader;
 
 	metadataPromise: Promise<void> | null = null;
 	firstFrameHeader: FrameHeader | null = null;
@@ -35,24 +43,21 @@ export class Mp3Demuxer extends Demuxer {
 	tracks: InputAudioTrack[] = [];
 
 	readingMutex = new AsyncMutex();
+	lastSampleLoaded = false;
 	lastLoadedPos = 0;
-	fileSize = 0;
 	nextTimestampInSamples = 0;
 
 	constructor(input: Input) {
 		super(input);
 
-		this.reader = new Mp3Reader(input._mainReader);
+		this.reader = input._reader;
 	}
 
 	async readMetadata() {
 		return this.metadataPromise ??= (async () => {
-			this.fileSize = await this.input.source.getSize();
-			this.reader.fileSize = this.fileSize;
-
 			// Keep loading until we find the first frame header
-			while (!this.firstFrameHeader && this.lastLoadedPos < this.fileSize) {
-				await this.loadNextChunk();
+			while (!this.firstFrameHeader && !this.lastSampleLoaded) {
+				await this.advanceReader();
 			}
 
 			// There has to be a frame if this demuxer got selected
@@ -62,78 +67,69 @@ export class Mp3Demuxer extends Demuxer {
 		})();
 	}
 
-	/** Loads the next 0.5 MiB of frames. */
-	async loadNextChunk() {
-		assert(this.lastLoadedPos < this.fileSize);
+	async advanceReader() {
+		if (this.lastLoadedPos === 0) {
+			// Let's skip all ID3v2 tags at the start of the file
+			while (true) {
+				let slice = this.reader.requestSlice(this.lastLoadedPos, ID3_V2_HEADER_SIZE);
+				if (slice instanceof Promise) slice = await slice;
 
-		this.reader.pos = this.lastLoadedPos;
+				if (!slice) {
+					this.lastSampleLoaded = true;
+					return;
+				}
 
-		const chunkSize = 0.5 * 1024 * 1024; // 0.5 MiB
-		const endPos = Math.min(this.lastLoadedPos + chunkSize, this.fileSize);
-		await this.reader.reader.loadRange(this.lastLoadedPos, endPos);
-
-		this.lastLoadedPos = endPos;
-		assert(this.lastLoadedPos <= this.fileSize);
-
-		if (this.reader.pos === 0) {
-			while (true) { // There may be multiple
-				await this.reader.reader.loadRange(this.reader.pos, this.reader.pos + ID3_V2_HEADER_SIZE);
-				const id3V2Header = this.reader.readId3V2Header();
+				const id3V2Header = readId3V2Header(slice);
 				if (!id3V2Header) {
 					break;
 				}
 
-				this.reader.pos += id3V2Header.size; // Skip it for now
+				this.lastLoadedPos = slice.filePos + id3V2Header.size;
 			}
 		}
 
-		this.parseFramesFromLoadedData();
-	}
+		const startPos = this.lastLoadedPos;
 
-	private parseFramesFromLoadedData() {
-		while (true) {
-			const startPos = this.reader.pos;
-			const header = this.reader.readNextFrameHeader();
-			if (!header) {
-				break;
-			}
-
-			// Check if the entire frame fits in the loaded data
-			if (header.startPos + header.totalSize > this.lastLoadedPos) {
-				// Frame doesn't fit, reset positions and stop
-				this.reader.pos = startPos;
-				this.lastLoadedPos = startPos; // Snap this back too so that the next read is frame-aligned
-
-				break;
-			}
-
-			const xingOffset = getXingOffset(header.mpegVersionId, header.channel);
-			this.reader.pos = header.startPos + xingOffset;
-			const word = this.reader.readU32();
-			const isXing = word === XING || word === INFO;
-
-			this.reader.pos = header.startPos + header.totalSize - 1; // -1 in case the frame is 1 byte too short
-
-			if (isXing) {
-				// There's no actual audio data in this frame, so let's skip it
-				continue;
-			}
-
-			if (!this.firstFrameHeader) {
-				this.firstFrameHeader = header;
-			}
-
-			const sampleDuration = header.audioSamplesInFrame / header.sampleRate;
-			const sample: Sample = {
-				timestamp: this.nextTimestampInSamples / header.sampleRate,
-				duration: sampleDuration,
-				dataStart: header.startPos,
-				dataSize: header.totalSize,
-			};
-
-			this.loadedSamples.push(sample);
-			this.nextTimestampInSamples += header.audioSamplesInFrame;
+		const result = await readNextFrameHeader(this.reader, startPos, this.reader.fileSize);
+		if (!result) {
+			this.lastSampleLoaded = true;
+			return;
 		}
+
+		const header = result.header;
+
+		this.lastLoadedPos = result.startPos + header.totalSize - 1; // -1 in case the frame is 1 byte too short
+
+		const xingOffset = getXingOffset(header.mpegVersionId, header.channel);
+
+		let slice = this.reader.requestSlice(startPos + xingOffset, 4);
+		if (slice instanceof Promise) slice = await slice;
+		assert(slice);
+
+		const word = readU32Be(slice);
+		const isXing = word === XING || word === INFO;
+
+		if (isXing) {
+			// There's no actual audio data in this frame, so let's skip it
+			return;
+		}
+
+		if (!this.firstFrameHeader) {
+			this.firstFrameHeader = header;
+		}
+
+		const sampleDuration = header.audioSamplesInFrame / header.sampleRate;
+		const sample: Sample = {
+			timestamp: this.nextTimestampInSamples / header.sampleRate,
+			duration: sampleDuration,
+			dataStart: startPos,
+			dataSize: header.totalSize,
+		};
+
+		this.loadedSamples.push(sample);
+		this.nextTimestampInSamples += header.audioSamplesInFrame;
+
+		return;
 	}
 
 	async getMimeType() {
@@ -165,30 +161,39 @@ export class Mp3Demuxer extends Demuxer {
 			}
 
 			this.metadata = {};
-			this.reader.pos = 0;
+			let currentPos = 0;
 			let id3V2HeaderFound = false;
 
 			while (true) {
-				await this.reader.reader.loadRange(this.reader.pos, this.reader.pos + ID3_V2_HEADER_SIZE);
-				const id3V2Header = this.reader.readId3V2Header();
+				let headerSlice = this.reader.requestSlice(currentPos, ID3_V2_HEADER_SIZE);
+				if (headerSlice instanceof Promise) headerSlice = await headerSlice;
+				if (!headerSlice) break;
+
+				const id3V2Header = readId3V2Header(headerSlice);
 				if (!id3V2Header) {
 					break;
 				}
 
 				id3V2HeaderFound = true;
 
-				await this.reader.reader.loadRange(this.reader.pos, this.reader.pos + id3V2Header.size);
-				this.reader.parseId3V2Tag(id3V2Header, this.metadata);
+				let contentSlice = this.reader.requestSlice(headerSlice.filePos, id3V2Header.size);
+				if (contentSlice instanceof Promise) contentSlice = await contentSlice;
+				if (!contentSlice) break;
+
+				parseId3V2Tag(contentSlice, id3V2Header, this.metadata);
+
+				currentPos = headerSlice.filePos + id3V2Header.size;
 			}
 
-			if (!id3V2HeaderFound) {
+			if (!id3V2HeaderFound && this.reader.fileSize !== null && this.reader.fileSize >= ID3_V1_TAG_SIZE) {
 				// Try reading an ID3v1 tag at the end of the file
-				this.reader.pos = Math.max(0, this.fileSize - ID3_V1_TAG_SIZE);
-				await this.reader.reader.loadRange(this.reader.pos, this.reader.pos + ID3_V1_TAG_SIZE);
+				let slice = this.reader.requestSlice(this.reader.fileSize - ID3_V1_TAG_SIZE, ID3_V1_TAG_SIZE);
+				if (slice instanceof Promise) slice = await slice;
+				assert(slice);
 
-				const tag = this.reader.readAscii(3);
+				const tag = readAscii(slice, 3);
 				if (tag === 'TAG') {
-					this.reader.parseId3V1Tag(this.metadata);
+					parseId3V1Tag(slice, this.metadata);
 				}
 			}
 
@@ -256,7 +261,7 @@ class Mp3AudioTrackBacking implements InputAudioTrackBacking {
 		};
 	}
 
-	getPacketAtIndex(sampleIndex: number, options: PacketRetrievalOptions) {
+	async getPacketAtIndex(sampleIndex: number, options: PacketRetrievalOptions) {
 		if (sampleIndex === -1) {
 			return null;
 		}
@@ -270,8 +275,14 @@ class Mp3AudioTrackBacking implements InputAudioTrackBacking {
 		if (options.metadataOnly) {
 			data = PLACEHOLDER_DATA;
 		} else {
-			this.demuxer.reader.pos = rawSample.dataStart;
-			data = this.demuxer.reader.readBytes(rawSample.dataSize);
+			let slice = this.demuxer.reader.requestSlice(rawSample.dataStart, rawSample.dataSize);
+			if (slice instanceof Promise) slice = await slice;
+
+			if (!slice) {
+				return null; // Data didn't fit into the rest of the file
+			}
+
+			data = readBytes(slice, rawSample.dataSize);
 		}
 
 		return new EncodedPacket(
@@ -284,7 +295,7 @@ class Mp3AudioTrackBacking implements InputAudioTrackBacking {
 		);
 	}
 
-	async getFirstPacket(options: PacketRetrievalOptions) {
+	getFirstPacket(options: PacketRetrievalOptions) {
 		return this.getPacketAtIndex(0, options);
 	}
 
@@ -305,9 +316,9 @@ class Mp3AudioTrackBacking implements InputAudioTrackBacking {
 			// Ensure the next sample exists
 			while (
 				nextIndex >= this.demuxer.loadedSamples.length
-				&& this.demuxer.lastLoadedPos < this.demuxer.fileSize
+				&& !this.demuxer.lastSampleLoaded
 			) {
-				await this.demuxer.loadNextChunk();
+				await this.demuxer.advanceReader();
 			}
 
 			return this.getPacketAtIndex(nextIndex, options);
@@ -318,6 +329,7 @@ class Mp3AudioTrackBacking implements InputAudioTrackBacking {
 
 	async getPacket(timestamp: number, options: PacketRetrievalOptions) {
 		const release = await this.demuxer.readingMutex.acquire();
+
 		try {
 			while (true) {
 				const index = binarySearchLessOrEqual(
@@ -331,7 +343,7 @@ class Mp3AudioTrackBacking implements InputAudioTrackBacking {
 					return null;
 				}
 
-				if (this.demuxer.lastLoadedPos === this.demuxer.fileSize) {
+				if (this.demuxer.lastSampleLoaded) {
 					// All data is loaded, return what we found
 					return this.getPacketAtIndex(index, options);
 				}
@@ -342,7 +354,7 @@ class Mp3AudioTrackBacking implements InputAudioTrackBacking {
 				}
 
 				// Otherwise, keep loading data
-				await this.demuxer.loadNextChunk();
+				await this.demuxer.advanceReader();
 			}
 		} finally {
 			release();

@@ -4,6 +4,7 @@ import {
 	BlobSource,
 	CanvasSink,
 	Input,
+	UrlSource,
 	WrappedAudioBuffer,
 	WrappedCanvas,
 } from 'mediabunny';
@@ -11,9 +12,11 @@ import {
 import SampleFileUrl from '../../docs/assets/big-buck-bunny-trimmed.mp4';
 (document.querySelector('#sample-file-download') as HTMLAnchorElement).href = SampleFileUrl;
 
-const selectMediaButton = document.querySelector('button') as HTMLButtonElement;
+const selectMediaButton = document.querySelector('#select-file') as HTMLButtonElement;
+const loadUrlButton = document.querySelector('#load-url') as HTMLButtonElement;
 const fileNameElement = document.querySelector('#file-name') as HTMLParagraphElement;
 const horizontalRule = document.querySelector('hr') as HTMLHRElement;
+const loadingElement = document.querySelector('#loading-element') as HTMLParagraphElement;
 const playerContainer = document.querySelector('#player') as HTMLDivElement;
 const canvas = document.querySelector('canvas') as HTMLCanvasElement;
 const controlsElement = document.querySelector('#controls') as HTMLDivElement;
@@ -66,7 +69,7 @@ let volumeMuted = false;
 
 /** === INIT LOGIC === */
 
-const initMediaPlayer = async (file: File) => {
+const initMediaPlayer = async (resource: File | string) => {
 	try {
 		// First, dispose any ongoing playback:
 
@@ -79,15 +82,19 @@ const initMediaPlayer = async (file: File) => {
 		asyncId++;
 
 		fileLoaded = false;
-		fileNameElement.textContent = file.name;
+		fileNameElement.textContent = resource instanceof File ? resource.name : resource;
 		horizontalRule.style.display = '';
+		loadingElement.style.display = '';
 		playerContainer.style.display = 'none';
 		errorElement.textContent = '';
 		warningElement.textContent = '';
 
-		// Create an Input from the file
+		// Create an Input from the resource
+		const source = resource instanceof File
+			? new BlobSource(resource)
+			: new UrlSource(resource);
 		const input = new Input({
-			source: new BlobSource(file),
+			source,
 			formats: ALL_FORMATS,
 		});
 
@@ -178,6 +185,7 @@ const initMediaPlayer = async (file: File) => {
 			await play();
 		}
 
+		loadingElement.style.display = 'none';
 		playerContainer.style.display = '';
 
 		if (!videoSink) {
@@ -189,6 +197,7 @@ const initMediaPlayer = async (file: File) => {
 		console.error(error);
 
 		errorElement.textContent = String(error);
+		loadingElement.style.display = 'none';
 		playerContainer.style.display = 'none';
 	}
 };
@@ -415,23 +424,28 @@ const updateProgressBarTime = (seconds: number) => {
 
 progressBarContainer.addEventListener('pointerdown', (event) => {
 	draggingProgressBar = true;
+	progressBarContainer.setPointerCapture(event.pointerId);
 
 	const rect = progressBarContainer.getBoundingClientRect();
 	const completion = Math.max(Math.min((event.clientX - rect.left) / rect.width, 1), 0);
 	updateProgressBarTime(completion * totalDuration);
 
+	clearTimeout(hideControlsTimeout);
+
 	window.addEventListener('pointerup', (event) => {
 		draggingProgressBar = false;
+		progressBarContainer.releasePointerCapture(event.pointerId);
 
 		const rect = progressBarContainer.getBoundingClientRect();
 		const completion = Math.max(Math.min((event.clientX - rect.left) / rect.width, 1), 0);
 		const newTime = completion * totalDuration;
 
 		void seekToTime(newTime);
+		showControlsTemporarily();
 	}, { once: true });
 });
 
-window.addEventListener('pointermove', (event) => {
+progressBarContainer.addEventListener('pointermove', (event) => {
 	if (draggingProgressBar) {
 		const rect = progressBarContainer.getBoundingClientRect();
 		const completion = Math.max(Math.min((event.clientX - rect.left) / rect.width, 1), 0);
@@ -456,18 +470,24 @@ const updateVolume = () => {
 
 volumeBarContainer.addEventListener('pointerdown', (event) => {
 	draggingVolumeBar = true;
+	volumeBarContainer.setPointerCapture(event.pointerId);
 
 	const rect = volumeBarContainer.getBoundingClientRect();
 	volume = Math.max(Math.min((event.clientX - rect.left) / rect.width, 1), 0);
 	volumeMuted = false;
 	updateVolume();
 
+	clearTimeout(hideControlsTimeout);
+
 	window.addEventListener('pointerup', (event) => {
 		draggingVolumeBar = false;
+		volumeBarContainer.releasePointerCapture(event.pointerId);
 
 		const rect = volumeBarContainer.getBoundingClientRect();
 		volume = Math.max(Math.min((event.clientX - rect.left) / rect.width, 1), 0);
 		updateVolume();
+
+		showControlsTemporarily();
 	}, { once: true });
 });
 
@@ -476,7 +496,7 @@ volumeButton.addEventListener('click', () => {
 	updateVolume();
 });
 
-window.addEventListener('pointermove', (event) => {
+volumeBarContainer.addEventListener('pointermove', (event) => {
 	if (draggingVolumeBar) {
 		const rect = volumeBarContainer.getBoundingClientRect();
 		volume = Math.max(Math.min((event.clientX - rect.left) / rect.width, 1), 0);
@@ -493,26 +513,43 @@ const showControlsTemporarily = () => {
 	}
 
 	controlsElement.style.opacity = '1';
+	controlsElement.style.pointerEvents = '';
 	playerContainer.style.cursor = '';
 
 	clearTimeout(hideControlsTimeout);
 	hideControlsTimeout = window.setTimeout(() => {
-		controlsElement.style.opacity = '0';
+		if (draggingProgressBar) {
+			return;
+		}
+
+		hideControls();
 		playerContainer.style.cursor = 'none';
 	}, 2000);
 };
 
+const hideControls = () => {
+	controlsElement.style.opacity = '0';
+	controlsElement.style.pointerEvents = 'none';
+};
+hideControls();
+
 let hideControlsTimeout = -1;
-playerContainer.addEventListener('pointermove', () => {
-	showControlsTemporarily();
+playerContainer.addEventListener('pointermove', (event) => {
+	if (event.pointerType !== 'touch') {
+		showControlsTemporarily();
+	}
 });
-playerContainer.addEventListener('pointerleave', () => {
+playerContainer.addEventListener('pointerleave', (event) => {
 	if (!videoSink) {
 		// Shouldn't run if there's only an audio track
 		return;
 	}
 
-	controlsElement.style.opacity = '0';
+	if (draggingProgressBar || draggingVolumeBar || event.pointerType === 'touch') {
+		return;
+	}
+
+	hideControls();
 	clearTimeout(hideControlsTimeout);
 });
 
@@ -554,17 +591,35 @@ fullscreenButton.addEventListener('click', () => {
 	}
 });
 
+// I'm sorry for this
+const isTouchDevice = () => {
+	return (('ontouchstart' in window)
+		|| (navigator.maxTouchPoints > 0)
+		|| ('msMaxTouchPoints' in navigator && (navigator.msMaxTouchPoints as number) > 0));
+};
+
 playerContainer.addEventListener('click', () => {
-	togglePlay();
+	if (isTouchDevice()) {
+		if (controlsElement.style.opacity === '1') {
+			hideControls();
+		} else {
+			showControlsTemporarily();
+		}
+	} else {
+		togglePlay();
+	}
 });
 controlsElement.addEventListener('click', (event) => {
 	// Make sure this does NOT toggle play
 	event.stopPropagation();
+	showControlsTemporarily();
 });
 
 /** === UTILS === */
 
 const formatSeconds = (seconds: number) => {
+	const showMilliseconds = window.innerWidth >= 640;
+
 	seconds = Math.round(seconds * 1000) / 1000; // Round to milliseconds
 
 	const hours = Math.floor(seconds / 3600);
@@ -572,12 +627,27 @@ const formatSeconds = (seconds: number) => {
 	const remainingSeconds = Math.floor(seconds % 60);
 	const millisecs = Math.floor(1000 * seconds % 1000).toString().padStart(3, '0');
 
+	let result: string;
 	if (hours > 0) {
-		return `${hours}:${minutes.toString().padStart(2, '0')}`
-			+ `:${remainingSeconds.toString().padStart(2, '0')}.${millisecs}`;
+		result = `${hours}:${minutes.toString().padStart(2, '0')}`
+			+ `:${remainingSeconds.toString().padStart(2, '0')}`;
+	} else {
+		result = `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
 	}
-	return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}.${millisecs}`;
+
+	if (showMilliseconds) {
+		result += `.${millisecs}`;
+	}
+
+	return result;
 };
+
+window.addEventListener('resize', () => {
+	if (totalDuration) {
+		updateProgressBarTime(getPlaybackTime());
+		durationElement.textContent = formatSeconds(totalDuration);
+	}
+});
 
 /** === FILE SELECTION LOGIC === */
 
@@ -595,6 +665,19 @@ selectMediaButton.addEventListener('click', () => {
 	});
 
 	fileInput.click();
+});
+
+loadUrlButton.addEventListener('click', () => {
+	const url = prompt(
+		'Please enter a URL of a media file. Note that it must be HTTPS and support cross-origin requests, so have the'
+		+ ' right CORS headers set.',
+		'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+	);
+	if (!url) {
+		return;
+	}
+
+	void initMediaPlayer(url);
 });
 
 document.addEventListener('dragover', (event) => {

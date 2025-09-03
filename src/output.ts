@@ -16,6 +16,7 @@ import { Writer } from './writer';
 
 /**
  * The options for creating an Output object.
+ * @group Output files
  * @public
  */
 export type OutputOptions<
@@ -30,11 +31,13 @@ export type OutputOptions<
 
 /**
  * List of all track types.
+ * @group Miscellaneous
  * @public
  */
 export const ALL_TRACK_TYPES = ['video', 'audio', 'subtitle'] as const;
 /**
  * Union type of all track types.
+ * @group Miscellaneous
  * @public
  */
 export type TrackType = typeof ALL_TRACK_TYPES[number];
@@ -63,6 +66,7 @@ export type OutputSubtitleTrack = OutputTrack & { type: 'subtitle' };
 
 /**
  * Base track metadata, applicable to all tracks.
+ * @group Output files
  * @public
  */
 export type BaseTrackMetadata = {
@@ -74,6 +78,7 @@ export type BaseTrackMetadata = {
 
 /**
  * Additional metadata for video tracks.
+ * @group Output files
  * @public
  */
 export type VideoTrackMetadata = BaseTrackMetadata & {
@@ -88,11 +93,13 @@ export type VideoTrackMetadata = BaseTrackMetadata & {
 };
 /**
  * Additional metadata for audio tracks.
+ * @group Output files
  * @public
  */
 export type AudioTrackMetadata = BaseTrackMetadata & {};
 /**
  * Additional metadata for subtitle tracks.
+ * @group Output files
  * @public
  */
 export type SubtitleTrackMetadata = BaseTrackMetadata & {};
@@ -111,6 +118,7 @@ const validateBaseTrackMetadata = (metadata: BaseTrackMetadata) => {
 
 /**
  * Main class orchestrating the creation of a new media file.
+ * @group Output files
  * @public
  */
 export class Output<
@@ -141,6 +149,10 @@ export class Output<
 	/** @internal */
 	_metadata: MediaMetadata = {};
 
+	/**
+	 * Creates a new instance of {@link Output} which can then be used to create a new media file according to the
+	 * specified {@link OutputOptions}.
+	 */
 	constructor(options: OutputOptions<F, T>) {
 		if (!options || typeof options !== 'object') {
 			throw new TypeError('options must be an object.');

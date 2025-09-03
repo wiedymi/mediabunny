@@ -420,7 +420,7 @@ This source is the fastest but requires the entire input file to be held in memo
 
 ### `BlobSource`
 
-This source is backed by an underlying [`Blob`](https://developer.mozilla.org/en-US/docs/Web/API/Blob) object. Since [`File`](https://developer.mozilla.org/en-US/docs/Web/API/File) extends `Blob`, this source is perfect for reading data directly from disk.
+This source is backed by an underlying [`Blob`](https://developer.mozilla.org/en-US/docs/Web/API/Blob) object. Since [`File`](https://developer.mozilla.org/en-US/docs/Web/API/File) extends `Blob`, this source is perfect for reading data directly from disk (in the browser).
 ```ts
 import { BlobSource } from 'mediabunny';
 
@@ -430,20 +430,25 @@ fileInput.addEventListener('change', (event) => {
 });
 ```
 
-### `UrlSource` <Badge type="warning" text="beta" />
+`BlobSource` accepts additional options as a second parameter:
+```ts
+type BlobSourceOptions = {
+	// The maximum number of bytes the cache is allowed to hold
+	// in memory. Defaults to 8 MiB.
+	maxCacheSize?: number;
+};
+```
 
-::: warning
-This is a **beta** feature. `UrlSource` tends to make tons of requests and is potentially slow. This is something that will be fixed in the near future.
+### `UrlSource`
 
-It still works, but keep in mind it's going to be much higher-latency than reading directly from disk or from memory.
-:::
-
-This source fetches data from a URL. This is useful for reading files over the network.
+This source fetches data from a remote URL, useful for reading files over the network.
 ```ts
 import { UrlSource } from 'mediabunny';
 
 const source = new UrlSource('https://example.com/bigbuckbunny.mp4');
 ```
+
+`UrlSource` will do some pretty crazy stuff to prefetch data intelligently based on observed access patterns to minimize request count and latency.
 
 ::: warning
 If you're using this source in the browser and the URL is on a different origin, make sure [CORS](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS) is properly configured.
@@ -454,6 +459,10 @@ If you're using this source in the browser and the URL is on a different origin,
 type UrlSourceOptions = {
 	requestInit?: RequestInit;
 	getRetryDelay?: (previousAttempts: number) => number | null;
+
+	// The maximum number of bytes the cache is allowed to hold
+	// in memory. Defaults to 8 MiB.
+	maxCacheSize?: number;
 };
 ```
 
@@ -476,13 +485,31 @@ const source = new UrlSource('https://example.com/bigbuckbunny.mp4', {
 });
 ```
 
-Not setting `getRetryDelay` means requests will not be retried.
+Not setting `getRetryDelay` will default to an infinite, capped exponential backoff pattern.
+
+### `FilePathSource`
+
+This input source can be used to load data directly from a file, given a file path. It requires a server-side environment such as Node, Bun, or Deno.
+```ts
+import { FilePathSource } from 'mediabunny';
+
+const source = new FilePathSource('/home/david/Downloads/bigbuckbunny.mp4');
+```
+
+`FilePathSource` accepts additional options as a second parameter:
+```ts
+type FilePathSourceOptions = {
+	// The maximum number of bytes the cache is allowed to hold
+	// in memory. Defaults to 8 MiB.
+	maxCacheSize?: number;
+};
+```
 
 ### `StreamSource`
 
-This is a general-purpose input source you can use to read data from anywhere. All other input sources can be implemented on top of `StreamSource`.
+This is a general-purpose input source you can use to read data from anywhere.
 
-For example, here we're reading a file from disk using the Node.js file system:
+For example, here we're reading a file from disk using the Node.js file system (although you should use [`FilePathSource`](#filepathsource) for that):
 ```ts
 import { StreamSource } from 'mediabunny';
 import { open } from 'node:fs/promises';
@@ -505,11 +532,101 @@ const source = new StreamSource({
 The options of `StreamSource` have the following type:
 ```ts
 type StreamSourceOptions = {
-	// Called when data is requested.
-	// Should return or resolve to the bytes from the specified byte range.
-	read: (start: number, end: number) => Uint8Array | Promise<Uint8Array>;
-	// Called when the size of the entire file is requested.
-	// Should return or resolve to the size in bytes.
-	getSize: () => number | Promise<number>;
+	getSize: () => MaybePromise<number>;
+	read: (start: number, end: number) => MaybePromise<Uint8Array | ReadableStream<Uint8Array>>;
+	maxCacheSize?: number;
+	prefetchProfile?: 'none' | 'fileSystem' | 'network';
 };
+
+type MaybePromise<T> = T | Promise<T>;
+```
+
+- `getSize`\
+	Called when the size of the entire file is requested. Must return or resolve to the size in bytes. This function is guaranteed to be called before `read`.
+- `read`\
+	Called when data is requested. Must return or resolve to the bytes from the specified byte range, or a stream that yields these bytes.
+- `maxCacheSize`\
+	The maximum number of bytes the cache is allowed to hold in memory. Defaults to 8 MiB.
+- `prefetchProfile`\
+	Specifies the prefetch profile that the reader should use with this source. A prefetch propfile specifies the pattern with which bytes outside of the requested range are preloaded to reduce latency for future reads.
+	- `'none'` (default): No prefetching; only the data needed in the moment is requested.
+	- `'fileSystem'`: File system-optimized prefetching: a small amount of data is prefetched bidirectionally, aligned with page boundaries.
+	- `'network'`: Network-optimized prefetching, or more generally, prefetching optimized for any high-latency environment: tries to minimize the amount of read calls and aggressively prefetches data when sequential access patterns are detected.
+
+### `ReadableStreamSource`
+
+This is a source backed by a `ReadableStream` of `Uint8Array`, representing an append-only byte stream of unknown length. This is the source to use for incrementally streaming in input files that are still being constructed and whose size we don't yet know. You could also use it to stream in existing files, but other sources (such as [`BlobSource`](#blobsource) or [`FilePathSource`](#filepathsource)) are recommended instead because they offer random access.
+
+```ts
+import { ReadableStreamSource } from 'mediabunny';
+
+const { writable, readable } = new TransformStream<Uint8Array, Uint8Array>();
+const source = new ReadableStreamSource(readable);
+
+// Append chunks of data
+const writer = writable.getWriter();
+writer.write(chunk1);
+writer.write(chunk2);
+writer.close();
+```
+
+This source is *unsized*, meaning calls to `.getSize()` will throw and readers are more limited due to the lack of random file access. You should only use this source with sequential access patterns, such as reading all packets from start to end or doing conversions. This source does not work well with random access patterns unless you increase its max cache size.
+
+```ts
+type ReadableStreamSourceOptions = {
+	// The maximum number of bytes the cache is allowed to hold
+	// in memory. Defaults to 16 MiB.
+	maxCacheSize?: number;
+};
+```
+
+#### Use with [`MediaRecorder`](https://developer.mozilla.org/en-US/docs/Web/API/MediaRecorder)
+
+You can combine `MediaRecorder` with `ReadableStreamSource` to stream recorded data into Mediabunny while the recording is taking place. Here's an example where we pipe `MediaRecorder`'s output into Mediabunny's Conversion API to create a WAVE file:
+```ts
+import {
+	Input, 
+	Output, 
+	Conversion, 
+	ReadableStreamSource, 
+	ALL_FORMATS, 
+	WavOutputFormat, 
+	BufferTarget,
+} from 'mediabunny';
+
+// Set up a TransformStream to convert MediaRecorder's Blobs into Uint8Arrays
+const { writable, readable } = new TransformStream<Blob, Uint8Array>({
+	async transform(chunk, controller) {
+		const arrayBuffer = await chunk.arrayBuffer();
+		controller.enqueue(new Uint8Array(arrayBuffer));
+	},
+});
+
+const input = new Input({
+	source: new ReadableStreamSource(readable),
+	formats: ALL_FORMATS,
+});
+const output = new Output({
+	format: new WavOutputFormat(),
+	target: new BufferTarget(),
+});
+
+const conversionPromise = Conversion.init({ input, output })
+	.then(conversion => conversion.execute());
+
+const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+const recorder = new MediaRecorder(micStream);
+const writer = writable.getWriter();
+
+recorder.ondataavailable = e => writer.write(e.data);
+recorder.onstop = async () => {
+	await writer.close();
+	await conversionPromise;
+
+	// Get the final .wav file
+	const wavFile = output.target.buffer!; // => ArrayBuffer
+};
+
+recorder.start(1000);
+setTimeout(() => recorder.stop(), 10_000); // Stop recording after 10s
 ```

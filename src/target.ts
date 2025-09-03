@@ -6,11 +6,12 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-import { BufferTargetWriter, StreamTargetWriter, Writer } from './writer';
+import { BufferTargetWriter, NullTargetWriter, StreamTargetWriter, Writer } from './writer';
 import { Output } from './output';
 
 /**
  * Base class for targets, specifying where output files are written.
+ * @group Output targets
  * @public
  */
 export abstract class Target {
@@ -19,15 +20,24 @@ export abstract class Target {
 
 	/** @internal */
 	abstract _createWriter(): Writer;
+
+	/**
+	 * Called each time data is written to the target. Will be called with the byte range into which data was written.
+	 *
+	 * Use this callback to track the size of the output file as it grows. But be warned, this function is chatty and
+	 * gets called *extremely* often.
+	 */
+	onwrite: ((start: number, end: number) => unknown) | null = null;
 }
 
 /**
  * A target that writes data directly into an ArrayBuffer in memory. Great for performance, but not suitable for very
  * large files. The buffer will be available once the output has been finalized.
+ * @group Output targets
  * @public
  */
 export class BufferTarget extends Target {
-	/** Stores the final output buffer. Until the output is finalized, this will be null. */
+	/** Stores the final output buffer. Until the output is finalized, this will be `null`. */
 	buffer: ArrayBuffer | null = null;
 
 	/** @internal */
@@ -37,7 +47,8 @@ export class BufferTarget extends Target {
 }
 
 /**
- * A data chunk for StreamTarget.
+ * A data chunk for {@link StreamTarget}.
+ * @group Output targets
  * @public
  */
 export type StreamTargetChunk = {
@@ -50,7 +61,8 @@ export type StreamTargetChunk = {
 };
 
 /**
- * Options for StreamTarget.
+ * Options for {@link StreamTarget}.
+ * @group Output targets
  * @public
  */
 export type StreamTargetOptions = {
@@ -65,9 +77,12 @@ export type StreamTargetOptions = {
 };
 
 /**
- * This target writes data to a WritableStream, making it a general-purpose target for writing data anywhere. It is
- * also compatible with FileSystemWritableFileStream for use with the File System Access API. The WritableStream can
- * also apply backpressure, which will propagate to the output and throttle the encoders.
+ * This target writes data to a [`WritableStream`](https://developer.mozilla.org/en-US/docs/Web/API/WritableStream),
+ * making it a general-purpose target for writing data anywhere. It is also compatible with
+ * [`FileSystemWritableFileStream`](https://developer.mozilla.org/en-US/docs/Web/API/FileSystemWritableFileStream) for
+ * use with the [File System Access API](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API). The
+ * `WritableStream` can also apply backpressure, which will propagate to the output and throttle the encoders.
+ * @group Output targets
  * @public
  */
 export class StreamTarget extends Target {
@@ -76,6 +91,7 @@ export class StreamTarget extends Target {
 	/** @internal */
 	_options: StreamTargetOptions;
 
+	/** Creates a new {@link StreamTarget} which writes to the specified `writable`. */
 	constructor(
 		writable: WritableStream<StreamTargetChunk>,
 		options: StreamTargetOptions = {},
@@ -102,5 +118,18 @@ export class StreamTarget extends Target {
 	/** @internal */
 	_createWriter() {
 		return new StreamTargetWriter(this);
+	}
+}
+
+/**
+ * This target just discards all incoming data. It is useful for when you need an {@link Output} but extract data from
+ * it differently, for example through format-specific callbacks (`onMoof`, `onMdat`, ...) or encoder events.
+ * @group Output targets
+ * @public
+ */
+export class NullTarget extends Target {
+	/** @internal */
+	_createWriter() {
+		return new NullTargetWriter(this);
 	}
 }

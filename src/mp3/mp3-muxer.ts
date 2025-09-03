@@ -63,7 +63,7 @@ export class Mp3Muxer extends Muxer {
 				}
 
 				const word = view.getUint32(0, false);
-				const header = readFrameHeader(word, { pos: 0, fileSize: null });
+				const header = readFrameHeader(word, null).header;
 				if (!header) {
 					throw new Error('Invalid MP3 header in sample.');
 				}

@@ -19,10 +19,14 @@ import {
 
 /**
  * Metadata used for VideoSample initialization.
+ * @group Samples
  * @public
  */
 export type VideoSampleInit = {
-	/** The internal pixel format in which the frame is stored. */
+	/**
+	 * The internal pixel format in which the frame is stored.
+	 * [See pixel formats](https://developer.mozilla.org/en-US/docs/Web/API/VideoFrame/format)
+	 */
 	format?: VideoPixelFormat;
 	/** The width of the frame in pixels. */
 	codedWidth?: number;
@@ -40,7 +44,8 @@ export type VideoSampleInit = {
 
 /**
  * Represents a raw, unencoded video sample (frame). Mainly used as an expressive wrapper around WebCodecs API's
- * VideoFrame, but can also be used standalone.
+ * [`VideoFrame`](https://developer.mozilla.org/en-US/docs/Web/API/VideoFrame), but can also be used standalone.
+ * @group Samples
  * @public
  */
 export class VideoSample {
@@ -49,7 +54,10 @@ export class VideoSample {
 	/** @internal */
 	_closed: boolean = false;
 
-	/** The internal pixel format in which the frame is stored. */
+	/**
+	 * The internal pixel format in which the frame is stored.
+	 * [See pixel formats](https://developer.mozilla.org/en-US/docs/Web/API/VideoFrame/format)
+	 */
 	readonly format!: VideoPixelFormat | null;
 	/** The width of the frame in pixels. */
 	readonly codedWidth!: number;
@@ -87,8 +95,24 @@ export class VideoSample {
 		return Math.trunc(SECOND_TO_MICROSECOND_FACTOR * this.duration);
 	}
 
+	/**
+	 * Creates a new {@link VideoSample} from a
+	 * [`VideoFrame`](https://developer.mozilla.org/en-US/docs/Web/API/VideoFrame). This is essentially a near zero-cost
+	 * wrapper around `VideoFrame`. The sample's metadata is optionally refined using the data specified in `init`.
+	*/
 	constructor(data: VideoFrame, init?: VideoSampleInit);
+	/**
+	 * Creates a new {@link VideoSample} from a
+	 * [`CanvasImageSource`](https://udn.realityripple.com/docs/Web/API/CanvasImageSource), similar to the
+	 * [`VideoFrame`](https://developer.mozilla.org/en-US/docs/Web/API/VideoFrame) constructor. When `VideoFrame` is
+	 * available, this is simply a wrapper around its constructor. If not, it will copy the source's image data to an
+	 * internal canvas for later use.
+	 */
 	constructor(data: CanvasImageSource, init: SetRequired<VideoSampleInit, 'timestamp'>);
+	/**
+	 * Creates a new {@link VideoSample} from raw pixel data specified in `data`. Additional metadata must be provided
+	 * in `init`.
+	 */
 	constructor(
 		data: BufferSource,
 		init: SetRequired<VideoSampleInit, 'format' | 'codedWidth' | 'codedHeight' | 'timestamp'>
@@ -143,8 +167,11 @@ export class VideoSample {
 			this._data = data;
 
 			this.format = data.format;
-			this.codedWidth = data.codedWidth;
-			this.codedHeight = data.codedHeight;
+			// Copying the display dimensions here, assuming no innate VideoFrame rotation
+			this.codedWidth = data.displayWidth;
+			this.codedHeight = data.displayHeight;
+			// The VideoFrame's rotation is ignored here. It's still a new field, and I'm not sure of any application
+			// where the browser makes use of it. If a case gets found, I'll add it.
 			this.rotation = init?.rotation ?? 0;
 			this.timestamp = init?.timestamp ?? data.timestamp / 1e6;
 			this.duration = init?.duration ?? (data.duration ?? 0) / 1e6;
@@ -541,10 +568,10 @@ export class VideoSample {
 		/**
 		 * Controls the fitting algorithm.
 		 *
-		 * - 'fill' will stretch the image to fill the entire box, potentially altering aspect ratio.
-		 * - 'contain' will contain the entire image within the box while preserving aspect ratio. This may lead to
+		 * - `'fill'` will stretch the image to fill the entire box, potentially altering aspect ratio.
+		 * - `'contain'` will contain the entire image within the box while preserving aspect ratio. This may lead to
 		 * letterboxing.
-		 * - 'cover' will scale the image until the entire box is filled, while preserving aspect ratio.
+		 * - `'cover'` will scale the image until the entire box is filled, while preserving aspect ratio.
 		 */
 		fit: 'fill' | 'contain' | 'cover';
 		/** A way to override rotation. Defaults to the rotation of the sample. */
@@ -593,7 +620,8 @@ export class VideoSample {
 	}
 
 	/**
-	 * Converts this video sample to a CanvasImageSource for drawing to a canvas.
+	 * Converts this video sample to a
+	 * [`CanvasImageSource`](https://udn.realityripple.com/docs/Web/API/CanvasImageSource) for drawing to a canvas.
 	 *
 	 * You must use the value returned by this method immediately, as any VideoFrame created internally will
 	 * automatically be closed in the next microtask.
@@ -657,12 +685,15 @@ const AUDIO_SAMPLE_FORMATS = new Set(
 
 /**
  * Metadata used for AudioSample initialization.
+ * @group Samples
  * @public
  */
 export type AudioSampleInit = {
 	/** The audio data for this sample. */
 	data: AllowSharedBufferSource;
-	/** The audio sample format. */
+	/**
+	 * The audio sample format. [See sample formats](https://developer.mozilla.org/en-US/docs/Web/API/AudioData/format)
+	 */
 	format: AudioSampleFormat;
 	/** The number of audio channels. */
 	numberOfChannels: number;
@@ -674,6 +705,7 @@ export type AudioSampleInit = {
 
 /**
  * Options used for copying audio sample data.
+ * @group Samples
  * @public
  */
 export type AudioSampleCopyToOptions = {
@@ -681,7 +713,10 @@ export type AudioSampleCopyToOptions = {
 	 * The index identifying the plane to copy from. This must be 0 if using a non-planar (interleaved) output format.
 	 */
 	planeIndex: number;
-	/** The output format for the destination data. Defaults to the AudioSample's format. */
+	/**
+	 * The output format for the destination data. Defaults to the AudioSample's format.
+	 * [See sample formats](https://developer.mozilla.org/en-US/docs/Web/API/AudioData/format)
+	 */
 	format?: AudioSampleFormat;
 	/** An offset into the source plane data indicating which frame to begin copying from. Defaults to 0. */
 	frameOffset?: number;
@@ -693,8 +728,9 @@ export type AudioSampleCopyToOptions = {
 };
 
 /**
- * Represents a raw, unencoded audio sample. Mainly used as an expressive wrapper around WebCodecs API's AudioData,
- * but can also be used standalone.
+ * Represents a raw, unencoded audio sample. Mainly used as an expressive wrapper around WebCodecs API's
+ * [`AudioData`](https://developer.mozilla.org/en-US/docs/Web/API/AudioData), but can also be used standalone.
+ * @group Samples
  * @public
  */
 export class AudioSample {
@@ -703,7 +739,10 @@ export class AudioSample {
 	/** @internal */
 	_closed: boolean = false;
 
-	/** The audio sample format. */
+	/**
+	 * The audio sample format.
+	 * [See sample formats](https://developer.mozilla.org/en-US/docs/Web/API/AudioData/format)
+	 */
 	readonly format: AudioSampleFormat;
 	/** The audio sample rate in hertz. */
 	readonly sampleRate: number;
@@ -713,7 +752,7 @@ export class AudioSample {
 	readonly numberOfFrames: number;
 	/** The number of audio channels. */
 	readonly numberOfChannels: number;
-	/** The timestamp of the sample in seconds. */
+	/** The duration of the sample in seconds. */
 	readonly duration: number;
 	/**
 	 * The presentation timestamp of the sample in seconds. May be negative. Samples with negative end timestamps should
@@ -731,6 +770,11 @@ export class AudioSample {
 		return Math.trunc(SECOND_TO_MICROSECOND_FACTOR * this.duration);
 	}
 
+	/**
+	 * Creates a new {@link AudioSample}, either from an existing
+	 * [`AudioData`](https://developer.mozilla.org/en-US/docs/Web/API/AudioData) or from raw bytes specified in
+	 * {@link AudioSampleInit}.
+	 */
 	constructor(init: AudioData | AudioSampleInit) {
 		if (isAudioData(init)) {
 			if (init.format === null) {

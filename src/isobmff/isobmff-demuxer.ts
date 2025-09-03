@@ -19,12 +19,12 @@ import {
 	VideoCodec,
 } from '../codec';
 import {
+	Av1CodecInfo,
 	AvcDecoderConfigurationRecord,
+	extractAv1CodecInfoFromPacket,
+	extractVp9CodecInfoFromPacket,
 	HevcDecoderConfigurationRecord,
 	Vp9CodecInfo,
-	Av1CodecInfo,
-	extractVp9CodecInfoFromPacket,
-	extractAv1CodecInfoFromPacket,
 } from '../codec-data';
 import { Demuxer } from '../demuxer';
 import { Input } from '../input';
@@ -39,29 +39,50 @@ import {
 import { PacketRetrievalOptions } from '../media-sink';
 import {
 	assert,
-	COLOR_PRIMARIES_MAP_INVERSE,
-	MATRIX_COEFFICIENTS_MAP_INVERSE,
-	TRANSFER_CHARACTERISTICS_MAP_INVERSE,
-	binarySearchLessOrEqual,
-	binarySearchExact,
-	Rotation,
-	last,
 	AsyncMutex,
-	findLastIndex,
-	UNDETERMINED_LANGUAGE,
-	TransformationMatrix,
-	roundToPrecision,
-	isIso639Dash2LanguageCode,
-	roundToMultiple,
-	normalizeRotation,
+	binarySearchExact,
+	binarySearchLessOrEqual,
 	Bitstream,
+	COLOR_PRIMARIES_MAP_INVERSE,
+	findLastIndex,
 	insertSorted,
+	isIso639Dash2LanguageCode,
+	last,
+	MATRIX_COEFFICIENTS_MAP_INVERSE,
+	normalizeRotation,
+	roundToMultiple,
+	roundToPrecision,
+	Rotation,
 	textDecoder,
+	TransformationMatrix,
+	TRANSFER_CHARACTERISTICS_MAP_INVERSE,
+	UNDETERMINED_LANGUAGE,
 } from '../misc';
 import { EncodedPacket, PLACEHOLDER_DATA } from '../packet';
-import { Reader } from '../reader';
 import { buildIsobmffMimeType } from './isobmff-misc';
-import { IsobmffReader, MAX_BOX_HEADER_SIZE, MIN_BOX_HEADER_SIZE } from './isobmff-reader';
+import {
+	MAX_BOX_HEADER_SIZE,
+	MIN_BOX_HEADER_SIZE,
+	readBoxHeader,
+	readFixed_16_16,
+	readFixed_2_30,
+	readIsomVariableInteger,
+} from './isobmff-reader';
+import {
+	FileSlice,
+	readBytes,
+	readF64Be,
+	readI16Be,
+	readI32Be,
+	readI64Be,
+	Reader,
+	readU16Be,
+	readU24Be,
+	readU32Be,
+	readU64Be,
+	readU8,
+	readAscii,
+} from '../reader';
 
 type InternalTrack = {
 	id: number;
@@ -202,7 +223,9 @@ type Fragment = {
 };
 
 export class IsobmffDemuxer extends Demuxer {
-	metadataReader: IsobmffReader;
+	reader: Reader;
+	moovSlice: FileSlice | null = null;
+
 	currentTrack: InternalTrack | null = null;
 	tracks: InternalTrack[] = [];
 	metadataPromise: Promise<void> | null = null;
@@ -216,13 +239,10 @@ export class IsobmffDemuxer extends Demuxer {
 	currentFragment: Fragment | null = null;
 	fragmentLookupMutex = new AsyncMutex();
 
-	chunkReader: IsobmffReader;
-
 	constructor(input: Input) {
 		super(input);
 
-		this.metadataReader = new IsobmffReader(input._mainReader);
-		this.chunkReader = new IsobmffReader(new Reader(input.source, 64 * 2 ** 20)); // Max 64 MiB of stored chunks
+		this.reader = input._reader;
 	}
 
 	override async computeDuration() {
@@ -251,29 +271,30 @@ export class IsobmffDemuxer extends Demuxer {
 
 	readMetadata() {
 		return this.metadataPromise ??= (async () => {
-			const sourceSize = await this.metadataReader.reader.source.getSize();
+			let currentPos = 0;
+			while (true) {
+				let slice = this.reader.requestSliceRange(currentPos, MIN_BOX_HEADER_SIZE, MAX_BOX_HEADER_SIZE);
+				if (slice instanceof Promise) slice = await slice;
+				if (!slice) break;
 
-			while (this.metadataReader.pos < sourceSize) {
-				await this.metadataReader.reader.loadRange(
-					this.metadataReader.pos,
-					this.metadataReader.pos + MAX_BOX_HEADER_SIZE,
-				);
-				const startPos = this.metadataReader.pos;
-				const boxInfo = this.metadataReader.readBoxHeader();
+				const startPos = currentPos;
+				const boxInfo = readBoxHeader(slice);
 				if (!boxInfo) {
 					break;
 				}
 
 				if (boxInfo.name === 'ftyp') {
-					const majorBrand = this.metadataReader.readAscii(4);
+					const majorBrand = readAscii(slice, 4);
 					this.isQuickTime = majorBrand === 'qt  ';
 				} else if (boxInfo.name === 'moov') {
 					// Found moov, load it
-					await this.metadataReader.reader.loadRange(
-						this.metadataReader.pos,
-						this.metadataReader.pos + boxInfo.contentSize,
-					);
-					this.readContiguousBoxes(boxInfo.contentSize);
+
+					let moovSlice = this.reader.requestSlice(slice.filePos, boxInfo.contentSize);
+					if (moovSlice instanceof Promise) moovSlice = await moovSlice;
+					if (!moovSlice) break;
+
+					this.moovSlice = moovSlice;
+					this.readContiguousBoxes(this.moovSlice);
 
 					for (const track of this.tracks) {
 						// Modify the edit list offset based on the previous segment durations. They are in different
@@ -286,32 +307,38 @@ export class IsobmffDemuxer extends Demuxer {
 					break;
 				}
 
-				this.metadataReader.pos = startPos + boxInfo.totalSize;
+				currentPos = startPos + boxInfo.totalSize;
 			}
 
-			if (this.isFragmented) {
+			if (this.isFragmented && this.reader.fileSize !== null) {
 				// The last 4 bytes may contain the size of the mfra box at the end of the file
-				await this.metadataReader.reader.loadRange(sourceSize - 4, sourceSize);
+				let lastWordSlice = this.reader.requestSlice(this.reader.fileSize - 4, 4);
+				if (lastWordSlice instanceof Promise) lastWordSlice = await lastWordSlice;
+				assert(lastWordSlice);
 
-				this.metadataReader.pos = sourceSize - 4;
-				const lastWord = this.metadataReader.readU32();
-				const potentialMfraPos = sourceSize - lastWord;
+				const lastWord = readU32Be(lastWordSlice);
+				const potentialMfraPos = this.reader.fileSize - lastWord;
 
-				if (potentialMfraPos >= 0 && potentialMfraPos <= sourceSize - MAX_BOX_HEADER_SIZE) {
-					// Load the header and a bit more, likely covering the entire box
-					await this.metadataReader.reader.loadRange(potentialMfraPos, potentialMfraPos + 2 ** 16);
+				if (potentialMfraPos >= 0 && potentialMfraPos <= this.reader.fileSize - MAX_BOX_HEADER_SIZE) {
+					let mfraHeaderSlice = this.reader.requestSliceRange(
+						potentialMfraPos,
+						MIN_BOX_HEADER_SIZE,
+						MAX_BOX_HEADER_SIZE,
+					);
+					if (mfraHeaderSlice instanceof Promise) mfraHeaderSlice = await mfraHeaderSlice;
 
-					this.metadataReader.pos = potentialMfraPos;
-					const boxInfo = this.metadataReader.readBoxHeader();
+					if (mfraHeaderSlice) {
+						const boxInfo = readBoxHeader(mfraHeaderSlice);
 
-					if (boxInfo && boxInfo.name === 'mfra') {
-						// We found the mfra box, allowing for much better random access. Let's parse it.
+						if (boxInfo && boxInfo.name === 'mfra') {
+							// We found the mfra box, allowing for much better random access. Let's parse it.
+							let mfraSlice = this.reader.requestSlice(mfraHeaderSlice.filePos, boxInfo.contentSize);
+							if (mfraSlice instanceof Promise) mfraSlice = await mfraSlice;
 
-						await this.metadataReader.reader.loadRange(
-							potentialMfraPos,
-							potentialMfraPos + boxInfo.totalSize,
-						);
-						this.readContiguousBoxes(boxInfo.contentSize);
+							if (mfraSlice) {
+								this.readContiguousBoxes(mfraSlice);
+							}
+						}
 					}
 				}
 			}
@@ -335,9 +362,11 @@ export class IsobmffDemuxer extends Demuxer {
 		};
 		internalTrack.sampleTable = sampleTable;
 
-		this.metadataReader.pos = internalTrack.sampleTableByteOffset;
+		assert(this.moovSlice);
+		const stblContainerSlice = this.moovSlice.slice(internalTrack.sampleTableByteOffset);
+
 		this.currentTrack = internalTrack;
-		this.traverseBox();
+		this.traverseBox(stblContainerSlice);
 		this.currentTrack = null;
 
 		const isPcmCodec = internalTrack.info?.type === 'audio'
@@ -459,32 +488,25 @@ export class IsobmffDemuxer extends Demuxer {
 		return sampleTable;
 	}
 
-	async readFragment(): Promise<Fragment> {
-		const startPos = this.metadataReader.pos;
+	async readFragment(startPos: number): Promise<Fragment> {
+		let headerSlice = this.reader.requestSliceRange(startPos, MIN_BOX_HEADER_SIZE, MAX_BOX_HEADER_SIZE);
+		if (headerSlice instanceof Promise) headerSlice = await headerSlice;
+		assert(headerSlice);
 
-		await this.metadataReader.reader.loadRange(
-			this.metadataReader.pos,
-			this.metadataReader.pos + MAX_BOX_HEADER_SIZE,
-		);
-
-		const moofBoxInfo = this.metadataReader.readBoxHeader();
+		const moofBoxInfo = readBoxHeader(headerSlice);
 		assert(moofBoxInfo?.name === 'moof');
 
-		const contentStart = this.metadataReader.pos;
-		await this.metadataReader.reader.loadRange(contentStart, contentStart + moofBoxInfo.contentSize);
+		let entireSlice = this.reader.requestSlice(startPos, moofBoxInfo.totalSize);
+		if (entireSlice instanceof Promise) entireSlice = await entireSlice;
+		assert(entireSlice);
 
-		this.metadataReader.pos = startPos;
-		this.traverseBox();
+		this.traverseBox(entireSlice);
 
 		const index = binarySearchExact(this.fragments, startPos, x => x.moofOffset);
 		assert(index !== -1);
 
 		const fragment = this.fragments[index]!;
 		assert(fragment.moofOffset === startPos);
-
-		// We have read everything in the moof box, there's no need to keep the data around anymore
-		// (keep the header tho)
-		this.metadataReader.reader.forgetRange(contentStart, contentStart + moofBoxInfo.contentSize);
 
 		// It may be that some tracks don't define the base decode time, i.e. when the fragment begins. This means the
 		// only other option is to sum up the duration of all previous fragments.
@@ -495,7 +517,7 @@ export class IsobmffDemuxer extends Demuxer {
 
 			const internalTrack = this.tracks.find(x => x.id === trackId)!;
 
-			this.metadataReader.pos = 0;
+			let currentPos = 0;
 			let currentFragment: Fragment | null = null;
 			let lastFragment: Fragment | null = null;
 
@@ -509,34 +531,32 @@ export class IsobmffDemuxer extends Demuxer {
 				// already has final timestamps).
 				currentFragment = internalTrack.fragments[index]!;
 				lastFragment = currentFragment;
-				this.metadataReader.pos = currentFragment.moofOffset + currentFragment.moofSize;
+				currentPos = currentFragment.moofOffset + currentFragment.moofSize;
 			}
 
-			let nextFragmentIsFirstFragment = this.metadataReader.pos === 0;
+			let nextFragmentIsFirstFragment = currentPos === 0;
 
-			while (this.metadataReader.pos <= startPos - MIN_BOX_HEADER_SIZE) {
+			while (currentPos <= startPos - MIN_BOX_HEADER_SIZE) {
 				if (currentFragment?.nextFragment) {
 					currentFragment = currentFragment.nextFragment;
-					this.metadataReader.pos = currentFragment.moofOffset + currentFragment.moofSize;
+					currentPos = currentFragment.moofOffset + currentFragment.moofSize;
 				} else {
-					await this.metadataReader.reader.loadRange(
-						this.metadataReader.pos,
-						this.metadataReader.pos + MAX_BOX_HEADER_SIZE,
-					);
-					const startPos = this.metadataReader.pos;
-					const boxInfo = this.metadataReader.readBoxHeader();
+					let slice = this.reader.requestSliceRange(currentPos, MIN_BOX_HEADER_SIZE, MAX_BOX_HEADER_SIZE);
+					if (slice instanceof Promise) slice = await slice;
+					if (!slice) break;
+
+					const boxStartPos = currentPos;
+					const boxInfo = readBoxHeader(slice);
 					if (!boxInfo) {
 						break;
 					}
 
 					if (boxInfo.name === 'moof') {
-						const index = binarySearchExact(this.fragments, startPos, x => x.moofOffset);
+						const index = binarySearchExact(this.fragments, boxStartPos, x => x.moofOffset);
 
 						let fragment: Fragment;
 						if (index === -1) {
-							this.metadataReader.pos = startPos;
-
-							fragment = await this.readFragment(); // Recursive call
+							fragment = await this.readFragment(boxStartPos); // Recursive call
 						} else {
 							// We already know this fragment
 							fragment = this.fragments[index]!;
@@ -552,7 +572,7 @@ export class IsobmffDemuxer extends Demuxer {
 						}
 					}
 
-					this.metadataReader.pos = startPos + boxInfo.totalSize;
+					currentPos = boxStartPos + boxInfo.totalSize;
 				}
 
 				if (currentFragment && currentFragment.trackData.has(trackId)) {
@@ -573,11 +593,11 @@ export class IsobmffDemuxer extends Demuxer {
 		return fragment;
 	}
 
-	readContiguousBoxes(totalSize: number) {
-		const startIndex = this.metadataReader.pos;
+	readContiguousBoxes(slice: FileSlice) {
+		const startIndex = slice.filePos;
 
-		while (this.metadataReader.pos - startIndex <= totalSize - MIN_BOX_HEADER_SIZE) {
-			const foundBox = this.traverseBox();
+		while (slice.filePos - startIndex <= slice.length - MIN_BOX_HEADER_SIZE) {
+			const foundBox = this.traverseBox(slice);
 
 			if (!foundBox) {
 				break;
@@ -585,13 +605,14 @@ export class IsobmffDemuxer extends Demuxer {
 		}
 	}
 
-	traverseBox() {
-		const startPos = this.metadataReader.pos;
-		const boxInfo = this.metadataReader.readBoxHeader();
+	traverseBox(slice: FileSlice): boolean {
+		const startPos = slice.filePos;
+		const boxInfo = readBoxHeader(slice);
 		if (!boxInfo) {
 			return false;
 		}
 
+		const contentStartPos = slice.filePos;
 		const boxEndPos = startPos + boxInfo.totalSize;
 
 		switch (boxInfo.name) {
@@ -601,21 +622,21 @@ export class IsobmffDemuxer extends Demuxer {
 			case 'mfra':
 			case 'edts':
 			case 'udta': {
-				this.readContiguousBoxes(boxInfo.contentSize);
+				this.readContiguousBoxes(slice.slice(contentStartPos, boxInfo.contentSize));
 			}; break;
 
 			case 'mvhd': {
-				const version = this.metadataReader.readU8();
-				this.metadataReader.pos += 3; // Flags
+				const version = readU8(slice);
+				slice.skip(3); // Flags
 
 				if (version === 1) {
-					this.metadataReader.pos += 8 + 8;
-					this.movieTimescale = this.metadataReader.readU32();
-					this.movieDurationInTimescale = this.metadataReader.readU64();
+					slice.skip(8 + 8);
+					this.movieTimescale = readU32Be(slice);
+					this.movieDurationInTimescale = readU64Be(slice);
 				} else {
-					this.metadataReader.pos += 4 + 4;
-					this.movieTimescale = this.metadataReader.readU32();
-					this.movieDurationInTimescale = this.metadataReader.readU32();
+					slice.skip(4 + 4);
+					this.movieTimescale = readU32Be(slice);
+					this.movieDurationInTimescale = readU32Be(slice);
 				}
 			}; break;
 
@@ -643,7 +664,7 @@ export class IsobmffDemuxer extends Demuxer {
 				} satisfies InternalTrack as InternalTrack;
 				this.currentTrack = track;
 
-				this.readContiguousBoxes(boxInfo.contentSize);
+				this.readContiguousBoxes(slice.slice(contentStartPos, boxInfo.contentSize));
 
 				if (track.id !== -1 && track.timescale !== -1 && track.info !== null) {
 					if (track.info.type === 'video' && track.info.width !== -1) {
@@ -664,8 +685,8 @@ export class IsobmffDemuxer extends Demuxer {
 				const track = this.currentTrack;
 				assert(track);
 
-				const version = this.metadataReader.readU8();
-				const flags = this.metadataReader.readU24();
+				const version = readU8(slice);
+				const flags = readU24Be(slice);
 
 				const trackEnabled = (flags & 0x1) !== 0;
 				if (!trackEnabled) {
@@ -674,30 +695,30 @@ export class IsobmffDemuxer extends Demuxer {
 
 				// Skip over creation & modification time to reach the track ID
 				if (version === 0) {
-					this.metadataReader.pos += 8;
-					track.id = this.metadataReader.readU32();
-					this.metadataReader.pos += 4;
-					track.durationInMovieTimescale = this.metadataReader.readU32();
+					slice.skip(8);
+					track.id = readU32Be(slice);
+					slice.skip(4);
+					track.durationInMovieTimescale = readU32Be(slice);
 				} else if (version === 1) {
-					this.metadataReader.pos += 16;
-					track.id = this.metadataReader.readU32();
-					this.metadataReader.pos += 4;
-					track.durationInMovieTimescale = this.metadataReader.readU64();
+					slice.skip(16);
+					track.id = readU32Be(slice);
+					slice.skip(4);
+					track.durationInMovieTimescale = readU64Be(slice);
 				} else {
 					throw new Error(`Incorrect track header version ${version}.`);
 				}
 
-				this.metadataReader.pos += 2 * 4 + 2 + 2 + 2 + 2;
+				slice.skip(2 * 4 + 2 + 2 + 2 + 2);
 				const matrix: TransformationMatrix = [
-					this.metadataReader.readFixed_16_16(),
-					this.metadataReader.readFixed_16_16(),
-					this.metadataReader.readFixed_2_30(),
-					this.metadataReader.readFixed_16_16(),
-					this.metadataReader.readFixed_16_16(),
-					this.metadataReader.readFixed_2_30(),
-					this.metadataReader.readFixed_16_16(),
-					this.metadataReader.readFixed_16_16(),
-					this.metadataReader.readFixed_2_30(),
+					readFixed_16_16(slice),
+					readFixed_16_16(slice),
+					readFixed_2_30(slice),
+					readFixed_16_16(slice),
+					readFixed_16_16(slice),
+					readFixed_2_30(slice),
+					readFixed_16_16(slice),
+					readFixed_16_16(slice),
+					readFixed_2_30(slice),
 				];
 
 				const rotation = normalizeRotation(roundToMultiple(extractRotationFromMatrix(matrix), 90));
@@ -710,21 +731,21 @@ export class IsobmffDemuxer extends Demuxer {
 				const track = this.currentTrack;
 				assert(track);
 
-				const version = this.metadataReader.readU8();
-				this.metadataReader.pos += 3; // Flags
+				const version = readU8(slice);
+				slice.skip(3); // Flags
 
 				let relevantEntryFound = false;
 				let previousSegmentDurations = 0;
 
-				const entryCount = this.metadataReader.readU32();
+				const entryCount = readU32Be(slice);
 				for (let i = 0; i < entryCount; i++) {
 					const segmentDuration = version === 1
-						? this.metadataReader.readU64()
-						: this.metadataReader.readU32();
+						? readU64Be(slice)
+						: readU32Be(slice);
 					const mediaTime = version === 1
-						? this.metadataReader.readI64()
-						: this.metadataReader.readI32();
-					const mediaRate = this.metadataReader.readFixed_16_16();
+						? readI64Be(slice)
+						: readI32Be(slice);
+					const mediaRate = readFixed_16_16(slice);
 
 					if (segmentDuration === 0) {
 						// Don't care
@@ -758,20 +779,20 @@ export class IsobmffDemuxer extends Demuxer {
 				const track = this.currentTrack;
 				assert(track);
 
-				const version = this.metadataReader.readU8();
-				this.metadataReader.pos += 3; // Flags
+				const version = readU8(slice);
+				slice.skip(3); // Flags
 
 				if (version === 0) {
-					this.metadataReader.pos += 8;
-					track.timescale = this.metadataReader.readU32();
-					track.durationInMediaTimescale = this.metadataReader.readU32();
+					slice.skip(8);
+					track.timescale = readU32Be(slice);
+					track.durationInMediaTimescale = readU32Be(slice);
 				} else if (version === 1) {
-					this.metadataReader.pos += 16;
-					track.timescale = this.metadataReader.readU32();
-					track.durationInMediaTimescale = this.metadataReader.readU64();
+					slice.skip(16);
+					track.timescale = readU32Be(slice);
+					track.durationInMediaTimescale = readU64Be(slice);
 				}
 
-				let language = this.metadataReader.readU16();
+				let language = readU16Be(slice);
 
 				if (language > 0) {
 					track.languageCode = '';
@@ -792,8 +813,8 @@ export class IsobmffDemuxer extends Demuxer {
 				const track = this.currentTrack;
 				assert(track);
 
-				this.metadataReader.pos += 8; // Version + flags + pre-defined
-				const handlerType = this.metadataReader.readAscii(4);
+				slice.skip(8); // Version + flags + pre-defined
+				const handlerType = readAscii(slice, 4);
 
 				if (handlerType === 'vide') {
 					track.info = {
@@ -826,7 +847,7 @@ export class IsobmffDemuxer extends Demuxer {
 
 				track.sampleTableByteOffset = startPos;
 
-				this.readContiguousBoxes(boxInfo.contentSize);
+				this.readContiguousBoxes(slice.slice(contentStartPos, boxInfo.contentSize));
 			}; break;
 
 			case 'stsd': {
@@ -837,14 +858,14 @@ export class IsobmffDemuxer extends Demuxer {
 					break;
 				}
 
-				const stsdVersion = this.metadataReader.readU8();
-				this.metadataReader.pos += 3; // Flags
+				const stsdVersion = readU8(slice);
+				slice.skip(3); // Flags
 
-				const entries = this.metadataReader.readU32();
+				const entries = readU32Be(slice);
 
 				for (let i = 0; i < entries; i++) {
-					const startPos = this.metadataReader.pos;
-					const sampleBoxInfo = this.metadataReader.readBoxHeader();
+					const sampleBoxStartPos = slice.filePos;
+					const sampleBoxInfo = readBoxHeader(slice);
 					if (!sampleBoxInfo) {
 						break;
 					}
@@ -867,14 +888,19 @@ export class IsobmffDemuxer extends Demuxer {
 							console.warn(`Unsupported video codec (sample entry type '${sampleBoxInfo.name}').`);
 						}
 
-						this.metadataReader.pos += 6 * 1 + 2 + 2 + 2 + 3 * 4;
+						slice.skip(6 * 1 + 2 + 2 + 2 + 3 * 4);
 
-						track.info.width = this.metadataReader.readU16();
-						track.info.height = this.metadataReader.readU16();
+						track.info.width = readU16Be(slice);
+						track.info.height = readU16Be(slice);
 
-						this.metadataReader.pos += 4 + 4 + 4 + 2 + 32 + 2 + 2;
+						slice.skip(4 + 4 + 4 + 2 + 32 + 2 + 2);
 
-						this.readContiguousBoxes((startPos + sampleBoxInfo.totalSize) - this.metadataReader.pos);
+						this.readContiguousBoxes(
+							slice.slice(
+								slice.filePos,
+								(sampleBoxStartPos + sampleBoxInfo.totalSize) - slice.filePos,
+							),
+						);
 					} else {
 						if (lowercaseBoxName === 'mp4a') {
 							// We don't know the codec yet (might be AAC, might be MP3), need to read the esds box
@@ -904,36 +930,36 @@ export class IsobmffDemuxer extends Demuxer {
 							console.warn(`Unsupported audio codec (sample entry type '${sampleBoxInfo.name}').`);
 						}
 
-						this.metadataReader.pos += 6 * 1 + 2;
+						slice.skip(6 * 1 + 2);
 
-						const version = this.metadataReader.readU16();
-						this.metadataReader.pos += 3 * 2;
+						const version = readU16Be(slice);
+						slice.skip(3 * 2);
 
-						let channelCount = this.metadataReader.readU16();
-						let sampleSize = this.metadataReader.readU16();
+						let channelCount = readU16Be(slice);
+						let sampleSize = readU16Be(slice);
 
-						this.metadataReader.pos += 2 * 2;
+						slice.skip(2 * 2);
 
 						// Can't use fixed16_16 as that's signed
-						let sampleRate = this.metadataReader.readU32() / 0x10000;
+						let sampleRate = readU32Be(slice) / 0x10000;
 
 						if (stsdVersion === 0 && version > 0) {
 							// Additional QuickTime fields
 							if (version === 1) {
-								this.metadataReader.pos += 4;
-								sampleSize = 8 * this.metadataReader.readU32();
-								this.metadataReader.pos += 2 * 4;
+								slice.skip(4);
+								sampleSize = 8 * readU32Be(slice);
+								slice.skip(2 * 4);
 							} else if (version === 2) {
-								this.metadataReader.pos += 4;
-								sampleRate = this.metadataReader.readF64();
-								channelCount = this.metadataReader.readU32();
-								this.metadataReader.pos += 4; // Always 0x7f000000
+								slice.skip(4);
+								sampleRate = readF64Be(slice);
+								channelCount = readU32Be(slice);
+								slice.skip(4); // Always 0x7f000000
 
-								sampleSize = this.metadataReader.readU32();
+								sampleSize = readU32Be(slice);
 
-								const flags = this.metadataReader.readU32();
+								const flags = readU32Be(slice);
 
-								this.metadataReader.pos += 2 * 4;
+								slice.skip(2 * 4);
 
 								if (lowercaseBoxName === 'lpcm') {
 									const bytesPerSample = (sampleSize + 7) >> 3;
@@ -1010,7 +1036,12 @@ export class IsobmffDemuxer extends Demuxer {
 							track.info.codec = 'pcm-f32be'; // Placeholder, will be adjusted by the pcmC box
 						}
 
-						this.readContiguousBoxes((startPos + sampleBoxInfo.totalSize) - this.metadataReader.pos);
+						this.readContiguousBoxes(
+							slice.slice(
+								slice.filePos,
+								(sampleBoxStartPos + sampleBoxInfo.totalSize) - slice.filePos,
+							),
+						);
 					}
 				}
 			}; break;
@@ -1019,31 +1050,31 @@ export class IsobmffDemuxer extends Demuxer {
 				const track = this.currentTrack;
 				assert(track && track.info);
 
-				track.info.codecDescription = this.metadataReader.readBytes(boxInfo.contentSize);
+				track.info.codecDescription = readBytes(slice, boxInfo.contentSize);
 			}; break;
 
 			case 'hvcC': {
 				const track = this.currentTrack;
 				assert(track && track.info);
 
-				track.info.codecDescription = this.metadataReader.readBytes(boxInfo.contentSize);
+				track.info.codecDescription = readBytes(slice, boxInfo.contentSize);
 			}; break;
 
 			case 'vpcC': {
 				const track = this.currentTrack;
 				assert(track && track.info?.type === 'video');
 
-				this.metadataReader.pos += 4; // Version + flags
+				slice.skip(4); // Version + flags
 
-				const profile = this.metadataReader.readU8();
-				const level = this.metadataReader.readU8();
-				const thirdByte = this.metadataReader.readU8();
+				const profile = readU8(slice);
+				const level = readU8(slice);
+				const thirdByte = readU8(slice);
 				const bitDepth = thirdByte >> 4;
 				const chromaSubsampling = (thirdByte >> 1) & 0b111;
 				const videoFullRangeFlag = thirdByte & 1;
-				const colourPrimaries = this.metadataReader.readU8();
-				const transferCharacteristics = this.metadataReader.readU8();
-				const matrixCoefficients = this.metadataReader.readU8();
+				const colourPrimaries = readU8(slice);
+				const transferCharacteristics = readU8(slice);
+				const matrixCoefficients = readU8(slice);
 
 				track.info.vp9CodecInfo = {
 					profile,
@@ -1061,13 +1092,13 @@ export class IsobmffDemuxer extends Demuxer {
 				const track = this.currentTrack;
 				assert(track && track.info?.type === 'video');
 
-				this.metadataReader.pos += 1; // Marker + version
+				slice.skip(1); // Marker + version
 
-				const secondByte = this.metadataReader.readU8();
+				const secondByte = readU8(slice);
 				const profile = secondByte >> 5;
 				const level = secondByte & 0b11111;
 
-				const thirdByte = this.metadataReader.readU8();
+				const thirdByte = readU8(slice);
 				const tier = thirdByte >> 7;
 				const highBitDepth = (thirdByte >> 6) & 1;
 				const twelveBit = (thirdByte >> 5) & 1;
@@ -1095,15 +1126,15 @@ export class IsobmffDemuxer extends Demuxer {
 				const track = this.currentTrack;
 				assert(track && track.info?.type === 'video');
 
-				const colourType = this.metadataReader.readAscii(4);
+				const colourType = readAscii(slice, 4);
 				if (colourType !== 'nclx') {
 					break;
 				}
 
-				const colourPrimaries = this.metadataReader.readU16();
-				const transferCharacteristics = this.metadataReader.readU16();
-				const matrixCoefficients = this.metadataReader.readU16();
-				const fullRangeFlag = Boolean(this.metadataReader.readU8() & 0x80);
+				const colourPrimaries = readU16Be(slice);
+				const transferCharacteristics = readU16Be(slice);
+				const matrixCoefficients = readU16Be(slice);
+				const fullRangeFlag = Boolean(readU8(slice) & 0x80);
 
 				track.info.colorSpace = {
 					primaries: COLOR_PRIMARIES_MAP_INVERSE[colourPrimaries],
@@ -1114,46 +1145,46 @@ export class IsobmffDemuxer extends Demuxer {
 			}; break;
 
 			case 'wave': {
-				this.readContiguousBoxes(boxInfo.contentSize);
+				this.readContiguousBoxes(slice.slice(contentStartPos, boxInfo.contentSize));
 			}; break;
 
 			case 'esds': {
 				const track = this.currentTrack;
 				assert(track && track.info?.type === 'audio');
 
-				this.metadataReader.pos += 4; // Version + flags
+				slice.skip(4); // Version + flags
 
-				const tag = this.metadataReader.readU8();
+				const tag = readU8(slice);
 				assert(tag === 0x03); // ES Descriptor
 
-				this.metadataReader.readIsomVariableInteger(); // Length
+				readIsomVariableInteger(slice); // Length
 
-				this.metadataReader.pos += 2; // ES ID
-				const mixed = this.metadataReader.readU8();
+				slice.skip(2); // ES ID
+				const mixed = readU8(slice);
 
 				const streamDependenceFlag = (mixed & 0x80) !== 0;
 				const urlFlag = (mixed & 0x40) !== 0;
 				const ocrStreamFlag = (mixed & 0x20) !== 0;
 
 				if (streamDependenceFlag) {
-					this.metadataReader.pos += 2;
+					slice.skip(2);
 				}
 				if (urlFlag) {
-					const urlLength = this.metadataReader.readU8();
-					this.metadataReader.pos += urlLength;
+					const urlLength = readU8(slice);
+					slice.skip(urlLength);
 				}
 				if (ocrStreamFlag) {
-					this.metadataReader.pos += 2;
+					slice.skip(2);
 				}
 
-				const decoderConfigTag = this.metadataReader.readU8();
+				const decoderConfigTag = readU8(slice);
 				assert(decoderConfigTag === 0x04); // DecoderConfigDescriptor
 
-				const decoderConfigDescriptorLength = this.metadataReader.readIsomVariableInteger(); // Length
+				const decoderConfigDescriptorLength = readIsomVariableInteger(slice); // Length
 
-				const payloadStart = this.metadataReader.pos;
+				const payloadStart = slice.filePos;
 
-				const objectTypeIndication = this.metadataReader.readU8();
+				const objectTypeIndication = readU8(slice);
 				if (objectTypeIndication === 0x40 || objectTypeIndication === 0x67) {
 					track.info.codec = 'aac';
 					track.info.aacCodecInfo = { isMpeg2: objectTypeIndication === 0x67 };
@@ -1167,16 +1198,16 @@ export class IsobmffDemuxer extends Demuxer {
 					);
 				}
 
-				this.metadataReader.pos += 1 + 3 + 4 + 4;
+				slice.skip(1 + 3 + 4 + 4);
 
-				if (decoderConfigDescriptorLength > this.metadataReader.pos - payloadStart) {
+				if (decoderConfigDescriptorLength > slice.filePos - payloadStart) {
 					// There's a DecoderSpecificInfo at the end, let's read it
 
-					const decoderSpecificInfoTag = this.metadataReader.readU8();
+					const decoderSpecificInfoTag = readU8(slice);
 					assert(decoderSpecificInfoTag === 0x05); // DecoderSpecificInfo
 
-					const decoderSpecificInfoLength = this.metadataReader.readIsomVariableInteger();
-					track.info.codecDescription = this.metadataReader.readBytes(decoderSpecificInfoLength);
+					const decoderSpecificInfoLength = readIsomVariableInteger(slice);
+					track.info.codecDescription = readBytes(slice, decoderSpecificInfoLength);
 
 					if (track.info.codec === 'aac') {
 						// Let's try to deduce more accurate values directly from the AudioSpecificConfig:
@@ -1195,7 +1226,7 @@ export class IsobmffDemuxer extends Demuxer {
 				const track = this.currentTrack;
 				assert(track && track.info?.type === 'audio');
 
-				const littleEndian = this.metadataReader.readU16() & 0xff; // 0xff is from FFmpeg
+				const littleEndian = readU16Be(slice) & 0xff; // 0xff is from FFmpeg
 
 				if (littleEndian) {
 					if (track.info.codec === 'pcm-s16be') {
@@ -1216,13 +1247,13 @@ export class IsobmffDemuxer extends Demuxer {
 				const track = this.currentTrack;
 				assert(track && track.info?.type === 'audio');
 
-				this.metadataReader.pos += 1 + 3; // Version + flags
+				slice.skip(1 + 3); // Version + flags
 
 				// ISO/IEC 23003-5
 
-				const formatFlags = this.metadataReader.readU8();
+				const formatFlags = readU8(slice);
 				const isLittleEndian = Boolean(formatFlags & 0x01);
-				const pcmSampleSize = this.metadataReader.readU8();
+				const pcmSampleSize = readU8(slice);
 
 				if (track.info.codec === 'pcm-s16be') {
 					// ipcm
@@ -1281,18 +1312,18 @@ export class IsobmffDemuxer extends Demuxer {
 				const track = this.currentTrack;
 				assert(track && track.info?.type === 'audio');
 
-				this.metadataReader.pos += 1; // Version
+				slice.skip(1); // Version
 
 				// https://www.opus-codec.org/docs/opus_in_isobmff.html
-				const outputChannelCount = this.metadataReader.readU8();
-				const preSkip = this.metadataReader.readU16();
-				const inputSampleRate = this.metadataReader.readU32();
-				const outputGain = this.metadataReader.readI16();
-				const channelMappingFamily = this.metadataReader.readU8();
+				const outputChannelCount = readU8(slice);
+				const preSkip = readU16Be(slice);
+				const inputSampleRate = readU32Be(slice);
+				const outputGain = readI16Be(slice);
+				const channelMappingFamily = readU8(slice);
 
 				let channelMappingTable: Uint8Array;
 				if (channelMappingFamily !== 0) {
-					channelMappingTable = this.metadataReader.readBytes(2 + outputChannelCount);
+					channelMappingTable = readBytes(slice, 2 + outputChannelCount);
 				} else {
 					channelMappingTable = new Uint8Array(0);
 				}
@@ -1319,36 +1350,36 @@ export class IsobmffDemuxer extends Demuxer {
 				const track = this.currentTrack;
 				assert(track && track.info?.type === 'audio');
 
-				this.metadataReader.pos += 4; // Version + flags
+				slice.skip(4); // Version + flags
 
 				// https://datatracker.ietf.org/doc/rfc9639/
 
 				const BLOCK_TYPE_MASK = 0x7f;
 				const LAST_METADATA_BLOCK_FLAG_MASK = 0x80;
 
-				const startPos = this.metadataReader.pos;
+				const startPos = slice.filePos;
 
-				while (this.metadataReader.pos < boxEndPos) {
-					const flagAndType = this.metadataReader.readU8();
-					const metadataBlockLength = this.metadataReader.readU24();
+				while (slice.filePos < boxEndPos) {
+					const flagAndType = readU8(slice);
+					const metadataBlockLength = readU24Be(slice);
 					const type = flagAndType & BLOCK_TYPE_MASK;
 
 					// It's a STREAMINFO block; let's extract the actual sample rate and channel count
 					if (type === 0) {
-						this.metadataReader.pos += 10;
+						slice.skip(10);
 
-						// Extract sample rate
-						const word = this.metadataReader.readU32();
+						// Extract sample rate and channel count
+						const word = readU32Be(slice);
 						const sampleRate = word >>> 12;
 						const numberOfChannels = ((word >> 9) & 0b111) + 1;
 
 						track.info.sampleRate = sampleRate;
 						track.info.numberOfChannels = numberOfChannels;
 
-						this.metadataReader.pos += 20;
+						slice.skip(20);
 					} else {
 						// Simply skip ahead to the next block
-						this.metadataReader.pos += metadataBlockLength;
+						slice.skip(metadataBlockLength);
 					}
 
 					if (flagAndType & LAST_METADATA_BLOCK_FLAG_MASK) {
@@ -1356,9 +1387,9 @@ export class IsobmffDemuxer extends Demuxer {
 					}
 				}
 
-				const endPos = this.metadataReader.pos;
-				this.metadataReader.pos = startPos;
-				const bytes = this.metadataReader.readBytes(endPos - startPos);
+				const endPos = slice.filePos;
+				slice.filePos = startPos;
+				const bytes = readBytes(slice, endPos - startPos);
 
 				const description = new Uint8Array(4 + bytes.byteLength);
 				const view = new DataView(description.buffer);
@@ -1377,16 +1408,16 @@ export class IsobmffDemuxer extends Demuxer {
 					break;
 				}
 
-				this.metadataReader.pos += 4; // Version + flags
+				slice.skip(4); // Version + flags
 
-				const entryCount = this.metadataReader.readU32();
+				const entryCount = readU32Be(slice);
 
 				let currentIndex = 0;
 				let currentTimestamp = 0;
 
 				for (let i = 0; i < entryCount; i++) {
-					const sampleCount = this.metadataReader.readU32();
-					const sampleDelta = this.metadataReader.readU32();
+					const sampleCount = readU32Be(slice);
+					const sampleDelta = readU32Be(slice);
 
 					track.sampleTable.sampleTimingEntries.push({
 						startIndex: currentIndex,
@@ -1408,14 +1439,14 @@ export class IsobmffDemuxer extends Demuxer {
 					break;
 				}
 
-				this.metadataReader.pos += 1 + 3; // Version + flags
+				slice.skip(1 + 3); // Version + flags
 
-				const entryCount = this.metadataReader.readU32();
+				const entryCount = readU32Be(slice);
 
 				let sampleIndex = 0;
 				for (let i = 0; i < entryCount; i++) {
-					const sampleCount = this.metadataReader.readU32();
-					const sampleOffset = this.metadataReader.readI32();
+					const sampleCount = readU32Be(slice);
+					const sampleOffset = readI32Be(slice);
 
 					track.sampleTable.sampleCompositionTimeOffsets.push({
 						startIndex: sampleIndex,
@@ -1435,14 +1466,14 @@ export class IsobmffDemuxer extends Demuxer {
 					break;
 				}
 
-				this.metadataReader.pos += 4; // Version + flags
+				slice.skip(4); // Version + flags
 
-				const sampleSize = this.metadataReader.readU32();
-				const sampleCount = this.metadataReader.readU32();
+				const sampleSize = readU32Be(slice);
+				const sampleCount = readU32Be(slice);
 
 				if (sampleSize === 0) {
 					for (let i = 0; i < sampleCount; i++) {
-						const sampleSize = this.metadataReader.readU32();
+						const sampleSize = readU32Be(slice);
 						track.sampleTable.sampleSizes.push(sampleSize);
 					}
 				} else {
@@ -1458,13 +1489,13 @@ export class IsobmffDemuxer extends Demuxer {
 					break;
 				}
 
-				this.metadataReader.pos += 4; // Version + flags
-				this.metadataReader.pos += 3; // Reserved
+				slice.skip(4); // Version + flags
+				slice.skip(3); // Reserved
 
-				const fieldSize = this.metadataReader.readU8(); // in bits
-				const sampleCount = this.metadataReader.readU32();
+				const fieldSize = readU8(slice); // in bits
+				const sampleCount = readU32Be(slice);
 
-				const bytes = this.metadataReader.readBytes(Math.ceil(sampleCount * fieldSize / 8));
+				const bytes = readBytes(slice, Math.ceil(sampleCount * fieldSize / 8));
 				const bitstream = new Bitstream(bytes);
 
 				for (let i = 0; i < sampleCount; i++) {
@@ -1481,13 +1512,13 @@ export class IsobmffDemuxer extends Demuxer {
 					break;
 				}
 
-				this.metadataReader.pos += 4; // Version + flags
+				slice.skip(4); // Version + flags
 
 				track.sampleTable.keySampleIndices = [];
 
-				const entryCount = this.metadataReader.readU32();
+				const entryCount = readU32Be(slice);
 				for (let i = 0; i < entryCount; i++) {
-					const sampleIndex = this.metadataReader.readU32() - 1; // Convert to 0-indexed
+					const sampleIndex = readU32Be(slice) - 1; // Convert to 0-indexed
 					track.sampleTable.keySampleIndices.push(sampleIndex);
 				}
 
@@ -1506,14 +1537,14 @@ export class IsobmffDemuxer extends Demuxer {
 					break;
 				}
 
-				this.metadataReader.pos += 4;
+				slice.skip(4);
 
-				const entryCount = this.metadataReader.readU32();
+				const entryCount = readU32Be(slice);
 
 				for (let i = 0; i < entryCount; i++) {
-					const startChunkIndex = this.metadataReader.readU32() - 1; // Convert to 0-indexed
-					const samplesPerChunk = this.metadataReader.readU32();
-					const sampleDescriptionIndex = this.metadataReader.readU32();
+					const startChunkIndex = readU32Be(slice) - 1; // Convert to 0-indexed
+					const samplesPerChunk = readU32Be(slice);
+					const sampleDescriptionIndex = readU32Be(slice);
 
 					track.sampleTable.sampleToChunk.push({
 						startSampleIndex: -1,
@@ -1544,12 +1575,12 @@ export class IsobmffDemuxer extends Demuxer {
 					break;
 				}
 
-				this.metadataReader.pos += 4; // Version + flags
+				slice.skip(4); // Version + flags
 
-				const entryCount = this.metadataReader.readU32();
+				const entryCount = readU32Be(slice);
 
 				for (let i = 0; i < entryCount; i++) {
-					const chunkOffset = this.metadataReader.readU32();
+					const chunkOffset = readU32Be(slice);
 					track.sampleTable.chunkOffsets.push(chunkOffset);
 				}
 			}; break;
@@ -1562,37 +1593,37 @@ export class IsobmffDemuxer extends Demuxer {
 					break;
 				}
 
-				this.metadataReader.pos += 4; // Version + flags
+				slice.skip(4); // Version + flags
 
-				const entryCount = this.metadataReader.readU32();
+				const entryCount = readU32Be(slice);
 
 				for (let i = 0; i < entryCount; i++) {
-					const chunkOffset = this.metadataReader.readU64();
+					const chunkOffset = readU64Be(slice);
 					track.sampleTable.chunkOffsets.push(chunkOffset);
 				}
 			}; break;
 
 			case 'mvex': {
 				this.isFragmented = true;
-				this.readContiguousBoxes(boxInfo.contentSize);
+				this.readContiguousBoxes(slice.slice(contentStartPos, boxInfo.contentSize));
 			}; break;
 
 			case 'mehd': {
-				const version = this.metadataReader.readU8();
-				this.metadataReader.pos += 3; // Flags
+				const version = readU8(slice);
+				slice.skip(3); // Flags
 
-				const fragmentDuration = version === 1 ? this.metadataReader.readU64() : this.metadataReader.readU32();
+				const fragmentDuration = version === 1 ? readU64Be(slice) : readU32Be(slice);
 				this.movieDurationInTimescale = fragmentDuration;
 			}; break;
 
 			case 'trex': {
-				this.metadataReader.pos += 4; // Version + flags
+				slice.skip(4); // Version + flags
 
-				const trackId = this.metadataReader.readU32();
-				const defaultSampleDescriptionIndex = this.metadataReader.readU32();
-				const defaultSampleDuration = this.metadataReader.readU32();
-				const defaultSampleSize = this.metadataReader.readU32();
-				const defaultSampleFlags = this.metadataReader.readU32();
+				const trackId = readU32Be(slice);
+				const defaultSampleDescriptionIndex = readU32Be(slice);
+				const defaultSampleDuration = readU32Be(slice);
+				const defaultSampleSize = readU32Be(slice);
+				const defaultSampleFlags = readU32Be(slice);
 
 				// We store these separately rather than in the tracks since the tracks may not exist yet
 				this.fragmentTrackDefaults.push({
@@ -1605,10 +1636,10 @@ export class IsobmffDemuxer extends Demuxer {
 			}; break;
 
 			case 'tfra': {
-				const version = this.metadataReader.readU8();
-				this.metadataReader.pos += 3; // Flags
+				const version = readU8(slice);
+				slice.skip(3); // Flags
 
-				const trackId = this.metadataReader.readU32();
+				const trackId = readU32Be(slice);
 				const track = this.tracks.find(x => x.id === trackId);
 				if (!track) {
 					break;
@@ -1616,30 +1647,26 @@ export class IsobmffDemuxer extends Demuxer {
 
 				track.fragmentLookupTable = [];
 
-				const word = this.metadataReader.readU32();
+				const word = readU32Be(slice);
 
 				const lengthSizeOfTrafNum = (word & 0b110000) >> 4;
 				const lengthSizeOfTrunNum = (word & 0b001100) >> 2;
 				const lengthSizeOfSampleNum = word & 0b000011;
 
-				const x = this.metadataReader;
-				const functions = [x.readU8.bind(x), x.readU16.bind(x), x.readU24.bind(x), x.readU32.bind(x)];
+				const functions = [readU8, readU16Be, readU24Be, readU32Be];
 
 				const readTrafNum = functions[lengthSizeOfTrafNum]!;
 				const readTrunNum = functions[lengthSizeOfTrunNum]!;
 				const readSampleNum = functions[lengthSizeOfSampleNum]!;
 
-				const numberOfEntries = this.metadataReader.readU32();
+				const numberOfEntries = readU32Be(slice);
 				for (let i = 0; i < numberOfEntries; i++) {
-					const time = version === 1 ? this.metadataReader.readU64() : this.metadataReader.readU32();
-					const moofOffset = version === 1 ? this.metadataReader.readU64() : this.metadataReader.readU32();
+					const time = version === 1 ? readU64Be(slice) : readU32Be(slice);
+					const moofOffset = version === 1 ? readU64Be(slice) : readU32Be(slice);
 
-					// eslint-disable-next-line @typescript-eslint/no-unused-vars
-					const trafNumber = readTrafNum();
-					// eslint-disable-next-line @typescript-eslint/no-unused-vars
-					const trunNumber = readTrunNum();
-					// eslint-disable-next-line @typescript-eslint/no-unused-vars
-					const sampleNumber = readSampleNum();
+					readTrafNum(slice);
+					readTrunNum(slice);
+					readSampleNum(slice);
 
 					track.fragmentLookupTable.push({
 						timestamp: time,
@@ -1660,7 +1687,7 @@ export class IsobmffDemuxer extends Demuxer {
 					isKnownToBeFirstFragment: false,
 				};
 
-				this.readContiguousBoxes(boxInfo.contentSize);
+				this.readContiguousBoxes(slice.slice(contentStartPos, boxInfo.contentSize));
 
 				insertSorted(this.fragments, this.currentFragment, x => x.moofOffset);
 
@@ -1685,7 +1712,7 @@ export class IsobmffDemuxer extends Demuxer {
 			case 'traf': {
 				assert(this.currentFragment);
 
-				this.readContiguousBoxes(boxInfo.contentSize);
+				this.readContiguousBoxes(slice.slice(contentStartPos, boxInfo.contentSize));
 
 				// It is possible that there is no current track, for example when we don't care about the track
 				// referenced in the track fragment header.
@@ -1722,9 +1749,9 @@ export class IsobmffDemuxer extends Demuxer {
 			case 'tfhd': {
 				assert(this.currentFragment);
 
-				this.metadataReader.pos += 1; // Version
+				slice.skip(1); // Version
 
-				const flags = this.metadataReader.readU24();
+				const flags = readU24Be(slice);
 				const baseDataOffsetPresent = Boolean(flags & 0x000001);
 				const sampleDescriptionIndexPresent = Boolean(flags & 0x000002);
 				const defaultSampleDurationPresent = Boolean(flags & 0x000008);
@@ -1733,7 +1760,7 @@ export class IsobmffDemuxer extends Demuxer {
 				const durationIsEmpty = Boolean(flags & 0x010000);
 				const defaultBaseIsMoof = Boolean(flags & 0x020000);
 
-				const trackId = this.metadataReader.readU32();
+				const trackId = readU32Be(slice);
 				const track = this.tracks.find(x => x.id === trackId);
 				if (!track) {
 					// We don't care about this track
@@ -1753,21 +1780,21 @@ export class IsobmffDemuxer extends Demuxer {
 				};
 
 				if (baseDataOffsetPresent) {
-					track.currentFragmentState.baseDataOffset = this.metadataReader.readU64();
+					track.currentFragmentState.baseDataOffset = readU64Be(slice);
 				} else if (defaultBaseIsMoof) {
 					track.currentFragmentState.baseDataOffset = this.currentFragment.moofOffset;
 				}
 				if (sampleDescriptionIndexPresent) {
-					track.currentFragmentState.sampleDescriptionIndex = this.metadataReader.readU32();
+					track.currentFragmentState.sampleDescriptionIndex = readU32Be(slice);
 				}
 				if (defaultSampleDurationPresent) {
-					track.currentFragmentState.defaultSampleDuration = this.metadataReader.readU32();
+					track.currentFragmentState.defaultSampleDuration = readU32Be(slice);
 				}
 				if (defaultSampleSizePresent) {
-					track.currentFragmentState.defaultSampleSize = this.metadataReader.readU32();
+					track.currentFragmentState.defaultSampleSize = readU32Be(slice);
 				}
 				if (defaultSampleFlagsPresent) {
-					track.currentFragmentState.defaultSampleFlags = this.metadataReader.readU32();
+					track.currentFragmentState.defaultSampleFlags = readU32Be(slice);
 				}
 				if (durationIsEmpty) {
 					track.currentFragmentState.defaultSampleDuration = 0;
@@ -1782,14 +1809,10 @@ export class IsobmffDemuxer extends Demuxer {
 
 				assert(track.currentFragmentState);
 
-				// break;
+				const version = readU8(slice);
+				slice.skip(3); // Flags
 
-				const version = this.metadataReader.readU8();
-				this.metadataReader.pos += 3; // Flags
-
-				const baseMediaDecodeTime = version === 0
-					? this.metadataReader.readU32()
-					: this.metadataReader.readU64();
+				const baseMediaDecodeTime = version === 0 ? readU32Be(slice) : readU64Be(slice);
 				track.currentFragmentState.startTimestamp = baseMediaDecodeTime;
 			}; break;
 
@@ -1807,9 +1830,9 @@ export class IsobmffDemuxer extends Demuxer {
 					break;
 				}
 
-				const version = this.metadataReader.readU8();
+				const version = readU8(slice);
 
-				const flags = this.metadataReader.readU24();
+				const flags = readU24Be(slice);
 				const dataOffsetPresent = Boolean(flags & 0x000001);
 				const firstSampleFlagsPresent = Boolean(flags & 0x000004);
 				const sampleDurationPresent = Boolean(flags & 0x000100);
@@ -1817,15 +1840,15 @@ export class IsobmffDemuxer extends Demuxer {
 				const sampleFlagsPresent = Boolean(flags & 0x000400);
 				const sampleCompositionTimeOffsetsPresent = Boolean(flags & 0x000800);
 
-				const sampleCount = this.metadataReader.readU32();
+				const sampleCount = readU32Be(slice);
 
 				let dataOffset = track.currentFragmentState.baseDataOffset;
 				if (dataOffsetPresent) {
-					dataOffset += this.metadataReader.readI32();
+					dataOffset += readI32Be(slice);
 				}
 				let firstSampleFlags: number | null = null;
 				if (firstSampleFlagsPresent) {
-					firstSampleFlags = this.metadataReader.readU32();
+					firstSampleFlags = readU32Be(slice);
 				}
 
 				let currentOffset = dataOffset;
@@ -1851,7 +1874,7 @@ export class IsobmffDemuxer extends Demuxer {
 				for (let i = 0; i < sampleCount; i++) {
 					let sampleDuration: number;
 					if (sampleDurationPresent) {
-						sampleDuration = this.metadataReader.readU32();
+						sampleDuration = readU32Be(slice);
 					} else {
 						assert(track.currentFragmentState.defaultSampleDuration !== null);
 						sampleDuration = track.currentFragmentState.defaultSampleDuration;
@@ -1859,7 +1882,7 @@ export class IsobmffDemuxer extends Demuxer {
 
 					let sampleSize: number;
 					if (sampleSizePresent) {
-						sampleSize = this.metadataReader.readU32();
+						sampleSize = readU32Be(slice);
 					} else {
 						assert(track.currentFragmentState.defaultSampleSize !== null);
 						sampleSize = track.currentFragmentState.defaultSampleSize;
@@ -1867,7 +1890,7 @@ export class IsobmffDemuxer extends Demuxer {
 
 					let sampleFlags: number;
 					if (sampleFlagsPresent) {
-						sampleFlags = this.metadataReader.readU32();
+						sampleFlags = readU32Be(slice);
 					} else {
 						assert(track.currentFragmentState.defaultSampleFlags !== null);
 						sampleFlags = track.currentFragmentState.defaultSampleFlags;
@@ -1879,9 +1902,9 @@ export class IsobmffDemuxer extends Demuxer {
 					let sampleCompositionTimeOffset = 0;
 					if (sampleCompositionTimeOffsetsPresent) {
 						if (version === 0) {
-							sampleCompositionTimeOffset = this.metadataReader.readU32();
+							sampleCompositionTimeOffset = readU32Be(slice);
 						} else {
-							sampleCompositionTimeOffset = this.metadataReader.readI32();
+							sampleCompositionTimeOffset = readI32Be(slice);
 						}
 					}
 
@@ -1934,11 +1957,11 @@ export class IsobmffDemuxer extends Demuxer {
 					break;
 				}
 
-				this.currentTrack.name = textDecoder.decode(this.metadataReader.readBytes(boxInfo.contentSize));
+				this.currentTrack.name = textDecoder.decode(readBytes(slice, boxInfo.contentSize));
 			}; break;
 		}
 
-		this.metadataReader.pos = boxEndPos;
+		slice.filePos = boxEndPos;
 		return true;
 	}
 }
@@ -2236,14 +2259,14 @@ abstract class IsobmffTrackBacking implements InputTrackBacking {
 		if (options.metadataOnly) {
 			data = PLACEHOLDER_DATA;
 		} else {
-			// Load the entire chunk
-			await this.internalTrack.demuxer.chunkReader.reader.loadRange(
-				sampleInfo.chunkOffset,
-				sampleInfo.chunkOffset + sampleInfo.chunkSize,
+			let slice = this.internalTrack.demuxer.reader.requestSlice(
+				sampleInfo.sampleOffset,
+				sampleInfo.sampleSize,
 			);
+			if (slice instanceof Promise) slice = await slice;
+			assert(slice);
 
-			this.internalTrack.demuxer.chunkReader.pos = sampleInfo.sampleOffset;
-			data = this.internalTrack.demuxer.chunkReader.readBytes(sampleInfo.sampleSize);
+			data = readBytes(slice, sampleInfo.sampleSize);
 		}
 
 		const timestamp = (sampleInfo.presentationTimestamp - this.internalTrack.editListOffset)
@@ -2276,11 +2299,14 @@ abstract class IsobmffTrackBacking implements InputTrackBacking {
 		if (options.metadataOnly) {
 			data = PLACEHOLDER_DATA;
 		} else {
-			// Load the entire fragment
-			await this.internalTrack.demuxer.chunkReader.reader.loadRange(fragment.dataStart, fragment.dataEnd);
+			let slice = this.internalTrack.demuxer.reader.requestSlice(
+				fragmentSample.byteOffset,
+				fragmentSample.byteSize,
+			);
+			if (slice instanceof Promise) slice = await slice;
+			assert(slice);
 
-			this.internalTrack.demuxer.chunkReader.pos = fragmentSample.byteOffset;
-			data = this.internalTrack.demuxer.chunkReader.readBytes(fragmentSample.byteSize);
+			data = readBytes(slice, fragmentSample.byteSize);
 		}
 
 		const timestamp = (fragmentSample.presentationTimestamp - this.internalTrack.editListOffset)
@@ -2388,9 +2414,6 @@ abstract class IsobmffTrackBacking implements InputTrackBacking {
 				return this.fetchPacketInFragment(fragment, sampleIndex, options);
 			}
 
-			const metadataReader = demuxer.metadataReader;
-			const sourceSize = await metadataReader.reader.source.getSize();
-
 			let prevFragment: Fragment | null = null;
 			let bestFragmentIndex = fragmentIndex;
 			let bestSampleIndex = sampleIndex;
@@ -2408,24 +2431,25 @@ abstract class IsobmffTrackBacking implements InputTrackBacking {
 				? this.internalTrack.fragmentLookupTable![lookupEntryIndex]!
 				: null;
 
+			let currentPos: number;
 			let nextFragmentIsFirstFragment = false;
 
 			if (fragmentIndex === -1) {
-				metadataReader.pos = lookupEntry?.moofOffset ?? 0;
-				nextFragmentIsFirstFragment = metadataReader.pos === 0;
+				currentPos = lookupEntry?.moofOffset ?? 0;
+				nextFragmentIsFirstFragment = currentPos === 0;
 			} else {
 				const fragment = this.internalTrack.fragments[fragmentIndex]!;
 
 				if (!lookupEntry || fragment.moofOffset >= lookupEntry.moofOffset) {
-					metadataReader.pos = fragment.moofOffset + fragment.moofSize;
+					currentPos = fragment.moofOffset + fragment.moofSize;
 					prevFragment = fragment;
 				} else {
 					// Use the lookup entry
-					metadataReader.pos = lookupEntry.moofOffset;
+					currentPos = lookupEntry.moofOffset;
 				}
 			}
 
-			while (metadataReader.pos < sourceSize) {
+			while (true) {
 				if (prevFragment) {
 					const trackData = prevFragment.trackData.get(this.internalTrack.id);
 					if (trackData && trackData.startTimestamp > latestTimestamp) {
@@ -2435,16 +2459,19 @@ abstract class IsobmffTrackBacking implements InputTrackBacking {
 
 					if (prevFragment.nextFragment) {
 						// Skip ahead quickly without needing to read the file again
-						metadataReader.pos = prevFragment.nextFragment.moofOffset + prevFragment.nextFragment.moofSize;
+						currentPos = prevFragment.nextFragment.moofOffset + prevFragment.nextFragment.moofSize;
 						prevFragment = prevFragment.nextFragment;
 						continue;
 					}
 				}
 
 				// Load the header
-				await metadataReader.reader.loadRange(metadataReader.pos, metadataReader.pos + MAX_BOX_HEADER_SIZE);
-				const startPos = metadataReader.pos;
-				const boxInfo = metadataReader.readBoxHeader();
+				let slice = demuxer.reader.requestSliceRange(currentPos, MIN_BOX_HEADER_SIZE, MAX_BOX_HEADER_SIZE);
+				if (slice instanceof Promise) slice = await slice;
+				if (!slice) break;
+
+				const startPos = currentPos;
+				const boxInfo = readBoxHeader(slice);
 				if (!boxInfo) {
 					break;
 				}
@@ -2455,8 +2482,7 @@ abstract class IsobmffTrackBacking implements InputTrackBacking {
 					let fragment: Fragment;
 					if (index === -1) {
 						// This is the first time we've seen this fragment
-						metadataReader.pos = startPos;
-						fragment = await demuxer.readFragment();
+						fragment = await demuxer.readFragment(startPos);
 					} else {
 						// We already know this fragment
 						fragment = demuxer.fragments[index]!;
@@ -2482,7 +2508,7 @@ abstract class IsobmffTrackBacking implements InputTrackBacking {
 					}
 				}
 
-				metadataReader.pos = startPos + boxInfo.totalSize;
+				currentPos = startPos + boxInfo.totalSize;
 			}
 
 			const bestFragment = bestFragmentIndex !== -1 ? this.internalTrack.fragments[bestFragmentIndex]! : null;

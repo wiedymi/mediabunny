@@ -15,6 +15,10 @@ Mediabunny is a JavaScript library for reading, writing, and converting media fi
 ### Gold sponsors
 
 <div align="center">
+  <a href="https://remotion.dev/" target="_blank">
+    <img src="./docs/public/sponsors/remotion.png" width="60" height="60" alt="Remotion">
+  </a>
+  &nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://www.gling.ai/" target="_blank">
     <img src="./docs/public/sponsors/gling.svg" width="60" height="60" alt="Gling AI">
   </a>
@@ -180,6 +184,7 @@ npm run build # Production build with type definitions
 npm run check # Type checking
 npm run lint # ESLint
 
+npm run docs:generate # Generates API docs
 npm run docs:dev # Start docs development server
 npm run dev # Start examples development server
 

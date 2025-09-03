@@ -20,7 +20,8 @@ import {
 	UNDETERMINED_LANGUAGE,
 } from '../misc';
 import { EncodedPacket, PLACEHOLDER_DATA } from '../packet';
-import { AdtsReader, FrameHeader, MAX_FRAME_HEADER_SIZE } from './adts-reader';
+import { readBytes, Reader } from '../reader';
+import { FrameHeader, MAX_FRAME_HEADER_SIZE, MIN_FRAME_HEADER_SIZE, readFrameHeader } from './adts-reader';
 
 const SAMPLES_PER_AAC_FRAME = 1024;
 
@@ -32,30 +33,31 @@ type Sample = {
 };
 
 export class AdtsDemuxer extends Demuxer {
-	reader: AdtsReader;
+	reader: Reader;
 
 	metadataPromise: Promise<void> | null = null;
 	firstFrameHeader: FrameHeader | null = null;
-	loadedSamples: Sample[] = []; // All samples from the start of the file to lastLoadedPos
+	loadedSamples: Sample[] = [];
 
 	tracks: InputAudioTrack[] = [];
 
 	readingMutex = new AsyncMutex();
+	lastSampleLoaded = false;
 	lastLoadedPos = 0;
-	fileSize = 0;
 	nextTimestampInSamples = 0;
 
 	constructor(input: Input) {
 		super(input);
 
-		this.reader = new AdtsReader(input._mainReader);
+		this.reader = input._reader;
 	}
 
 	async readMetadata() {
 		return this.metadataPromise ??= (async () => {
-			this.fileSize = await this.input.source.getSize();
-
-			await this.loadNextChunk();
+			// Keep loading until we find the first frame header
+			while (!this.firstFrameHeader && !this.lastSampleLoaded) {
+				await this.advanceReader();
+			}
 
 			// There has to be a frame if this demuxer got selected
 			assert(this.firstFrameHeader);
@@ -65,55 +67,45 @@ export class AdtsDemuxer extends Demuxer {
 		})();
 	}
 
-	async loadNextChunk() {
-		assert(this.lastLoadedPos < this.fileSize);
-
-		const chunkSize = 0.5 * 1024 * 1024; // 0.5 MiB
-		const endPos = Math.min(this.lastLoadedPos + chunkSize, this.fileSize);
-		await this.reader.reader.loadRange(this.lastLoadedPos, endPos);
-
-		this.lastLoadedPos = endPos;
-		assert(this.lastLoadedPos <= this.fileSize);
-
-		this.parseFramesFromLoadedData();
-	}
-
-	private parseFramesFromLoadedData() {
-		while (this.reader.pos <= this.fileSize - MAX_FRAME_HEADER_SIZE) {
-			const startPos = this.reader.pos;
-			const header = this.reader.readFrameHeader();
-			if (!header) {
-				break;
-			}
-
-			// Check if the entire frame fits in the loaded data
-			if (startPos + header.frameLength > this.lastLoadedPos) {
-				// Frame doesn't fit, reset positions and stop
-				this.reader.pos = startPos;
-				this.lastLoadedPos = startPos;
-				break;
-			}
-
-			if (!this.firstFrameHeader) {
-				this.firstFrameHeader = header;
-			}
-
-			const sampleRate = aacFrequencyTable[header.samplingFrequencyIndex];
-			assert(sampleRate !== undefined);
-			const sampleDuration = SAMPLES_PER_AAC_FRAME / sampleRate;
-			const headerSize = header.crcCheck ? MAX_FRAME_HEADER_SIZE : MAX_FRAME_HEADER_SIZE - 2;
-
-			const sample: Sample = {
-				timestamp: this.nextTimestampInSamples / sampleRate,
-				duration: sampleDuration,
-				dataStart: startPos + headerSize,
-				dataSize: header.frameLength - headerSize,
-			};
-
-			this.loadedSamples.push(sample);
-			this.nextTimestampInSamples += SAMPLES_PER_AAC_FRAME;
-			this.reader.pos = startPos + header.frameLength;
+	async advanceReader() {
+		let slice = this.reader.requestSliceRange(this.lastLoadedPos, MIN_FRAME_HEADER_SIZE, MAX_FRAME_HEADER_SIZE);
+		if (slice instanceof Promise) slice = await slice;
+		if (!slice) {
+			this.lastSampleLoaded = true;
+			return;
 		}
+
+		const header = readFrameHeader(slice);
+		if (!header) {
+			this.lastSampleLoaded = true;
+			return;
+		}
+
+		if (this.reader.fileSize !== null && header.startPos + header.frameLength > this.reader.fileSize) {
+			// Frame doesn't fit in the rest of the file
+			this.lastSampleLoaded = true;
+			return;
+		}
+
+		if (!this.firstFrameHeader) {
+			this.firstFrameHeader = header;
+		}
+
+		const sampleRate = aacFrequencyTable[header.samplingFrequencyIndex];
+		assert(sampleRate !== undefined);
+		const sampleDuration = SAMPLES_PER_AAC_FRAME / sampleRate;
+		const headerSize = header.crcCheck ? MAX_FRAME_HEADER_SIZE : MIN_FRAME_HEADER_SIZE;
+
+		const sample: Sample = {
+			timestamp: this.nextTimestampInSamples / sampleRate,
+			duration: sampleDuration,
+			dataStart: header.startPos + headerSize,
+			dataSize: header.frameLength - headerSize,
+		};
+
+		this.loadedSamples.push(sample);
+		this.nextTimestampInSamples += SAMPLES_PER_AAC_FRAME;
+		this.lastLoadedPos = header.startPos + header.frameLength;
 	}
 
 	async getMimeType() {
@@ -219,7 +211,7 @@ class AdtsAudioTrackBacking implements InputAudioTrackBacking {
 		};
 	}
 
-	getPacketAtIndex(sampleIndex: number, options: PacketRetrievalOptions) {
+	async getPacketAtIndex(sampleIndex: number, options: PacketRetrievalOptions) {
 		if (sampleIndex === -1) {
 			return null;
 		}
@@ -233,8 +225,14 @@ class AdtsAudioTrackBacking implements InputAudioTrackBacking {
 		if (options.metadataOnly) {
 			data = PLACEHOLDER_DATA;
 		} else {
-			this.demuxer.reader.pos = rawSample.dataStart;
-			data = this.demuxer.reader.readBytes(rawSample.dataSize);
+			let slice = this.demuxer.reader.requestSlice(rawSample.dataStart, rawSample.dataSize);
+			if (slice instanceof Promise) slice = await slice;
+
+			if (!slice) {
+				return null; // Data didn't fit into the rest of the file
+			}
+
+			data = readBytes(slice, rawSample.dataSize);
 		}
 
 		return new EncodedPacket(
@@ -247,7 +245,7 @@ class AdtsAudioTrackBacking implements InputAudioTrackBacking {
 		);
 	}
 
-	async getFirstPacket(options: PacketRetrievalOptions) {
+	getFirstPacket(options: PacketRetrievalOptions) {
 		return this.getPacketAtIndex(0, options);
 	}
 
@@ -268,9 +266,9 @@ class AdtsAudioTrackBacking implements InputAudioTrackBacking {
 			// Ensure the next sample exists
 			while (
 				nextIndex >= this.demuxer.loadedSamples.length
-				&& this.demuxer.lastLoadedPos < this.demuxer.fileSize
+				&& !this.demuxer.lastSampleLoaded
 			) {
-				await this.demuxer.loadNextChunk();
+				await this.demuxer.advanceReader();
 			}
 
 			return this.getPacketAtIndex(nextIndex, options);
@@ -294,7 +292,7 @@ class AdtsAudioTrackBacking implements InputAudioTrackBacking {
 					return null;
 				}
 
-				if (this.demuxer.lastLoadedPos === this.demuxer.fileSize) {
+				if (this.demuxer.lastSampleLoaded) {
 					// All data is loaded, return what we found
 					return this.getPacketAtIndex(index, options);
 				}
@@ -305,7 +303,7 @@ class AdtsAudioTrackBacking implements InputAudioTrackBacking {
 				}
 
 				// Otherwise, keep loading data
-				await this.demuxer.loadNextChunk();
+				await this.demuxer.advanceReader();
 			}
 		} finally {
 			release();
