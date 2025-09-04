@@ -785,47 +785,67 @@ const generateDocs = (entryFiles: string[], apiConfigFile: string) => {
 						const constructorBlocks: string[] = [];
 						const allReferencedTypes: string[] = [];
 
+						// First, process constructor parameters with visibility modifiers as properties from any constructor
+						// that has them (typically the implementation or the main signature)
+						let processedProperties = false;
 						constructorOverloads.forEach((ctor) => {
-							// Skip the implementation (the one with a body) unless it's the only constructor
-							if (ctor.body && constructorOverloads.length > 1) {
-								// Process constructor parameters with visibility modifiers as properties (only from implementation)
-								ctor.parameters.forEach((param) => {
-									// Check if parameter has visibility modifier (public, private, protected, readonly)
-									const hasVisibilityModifier = param.modifiers?.some(mod =>
+							// Process constructor parameters with visibility modifiers as properties (only once)
+							if (!processedProperties) {
+								const hasVisibilityParams = ctor.parameters.some(param =>
+									param.modifiers?.some(mod =>
 										mod.kind === ts.SyntaxKind.PublicKeyword
 										|| mod.kind === ts.SyntaxKind.PrivateKeyword
 										|| mod.kind === ts.SyntaxKind.ProtectedKeyword
 										|| mod.kind === ts.SyntaxKind.ReadonlyKeyword,
-									);
+									),
+								);
 
-									if (!hasVisibilityModifier) return;
+								if (hasVisibilityParams) {
+									ctor.parameters.forEach((param) => {
+										// Check if parameter has visibility modifier (public, private, protected, readonly)
+										const hasVisibilityModifier = param.modifiers?.some(mod =>
+											mod.kind === ts.SyntaxKind.PublicKeyword
+											|| mod.kind === ts.SyntaxKind.PrivateKeyword
+											|| mod.kind === ts.SyntaxKind.ProtectedKeyword
+											|| mod.kind === ts.SyntaxKind.ReadonlyKeyword,
+										);
 
-									// Skip private parameters
-									const isPrivate = param.modifiers?.some(mod => mod.kind === ts.SyntaxKind.PrivateKeyword);
-									if (isPrivate) return;
+										if (!hasVisibilityModifier) return;
 
-									const paramName = param.name.getText();
-									const hasQuestionToken = param.questionToken !== undefined;
-									const isReadonly = param.modifiers?.some(mod => mod.kind === ts.SyntaxKind.ReadonlyKeyword);
-									const rawParamType = param.type ? param.type.getText() : typeChecker.typeToString(typeChecker.getTypeAtLocation(param));
-									const paramType = cleanOptionalType(rawParamType, hasQuestionToken);
+										// Skip private parameters
+										const isPrivate = param.modifiers?.some(mod => mod.kind === ts.SyntaxKind.PrivateKeyword);
+										if (isPrivate) return;
 
-									const propertyDef = `${isReadonly ? 'readonly ' : ''}${paramName}${hasQuestionToken ? '?' : ''}: ${paramType};`;
+										const paramName = param.name.getText();
+										const hasQuestionToken = param.questionToken !== undefined;
+										const isReadonly = param.modifiers?.some(mod => mod.kind === ts.SyntaxKind.ReadonlyKeyword);
+										const rawParamType = param.type ? param.type.getText() : typeChecker.typeToString(typeChecker.getTypeAtLocation(param));
+										const paramType = cleanOptionalType(rawParamType, hasQuestionToken);
 
-									// Get description from JSDoc comment on the parameter
-									const paramJsDoc = ts.getJSDocCommentsAndTags(param)[0];
-									let desc = '';
-									if (paramJsDoc && ts.isJSDoc(paramJsDoc) && typeof paramJsDoc.comment === 'string') {
-										desc = processLinkTags(paramJsDoc.comment.trim(), className);
-									}
+										const propertyDef = `${isReadonly ? 'readonly ' : ''}${paramName}${hasQuestionToken ? '?' : ''}: ${paramType};`;
 
-									// Find referenced types
-									const references = filterToExportedTypes(findAllTypeReferences(paramType), className);
-									const referencesText = formatReferences(references);
+										// Get description from JSDoc comment on the parameter
+										const paramJsDoc = ts.getJSDocCommentsAndTags(param)[0];
+										let desc = '';
+										if (paramJsDoc && ts.isJSDoc(paramJsDoc) && typeof paramJsDoc.comment === 'string') {
+											desc = processLinkTags(paramJsDoc.comment.trim(), className);
+										}
 
-									const propertyContent = `### \`${paramName}\`\n\n\`\`\`ts\n${propertyDef}\n\`\`\`${desc ? `\n\n${desc}` : ''}${referencesText}`;
-									properties.push(propertyContent);
-								});
+										// Find referenced types
+										const references = filterToExportedTypes(findAllTypeReferences(paramType), className);
+										const referencesText = formatReferences(references);
+
+										const propertyContent = `### \`${paramName}\`\n\n\`\`\`ts\n${propertyDef}\n\`\`\`${desc ? `\n\n${desc}` : ''}${referencesText}`;
+										properties.push(propertyContent);
+									});
+									processedProperties = true;
+								}
+							}
+						});
+
+						constructorOverloads.forEach((ctor) => {
+							// Skip the implementation (the one with a body) unless it's the only constructor
+							if (ctor.body && constructorOverloads.length > 1) {
 								return;
 							}
 
