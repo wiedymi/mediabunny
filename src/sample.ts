@@ -114,11 +114,11 @@ export class VideoSample {
 	 * in `init`.
 	 */
 	constructor(
-		data: BufferSource,
+		data: AllowSharedBufferSource,
 		init: SetRequired<VideoSampleInit, 'format' | 'codedWidth' | 'codedHeight' | 'timestamp'>
 	);
 	constructor(
-		data: VideoFrame | CanvasImageSource | BufferSource,
+		data: VideoFrame | CanvasImageSource | AllowSharedBufferSource,
 		init?: VideoSampleInit,
 	) {
 		if (data instanceof ArrayBuffer || ArrayBuffer.isView(data)) {

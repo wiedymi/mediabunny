@@ -7,7 +7,7 @@
     </div>
 </div>
 
-While Mediabunny is proudly human-coded, we want to encourage any and all usage of Mediabunny, even when the vibes are high.
+While Mediabunny is proudly human-generated, we want to encourage any and all usage of Mediabunny, even when the vibes are high.
 
 Mediabunny is still new and is unlikely to be in the training data of modern LLMs, but we can still make the AI perform extremely well by just giving it a little more context.
 
