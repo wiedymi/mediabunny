@@ -65,21 +65,6 @@ export const ID3_V1_GENRES = [
 	'Dubstep', 'Garage rock', 'Psybient',
 ];
 
-/*
-export const readId3 = (slice: FileSlice) => {
-	const tag = readAscii(slice, 3);
-	if (tag !== 'ID3') {
-		slice.skip(-3);
-		return null;
-	}
-
-	slice.skip(3);
-
-	const size = decodeSynchsafe(readU32Be(slice));
-	return { size };
-};
-*/
-
 export const readNextFrameHeader = async (reader: Reader, startPos: number, until: number | null): Promise<{
 	header: FrameHeader;
 	startPos: number;
@@ -105,6 +90,11 @@ export const readNextFrameHeader = async (reader: Reader, startPos: number, unti
 };
 
 export const parseId3V1Tag = (slice: FileSlice, metadata: MediaMetadata) => {
+	const startPos = slice.filePos;
+	metadata.raw ??= {};
+	metadata.raw['TAG'] = readBytes(slice, ID3_V1_TAG_SIZE - 3); // Dump the whole tag into the raw metadata
+	slice.filePos = startPos;
+
 	const title = readId3V1String(slice, 30);
 	if (title) metadata.title ??= title;
 
@@ -117,7 +107,7 @@ export const parseId3V1Tag = (slice: FileSlice, metadata: MediaMetadata) => {
 	const yearText = readId3V1String(slice, 4);
 	const year = Number.parseInt(yearText, 10);
 	if (Number.isInteger(year) && year > 0) {
-		metadata.releasedAt ??= new Date(year, 0, 1);
+		metadata.date ??= new Date(year, 0, 1);
 	}
 
 	const commentBytes = readBytes(slice, 30);
@@ -216,6 +206,7 @@ export const parseId3V2Tag = (slice: FileSlice, header: Id3V2Header, metadata: M
 			break;
 		}
 
+		const frameStartPos = reader.pos;
 		const frameEndPos = reader.pos + frame.size;
 
 		let	frameEncrypted = false;
@@ -248,10 +239,26 @@ export const parseId3V2Tag = (slice: FileSlice, header: Id3V2Header, metadata: M
 			reader.ununsynchronizeRegion(reader.pos, frameEndPos);
 		}
 
+		metadata.raw ??= {};
+		if (frame.id[0] === 'T') {
+			// It's a text frame, let's decode as text
+			metadata.raw[frame.id] = reader.readId3V2EncodingAndText(frameEndPos);
+		} else {
+			// For the others, let's just get the bytes
+			metadata.raw[frame.id] = reader.readBytes(frame.size);
+		}
+
+		reader.pos = frameStartPos;
+
 		switch (frame.id) {
 			case 'TIT2':
 			case 'TT2': {
 				metadata.title ??= reader.readId3V2EncodingAndText(frameEndPos);
+			}; break;
+
+			case 'TIT3':
+			case 'TT3': {
+				metadata.description ??= reader.readId3V2EncodingAndText(frameEndPos);
 			}; break;
 
 			case 'TPE1':
@@ -272,20 +279,30 @@ export const parseId3V2Tag = (slice: FileSlice, header: Id3V2Header, metadata: M
 			case 'TRCK':
 			case 'TRK': {
 				const trackText = reader.readId3V2EncodingAndText(frameEndPos);
-				const trackNum = Number.parseInt(trackText, 10);
+				const parts = trackText.split('/');
+				const trackNum = Number.parseInt(parts[0]!, 10);
+				const trackNumMax = parts[1] && Number.parseInt(parts[1], 10);
 
 				if (Number.isInteger(trackNum) && trackNum > 0) {
 					metadata.trackNumber ??= trackNum;
+				}
+				if (trackNumMax && Number.isInteger(trackNumMax) && trackNumMax > 0) {
+					metadata.trackNumberMax ??= trackNumMax;
 				}
 			}; break;
 
 			case 'TPOS':
 			case 'TPA': {
 				const discText = reader.readId3V2EncodingAndText(frameEndPos);
-				const discNum = Number.parseInt(discText, 10);
+				const parts = discText.split('/');
+				const discNum = Number.parseInt(parts[0]!, 10);
+				const discNumMax = parts[1] && Number.parseInt(parts[1], 10);
 
 				if (Number.isInteger(discNum) && discNum > 0) {
 					metadata.discNumber ??= discNum;
+				}
+				if (discNumMax && Number.isInteger(discNumMax) && discNumMax > 0) {
+					metadata.discNumberMax ??= discNumMax;
 				}
 			}; break;
 
@@ -319,7 +336,7 @@ export const parseId3V2Tag = (slice: FileSlice, header: Id3V2Header, metadata: M
 				const date = new Date(dateText);
 
 				if (!Number.isNaN(date.getTime())) {
-					metadata.releasedAt ??= date;
+					metadata.date ??= date;
 				}
 			}; break;
 
@@ -329,7 +346,7 @@ export const parseId3V2Tag = (slice: FileSlice, header: Id3V2Header, metadata: M
 				const year = Number.parseInt(yearText, 10);
 
 				if (Number.isInteger(year)) {
-					metadata.releasedAt ??= new Date(year, 0, 1);
+					metadata.date ??= new Date(year, 0, 1);
 				}
 			}; break;
 

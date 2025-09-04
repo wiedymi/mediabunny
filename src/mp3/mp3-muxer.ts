@@ -6,7 +6,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-import { assert, toDataView } from '../misc';
+import { assert, assertNever, keyValueIterator, textEncoder, toDataView } from '../misc';
 import { mediaMetadataIsEmpty, MediaMetadata } from '../metadata';
 import { Muxer } from '../muxer';
 import { Output, OutputAudioTrack } from '../output';
@@ -15,6 +15,7 @@ import { EncodedPacket } from '../packet';
 import { Writer } from '../writer';
 import { getXingOffset, INFO, readFrameHeader, XING } from '../../shared/mp3-misc';
 import { Mp3Writer, XingFrameData } from './mp3-writer';
+import { Id3V2TextEncoding } from './mp3-reader';
 
 export class Mp3Muxer extends Muxer {
 	private format: Mp3OutputFormat;
@@ -129,43 +130,119 @@ export class Mp3Muxer extends Muxer {
 		this.mp3Writer.writeSynchsafeU32(0); // Size placeholder
 
 		const startPos = this.writer.getPos();
+		const writtenTags = new Set<string>();
 
-		if (metadata.title !== undefined) {
-			this.mp3Writer.writeId3V2TextFrame('TIT2', metadata.title);
+		for (const { key, value } of keyValueIterator(metadata)) {
+			switch (key) {
+				case 'title': {
+					this.mp3Writer.writeId3V2TextFrame('TIT2', value);
+					writtenTags.add('TIT2');
+				}; break;
+
+				case 'description': {
+					this.mp3Writer.writeId3V2TextFrame('TIT3', value);
+					writtenTags.add('TIT3');
+				}; break;
+
+				case 'artist': {
+					this.mp3Writer.writeId3V2TextFrame('TPE1', value);
+					writtenTags.add('TPE1');
+				}; break;
+
+				case 'album': {
+					this.mp3Writer.writeId3V2TextFrame('TALB', value);
+					writtenTags.add('TALB');
+				}; break;
+
+				case 'albumArtist': {
+					this.mp3Writer.writeId3V2TextFrame('TPE2', value);
+					writtenTags.add('TPE2');
+				}; break;
+
+				case 'trackNumber': {
+					const string = metadata.trackNumberMax !== undefined
+						? `${value}/${metadata.trackNumberMax}`
+						: value.toString();
+
+					this.mp3Writer.writeId3V2TextFrame('TRCK', string);
+					writtenTags.add('TRCK');
+				}; break;
+
+				case 'discNumber': {
+					const string = metadata.discNumberMax !== undefined
+						? `${value}/${metadata.discNumberMax}`
+						: value.toString();
+
+					this.mp3Writer.writeId3V2TextFrame('TPOS', string);
+					writtenTags.add('TPOS');
+				}; break;
+
+				case 'genre': {
+					this.mp3Writer.writeId3V2TextFrame('TCON', value);
+					writtenTags.add('TCON');
+				}; break;
+
+				case 'date': {
+					this.mp3Writer.writeId3V2TextFrame('TDRC', value.toISOString().split('.')[0]!);
+					writtenTags.add('TDRC');
+				}; break;
+
+				case 'lyrics': {
+					this.mp3Writer.writeId3V2LyricsFrame(value);
+					writtenTags.add('USLT');
+				}; break;
+
+				case 'comment': {
+					this.mp3Writer.writeId3V2CommentFrame(value);
+					writtenTags.add('COMM');
+				}; break;
+
+				case 'images': {
+					const pictureTypeMap = { coverFront: 0x03, coverBack: 0x04, unknown: 0x00 };
+					for (const image of value) {
+						const pictureType = pictureTypeMap[image.kind];
+						const description = image.description ?? '';
+						this.mp3Writer.writeId3V2ApicFrame(image.mimeType, pictureType, description, image.data);
+					}
+				}; break;
+
+				case 'trackNumberMax':
+				case 'discNumberMax': {
+					// Handled with trackNumber and discNumber respectively
+				}; break;
+
+				case 'raw': {
+					// Handled later
+				}; break;
+
+				default: assertNever(key);
+			}
 		}
-		if (metadata.artist !== undefined) {
-			this.mp3Writer.writeId3V2TextFrame('TPE1', metadata.artist);
-		}
-		if (metadata.album !== undefined) {
-			this.mp3Writer.writeId3V2TextFrame('TALB', metadata.album);
-		}
-		if (metadata.albumArtist !== undefined) {
-			this.mp3Writer.writeId3V2TextFrame('TPE2', metadata.albumArtist);
-		}
-		if (metadata.trackNumber !== undefined) {
-			this.mp3Writer.writeId3V2TextFrame('TRCK', metadata.trackNumber.toString());
-		}
-		if (metadata.discNumber !== undefined) {
-			this.mp3Writer.writeId3V2TextFrame('TPOS', metadata.discNumber.toString());
-		}
-		if (metadata.genre !== undefined) {
-			this.mp3Writer.writeId3V2TextFrame('TCON', metadata.genre);
-		}
-		if (metadata.releasedAt !== undefined) {
-			this.mp3Writer.writeId3V2TextFrame('TDRC', metadata.releasedAt.toISOString().split('.')[0]!);
-		}
-		if (metadata.lyrics !== undefined) {
-			this.mp3Writer.writeId3V2LyricsFrame(metadata.lyrics);
-		}
-		if (metadata.comment !== undefined) {
-			this.mp3Writer.writeId3V2CommentFrame(metadata.comment);
-		}
-		if (metadata.images) {
-			const pictureTypeMap = { coverFront: 0x03, coverBack: 0x04, unknown: 0x00 };
-			for (const image of metadata.images) {
-				const pictureType = pictureTypeMap[image.kind];
-				const description = image.description ?? '';
-				this.mp3Writer.writeId3V2ApicFrame(image.mimeType, pictureType, description, image.data);
+
+		if (metadata.raw) {
+			for (const key in metadata.raw) {
+				const value = metadata.raw[key];
+				if (value == null || key.length !== 4 || writtenTags.has(key)) {
+					continue;
+				}
+
+				let bytes: Uint8Array;
+				if (typeof value === 'string') {
+					const encoded = textEncoder.encode(value);
+					bytes = new Uint8Array(encoded.byteLength + 2);
+					bytes[0] = Id3V2TextEncoding.UTF_8;
+					bytes.set(encoded, 1);
+					// Last byte is the null terminator
+				} else if (value instanceof Uint8Array) {
+					bytes = value;
+				} else {
+					continue;
+				}
+
+				this.mp3Writer.writeAscii(key);
+				this.mp3Writer.writeSynchsafeU32(bytes.byteLength);
+				this.mp3Writer.writeU16(0x0000);
+				this.writer.write(bytes);
 			}
 		}
 

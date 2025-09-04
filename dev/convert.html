@@ -18,15 +18,13 @@
 		const file = fileInput.files[0];
 
 		const source = new Mediabunny.BlobSource(file);
-		const target = new Mediabunny.NullTarget() ?? new Mediabunny.BufferTarget() ?? new Mediabunny.StreamTarget(new WritableStream({
+		const target = new Mediabunny.BufferTarget() ?? new Mediabunny.StreamTarget(new WritableStream({
 			write: console.log
 		}), {
 			chunked: true,
 			chunkSize: 2**20
 		});
-		const outputFormat = new Mediabunny.Mp4OutputFormat({
-			onMoov: console.log
-		});
+		const outputFormat = new Mediabunny.Mp4OutputFormat({});
 
 		const button = document.createElement('button');
 		button.textContent = 'Cancel';
@@ -57,7 +55,14 @@
 				kind: 'coverFront',
 				mimeType: 'image/jpeg'
 			}],
-			lyrics: "There's no way\nThat it's not going there"
+			trackNumber: 4,
+			trackNumberMax: 10,
+			discNumber: 5,
+			discNumberMax: 8,
+			lyrics: "There's no way\nThat it's not going there",
+			raw: {
+				//'TBRU': 'this is a BRUH metadatum',
+			}
 		});
 
 		const conversion = await Mediabunny.Conversion.init({
@@ -100,6 +105,7 @@
 			},
 			*/
 			video: () => ({
+				discard: true,
 				//codec: 'avc',
 				//fit: 'contain',
 				//frameRate: 27.123,
@@ -123,7 +129,7 @@
 			}),
 			trim: {
 				start: 0,
-				end: 20
+				end: 1
 			},
 		});
 		console.log(conversion);

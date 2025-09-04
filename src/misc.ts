@@ -657,3 +657,21 @@ export const coalesceIndex = (a: number, b: number) => {
 export const closedIntervalsOverlap = (startA: number, endA: number, startB: number, endB: number) => {
 	return startA <= endB && startB <= endA;
 };
+
+type KeyValuePair<T extends Record<string, unknown>> = {
+	[K in keyof T]-?: {
+		key: K;
+		value: T[K] extends infer R | undefined ? R : T[K];
+	}
+}[keyof T];
+
+export const keyValueIterator = function* <T extends Record<string, unknown>>(object: T) {
+	for (const key in object) {
+		const value = object[key];
+		if (value === undefined) {
+			continue;
+		}
+
+		yield { key, value } as KeyValuePair<T>;
+	}
+};
