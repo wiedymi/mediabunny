@@ -353,6 +353,7 @@ class VideoEncoderWrapper {
 			return;
 		}
 
+		const encoderError = new Error();
 		return this.ensureEncoderPromise = (async () => {
 			const encoderConfig = buildVideoEncoderConfig({
 				width: videoSample.codedWidth,
@@ -411,7 +412,7 @@ class VideoEncoderWrapper {
 						void this.muxer!.addEncodedVideoPacket(this.source._connectedTrack!, packet, meta);
 					},
 					error: (error) => {
-						error.stack = new Error().stack; // Provide a more useful stack trace
+						error.stack = encoderError.stack; // Provide a more useful stack trace
 						this.encoderError ??= error;
 					},
 				});
@@ -426,7 +427,7 @@ class VideoEncoderWrapper {
 	}
 
 	async flushAndClose(forceClose: boolean) {
-		this.checkForEncoderError();
+		if (!forceClose) this.checkForEncoderError();
 
 		if (this.customEncoder) {
 			if (!forceClose) {
@@ -439,10 +440,12 @@ class VideoEncoderWrapper {
 				await this.encoder.flush();
 			}
 
-			this.encoder.close();
+			if (this.encoder.state !== 'closed') {
+				this.encoder.close();
+			}
 		}
 
-		this.checkForEncoderError();
+		if (!forceClose) this.checkForEncoderError();
 	}
 
 	getQueueSize() {
@@ -455,6 +458,7 @@ class VideoEncoderWrapper {
 
 	checkForEncoderError() {
 		if (this.encoderError) {
+			this.encoderError.stack = new Error().stack; // Provide an even more useful stack trace
 			throw this.encoderError;
 		}
 	}
@@ -990,6 +994,7 @@ class AudioEncoderWrapper {
 			return;
 		}
 
+		const encoderError = new Error();
 		return this.ensureEncoderPromise = (async () => {
 			const { numberOfChannels, sampleRate } = audioSample;
 
@@ -1050,7 +1055,7 @@ class AudioEncoderWrapper {
 						void this.muxer!.addEncodedAudioPacket(this.source._connectedTrack!, packet, meta);
 					},
 					error: (error) => {
-						error.stack = new Error().stack; // Provide a more useful stack trace
+						error.stack = encoderError.stack; // Provide a more useful stack trace
 						this.encoderError ??= error;
 					},
 				});
@@ -1158,7 +1163,7 @@ class AudioEncoderWrapper {
 	}
 
 	async flushAndClose(forceClose: boolean) {
-		this.checkForEncoderError();
+		if (!forceClose) this.checkForEncoderError();
 
 		if (this.customEncoder) {
 			if (!forceClose) {
@@ -1171,10 +1176,12 @@ class AudioEncoderWrapper {
 				await this.encoder.flush();
 			}
 
-			this.encoder.close();
+			if (this.encoder.state !== 'closed') {
+				this.encoder.close();
+			}
 		}
 
-		this.checkForEncoderError();
+		if (!forceClose) this.checkForEncoderError();
 	}
 
 	getQueueSize() {
@@ -1189,6 +1196,7 @@ class AudioEncoderWrapper {
 
 	checkForEncoderError() {
 		if (this.encoderError) {
+			this.encoderError.stack = new Error().stack; // Provide an even more useful stack trace
 			throw this.encoderError;
 		}
 	}
