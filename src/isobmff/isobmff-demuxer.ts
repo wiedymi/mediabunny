@@ -2060,9 +2060,9 @@ export class IsobmffDemuxer extends Demuxer {
 						this.metadata.raw ??= {};
 
 						if (UDTA_STRING_KEYS.has(boxInfo.name)) {
-							this.metadata.raw[boxInfo.name] = readMetadataStringShort(slice);
+							this.metadata.raw[boxInfo.name] ??= readMetadataStringShort(slice);
 						} else {
-							this.metadata.raw[boxInfo.name] = readBytes(slice, boxInfo.contentSize);
+							this.metadata.raw[boxInfo.name] ??= readBytes(slice, boxInfo.contentSize);
 						}
 
 						slice.filePos = startPos;
@@ -2079,37 +2079,37 @@ export class IsobmffDemuxer extends Demuxer {
 							if (this.currentTrack) {
 								this.currentTrack.name = textDecoder.decode(readBytes(slice, boxInfo.contentSize));
 							} else {
-								this.metadata.title = readMetadataStringShort(slice);
+								this.metadata.title ??= readMetadataStringShort(slice);
 							}
 						}; break;
 
 						case '©des': {
 							if (!this.currentTrack) {
-								this.metadata.description = readMetadataStringShort(slice);
+								this.metadata.description ??= readMetadataStringShort(slice);
 							}
 						}; break;
 
 						case '©ART': {
 							if (!this.currentTrack) {
-								this.metadata.artist = readMetadataStringShort(slice);
+								this.metadata.artist ??= readMetadataStringShort(slice);
 							}
 						}; break;
 
 						case '©alb': {
 							if (!this.currentTrack) {
-								this.metadata.album = readMetadataStringShort(slice);
+								this.metadata.album ??= readMetadataStringShort(slice);
 							}
 						}; break;
 
 						case 'albr': {
 							if (!this.currentTrack) {
-								this.metadata.albumArtist = readMetadataStringShort(slice);
+								this.metadata.albumArtist ??= readMetadataStringShort(slice);
 							}
 						}; break;
 
 						case '©gen': {
 							if (!this.currentTrack) {
-								this.metadata.genre = readMetadataStringShort(slice);
+								this.metadata.genre ??= readMetadataStringShort(slice);
 							}
 						}; break;
 
@@ -2117,20 +2117,20 @@ export class IsobmffDemuxer extends Demuxer {
 							if (!this.currentTrack) {
 								const date = new Date(readMetadataStringShort(slice));
 								if (!Number.isNaN(date.getTime())) {
-									this.metadata.date = date;
+									this.metadata.date ??= date;
 								}
 							}
 						}; break;
 
 						case '©cmt': {
 							if (!this.currentTrack) {
-								this.metadata.comment = readMetadataStringShort(slice);
+								this.metadata.comment ??= readMetadataStringShort(slice);
 							}
 						}; break;
 
 						case '©lyr': {
 							if (!this.currentTrack) {
-								this.metadata.lyrics = readMetadataStringShort(slice);
+								this.metadata.lyrics ??= readMetadataStringShort(slice);
 							}
 						}; break;
 					}
@@ -2200,7 +2200,7 @@ export class IsobmffDemuxer extends Demuxer {
 					const data = readDataBox(slice);
 
 					this.metadata.raw ??= {};
-					this.metadata.raw[metadataKey] = data;
+					this.metadata.raw[metadataKey] ??= data;
 
 					switch (metadataKey) {
 						case '©nam':
@@ -2208,7 +2208,7 @@ export class IsobmffDemuxer extends Demuxer {
 						case 'com.apple.quicktime.title':
 						case 'title': {
 							if (typeof data === 'string') {
-								this.metadata.title = data;
+								this.metadata.title ??= data;
 							}
 						}; break;
 
@@ -2218,7 +2218,7 @@ export class IsobmffDemuxer extends Demuxer {
 						case 'com.apple.quicktime.description':
 						case 'description': {
 							if (typeof data === 'string') {
-								this.metadata.description = data;
+								this.metadata.description ??= data;
 							}
 						}; break;
 
@@ -2226,7 +2226,7 @@ export class IsobmffDemuxer extends Demuxer {
 						case 'com.apple.quicktime.artist':
 						case 'artist': {
 							if (typeof data === 'string') {
-								this.metadata.artist = data;
+								this.metadata.artist ??= data;
 							}
 						}; break;
 
@@ -2235,14 +2235,14 @@ export class IsobmffDemuxer extends Demuxer {
 						case 'com.apple.quicktime.album':
 						case 'album': {
 							if (typeof data === 'string') {
-								this.metadata.album = data;
+								this.metadata.album ??= data;
 							}
 						}; break;
 
 						case 'aART':
 						case 'album_artist': {
 							if (typeof data === 'string') {
-								this.metadata.albumArtist = data;
+								this.metadata.albumArtist ??= data;
 							}
 						}; break;
 
@@ -2250,7 +2250,7 @@ export class IsobmffDemuxer extends Demuxer {
 						case 'com.apple.quicktime.comment':
 						case 'comment': {
 							if (typeof data === 'string') {
-								this.metadata.comment = data;
+								this.metadata.comment ??= data;
 							}
 						}; break;
 
@@ -2259,14 +2259,14 @@ export class IsobmffDemuxer extends Demuxer {
 						case 'com.apple.quicktime.genre':
 						case 'genre': {
 							if (typeof data === 'string') {
-								this.metadata.genre = data;
+								this.metadata.genre ??= data;
 							}
 						}; break;
 
 						case '©lyr':
 						case 'lyrics': {
 							if (typeof data === 'string') {
-								this.metadata.lyrics = data;
+								this.metadata.lyrics ??= data;
 							}
 						}; break;
 
@@ -2277,7 +2277,7 @@ export class IsobmffDemuxer extends Demuxer {
 							if (typeof data === 'string') {
 								const date = new Date(data);
 								if (!Number.isNaN(date.getTime())) {
-									this.metadata.date = date;
+									this.metadata.date ??= date;
 								}
 							}
 						}; break;
@@ -2309,10 +2309,10 @@ export class IsobmffDemuxer extends Demuxer {
 								const trackNumberMax = view.getUint16(4, false);
 
 								if (trackNumber > 0) {
-									this.metadata.trackNumber = trackNumber;
+									this.metadata.trackNumber ??= trackNumber;
 								}
 								if (trackNumberMax > 0) {
-									this.metadata.trackNumberMax = trackNumberMax;
+									this.metadata.trackNumberMax ??= trackNumberMax;
 								}
 							}
 						}; break;
@@ -2326,10 +2326,10 @@ export class IsobmffDemuxer extends Demuxer {
 								const discNumberMax = view.getUint16(4, false);
 
 								if (discNumber > 0) {
-									this.metadata.discNumber = discNumber;
+									this.metadata.discNumber ??= discNumber;
 								}
 								if (discNumberMax > 0) {
-									this.metadata.discNumberMax = discNumberMax;
+									this.metadata.discNumberMax ??= discNumberMax;
 								}
 							}
 						}; break;

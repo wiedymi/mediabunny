@@ -92,7 +92,7 @@ export const readNextFrameHeader = async (reader: Reader, startPos: number, unti
 export const parseId3V1Tag = (slice: FileSlice, metadata: MediaMetadata) => {
 	const startPos = slice.filePos;
 	metadata.raw ??= {};
-	metadata.raw['TAG'] = readBytes(slice, ID3_V1_TAG_SIZE - 3); // Dump the whole tag into the raw metadata
+	metadata.raw['TAG'] ??= readBytes(slice, ID3_V1_TAG_SIZE - 3); // Dump the whole tag into the raw metadata
 	slice.filePos = startPos;
 
 	const title = readId3V1String(slice, 30);
@@ -242,10 +242,10 @@ export const parseId3V2Tag = (slice: FileSlice, header: Id3V2Header, metadata: M
 		metadata.raw ??= {};
 		if (frame.id[0] === 'T') {
 			// It's a text frame, let's decode as text
-			metadata.raw[frame.id] = reader.readId3V2EncodingAndText(frameEndPos);
+			metadata.raw[frame.id] ??= reader.readId3V2EncodingAndText(frameEndPos);
 		} else {
 			// For the others, let's just get the bytes
-			metadata.raw[frame.id] = reader.readBytes(frame.size);
+			metadata.raw[frame.id] ??= reader.readBytes(frame.size);
 		}
 
 		reader.pos = frameStartPos;

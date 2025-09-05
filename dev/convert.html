@@ -24,7 +24,7 @@
 			chunked: true,
 			chunkSize: 2**20
 		});
-		const outputFormat = new Mediabunny.MkvOutputFormat({});
+		const outputFormat = new Mediabunny.OggOutputFormat({});
 
 		const button = document.createElement('button');
 		button.textContent = 'Cancel';
@@ -61,7 +61,7 @@
 			discNumberMax: 8,
 			lyrics: "There's no way\nThat it's not going there",
 			raw: {
-				//'TBRU': 'this is a BRUH metadatum',
+				'ENCODER': 'Mediabunny epic own encoder'
 			}
 		});
 

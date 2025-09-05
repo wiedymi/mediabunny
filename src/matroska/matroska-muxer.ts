@@ -65,7 +65,7 @@ import { parseOpusIdentificationHeader } from '../codec-data';
 
 const MIN_CLUSTER_TIMESTAMP_MS = -(2 ** 15);
 const MAX_CLUSTER_TIMESTAMP_MS = 2 ** 15 - 1;
-const APP_NAME = 'https://github.com/Vanilagy/mediabunny';
+const APP_NAME = 'Mediabunny';
 const SEGMENT_SIZE_BYTES = 6;
 const CLUSTER_SIZE_BYTES = 5;
 
@@ -470,7 +470,7 @@ export class MatroskaMuxer extends Muxer {
 				}; break;
 
 				case 'date': {
-					addSimpleTag('DATE', value.toISOString().split('T')[0]!);
+					addSimpleTag('DATE', value.toISOString().slice(0, 10));
 					writtenTags.add('DATE');
 				}; break;
 

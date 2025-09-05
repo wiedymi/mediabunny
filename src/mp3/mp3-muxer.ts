@@ -183,7 +183,7 @@ export class Mp3Muxer extends Muxer {
 				}; break;
 
 				case 'date': {
-					this.mp3Writer.writeId3V2TextFrame('TDRC', value.toISOString().split('.')[0]!);
+					this.mp3Writer.writeId3V2TextFrame('TDRC', value.toISOString().slice(0, 10));
 					writtenTags.add('TDRC');
 				}; break;
 

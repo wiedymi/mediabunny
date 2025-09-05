@@ -1473,7 +1473,7 @@ export class MatroskaDemuxer extends Demuxer {
 
 		const metadata = this.currentSegment.metadata;
 		metadata.raw ??= {};
-		metadata.raw[name] = value;
+		metadata.raw[name] ??= value;
 
 		if (typeof value === 'string') {
 			switch (name.toLowerCase()) {

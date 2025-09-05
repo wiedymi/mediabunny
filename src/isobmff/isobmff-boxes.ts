@@ -1322,7 +1322,7 @@ const addQuickTimeMetadataboxes = (boxes: Box[], metadata: MediaMetadata) => {
 			}; break;
 
 			case 'date': {
-				boxes.push(metadataStringBoxShort('©day', value.toISOString().split('T')[0]!));
+				boxes.push(metadataStringBoxShort('©day', value.toISOString().slice(0, 10)));
 			}; break;
 
 			case 'comment': {
@@ -1423,7 +1423,7 @@ const meta = (metadata: MediaMetadata) => {
 			}; break;
 
 			case 'date': {
-				boxes.push(metadataStringBoxLong('©day', value.toISOString().split('T')[0]!));
+				boxes.push(metadataStringBoxLong('©day', value.toISOString().slice(0, 10)));
 			}; break;
 
 			case 'images': {

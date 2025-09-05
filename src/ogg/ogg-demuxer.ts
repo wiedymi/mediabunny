@@ -12,13 +12,16 @@ import { Demuxer } from '../demuxer';
 import { Input } from '../input';
 import { InputAudioTrack, InputAudioTrackBacking } from '../input-track';
 import { PacketRetrievalOptions } from '../media-sink';
+import { MediaMetadata } from '../metadata';
 import {
 	assert,
 	AsyncMutex,
+	base64ToBytes,
 	binarySearchLessOrEqual,
 	findLast,
 	last,
 	roundToPrecision,
+	textDecoder,
 	toDataView,
 	UNDETERMINED_LANGUAGE,
 } from '../misc';
@@ -57,6 +60,7 @@ export class OggDemuxer extends Demuxer {
 	metadataPromise: Promise<void> | null = null;
 	bitstreams: LogicalBitstream[] = [];
 	tracks: InputAudioTrack[] = [];
+	metadata: MediaMetadata = {};
 
 	constructor(input: Input) {
 		super(input);
@@ -218,6 +222,8 @@ export class OggDemuxer extends Demuxer {
 			],
 			modeBlockflags: parseModesFromVorbisSetupPacket(thirdPacket.data).modeBlockflags,
 		};
+
+		this.readVorbisComments(secondPacket.data.subarray(7)); // Skip header type and 'vorbis'
 	}
 
 	async readOpusMetadata(firstPacket: Packet, bitstream: LogicalBitstream) {
@@ -237,8 +243,6 @@ export class OggDemuxer extends Demuxer {
 			return;
 		}
 
-		// We don't make use of the comment header's data
-
 		bitstream.codecInfo.codec = 'opus';
 		bitstream.description = firstPacket.data;
 		bitstream.lastMetadataPacket = secondPacket;
@@ -250,6 +254,164 @@ export class OggDemuxer extends Demuxer {
 		bitstream.codecInfo.opusInfo = {
 			preSkip: header.preSkip,
 		};
+
+		this.readVorbisComments(secondPacket.data.subarray(8)); // Skip 'OpusTags'
+	}
+
+	readVorbisComments(bytes: Uint8Array) {
+		// https://datatracker.ietf.org/doc/html/rfc7845#section-5.2
+
+		const commentView = toDataView(bytes);
+		let commentPos = 0;
+
+		const vendorStringLength = commentView.getUint32(commentPos, true);
+		commentPos += 4;
+
+		const vendorString = textDecoder.decode(
+			bytes.subarray(commentPos, commentPos + vendorStringLength),
+		);
+		commentPos += vendorStringLength;
+
+		if (vendorStringLength > 0) {
+			// Expose the vendor string in the raw metadata
+			this.metadata.raw ??= {};
+			this.metadata.raw['vendor'] ??= vendorString;
+		}
+
+		const listLength = commentView.getUint32(commentPos, true);
+		commentPos += 4;
+
+		// Loop over all metadata tags
+		for (let i = 0; i < listLength; i++) {
+			const stringLength = commentView.getUint32(commentPos, true);
+			commentPos += 4;
+
+			const string = textDecoder.decode(
+				bytes.subarray(commentPos, commentPos + stringLength),
+			);
+			commentPos += stringLength;
+
+			const separatorIndex = string.indexOf('=');
+			if (separatorIndex === -1) {
+				continue;
+			}
+
+			const key = string.slice(0, separatorIndex).toUpperCase();
+			const value = string.slice(separatorIndex + 1);
+
+			this.metadata.raw ??= {};
+			this.metadata.raw[key] ??= value;
+
+			switch (key) {
+				case 'TITLE': {
+					this.metadata.title ??= value;
+				}; break;
+
+				case 'DESCRIPTION': {
+					this.metadata.description ??= value;
+				}; break;
+
+				case 'ARTIST': {
+					this.metadata.artist ??= value;
+				}; break;
+
+				case 'ALBUM': {
+					this.metadata.album ??= value;
+				}; break;
+
+				case 'ALBUMARTIST': {
+					this.metadata.albumArtist ??= value;
+				}; break;
+
+				case 'COMMENT': {
+					this.metadata.comment ??= value;
+				}; break;
+
+				case 'LYRICS': {
+					this.metadata.lyrics ??= value;
+				}; break;
+
+				case 'TRACKNUMBER': {
+					const parts = value.split('/');
+					const trackNum = Number.parseInt(parts[0]!, 10);
+					const trackNumMax = parts[1] && Number.parseInt(parts[1], 10);
+
+					if (Number.isInteger(trackNum) && trackNum > 0) {
+						this.metadata.trackNumber ??= trackNum;
+					}
+					if (trackNumMax && Number.isInteger(trackNumMax) && trackNumMax > 0) {
+						this.metadata.trackNumberMax ??= trackNumMax;
+					}
+				}; break;
+
+				case 'TRACKTOTAL': {
+					const trackNumMax = Number.parseInt(value, 10);
+					if (Number.isInteger(trackNumMax) && trackNumMax > 0) {
+						this.metadata.trackNumberMax ??= trackNumMax;
+					}
+				}; break;
+
+				case 'DISCNUMBER': {
+					const parts = value.split('/');
+					const discNum = Number.parseInt(parts[0]!, 10);
+					const discNumMax = parts[1] && Number.parseInt(parts[1], 10);
+
+					if (Number.isInteger(discNum) && discNum > 0) {
+						this.metadata.discNumber ??= discNum;
+					}
+					if (discNumMax && Number.isInteger(discNumMax) && discNumMax > 0) {
+						this.metadata.discNumberMax ??= discNumMax;
+					}
+				}; break;
+
+				case 'DISCTOTAL': {
+					const trackNumMax = Number.parseInt(value, 10);
+					if (Number.isInteger(trackNumMax) && trackNumMax > 0) {
+						this.metadata.trackNumberMax ??= trackNumMax;
+					}
+				}; break;
+
+				case 'DATE': {
+					const date = new Date(value);
+					if (!Number.isNaN(date.getTime())) {
+						this.metadata.date ??= date;
+					}
+				}; break;
+
+				case 'GENRE': {
+					this.metadata.genre ??= value;
+				}; break;
+
+				case 'METADATA_BLOCK_PICTURE': {
+					// https://datatracker.ietf.org/doc/rfc9639/ Section 8.8
+					const decoded = base64ToBytes(value);
+
+					const view = toDataView(decoded);
+					const pictureType = view.getUint32(0, false);
+					const mediaTypeLength = view.getUint32(4, false);
+					const mediaType = String.fromCharCode(...decoded.subarray(8, 8 + mediaTypeLength)); // ASCII
+					const descriptionLength = view.getUint32(8 + mediaTypeLength, false);
+					const description = textDecoder.decode(decoded.subarray(
+						12 + mediaTypeLength,
+						12 + mediaTypeLength + descriptionLength,
+					));
+					const dataLength = view.getUint32(mediaTypeLength + descriptionLength + 28);
+					const data = decoded.subarray(
+						mediaTypeLength + descriptionLength + 32,
+						mediaTypeLength + descriptionLength + 32 + dataLength,
+					);
+
+					this.metadata.images ??= [];
+					this.metadata.images.push({
+						data,
+						mimeType: mediaType,
+						kind: pictureType === 3 ? 'coverFront' : pictureType === 4 ? 'coverBack' : 'unknown',
+						name: undefined,
+						description: description || undefined,
+					});
+				}; break;
+			}
+		}
 	}
 
 	async readPacket(startPage: Page, startSegmentIndex: number): Promise<Packet | null> {
@@ -387,6 +549,11 @@ export class OggDemuxer extends Demuxer {
 		const tracks = await this.getTracks();
 		const trackDurations = await Promise.all(tracks.map(x => x.computeDuration()));
 		return Math.max(0, ...trackDurations);
+	}
+
+	async getMetadata() {
+		await this.readMetadata();
+		return this.metadata;
 	}
 }
 
