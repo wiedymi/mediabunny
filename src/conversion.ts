@@ -46,8 +46,10 @@ import {
 	Rotation,
 } from './misc';
 import { Output, TrackType } from './output';
+import { Mp4OutputFormat } from './output-format';
 import { AudioSample, VideoSample } from './sample';
 import { MetadataTags, validateMetadataTags } from './tags';
+import { NullTarget } from './target';
 
 /**
  * The options for media file conversion.
@@ -621,7 +623,7 @@ export class Conversion {
 			|| this._startTimestamp > 0
 			|| firstTimestamp < 0
 			|| !!trackOptions.frameRate;
-		const needsRerender = width !== originalWidth
+		let needsRerender = width !== originalWidth
 			|| height !== originalHeight
 			|| (totalRotation !== 0 && !outputSupportsRotation);
 
@@ -700,6 +702,43 @@ export class Conversion {
 
 			const source = new VideoSampleSource(encodingConfig);
 			videoSource = source;
+
+			if (!needsRerender) {
+				// If we're directly passing decoded samples back to the encoder, sometimes the encoder may error due
+				// to lack of support of certain video frame formats, like when HDR is at play. To check for this, we
+				// first try to pass a single frame to the encoder to see how it behaves. If it throws, we then fall
+				// back to the rerender path.
+				//
+				// Creating a new temporary Output is sort of hacky, but due to a lack of an isolated encoder API right
+				// now, this is the simplest way. Will refactor in the future!
+
+				const tempOutput = new Output({
+					format: new Mp4OutputFormat(), // Supports all video codecs
+					target: new NullTarget(),
+				});
+
+				const tempSource = new VideoSampleSource(encodingConfig);
+				tempOutput.addVideoTrack(tempSource);
+
+				await tempOutput.start();
+
+				const sink = new VideoSampleSink(track);
+				const firstSample = await sink.getSample(this._startTimestamp);
+
+				if (firstSample) {
+					try {
+						await tempSource.add(firstSample);
+						firstSample.close();
+						await tempOutput.finalize();
+					} catch (error) {
+						console.info('Error when probing encoder support. Falling back to rerender path.', error);
+						needsRerender = true;
+						void tempOutput.cancel();
+					}
+				} else {
+					await tempOutput.cancel();
+				}
+			}
 
 			if (needsRerender) {
 				this._trackPromises.push((async () => {
@@ -1123,13 +1162,8 @@ export class Conversion {
 
 		this._maxTimestamps.set(trackId, Math.max(endTimestamp, this._maxTimestamps.get(trackId) ?? -Infinity));
 
-		let totalTimestamps = 0;
-		for (const [, timestamp] of this._maxTimestamps) {
-			totalTimestamps += timestamp;
-		}
-
-		const averageTimestamp = totalTimestamps / this._totalTrackCount;
-		const newProgress = clamp(averageTimestamp / this._totalDuration, 0, 1);
+		const minTimestamp = Math.min(...this._maxTimestamps.values());
+		const newProgress = clamp(minTimestamp / this._totalDuration, 0, 1);
 
 		if (newProgress !== this._lastProgress) {
 			this._lastProgress = newProgress;

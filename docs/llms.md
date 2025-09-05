@@ -3,11 +3,11 @@
 <div class="grid place-items-center my-14">
     <div class="relative">
         <div class="absolute top-0 left-0 size-full rounded-full" style="background: var(--vp-home-hero-image-background-image); filter: var(--vp-home-hero-image-filter)"></div>
-        <img src="./assets/mediarobot.svg" width="250" class="relative">
+        <img src="./assets/mechabunny.svg" width="250" class="relative">
     </div>
 </div>
 
-While Mediabunny is proudly human-coded, we want to encourage any and all usage of Mediabunny, even when the vibes are high.
+While Mediabunny is proudly human-generated, we want to encourage any and all usage of Mediabunny, even when the vibes are high.
 
 Mediabunny is still new and is unlikely to be in the training data of modern LLMs, but we can still make the AI perform extremely well by just giving it a little more context.
 
