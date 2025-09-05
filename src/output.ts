@@ -220,6 +220,10 @@ export class Output<
 		this._addTrack('subtitle', source, metadata);
 	}
 
+	/**
+	 * Sets descriptive metadata tags about the media file, such as title, author, date, or cover art. When called
+	 * multiple times, only the metadata from the last call will be used.
+	 */
 	setMetadataTags(tags: MetadataTags) {
 		validateMetadataTags(tags);
 

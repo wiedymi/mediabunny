@@ -142,6 +142,7 @@ export class Input<S extends Source = Source> {
 		return demuxer.getMimeType();
 	}
 
+	/** Returns descriptive metadata tags about the media file, such as title, author, date, or cover art. */
 	async getMetadataTags() {
 		const demuxer = await this._getDemuxer();
 		return demuxer.getMetadataTags();
