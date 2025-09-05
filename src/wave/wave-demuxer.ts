@@ -11,6 +11,7 @@ import { Demuxer } from '../demuxer';
 import { Input } from '../input';
 import { InputAudioTrack, InputAudioTrackBacking } from '../input-track';
 import { PacketRetrievalOptions } from '../media-sink';
+import { MediaMetadata } from '../metadata';
 import { assert, UNDETERMINED_LANGUAGE } from '../misc';
 import { EncodedPacket, PLACEHOLDER_DATA } from '../packet';
 import { readAscii, readBytes, Reader, readU16, readU32, readU64 } from '../reader';
@@ -39,6 +40,7 @@ export class WaveDemuxer extends Demuxer {
 
 	tracks: InputAudioTrack[] = [];
 	lastKnownPacketIndex = 0;
+	metadata: MediaMetadata = {};
 
 	constructor(input: Input) {
 		super(input);
@@ -92,6 +94,10 @@ export class WaveDemuxer extends Demuxer {
 
 					this.dataStart = slice.filePos;
 					this.dataSize = Math.min(dataChunkSize, (totalFileSize ?? Infinity) - this.dataStart);
+
+					if (this.reader.fileSize === null) {
+						break; // Stop once we hit the data chunk
+					}
 				} else if (chunkId === 'ds64') {
 					// File and data chunk sizes are defined in here instead
 
@@ -99,6 +105,8 @@ export class WaveDemuxer extends Demuxer {
 					dataChunkSize = readU64(slice, littleEndian);
 
 					totalFileSize = Math.min(riffChunkSize + 8, this.reader.fileSize ?? Infinity);
+				} else if (chunkId === 'LIST') {
+					await this.parseListChunk(startPos, chunkSize, littleEndian);
 				}
 
 				currentPos = startPos + chunkSize + (chunkSize & 1); // Handle padding
@@ -167,6 +175,102 @@ export class WaveDemuxer extends Demuxer {
 		};
 	}
 
+	private async parseListChunk(startPos: number, size: number, littleEndian: boolean) {
+		let slice = this.reader.requestSlice(startPos, size);
+		if (slice instanceof Promise) slice = await slice;
+		if (!slice) return; // File too short
+
+		const infoType = readAscii(slice, 4);
+		if (infoType !== 'INFO' && infoType !== 'INF0') { // exiftool.org claims INF0 can happen
+			return; // Not an INFO chunk
+		}
+
+		let currentPos = slice.filePos;
+		while (currentPos <= startPos + size - 8) {
+			slice.filePos = currentPos;
+
+			const chunkName = readAscii(slice, 4);
+			const chunkSize = readU32(slice, littleEndian);
+			const bytes = readBytes(slice, chunkSize);
+
+			let stringLength = 0;
+			for (let i = 0; i < bytes.length; i++) {
+				if (bytes[i] === 0) {
+					break;
+				}
+
+				stringLength++;
+			}
+
+			const value = String.fromCharCode(...bytes.subarray(0, stringLength));
+
+			this.metadata.raw ??= {};
+			this.metadata.raw[chunkName] = value;
+
+			switch (chunkName) {
+				case 'INAM':
+				case 'TITL': {
+					this.metadata.title ??= value;
+				}; break;
+
+				case 'TIT3': {
+					this.metadata.description ??= value;
+				}; break;
+
+				case 'IART': {
+					this.metadata.artist ??= value;
+				}; break;
+
+				case 'IPRD': {
+					this.metadata.album ??= value;
+				}; break;
+
+				case 'IPRT':
+				case 'ITRK':
+				case 'TRCK': {
+					const parts = value.split('/');
+					const trackNum = Number.parseInt(parts[0]!, 10);
+					const trackNumMax = parts[1] && Number.parseInt(parts[1], 10);
+
+					if (Number.isInteger(trackNum) && trackNum > 0) {
+						this.metadata.trackNumber ??= trackNum;
+					}
+					if (trackNumMax && Number.isInteger(trackNumMax) && trackNumMax > 0) {
+						this.metadata.trackNumberMax ??= trackNumMax;
+					}
+				}; break;
+
+				case 'ICRD':
+				case 'IDIT': {
+					const date = new Date(value);
+					if (!Number.isNaN(date.getTime())) {
+						this.metadata.date ??= date;
+					}
+				}; break;
+
+				case 'YEAR': {
+					const year = Number.parseInt(value, 10);
+					if (Number.isInteger(year) && year > 0) {
+						this.metadata.date ??= new Date(year, 0, 1);
+					}
+				}; break;
+
+				case 'IGNR':
+				case 'GENR': {
+					this.metadata.genre ??= value;
+				}; break;
+
+				case 'ICMT':
+				case 'CMNT':
+				case 'COMM': {
+					this.metadata.comment ??= value;
+				}; break;
+			}
+
+			currentPos += 8 + chunkSize + (chunkSize & 1); // Handle padding
+		}
+	}
+
 	getCodec(): AudioCodec | null {
 		assert(this.audioInfo);
 
@@ -213,6 +317,11 @@ export class WaveDemuxer extends Demuxer {
 	async getTracks() {
 		await this.readMetadata();
 		return this.tracks;
+	}
+
+	async getMetadata() {
+		await this.readMetadata();
+		return this.metadata;
 	}
 }
 

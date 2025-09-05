@@ -125,6 +125,10 @@ export class AdtsDemuxer extends Demuxer {
 
 		return track.computeDuration();
 	}
+
+	async getMetadata() {
+		return {}; // No metadata in this one
+	}
 }
 
 class AdtsAudioTrackBacking implements InputAudioTrackBacking {

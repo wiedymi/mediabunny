@@ -24,7 +24,7 @@
 			chunked: true,
 			chunkSize: 2**20
 		});
-		const outputFormat = new Mediabunny.OggOutputFormat({});
+		const outputFormat = new Mediabunny.WavOutputFormat({});
 
 		const button = document.createElement('button');
 		button.textContent = 'Cancel';
@@ -129,7 +129,7 @@
 			}),
 			trim: {
 				start: 0,
-				end: 1
+				end: 10
 			},
 		});
 		console.log(conversion);

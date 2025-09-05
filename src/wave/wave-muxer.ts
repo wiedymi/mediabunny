@@ -14,7 +14,8 @@ import { RiffWriter } from './riff-writer';
 import { Writer } from '../writer';
 import { EncodedPacket } from '../packet';
 import { WavOutputFormat } from '../output-format';
-import { assert } from '../misc';
+import { assert, assertNever, keyValueIterator } from '../misc';
+import { MediaMetadata, mediaMetadataIsEmpty } from '../metadata';
 
 export class WaveMuxer extends Muxer {
 	private format: WavOutputFormat;
@@ -25,6 +26,12 @@ export class WaveMuxer extends Muxer {
 	private dataSize = 0;
 	private sampleRate: number | null = null;
 	private sampleCount = 0;
+
+	private riffSizePos: number | null = null;
+	private dataSizePos: number | null = null;
+	private ds64RiffSizePos: number | null = null;
+	private ds64DataSizePos: number | null = null;
+	private ds64SampleCountPos: number | null = null;
 
 	constructor(output: Output, format: WavOutputFormat) {
 		super(output);
@@ -119,6 +126,7 @@ export class WaveMuxer extends Muxer {
 		if (this.isRf64) {
 			this.riffWriter.writeU32(0xffffffff); // Not used in RF64
 		} else {
+			this.riffSizePos = this.writer.getPos();
 			this.riffWriter.writeU32(0); // File size placeholder
 		}
 
@@ -127,9 +135,16 @@ export class WaveMuxer extends Muxer {
 		if (this.isRf64) {
 			this.riffWriter.writeAscii('ds64');
 			this.riffWriter.writeU32(28); // Chunk size
+
+			this.ds64RiffSizePos = this.writer.getPos();
 			this.riffWriter.writeU64(0); // RIFF size placeholder
+
+			this.ds64DataSizePos = this.writer.getPos();
 			this.riffWriter.writeU64(0); // Data size placeholder
+
+			this.ds64SampleCountPos = this.writer.getPos();
 			this.riffWriter.writeU64(0); // Sample count placeholder
+
 			this.riffWriter.writeU32(0); // Table length
 			// Empty table
 		}
@@ -144,18 +159,136 @@ export class WaveMuxer extends Muxer {
 		this.riffWriter.writeU16(blockSize);
 		this.riffWriter.writeU16(8 * pcmInfo.sampleSize);
 
+		if (!mediaMetadataIsEmpty(this.output._metadata)) {
+			// Metadata exists, let's write an INFO chunk
+			this.writeInfoChunk(this.output._metadata);
+		}
+
 		// data chunk
 		this.riffWriter.writeAscii('data');
 
 		if (this.isRf64) {
 			this.riffWriter.writeU32(0xffffffff); // Not used in RF64
 		} else {
+			this.dataSizePos = this.writer.getPos();
 			this.riffWriter.writeU32(0); // Data size placeholder
 		}
 
 		if (this.format._options.onHeader) {
 			const { data, start } = this.writer.stopTrackingWrites();
 			this.format._options.onHeader(data, start);
+		}
+	}
+
+	private writeInfoChunk(metadata: MediaMetadata) {
+		const startPos = this.writer.getPos();
+
+		this.riffWriter.writeAscii('LIST');
+		this.riffWriter.writeU32(0); // Size placeholder
+		this.riffWriter.writeAscii('INFO');
+
+		const writtenTags = new Set<string>();
+
+		for (const { key, value } of keyValueIterator(metadata)) {
+			switch (key) {
+				case 'title': {
+					this.writeInfoTag('INAM', value);
+					writtenTags.add('INAM');
+				}; break;
+
+				case 'artist': {
+					this.writeInfoTag('IART', value);
+					writtenTags.add('IART');
+				}; break;
+
+				case 'album': {
+					this.writeInfoTag('IPRD', value);
+					writtenTags.add('IPRD');
+				}; break;
+
+				case 'trackNumber': {
+					const string = metadata.trackNumberMax !== undefined
+						? `${value}/${metadata.trackNumberMax}`
+						: value.toString();
+
+					this.writeInfoTag('ITRK', string);
+					writtenTags.add('ITRK');
+				}; break;
+
+				case 'genre': {
+					this.writeInfoTag('IGNR', value);
+					writtenTags.add('IGNR');
+				}; break;
+
+				case 'date': {
+					this.writeInfoTag('ICRD', value.toISOString().slice(0, 10));
+					writtenTags.add('ICRD');
+				}; break;
+
+				case 'comment': {
+					this.writeInfoTag('ICMT', value);
+					writtenTags.add('ICMT');
+				}; break;
+
+				case 'albumArtist':
+				case 'discNumber':
+				case 'trackNumberMax':
+				case 'discNumberMax':
+				case 'description':
+				case 'lyrics':
+				case 'images': {
+					// Not supported in RIFF INFO
+				}; break;
+
+				case 'raw': {
+					// Handled later
+				}; break;
+
+				default: assertNever(key);
+			}
+		}
+
+		if (metadata.raw) {
+			for (const key in metadata.raw) {
+				const value = metadata.raw[key];
+				if (value == null || key.length !== 4 || writtenTags.has(key)) {
+					continue;
+				}
+
+				if (typeof value === 'string') {
+					this.writeInfoTag(key, value);
+				}
+			}
+		}
+
+		const endPos = this.writer.getPos();
+		const chunkSize = endPos - startPos - 8;
+
+		this.writer.seek(startPos + 4);
+		this.riffWriter.writeU32(chunkSize);
+		this.writer.seek(endPos);
+
+		// Add padding byte if chunk size is odd
+		if (chunkSize & 1) {
+			this.writer.write(new Uint8Array(1));
+		}
+	}
+
+	private writeInfoTag(tag: string, value: string) {
+		const size = value.length + 1; // +1 for null terminator
+		const bytes = new Uint8Array(size);
+
+		for (let i = 0; i < value.length; i++) {
+			bytes[i] = value.charCodeAt(i);
+		}
+
+		this.riffWriter.writeAscii(tag);
+		this.riffWriter.writeU32(size);
+		this.writer.write(bytes);
+
+		// Add padding byte if size is odd
+		if (size & 1) {
+			this.writer.write(new Uint8Array(1));
 		}
 	}
 
@@ -166,23 +299,28 @@ export class WaveMuxer extends Muxer {
 
 		if (this.isRf64) {
 			// Write riff size
-			this.writer.seek(20);
+			assert(this.ds64RiffSizePos !== null);
+			this.writer.seek(this.ds64RiffSizePos);
 			this.riffWriter.writeU64(endPos - 8);
 
 			// Write data size
-			this.writer.seek(28);
+			assert(this.ds64DataSizePos !== null);
+			this.writer.seek(this.ds64DataSizePos);
 			this.riffWriter.writeU64(this.dataSize);
 
 			// Write sample count
-			this.writer.seek(36);
+			assert(this.ds64SampleCountPos !== null);
+			this.writer.seek(this.ds64SampleCountPos);
 			this.riffWriter.writeU64(this.sampleCount);
 		} else {
 			// Write file size
-			this.writer.seek(4);
+			assert(this.riffSizePos !== null);
+			this.writer.seek(this.riffSizePos);
 			this.riffWriter.writeU32(endPos - 8);
 
 			// Write data chunk size
-			this.writer.seek(40);
+			assert(this.dataSizePos !== null);
+			this.writer.seek(this.dataSizePos);
 			this.riffWriter.writeU32(this.dataSize);
 		}
 
