@@ -14,7 +14,7 @@ import { RiffWriter } from './riff-writer';
 import { Writer } from '../writer';
 import { EncodedPacket } from '../packet';
 import { WavOutputFormat } from '../output-format';
-import { assert, assertNever, keyValueIterator } from '../misc';
+import { assert, assertNever, isIso88591Compatible, keyValueIterator } from '../misc';
 import { MetadataTags, metadataTagsAreEmpty } from '../tags';
 
 export class WaveMuxer extends Muxer {
@@ -189,20 +189,46 @@ export class WaveMuxer extends Muxer {
 
 		const writtenTags = new Set<string>();
 
+		const writeInfoTag = (tag: string, value: string) => {
+			if (!isIso88591Compatible(value)) {
+				// No Unicode supported here
+				console.warn(`Didn't write tag '${tag}' because '${value}' is not ISO 8859-1-compatible.`);
+				return;
+			}
+
+			const size = value.length + 1; // +1 for null terminator
+			const bytes = new Uint8Array(size);
+
+			for (let i = 0; i < value.length; i++) {
+				bytes[i] = value.charCodeAt(i);
+			}
+
+			this.riffWriter.writeAscii(tag);
+			this.riffWriter.writeU32(size);
+			this.writer.write(bytes);
+
+			// Add padding byte if size is odd
+			if (size & 1) {
+				this.writer.write(new Uint8Array(1));
+			}
+
+			writtenTags.add(tag);
+		};
+
 		for (const { key, value } of keyValueIterator(metadata)) {
 			switch (key) {
 				case 'title': {
-					this.writeInfoTag('INAM', value);
+					writeInfoTag('INAM', value);
 					writtenTags.add('INAM');
 				}; break;
 
 				case 'artist': {
-					this.writeInfoTag('IART', value);
+					writeInfoTag('IART', value);
 					writtenTags.add('IART');
 				}; break;
 
 				case 'album': {
-					this.writeInfoTag('IPRD', value);
+					writeInfoTag('IPRD', value);
 					writtenTags.add('IPRD');
 				}; break;
 
@@ -211,22 +237,22 @@ export class WaveMuxer extends Muxer {
 						? `${value}/${metadata.tracksTotal}`
 						: value.toString();
 
-					this.writeInfoTag('ITRK', string);
+					writeInfoTag('ITRK', string);
 					writtenTags.add('ITRK');
 				}; break;
 
 				case 'genre': {
-					this.writeInfoTag('IGNR', value);
+					writeInfoTag('IGNR', value);
 					writtenTags.add('IGNR');
 				}; break;
 
 				case 'date': {
-					this.writeInfoTag('ICRD', value.toISOString().slice(0, 10));
+					writeInfoTag('ICRD', value.toISOString().slice(0, 10));
 					writtenTags.add('ICRD');
 				}; break;
 
 				case 'comment': {
-					this.writeInfoTag('ICMT', value);
+					writeInfoTag('ICMT', value);
 					writtenTags.add('ICMT');
 				}; break;
 
@@ -256,7 +282,7 @@ export class WaveMuxer extends Muxer {
 				}
 
 				if (typeof value === 'string') {
-					this.writeInfoTag(key, value);
+					writeInfoTag(key, value);
 				}
 			}
 		}
@@ -270,24 +296,6 @@ export class WaveMuxer extends Muxer {
 
 		// Add padding byte if chunk size is odd
 		if (chunkSize & 1) {
-			this.writer.write(new Uint8Array(1));
-		}
-	}
-
-	private writeInfoTag(tag: string, value: string) {
-		const size = value.length + 1; // +1 for null terminator
-		const bytes = new Uint8Array(size);
-
-		for (let i = 0; i < value.length; i++) {
-			bytes[i] = value.charCodeAt(i);
-		}
-
-		this.riffWriter.writeAscii(tag);
-		this.riffWriter.writeU32(size);
-		this.writer.write(bytes);
-
-		// Add padding byte if size is odd
-		if (size & 1) {
 			this.writer.write(new Uint8Array(1));
 		}
 	}
