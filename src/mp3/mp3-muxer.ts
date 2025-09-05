@@ -7,7 +7,7 @@
  */
 
 import { assert, assertNever, keyValueIterator, textEncoder, toDataView } from '../misc';
-import { mediaMetadataIsEmpty, MediaMetadata } from '../metadata';
+import { metadataTagsAreEmpty, MetadataTags } from '../tags';
 import { Muxer } from '../muxer';
 import { Output, OutputAudioTrack } from '../output';
 import { Mp3OutputFormat } from '../output-format';
@@ -35,8 +35,8 @@ export class Mp3Muxer extends Muxer {
 	}
 
 	async start() {
-		if (!mediaMetadataIsEmpty(this.output._metadata)) {
-			this.writeId3v2Tag(this.output._metadata);
+		if (!metadataTagsAreEmpty(this.output._metadataTags)) {
+			this.writeId3v2Tag(this.output._metadataTags);
 		}
 	}
 
@@ -122,7 +122,7 @@ export class Mp3Muxer extends Muxer {
 		throw new Error('MP3 does not support subtitles.');
 	}
 
-	writeId3v2Tag(metadata: MediaMetadata) {
+	writeId3v2Tag(tags: MetadataTags) {
 		this.mp3Writer.writeAscii('ID3');
 		this.mp3Writer.writeU8(0x04); // Version 2.4
 		this.mp3Writer.writeU8(0x00); // Revision 0
@@ -132,7 +132,7 @@ export class Mp3Muxer extends Muxer {
 		const startPos = this.writer.getPos();
 		const writtenTags = new Set<string>();
 
-		for (const { key, value } of keyValueIterator(metadata)) {
+		for (const { key, value } of keyValueIterator(tags)) {
 			switch (key) {
 				case 'title': {
 					this.mp3Writer.writeId3V2TextFrame('TIT2', value);
@@ -160,8 +160,8 @@ export class Mp3Muxer extends Muxer {
 				}; break;
 
 				case 'trackNumber': {
-					const string = metadata.trackNumberMax !== undefined
-						? `${value}/${metadata.trackNumberMax}`
+					const string = tags.tracksTotal !== undefined
+						? `${value}/${tags.tracksTotal}`
 						: value.toString();
 
 					this.mp3Writer.writeId3V2TextFrame('TRCK', string);
@@ -169,8 +169,8 @@ export class Mp3Muxer extends Muxer {
 				}; break;
 
 				case 'discNumber': {
-					const string = metadata.discNumberMax !== undefined
-						? `${value}/${metadata.discNumberMax}`
+					const string = tags.discsTotal !== undefined
+						? `${value}/${tags.discsTotal}`
 						: value.toString();
 
 					this.mp3Writer.writeId3V2TextFrame('TPOS', string);
@@ -206,8 +206,8 @@ export class Mp3Muxer extends Muxer {
 					}
 				}; break;
 
-				case 'trackNumberMax':
-				case 'discNumberMax': {
+				case 'tracksTotal':
+				case 'discsTotal': {
 					// Handled with trackNumber and discNumber respectively
 				}; break;
 
@@ -219,9 +219,9 @@ export class Mp3Muxer extends Muxer {
 			}
 		}
 
-		if (metadata.raw) {
-			for (const key in metadata.raw) {
-				const value = metadata.raw[key];
+		if (tags.raw) {
+			for (const key in tags.raw) {
+				const value = tags.raw[key];
 				if (value == null || key.length !== 4 || writtenTags.has(key)) {
 					continue;
 				}

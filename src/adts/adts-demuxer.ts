@@ -126,8 +126,8 @@ export class AdtsDemuxer extends Demuxer {
 		return track.computeDuration();
 	}
 
-	async getMetadata() {
-		return {}; // No metadata in this one
+	async getMetadataTags() {
+		return {}; // No tags in this one
 	}
 }
 

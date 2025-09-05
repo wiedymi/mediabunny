@@ -262,14 +262,14 @@ export class OggMuxer extends Muxer {
 	createVorbisComments(headerBytes: Uint8Array) {
 		// https://datatracker.ietf.org/doc/html/rfc7845#section-5.2
 
-		const metadata = this.output._metadata;
+		const tags = this.output._metadataTags;
 		const commentHeaderParts = [
 			headerBytes,
 		];
 
 		let vendorString = '';
-		if (typeof metadata.raw?.['vendor'] === 'string') {
-			vendorString = metadata.raw?.['vendor'];
+		if (typeof tags.raw?.['vendor'] === 'string') {
+			vendorString = tags.raw?.['vendor'];
 		}
 		const encodedVendorString = textEncoder.encode(vendorString);
 
@@ -295,7 +295,7 @@ export class OggMuxer extends Muxer {
 			writtenTags.add(key);
 		};
 
-		for (const { key, value } of keyValueIterator(metadata)) {
+		for (const { key, value } of keyValueIterator(tags)) {
 			switch (key) {
 				case 'title': {
 					addCommentTag('TITLE', value);
@@ -333,20 +333,20 @@ export class OggMuxer extends Muxer {
 					addCommentTag('LYRICS', value);
 				}; break;
 
-				case 'discNumber': {
-					addCommentTag('TRACKNUMBER', value.toString());
-				}; break;
-
-				case 'discNumberMax': {
-					addCommentTag('TRACKTOTAL', value.toString());
-				}; break;
-
 				case 'trackNumber': {
 					addCommentTag('DISCNUMBER', value.toString());
 				}; break;
 
-				case 'trackNumberMax': {
+				case 'tracksTotal': {
 					addCommentTag('DISCTOTAL', value.toString());
+				}; break;
+
+				case 'discNumber': {
+					addCommentTag('TRACKNUMBER', value.toString());
+				}; break;
+
+				case 'discsTotal': {
+					addCommentTag('TRACKTOTAL', value.toString());
 				}; break;
 
 				case 'images': {
@@ -400,9 +400,9 @@ export class OggMuxer extends Muxer {
 			}
 		}
 
-		if (metadata.raw) {
-			for (const key in metadata.raw) {
-				const value = metadata.raw[key];
+		if (tags.raw) {
+			for (const key in tags.raw) {
+				const value = tags.raw[key];
 				if (key === 'vendor' || value == null || writtenTags.has(key)) {
 					continue;
 				}

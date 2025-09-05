@@ -424,10 +424,10 @@ export class MatroskaMuxer extends Muxer {
 			] });
 		};
 
-		const metadata = this.output._metadata;
+		const metadataTags = this.output._metadataTags;
 		const writtenTags = new Set<string>();
 
-		for (const { key, value } of keyValueIterator(metadata)) {
+		for (const { key, value } of keyValueIterator(metadataTags)) {
 			switch (key) {
 				case 'title': {
 					addSimpleTag('TITLE', value);
@@ -475,8 +475,8 @@ export class MatroskaMuxer extends Muxer {
 				}; break;
 
 				case 'trackNumber': {
-					const string = metadata.trackNumberMax !== undefined
-						? `${value}/${metadata.trackNumberMax}`
+					const string = metadataTags.tracksTotal !== undefined
+						? `${value}/${metadataTags.tracksTotal}`
 						: value.toString();
 
 					addSimpleTag('PART_NUMBER', string);
@@ -484,16 +484,16 @@ export class MatroskaMuxer extends Muxer {
 				}; break;
 
 				case 'discNumber': {
-					const string = metadata.discNumberMax !== undefined
-						? `${value}/${metadata.discNumberMax}`
+					const string = metadataTags.discsTotal !== undefined
+						? `${value}/${metadataTags.discsTotal}`
 						: value.toString();
 
 					addSimpleTag('DISC', string);
 					writtenTags.add('DISC');
 				}; break;
 
-				case 'trackNumberMax':
-				case 'discNumberMax': {
+				case 'tracksTotal':
+				case 'discsTotal': {
 					// Handled with trackNumber and discNumber respectively
 				}; break;
 
@@ -506,9 +506,9 @@ export class MatroskaMuxer extends Muxer {
 			}
 		}
 
-		if (metadata.raw) {
-			for (const key in metadata.raw) {
-				const value = metadata.raw[key]!;
+		if (metadataTags.raw) {
+			for (const key in metadataTags.raw) {
+				const value = metadataTags.raw[key]!;
 				if (value == null || writtenTags.has(key)) {
 					continue;
 				}
@@ -536,14 +536,14 @@ export class MatroskaMuxer extends Muxer {
 	}
 
 	private maybeCreateAttachments() {
-		const metadata = this.output._metadata;
-		if (!metadata.images || metadata.images.length === 0) {
+		const metadataTags = this.output._metadataTags;
+		if (!metadataTags.images || metadataTags.images.length === 0) {
 			return;
 		}
 
 		const existingFileUids = new Set<number>();
 
-		this.attachmentsElement = { id: EBMLId.Attachments, data: metadata.images.map((image): EBMLElement => {
+		this.attachmentsElement = { id: EBMLId.Attachments, data: metadataTags.images.map((image): EBMLElement => {
 			let imageName = image.name;
 			if (imageName === undefined) {
 				const baseName = image.kind === 'coverFront' ? 'cover' : image.kind === 'coverBack' ? 'back' : 'image';

@@ -15,7 +15,7 @@ import { Writer } from '../writer';
 import { EncodedPacket } from '../packet';
 import { WavOutputFormat } from '../output-format';
 import { assert, assertNever, keyValueIterator } from '../misc';
-import { MediaMetadata, mediaMetadataIsEmpty } from '../metadata';
+import { MetadataTags, metadataTagsAreEmpty } from '../tags';
 
 export class WaveMuxer extends Muxer {
 	private format: WavOutputFormat;
@@ -159,9 +159,9 @@ export class WaveMuxer extends Muxer {
 		this.riffWriter.writeU16(blockSize);
 		this.riffWriter.writeU16(8 * pcmInfo.sampleSize);
 
-		if (!mediaMetadataIsEmpty(this.output._metadata)) {
+		if (!metadataTagsAreEmpty(this.output._metadataTags)) {
 			// Metadata exists, let's write an INFO chunk
-			this.writeInfoChunk(this.output._metadata);
+			this.writeInfoChunk(this.output._metadataTags);
 		}
 
 		// data chunk
@@ -180,7 +180,7 @@ export class WaveMuxer extends Muxer {
 		}
 	}
 
-	private writeInfoChunk(metadata: MediaMetadata) {
+	private writeInfoChunk(metadata: MetadataTags) {
 		const startPos = this.writer.getPos();
 
 		this.riffWriter.writeAscii('LIST');
@@ -207,8 +207,8 @@ export class WaveMuxer extends Muxer {
 				}; break;
 
 				case 'trackNumber': {
-					const string = metadata.trackNumberMax !== undefined
-						? `${value}/${metadata.trackNumberMax}`
+					const string = metadata.tracksTotal !== undefined
+						? `${value}/${metadata.tracksTotal}`
 						: value.toString();
 
 					this.writeInfoTag('ITRK', string);
@@ -232,8 +232,8 @@ export class WaveMuxer extends Muxer {
 
 				case 'albumArtist':
 				case 'discNumber':
-				case 'trackNumberMax':
-				case 'discNumberMax':
+				case 'tracksTotal':
+				case 'discsTotal':
 				case 'description':
 				case 'lyrics':
 				case 'images': {

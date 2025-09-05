@@ -30,7 +30,7 @@ import {
 	InputVideoTrack,
 	InputVideoTrackBacking,
 } from '../input-track';
-import { MediaMetadata } from '../metadata';
+import { MetadataTags } from '../tags';
 import { PacketRetrievalOptions } from '../media-sink';
 import {
 	assert,
@@ -94,8 +94,8 @@ type Segment = {
 	clusters: Cluster[];
 	clusterLookupMutex: AsyncMutex;
 
-	metadata: MediaMetadata;
-	metadataCollected: boolean;
+	metadataTags: MetadataTags;
+	metadataTagsCollected: boolean;
 };
 
 type SeekEntry = {
@@ -246,25 +246,25 @@ export class MatroskaDemuxer extends Demuxer {
 		});
 	}
 
-	async getMetadata() {
+	async getMetadataTags() {
 		await this.readMetadata();
 
-		// Load metadata from each segment lazily (only once)
+		// Load metadata tags from each segment lazily (only once)
 		for (const segment of this.segments) {
-			if (!segment.metadataCollected) {
+			if (!segment.metadataTagsCollected) {
 				await this.loadSegmentMetadata(segment);
-				segment.metadataCollected = true;
+				segment.metadataTagsCollected = true;
 			}
 		}
 
 		// This is kinda handwavy, and how we handle multiple segments isn't suuuuper well-defined anyway; so we just
-		// shallow-merge metadata from all (usually just one) segments.
-		let metadata: MediaMetadata = {};
+		// shallow-merge metadata tags from all (usually just one) segments.
+		let metadataTags: MetadataTags = {};
 		for (const segment of this.segments) {
-			metadata = { ...metadata, ...segment.metadata };
+			metadataTags = { ...metadataTags, ...segment.metadataTags };
 		}
 
-		return metadata;
+		return metadataTags;
 	}
 
 	readMetadata() {
@@ -365,8 +365,8 @@ export class MatroskaDemuxer extends Demuxer {
 			clusters: [],
 			clusterLookupMutex: new AsyncMutex(),
 
-			metadata: {},
-			metadataCollected: false,
+			metadataTags: {},
+			metadataTagsCollected: false,
 		};
 		this.segments.push(this.currentSegment);
 
@@ -1426,8 +1426,8 @@ export class MatroskaDemuxer extends Demuxer {
 						}
 					}
 
-					this.currentSegment.metadata.images ??= [];
-					this.currentSegment.metadata.images.push({
+					this.currentSegment.metadataTags.images ??= [];
+					this.currentSegment.metadataTags.images.push({
 						data: this.currentAttachedFile.fileData,
 						mimeType: this.currentAttachedFile.fileMediaType,
 						kind,
@@ -1469,50 +1469,50 @@ export class MatroskaDemuxer extends Demuxer {
 	}
 
 	processTagValue(name: string, value: string | Uint8Array) {
-		if (!this.currentSegment?.metadata) return;
+		if (!this.currentSegment?.metadataTags) return;
 
-		const metadata = this.currentSegment.metadata;
-		metadata.raw ??= {};
-		metadata.raw[name] ??= value;
+		const metadataTags = this.currentSegment.metadataTags;
+		metadataTags.raw ??= {};
+		metadataTags.raw[name] ??= value;
 
 		if (typeof value === 'string') {
 			switch (name.toLowerCase()) {
 				case 'title': {
-					metadata.title ??= value;
+					metadataTags.title ??= value;
 				}; break;
 
 				case 'description': {
-					metadata.description ??= value;
+					metadataTags.description ??= value;
 				}; break;
 
 				case 'artist': {
-					metadata.artist ??= value;
+					metadataTags.artist ??= value;
 				}; break;
 
 				case 'album': {
-					metadata.album ??= value;
+					metadataTags.album ??= value;
 				}; break;
 
 				case 'album_artist': {
-					metadata.albumArtist ??= value;
+					metadataTags.albumArtist ??= value;
 				}; break;
 
 				case 'genre': {
-					metadata.genre ??= value;
+					metadataTags.genre ??= value;
 				}; break;
 
 				case 'comment': {
-					metadata.comment ??= value;
+					metadataTags.comment ??= value;
 				}; break;
 
 				case 'lyrics': {
-					metadata.lyrics ??= value;
+					metadataTags.lyrics ??= value;
 				}; break;
 
 				case 'date': {
 					const date = new Date(value);
 					if (!Number.isNaN(date.getTime())) {
-						metadata.date ??= date;
+						metadataTags.date ??= date;
 					}
 				}; break;
 
@@ -1523,10 +1523,10 @@ export class MatroskaDemuxer extends Demuxer {
 					const trackNumMax = parts[1] && Number.parseInt(parts[1], 10);
 
 					if (Number.isInteger(trackNum) && trackNum > 0) {
-						metadata.trackNumber ??= trackNum;
+						metadataTags.trackNumber ??= trackNum;
 					}
 					if (trackNumMax && Number.isInteger(trackNumMax) && trackNumMax > 0) {
-						metadata.trackNumberMax ??= trackNumMax;
+						metadataTags.tracksTotal ??= trackNumMax;
 					}
 				}; break;
 
@@ -1537,10 +1537,10 @@ export class MatroskaDemuxer extends Demuxer {
 					const discNumMax = discParts[1] && Number.parseInt(discParts[1], 10);
 
 					if (Number.isInteger(discNum) && discNum > 0) {
-						metadata.discNumber ??= discNum;
+						metadataTags.discNumber ??= discNum;
 					}
 					if (discNumMax && Number.isInteger(discNumMax) && discNumMax > 0) {
-						metadata.discNumberMax ??= discNumMax;
+						metadataTags.discsTotal ??= discNumMax;
 					}
 				}; break;
 			}

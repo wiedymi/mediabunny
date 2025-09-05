@@ -7,7 +7,7 @@
  */
 
 import { AsyncMutex, isIso639Dash2LanguageCode, Rotation } from './misc';
-import { MediaMetadata, validateMediaMetadata } from './metadata';
+import { MetadataTags, validateMetadataTags } from './tags';
 import { Muxer } from './muxer';
 import { OutputFormat } from './output-format';
 import { AudioSource, MediaSource, SubtitleSource, VideoSource } from './media-source';
@@ -147,7 +147,7 @@ export class Output<
 	/** @internal */
 	_mutex = new AsyncMutex();
 	/** @internal */
-	_metadata: MediaMetadata = {};
+	_metadataTags: MetadataTags = {};
 
 	/**
 	 * Creates a new instance of {@link Output} which can then be used to create a new media file according to the
@@ -220,14 +220,14 @@ export class Output<
 		this._addTrack('subtitle', source, metadata);
 	}
 
-	setMetadata(metadata: MediaMetadata) {
-		validateMediaMetadata(metadata);
+	setMetadataTags(tags: MetadataTags) {
+		validateMetadataTags(tags);
 
 		if (this.state !== 'pending') {
-			throw new Error('Cannot set metadata after output has been started or canceled.');
+			throw new Error('Cannot set metadata tags after output has been started or canceled.');
 		}
 
-		this._metadata = metadata;
+		this._metadataTags = tags;
 	}
 
 	/** @internal */

@@ -10,7 +10,7 @@ import { AudioCodec } from '../codec';
 import { Demuxer } from '../demuxer';
 import { Input } from '../input';
 import { InputAudioTrack, InputAudioTrackBacking } from '../input-track';
-import { MediaMetadata } from '../metadata';
+import { MetadataTags } from '../tags';
 import { PacketRetrievalOptions } from '../media-sink';
 import { assert, AsyncMutex, binarySearchExact, binarySearchLessOrEqual, UNDETERMINED_LANGUAGE } from '../misc';
 import { EncodedPacket, PLACEHOLDER_DATA } from '../packet';
@@ -38,7 +38,7 @@ export class Mp3Demuxer extends Demuxer {
 	metadataPromise: Promise<void> | null = null;
 	firstFrameHeader: FrameHeader | null = null;
 	loadedSamples: Sample[] = []; // All samples from the start of the file to lastLoadedPos
-	metadata: MediaMetadata | null = null;
+	metadataTags: MetadataTags | null = null;
 
 	tracks: InputAudioTrack[] = [];
 
@@ -148,17 +148,17 @@ export class Mp3Demuxer extends Demuxer {
 		return track.computeDuration();
 	}
 
-	async getMetadata() {
+	async getMetadataTags() {
 		const release = await this.readingMutex.acquire();
 
 		try {
 			await this.readMetadata();
 
-			if (this.metadata) {
-				return this.metadata;
+			if (this.metadataTags) {
+				return this.metadataTags;
 			}
 
-			this.metadata = {};
+			this.metadataTags = {};
 			let currentPos = 0;
 			let id3V2HeaderFound = false;
 
@@ -178,7 +178,7 @@ export class Mp3Demuxer extends Demuxer {
 				if (contentSlice instanceof Promise) contentSlice = await contentSlice;
 				if (!contentSlice) break;
 
-				parseId3V2Tag(contentSlice, id3V2Header, this.metadata);
+				parseId3V2Tag(contentSlice, id3V2Header, this.metadataTags);
 
 				currentPos = headerSlice.filePos + id3V2Header.size;
 			}
@@ -191,11 +191,11 @@ export class Mp3Demuxer extends Demuxer {
 
 				const tag = readAscii(slice, 3);
 				if (tag === 'TAG') {
-					parseId3V1Tag(slice, this.metadata);
+					parseId3V1Tag(slice, this.metadataTags);
 				}
 			}
 
-			return this.metadata;
+			return this.metadataTags;
 		} finally {
 			release();
 		}

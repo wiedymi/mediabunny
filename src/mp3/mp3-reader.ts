@@ -7,7 +7,7 @@
  */
 
 import { decodeSynchsafe, FRAME_HEADER_SIZE, FrameHeader, readFrameHeader } from '../../shared/mp3-misc';
-import { MediaMetadata } from '../metadata';
+import { MetadataTags } from '../tags';
 import { coalesceIndex, textDecoder } from '../misc';
 import { FileSlice, readAscii, readBytes, Reader, readU32Be, readU8 } from '../reader';
 
@@ -89,25 +89,25 @@ export const readNextFrameHeader = async (reader: Reader, startPos: number, unti
 	return null;
 };
 
-export const parseId3V1Tag = (slice: FileSlice, metadata: MediaMetadata) => {
+export const parseId3V1Tag = (slice: FileSlice, tags: MetadataTags) => {
 	const startPos = slice.filePos;
-	metadata.raw ??= {};
-	metadata.raw['TAG'] ??= readBytes(slice, ID3_V1_TAG_SIZE - 3); // Dump the whole tag into the raw metadata
+	tags.raw ??= {};
+	tags.raw['TAG'] ??= readBytes(slice, ID3_V1_TAG_SIZE - 3); // Dump the whole tag into the raw metadata
 	slice.filePos = startPos;
 
 	const title = readId3V1String(slice, 30);
-	if (title) metadata.title ??= title;
+	if (title) tags.title ??= title;
 
 	const artist = readId3V1String(slice, 30);
-	if (artist) metadata.artist ??= artist;
+	if (artist) tags.artist ??= artist;
 
 	const album = readId3V1String(slice, 30);
-	if (album) metadata.album ??= album;
+	if (album) tags.album ??= album;
 
 	const yearText = readId3V1String(slice, 4);
 	const year = Number.parseInt(yearText, 10);
 	if (Number.isInteger(year) && year > 0) {
-		metadata.date ??= new Date(year, 0, 1);
+		tags.date ??= new Date(year, 0, 1);
 	}
 
 	const commentBytes = readBytes(slice, 30);
@@ -118,7 +118,7 @@ export const parseId3V1Tag = (slice: FileSlice, metadata: MediaMetadata) => {
 	if (commentBytes[28] === 0 && commentBytes[29] !== 0) {
 		const trackNum = commentBytes[29]!;
 		if (trackNum > 0) {
-			metadata.trackNumber ??= trackNum;
+			tags.trackNumber ??= trackNum;
 		}
 
 		slice.skip(-30);
@@ -129,11 +129,11 @@ export const parseId3V1Tag = (slice: FileSlice, metadata: MediaMetadata) => {
 		comment = readId3V1String(slice, 30);
 	}
 
-	if (comment) metadata.comment ??= comment;
+	if (comment) tags.comment ??= comment;
 
 	const genreIndex = readU8(slice);
 	if (genreIndex < ID3_V1_GENRES.length) {
-		metadata.genre ??= ID3_V1_GENRES[genreIndex];
+		tags.genre ??= ID3_V1_GENRES[genreIndex];
 	}
 };
 
@@ -171,7 +171,7 @@ export const readId3V2Header = (slice: FileSlice): Id3V2Header | null => {
 	return { majorVersion, revision, flags, size };
 };
 
-export const parseId3V2Tag = (slice: FileSlice, header: Id3V2Header, metadata: MediaMetadata) => {
+export const parseId3V2Tag = (slice: FileSlice, header: Id3V2Header, tags: MetadataTags) => {
 	// https://id3.org/id3v2.3.0
 
 	if (![2, 3, 4].includes(header.majorVersion)) {
@@ -239,13 +239,13 @@ export const parseId3V2Tag = (slice: FileSlice, header: Id3V2Header, metadata: M
 			reader.ununsynchronizeRegion(reader.pos, frameEndPos);
 		}
 
-		metadata.raw ??= {};
+		tags.raw ??= {};
 		if (frame.id[0] === 'T') {
 			// It's a text frame, let's decode as text
-			metadata.raw[frame.id] ??= reader.readId3V2EncodingAndText(frameEndPos);
+			tags.raw[frame.id] ??= reader.readId3V2EncodingAndText(frameEndPos);
 		} else {
 			// For the others, let's just get the bytes
-			metadata.raw[frame.id] ??= reader.readBytes(frame.size);
+			tags.raw[frame.id] ??= reader.readBytes(frame.size);
 		}
 
 		reader.pos = frameStartPos;
@@ -253,27 +253,27 @@ export const parseId3V2Tag = (slice: FileSlice, header: Id3V2Header, metadata: M
 		switch (frame.id) {
 			case 'TIT2':
 			case 'TT2': {
-				metadata.title ??= reader.readId3V2EncodingAndText(frameEndPos);
+				tags.title ??= reader.readId3V2EncodingAndText(frameEndPos);
 			}; break;
 
 			case 'TIT3':
 			case 'TT3': {
-				metadata.description ??= reader.readId3V2EncodingAndText(frameEndPos);
+				tags.description ??= reader.readId3V2EncodingAndText(frameEndPos);
 			}; break;
 
 			case 'TPE1':
 			case 'TP1': {
-				metadata.artist ??= reader.readId3V2EncodingAndText(frameEndPos);
+				tags.artist ??= reader.readId3V2EncodingAndText(frameEndPos);
 			}; break;
 
 			case 'TALB':
 			case 'TAL': {
-				metadata.album ??= reader.readId3V2EncodingAndText(frameEndPos);
+				tags.album ??= reader.readId3V2EncodingAndText(frameEndPos);
 			}; break;
 
 			case 'TPE2':
 			case 'TP2': {
-				metadata.albumArtist ??= reader.readId3V2EncodingAndText(frameEndPos);
+				tags.albumArtist ??= reader.readId3V2EncodingAndText(frameEndPos);
 			}; break;
 
 			case 'TRCK':
@@ -284,10 +284,10 @@ export const parseId3V2Tag = (slice: FileSlice, header: Id3V2Header, metadata: M
 				const trackNumMax = parts[1] && Number.parseInt(parts[1], 10);
 
 				if (Number.isInteger(trackNum) && trackNum > 0) {
-					metadata.trackNumber ??= trackNum;
+					tags.trackNumber ??= trackNum;
 				}
 				if (trackNumMax && Number.isInteger(trackNumMax) && trackNumMax > 0) {
-					metadata.trackNumberMax ??= trackNumMax;
+					tags.tracksTotal ??= trackNumMax;
 				}
 			}; break;
 
@@ -299,10 +299,10 @@ export const parseId3V2Tag = (slice: FileSlice, header: Id3V2Header, metadata: M
 				const discNumMax = parts[1] && Number.parseInt(parts[1], 10);
 
 				if (Number.isInteger(discNum) && discNum > 0) {
-					metadata.discNumber ??= discNum;
+					tags.discNumber ??= discNum;
 				}
 				if (discNumMax && Number.isInteger(discNumMax) && discNumMax > 0) {
-					metadata.discNumberMax ??= discNumMax;
+					tags.discsTotal ??= discNumMax;
 				}
 			}; break;
 
@@ -313,7 +313,7 @@ export const parseId3V2Tag = (slice: FileSlice, header: Id3V2Header, metadata: M
 				if (match) {
 					const genreNumber = Number.parseInt(match[1]!);
 					if (ID3_V1_GENRES[genreNumber] !== undefined) {
-						metadata.genre ??= ID3_V1_GENRES[genreNumber];
+						tags.genre ??= ID3_V1_GENRES[genreNumber];
 						break;
 					}
 				}
@@ -322,12 +322,12 @@ export const parseId3V2Tag = (slice: FileSlice, header: Id3V2Header, metadata: M
 				if (match) {
 					const genreNumber = Number.parseInt(match[0]);
 					if (ID3_V1_GENRES[genreNumber] !== undefined) {
-						metadata.genre ??= ID3_V1_GENRES[genreNumber];
+						tags.genre ??= ID3_V1_GENRES[genreNumber];
 						break;
 					}
 				}
 
-				metadata.genre ??= genreText;
+				tags.genre ??= genreText;
 			}; break;
 
 			case 'TDRC':
@@ -336,7 +336,7 @@ export const parseId3V2Tag = (slice: FileSlice, header: Id3V2Header, metadata: M
 				const date = new Date(dateText);
 
 				if (!Number.isNaN(date.getTime())) {
-					metadata.date ??= date;
+					tags.date ??= date;
 				}
 			}; break;
 
@@ -346,7 +346,7 @@ export const parseId3V2Tag = (slice: FileSlice, header: Id3V2Header, metadata: M
 				const year = Number.parseInt(yearText, 10);
 
 				if (Number.isInteger(year)) {
-					metadata.date ??= new Date(year, 0, 1);
+					tags.date ??= new Date(year, 0, 1);
 				}
 			}; break;
 
@@ -355,7 +355,7 @@ export const parseId3V2Tag = (slice: FileSlice, header: Id3V2Header, metadata: M
 				const encoding = reader.readU8();
 				reader.pos += 3; // Skip language
 				reader.readId3V2Text(encoding, frameEndPos); // Short content description
-				metadata.lyrics ??= reader.readId3V2Text(encoding, frameEndPos);
+				tags.lyrics ??= reader.readId3V2Text(encoding, frameEndPos);
 			}; break;
 
 			case 'COMM':
@@ -363,7 +363,7 @@ export const parseId3V2Tag = (slice: FileSlice, header: Id3V2Header, metadata: M
 				const encoding = reader.readU8();
 				reader.pos += 3; // Skip language
 				reader.readId3V2Text(encoding, frameEndPos); // Short content description
-				metadata.comment ??= reader.readId3V2Text(encoding, frameEndPos);
+				tags.comment ??= reader.readId3V2Text(encoding, frameEndPos);
 			}; break;
 
 			case 'APIC':
@@ -389,8 +389,8 @@ export const parseId3V2Tag = (slice: FileSlice, header: Id3V2Header, metadata: M
 				if (imageDataSize >= 0) {
 					const imageData = reader.readBytes(imageDataSize);
 
-					if (!metadata.images) metadata.images = [];
-					metadata.images.push({
+					if (!tags.images) tags.images = [];
+					tags.images.push({
 						data: imageData,
 						mimeType,
 						kind: pictureType === 3

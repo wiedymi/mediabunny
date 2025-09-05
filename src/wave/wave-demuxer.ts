@@ -11,7 +11,7 @@ import { Demuxer } from '../demuxer';
 import { Input } from '../input';
 import { InputAudioTrack, InputAudioTrackBacking } from '../input-track';
 import { PacketRetrievalOptions } from '../media-sink';
-import { MediaMetadata } from '../metadata';
+import { MetadataTags } from '../tags';
 import { assert, UNDETERMINED_LANGUAGE } from '../misc';
 import { EncodedPacket, PLACEHOLDER_DATA } from '../packet';
 import { readAscii, readBytes, Reader, readU16, readU32, readU64 } from '../reader';
@@ -40,7 +40,7 @@ export class WaveDemuxer extends Demuxer {
 
 	tracks: InputAudioTrack[] = [];
 	lastKnownPacketIndex = 0;
-	metadata: MediaMetadata = {};
+	metadataTags: MetadataTags = {};
 
 	constructor(input: Input) {
 		super(input);
@@ -204,25 +204,25 @@ export class WaveDemuxer extends Demuxer {
 
 			const value = String.fromCharCode(...bytes.subarray(0, stringLength));
 
-			this.metadata.raw ??= {};
-			this.metadata.raw[chunkName] = value;
+			this.metadataTags.raw ??= {};
+			this.metadataTags.raw[chunkName] = value;
 
 			switch (chunkName) {
 				case 'INAM':
 				case 'TITL': {
-					this.metadata.title ??= value;
+					this.metadataTags.title ??= value;
 				}; break;
 
 				case 'TIT3': {
-					this.metadata.description ??= value;
+					this.metadataTags.description ??= value;
 				}; break;
 
 				case 'IART': {
-					this.metadata.artist ??= value;
+					this.metadataTags.artist ??= value;
 				}; break;
 
 				case 'IPRD': {
-					this.metadata.album ??= value;
+					this.metadataTags.album ??= value;
 				}; break;
 
 				case 'IPRT':
@@ -233,10 +233,10 @@ export class WaveDemuxer extends Demuxer {
 					const trackNumMax = parts[1] && Number.parseInt(parts[1], 10);
 
 					if (Number.isInteger(trackNum) && trackNum > 0) {
-						this.metadata.trackNumber ??= trackNum;
+						this.metadataTags.trackNumber ??= trackNum;
 					}
 					if (trackNumMax && Number.isInteger(trackNumMax) && trackNumMax > 0) {
-						this.metadata.trackNumberMax ??= trackNumMax;
+						this.metadataTags.tracksTotal ??= trackNumMax;
 					}
 				}; break;
 
@@ -244,26 +244,26 @@ export class WaveDemuxer extends Demuxer {
 				case 'IDIT': {
 					const date = new Date(value);
 					if (!Number.isNaN(date.getTime())) {
-						this.metadata.date ??= date;
+						this.metadataTags.date ??= date;
 					}
 				}; break;
 
 				case 'YEAR': {
 					const year = Number.parseInt(value, 10);
 					if (Number.isInteger(year) && year > 0) {
-						this.metadata.date ??= new Date(year, 0, 1);
+						this.metadataTags.date ??= new Date(year, 0, 1);
 					}
 				}; break;
 
 				case 'IGNR':
 				case 'GENR': {
-					this.metadata.genre ??= value;
+					this.metadataTags.genre ??= value;
 				}; break;
 
 				case 'ICMT':
 				case 'CMNT':
 				case 'COMM': {
-					this.metadata.comment ??= value;
+					this.metadataTags.comment ??= value;
 				}; break;
 			}
 
@@ -319,9 +319,9 @@ export class WaveDemuxer extends Demuxer {
 		return this.tracks;
 	}
 
-	async getMetadata() {
+	async getMetadataTags() {
 		await this.readMetadata();
-		return this.metadata;
+		return this.metadataTags;
 	}
 }
 

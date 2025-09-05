@@ -12,7 +12,7 @@ import { Demuxer } from '../demuxer';
 import { Input } from '../input';
 import { InputAudioTrack, InputAudioTrackBacking } from '../input-track';
 import { PacketRetrievalOptions } from '../media-sink';
-import { MediaMetadata } from '../metadata';
+import { MetadataTags } from '../tags';
 import {
 	assert,
 	AsyncMutex,
@@ -60,7 +60,7 @@ export class OggDemuxer extends Demuxer {
 	metadataPromise: Promise<void> | null = null;
 	bitstreams: LogicalBitstream[] = [];
 	tracks: InputAudioTrack[] = [];
-	metadata: MediaMetadata = {};
+	metadataTags: MetadataTags = {};
 
 	constructor(input: Input) {
 		super(input);
@@ -274,8 +274,8 @@ export class OggDemuxer extends Demuxer {
 
 		if (vendorStringLength > 0) {
 			// Expose the vendor string in the raw metadata
-			this.metadata.raw ??= {};
-			this.metadata.raw['vendor'] ??= vendorString;
+			this.metadataTags.raw ??= {};
+			this.metadataTags.raw['vendor'] ??= vendorString;
 		}
 
 		const listLength = commentView.getUint32(commentPos, true);
@@ -299,36 +299,36 @@ export class OggDemuxer extends Demuxer {
 			const key = string.slice(0, separatorIndex).toUpperCase();
 			const value = string.slice(separatorIndex + 1);
 
-			this.metadata.raw ??= {};
-			this.metadata.raw[key] ??= value;
+			this.metadataTags.raw ??= {};
+			this.metadataTags.raw[key] ??= value;
 
 			switch (key) {
 				case 'TITLE': {
-					this.metadata.title ??= value;
+					this.metadataTags.title ??= value;
 				}; break;
 
 				case 'DESCRIPTION': {
-					this.metadata.description ??= value;
+					this.metadataTags.description ??= value;
 				}; break;
 
 				case 'ARTIST': {
-					this.metadata.artist ??= value;
+					this.metadataTags.artist ??= value;
 				}; break;
 
 				case 'ALBUM': {
-					this.metadata.album ??= value;
+					this.metadataTags.album ??= value;
 				}; break;
 
 				case 'ALBUMARTIST': {
-					this.metadata.albumArtist ??= value;
+					this.metadataTags.albumArtist ??= value;
 				}; break;
 
 				case 'COMMENT': {
-					this.metadata.comment ??= value;
+					this.metadataTags.comment ??= value;
 				}; break;
 
 				case 'LYRICS': {
-					this.metadata.lyrics ??= value;
+					this.metadataTags.lyrics ??= value;
 				}; break;
 
 				case 'TRACKNUMBER': {
@@ -337,17 +337,17 @@ export class OggDemuxer extends Demuxer {
 					const trackNumMax = parts[1] && Number.parseInt(parts[1], 10);
 
 					if (Number.isInteger(trackNum) && trackNum > 0) {
-						this.metadata.trackNumber ??= trackNum;
+						this.metadataTags.trackNumber ??= trackNum;
 					}
 					if (trackNumMax && Number.isInteger(trackNumMax) && trackNumMax > 0) {
-						this.metadata.trackNumberMax ??= trackNumMax;
+						this.metadataTags.tracksTotal ??= trackNumMax;
 					}
 				}; break;
 
 				case 'TRACKTOTAL': {
 					const trackNumMax = Number.parseInt(value, 10);
 					if (Number.isInteger(trackNumMax) && trackNumMax > 0) {
-						this.metadata.trackNumberMax ??= trackNumMax;
+						this.metadataTags.tracksTotal ??= trackNumMax;
 					}
 				}; break;
 
@@ -357,29 +357,29 @@ export class OggDemuxer extends Demuxer {
 					const discNumMax = parts[1] && Number.parseInt(parts[1], 10);
 
 					if (Number.isInteger(discNum) && discNum > 0) {
-						this.metadata.discNumber ??= discNum;
+						this.metadataTags.discNumber ??= discNum;
 					}
 					if (discNumMax && Number.isInteger(discNumMax) && discNumMax > 0) {
-						this.metadata.discNumberMax ??= discNumMax;
+						this.metadataTags.discsTotal ??= discNumMax;
 					}
 				}; break;
 
 				case 'DISCTOTAL': {
 					const trackNumMax = Number.parseInt(value, 10);
 					if (Number.isInteger(trackNumMax) && trackNumMax > 0) {
-						this.metadata.trackNumberMax ??= trackNumMax;
+						this.metadataTags.tracksTotal ??= trackNumMax;
 					}
 				}; break;
 
 				case 'DATE': {
 					const date = new Date(value);
 					if (!Number.isNaN(date.getTime())) {
-						this.metadata.date ??= date;
+						this.metadataTags.date ??= date;
 					}
 				}; break;
 
 				case 'GENRE': {
-					this.metadata.genre ??= value;
+					this.metadataTags.genre ??= value;
 				}; break;
 
 				case 'METADATA_BLOCK_PICTURE': {
@@ -401,8 +401,8 @@ export class OggDemuxer extends Demuxer {
 						mediaTypeLength + descriptionLength + 32 + dataLength,
 					);
 
-					this.metadata.images ??= [];
-					this.metadata.images.push({
+					this.metadataTags.images ??= [];
+					this.metadataTags.images.push({
 						data,
 						mimeType: mediaType,
 						kind: pictureType === 3 ? 'coverFront' : pictureType === 4 ? 'coverBack' : 'unknown',
@@ -551,9 +551,9 @@ export class OggDemuxer extends Demuxer {
 		return Math.max(0, ...trackDurations);
 	}
 
-	async getMetadata() {
+	async getMetadataTags() {
 		await this.readMetadata();
-		return this.metadata;
+		return this.metadataTags;
 	}
 }
 

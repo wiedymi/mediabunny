@@ -144,6 +144,6 @@ export class Input<S extends Source = Source> {
 
 	async getMetadata() {
 		const demuxer = await this._getDemuxer();
-		return demuxer.getMetadata();
+		return demuxer.getMetadataTags();
 	}
 }

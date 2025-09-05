@@ -44,7 +44,7 @@ import {
 	Sample,
 } from './isobmff-muxer';
 import { parseOpusIdentificationHeader } from '../codec-data';
-import { MediaMetadata, RichImageData } from '../metadata';
+import { MetadataTags, RichImageData } from '../tags';
 
 export class IsobmffBoxWriter {
 	private helper = new Uint8Array(8);
@@ -1274,11 +1274,11 @@ export const vtta = (notes: string) => box('vtta', [...textEncoder.encode(notes)
 const udta = (muxer: IsobmffMuxer) => {
 	const boxes: Box[] = [];
 
-	// Depending on the format, metadata is written differently
+	// Depending on the format, metadata tags are written differently
 	if (muxer.isQuickTime) {
-		addQuickTimeMetadataboxes(boxes, muxer.output._metadata);
+		addQuickTimeMetadataTagBoxes(boxes, muxer.output._metadataTags);
 	} else {
-		const metaBox = meta(muxer.output._metadata);
+		const metaBox = meta(muxer.output._metadataTags);
 		if (metaBox) {
 			boxes.push(metaBox);
 		}
@@ -1291,46 +1291,46 @@ const udta = (muxer: IsobmffMuxer) => {
 	return box('udta', undefined, boxes);
 };
 
-const addQuickTimeMetadataboxes = (boxes: Box[], metadata: MediaMetadata) => {
+const addQuickTimeMetadataTagBoxes = (boxes: Box[], tags: MetadataTags) => {
 	// https://exiftool.org/TagNames/QuickTime.html (QuickTime UserData Tags)
-	// For QuickTime files, metadata is dumped into the udta box
+	// For QuickTime files, metadata tags are dumped into the udta box
 
-	for (const { key, value } of keyValueIterator(metadata)) {
+	for (const { key, value } of keyValueIterator(tags)) {
 		switch (key) {
 			case 'title': {
-				boxes.push(metadataStringBoxShort('©nam', value));
+				boxes.push(metadataTagStringBoxShort('©nam', value));
 			}; break;
 
 			case 'description': {
-				boxes.push(metadataStringBoxShort('©des', value));
+				boxes.push(metadataTagStringBoxShort('©des', value));
 			}; break;
 
 			case 'artist': {
-				boxes.push(metadataStringBoxShort('©ART', value));
+				boxes.push(metadataTagStringBoxShort('©ART', value));
 			}; break;
 
 			case 'album': {
-				boxes.push(metadataStringBoxShort('©alb', value));
+				boxes.push(metadataTagStringBoxShort('©alb', value));
 			}; break;
 
 			case 'albumArtist': {
-				boxes.push(metadataStringBoxShort('albr', value));
+				boxes.push(metadataTagStringBoxShort('albr', value));
 			}; break;
 
 			case 'genre': {
-				boxes.push(metadataStringBoxShort('©gen', value));
+				boxes.push(metadataTagStringBoxShort('©gen', value));
 			}; break;
 
 			case 'date': {
-				boxes.push(metadataStringBoxShort('©day', value.toISOString().slice(0, 10)));
+				boxes.push(metadataTagStringBoxShort('©day', value.toISOString().slice(0, 10)));
 			}; break;
 
 			case 'comment': {
-				boxes.push(metadataStringBoxShort('©cmt', value));
+				boxes.push(metadataTagStringBoxShort('©cmt', value));
 			}; break;
 
 			case 'lyrics': {
-				boxes.push(metadataStringBoxShort('©lyr', value));
+				boxes.push(metadataTagStringBoxShort('©lyr', value));
 			}; break;
 
 			case 'raw': {
@@ -1338,9 +1338,9 @@ const addQuickTimeMetadataboxes = (boxes: Box[], metadata: MediaMetadata) => {
 			}; break;
 
 			case 'discNumber':
-			case 'discNumberMax':
+			case 'discsTotal':
 			case 'trackNumber':
-			case 'trackNumberMax':
+			case 'tracksTotal':
 			case 'images': {
 				// Not written for QuickTime (common Apple L)
 			}; break;
@@ -1349,15 +1349,15 @@ const addQuickTimeMetadataboxes = (boxes: Box[], metadata: MediaMetadata) => {
 		}
 	}
 
-	if (metadata.raw) {
-		for (const key in metadata.raw) {
-			const value = metadata.raw[key];
+	if (tags.raw) {
+		for (const key in tags.raw) {
+			const value = tags.raw[key];
 			if (value == null || key.length !== 4 || boxes.some(x => x.type === key)) {
 				continue;
 			}
 
 			if (typeof value === 'string') {
-				boxes.push(metadataStringBoxShort(key, value));
+				boxes.push(metadataTagStringBoxShort(key, value));
 			} else if (value instanceof Uint8Array) {
 				boxes.push(box(key, Array.from(value)));
 			}
@@ -1365,7 +1365,7 @@ const addQuickTimeMetadataboxes = (boxes: Box[], metadata: MediaMetadata) => {
 	}
 };
 
-const metadataStringBoxShort = (name: string, value: string) => {
+const metadataTagStringBoxShort = (name: string, value: string) => {
 	const encoded = textEncoder.encode(value);
 
 	return box(name, [
@@ -1382,48 +1382,48 @@ const DATA_BOX_MIME_TYPE_MAP: Record<string, number> = {
 };
 
 /** Metadata Box */
-const meta = (metadata: MediaMetadata) => {
+const meta = (tags: MetadataTags) => {
 	const boxes: Box[] = [];
 
 	// https://exiftool.org/TagNames/QuickTime.html (QuickTime ItemList Tags)
 	// This is the metadata format used for MP4 files
 
-	for (const { key, value } of keyValueIterator(metadata)) {
+	for (const { key, value } of keyValueIterator(tags)) {
 		switch (key) {
 			case 'title': {
-				boxes.push(metadataStringBoxLong('©nam', value));
+				boxes.push(metadataTagStringBoxLong('©nam', value));
 			}; break;
 
 			case 'description': {
-				boxes.push(metadataStringBoxLong('©des', value));
+				boxes.push(metadataTagStringBoxLong('©des', value));
 			}; break;
 
 			case 'artist': {
-				boxes.push(metadataStringBoxLong('©ART', value));
+				boxes.push(metadataTagStringBoxLong('©ART', value));
 			}; break;
 
 			case 'album': {
-				boxes.push(metadataStringBoxLong('©alb', value));
+				boxes.push(metadataTagStringBoxLong('©alb', value));
 			}; break;
 
 			case 'albumArtist': {
-				boxes.push(metadataStringBoxLong('aART', value));
+				boxes.push(metadataTagStringBoxLong('aART', value));
 			}; break;
 
 			case 'comment': {
-				boxes.push(metadataStringBoxLong('©cmt', value));
+				boxes.push(metadataTagStringBoxLong('©cmt', value));
 			}; break;
 
 			case 'genre': {
-				boxes.push(metadataStringBoxLong('©gen', value));
+				boxes.push(metadataTagStringBoxLong('©gen', value));
 			}; break;
 
 			case 'lyrics': {
-				boxes.push(metadataStringBoxLong('©lyr', value));
+				boxes.push(metadataTagStringBoxLong('©lyr', value));
 			}; break;
 
 			case 'date': {
-				boxes.push(metadataStringBoxLong('©day', value.toISOString().slice(0, 10)));
+				boxes.push(metadataTagStringBoxLong('©day', value.toISOString().slice(0, 10)));
 			}; break;
 
 			case 'images': {
@@ -1449,7 +1449,7 @@ const meta = (metadata: MediaMetadata) => {
 						u32(0),
 						u16(0), // Empty
 						u16(value),
-						u16(metadata.trackNumberMax ?? 0),
+						u16(tags.tracksTotal ?? 0),
 						u16(0), // Empty
 					]),
 				]));
@@ -1462,14 +1462,14 @@ const meta = (metadata: MediaMetadata) => {
 						u32(0),
 						u16(0), // Empty
 						u16(value),
-						u16(metadata.discNumberMax ?? 0),
+						u16(tags.discsTotal ?? 0),
 						u16(0), // Empty
 					]),
 				]));
 			}; break;
 
-			case 'trackNumberMax':
-			case 'discNumberMax':{
+			case 'tracksTotal':
+			case 'discsTotal':{
 				// These are included with 'trackNumber' and 'discNumber' respectively
 			}; break;
 
@@ -1481,15 +1481,15 @@ const meta = (metadata: MediaMetadata) => {
 		}
 	}
 
-	if (metadata.raw) {
-		for (const key in metadata.raw) {
-			const value = metadata.raw[key];
+	if (tags.raw) {
+		for (const key in tags.raw) {
+			const value = tags.raw[key];
 			if (value == null || key.length !== 4 || boxes.some(x => x.type === key)) {
 				continue;
 			}
 
 			if (typeof value === 'string') {
-				boxes.push(metadataStringBoxLong(key, value));
+				boxes.push(metadataTagStringBoxLong(key, value));
 			} else if (value instanceof Uint8Array) {
 				boxes.push(box(key, undefined, [
 					box('data', [
@@ -1520,7 +1520,7 @@ const meta = (metadata: MediaMetadata) => {
 	]);
 };
 
-const metadataStringBoxLong = (name: string, value: string) => {
+const metadataTagStringBoxLong = (name: string, value: string) => {
 	return box(name, undefined, [
 		box('data', [
 			u32(1), // Type indicator (UTF-8)
