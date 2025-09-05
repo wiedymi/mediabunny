@@ -334,40 +334,40 @@ export class OggDemuxer extends Demuxer {
 				case 'TRACKNUMBER': {
 					const parts = value.split('/');
 					const trackNum = Number.parseInt(parts[0]!, 10);
-					const trackNumMax = parts[1] && Number.parseInt(parts[1], 10);
+					const tracksTotal = parts[1] && Number.parseInt(parts[1], 10);
 
 					if (Number.isInteger(trackNum) && trackNum > 0) {
 						this.metadataTags.trackNumber ??= trackNum;
 					}
-					if (trackNumMax && Number.isInteger(trackNumMax) && trackNumMax > 0) {
-						this.metadataTags.tracksTotal ??= trackNumMax;
+					if (tracksTotal && Number.isInteger(tracksTotal) && tracksTotal > 0) {
+						this.metadataTags.tracksTotal ??= tracksTotal;
 					}
 				}; break;
 
 				case 'TRACKTOTAL': {
-					const trackNumMax = Number.parseInt(value, 10);
-					if (Number.isInteger(trackNumMax) && trackNumMax > 0) {
-						this.metadataTags.tracksTotal ??= trackNumMax;
+					const tracksTotal = Number.parseInt(value, 10);
+					if (Number.isInteger(tracksTotal) && tracksTotal > 0) {
+						this.metadataTags.tracksTotal ??= tracksTotal;
 					}
 				}; break;
 
 				case 'DISCNUMBER': {
 					const parts = value.split('/');
 					const discNum = Number.parseInt(parts[0]!, 10);
-					const discNumMax = parts[1] && Number.parseInt(parts[1], 10);
+					const discsTotal = parts[1] && Number.parseInt(parts[1], 10);
 
 					if (Number.isInteger(discNum) && discNum > 0) {
 						this.metadataTags.discNumber ??= discNum;
 					}
-					if (discNumMax && Number.isInteger(discNumMax) && discNumMax > 0) {
-						this.metadataTags.discsTotal ??= discNumMax;
+					if (discsTotal && Number.isInteger(discsTotal) && discsTotal > 0) {
+						this.metadataTags.discsTotal ??= discsTotal;
 					}
 				}; break;
 
 				case 'DISCTOTAL': {
-					const trackNumMax = Number.parseInt(value, 10);
-					if (Number.isInteger(trackNumMax) && trackNumMax > 0) {
-						this.metadataTags.tracksTotal ??= trackNumMax;
+					const discsTotal = Number.parseInt(value, 10);
+					if (Number.isInteger(discsTotal) && discsTotal > 0) {
+						this.metadataTags.discsTotal ??= discsTotal;
 					}
 				}; break;
 

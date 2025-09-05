@@ -334,19 +334,19 @@ export class OggMuxer extends Muxer {
 				}; break;
 
 				case 'trackNumber': {
-					addCommentTag('DISCNUMBER', value.toString());
-				}; break;
-
-				case 'tracksTotal': {
-					addCommentTag('DISCTOTAL', value.toString());
-				}; break;
-
-				case 'discNumber': {
 					addCommentTag('TRACKNUMBER', value.toString());
 				}; break;
 
-				case 'discsTotal': {
+				case 'tracksTotal': {
 					addCommentTag('TRACKTOTAL', value.toString());
+				}; break;
+
+				case 'discNumber': {
+					addCommentTag('DISCNUMBER', value.toString());
+				}; break;
+
+				case 'discsTotal': {
+					addCommentTag('DISCTOTAL', value.toString());
 				}; break;
 
 				case 'images': {

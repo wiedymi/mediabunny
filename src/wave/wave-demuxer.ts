@@ -230,13 +230,13 @@ export class WaveDemuxer extends Demuxer {
 				case 'TRCK': {
 					const parts = value.split('/');
 					const trackNum = Number.parseInt(parts[0]!, 10);
-					const trackNumMax = parts[1] && Number.parseInt(parts[1], 10);
+					const tracksTotal = parts[1] && Number.parseInt(parts[1], 10);
 
 					if (Number.isInteger(trackNum) && trackNum > 0) {
 						this.metadataTags.trackNumber ??= trackNum;
 					}
-					if (trackNumMax && Number.isInteger(trackNumMax) && trackNumMax > 0) {
-						this.metadataTags.tracksTotal ??= trackNumMax;
+					if (tracksTotal && Number.isInteger(tracksTotal) && tracksTotal > 0) {
+						this.metadataTags.tracksTotal ??= tracksTotal;
 					}
 				}; break;
 

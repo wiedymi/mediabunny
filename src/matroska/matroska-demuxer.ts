@@ -1520,13 +1520,13 @@ export class MatroskaDemuxer extends Demuxer {
 				case 'part_number': {
 					const parts = value.split('/');
 					const trackNum = Number.parseInt(parts[0]!, 10);
-					const trackNumMax = parts[1] && Number.parseInt(parts[1], 10);
+					const tracksTotal = parts[1] && Number.parseInt(parts[1], 10);
 
 					if (Number.isInteger(trackNum) && trackNum > 0) {
 						metadataTags.trackNumber ??= trackNum;
 					}
-					if (trackNumMax && Number.isInteger(trackNumMax) && trackNumMax > 0) {
-						metadataTags.tracksTotal ??= trackNumMax;
+					if (tracksTotal && Number.isInteger(tracksTotal) && tracksTotal > 0) {
+						metadataTags.tracksTotal ??= tracksTotal;
 					}
 				}; break;
 
@@ -1534,13 +1534,13 @@ export class MatroskaDemuxer extends Demuxer {
 				case 'disc': {
 					const discParts = value.split('/');
 					const discNum = Number.parseInt(discParts[0]!, 10);
-					const discNumMax = discParts[1] && Number.parseInt(discParts[1], 10);
+					const discsTotal = discParts[1] && Number.parseInt(discParts[1], 10);
 
 					if (Number.isInteger(discNum) && discNum > 0) {
 						metadataTags.discNumber ??= discNum;
 					}
-					if (discNumMax && Number.isInteger(discNumMax) && discNumMax > 0) {
-						metadataTags.discsTotal ??= discNumMax;
+					if (discsTotal && Number.isInteger(discsTotal) && discsTotal > 0) {
+						metadataTags.discsTotal ??= discsTotal;
 					}
 				}; break;
 			}

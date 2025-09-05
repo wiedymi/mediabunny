@@ -281,13 +281,13 @@ export const parseId3V2Tag = (slice: FileSlice, header: Id3V2Header, tags: Metad
 				const trackText = reader.readId3V2EncodingAndText(frameEndPos);
 				const parts = trackText.split('/');
 				const trackNum = Number.parseInt(parts[0]!, 10);
-				const trackNumMax = parts[1] && Number.parseInt(parts[1], 10);
+				const tracksTotal = parts[1] && Number.parseInt(parts[1], 10);
 
 				if (Number.isInteger(trackNum) && trackNum > 0) {
 					tags.trackNumber ??= trackNum;
 				}
-				if (trackNumMax && Number.isInteger(trackNumMax) && trackNumMax > 0) {
-					tags.tracksTotal ??= trackNumMax;
+				if (tracksTotal && Number.isInteger(tracksTotal) && tracksTotal > 0) {
+					tags.tracksTotal ??= tracksTotal;
 				}
 			}; break;
 
@@ -296,13 +296,13 @@ export const parseId3V2Tag = (slice: FileSlice, header: Id3V2Header, tags: Metad
 				const discText = reader.readId3V2EncodingAndText(frameEndPos);
 				const parts = discText.split('/');
 				const discNum = Number.parseInt(parts[0]!, 10);
-				const discNumMax = parts[1] && Number.parseInt(parts[1], 10);
+				const discsTotal = parts[1] && Number.parseInt(parts[1], 10);
 
 				if (Number.isInteger(discNum) && discNum > 0) {
 					tags.discNumber ??= discNum;
 				}
-				if (discNumMax && Number.isInteger(discNumMax) && discNumMax > 0) {
-					tags.discsTotal ??= discNumMax;
+				if (discsTotal && Number.isInteger(discsTotal) && discsTotal > 0) {
+					tags.discsTotal ??= discsTotal;
 				}
 			}; break;
 

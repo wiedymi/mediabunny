@@ -60,8 +60,9 @@ export class Mp3Demuxer extends Demuxer {
 				await this.advanceReader();
 			}
 
-			// There has to be a frame if this demuxer got selected
-			assert(this.firstFrameHeader);
+			if (!this.firstFrameHeader) {
+				throw new Error('No valid MP3 frame found.');
+			}
 
 			this.tracks = [new InputAudioTrack(new Mp3AudioTrackBacking(this))];
 		})();

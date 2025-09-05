@@ -142,7 +142,7 @@ export class Input<S extends Source = Source> {
 		return demuxer.getMimeType();
 	}
 
-	async getMetadata() {
+	async getMetadataTags() {
 		const demuxer = await this._getDemuxer();
 		return demuxer.getMetadataTags();
 	}

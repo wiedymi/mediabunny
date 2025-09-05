@@ -188,5 +188,9 @@ export {
 	registerDecoder,
 	registerEncoder,
 } from './custom-coder';
+export {
+	MetadataTags,
+	RichImageData,
+} from './tags';
 
 // 🐡🦔
