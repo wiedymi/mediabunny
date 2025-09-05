@@ -11,6 +11,14 @@
  * Common tags are normalized by Mediabunny into a uniform format, while the `raw` field can be used to directly read or
  * write the underlying metadata tags (which differ by format).
  *
+ * - For MP4/QuickTime files, the metadata refers to the data in `'moov'`-level `'udta'` and `'meta'` atoms.
+ * - For Matroska files, the metadata refers to the Tags and Attachments elements whose target is 50 (MOVIE).
+ * - For MP3 files, the metadata refers to the ID3v2 or ID3v1 tags.
+ * - For Ogg files, there is no global metadata so instead, the metadata refers to the combined metadata of all tracks,
+ * in Vorbis-style comment headers.
+ * - For WAVE files, the metadata refers to the chunks within the RIFF INFO chunk.
+ * - For ADTS files, there is no metadata.
+ *
  * @group Metadata tags
  * @public
  */

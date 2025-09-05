@@ -17,6 +17,7 @@ import { ALL_FORMATS } from '../../src/input-format.js';
 import { MetadataTags } from '../../src/tags.js';
 import path from 'node:path';
 import { AudioCodec, buildAudioCodecString } from '../../src/codec.js';
+import { Conversion } from '../../src/conversion.js';
 
 const __dirname = new URL('.', import.meta.url).pathname;
 
@@ -33,24 +34,18 @@ const createDummyAudioTrack = (codec: AudioCodec, output: Output) => {
 			data[2] = 224;
 			data[3] = 100;
 
-			// OpusHead description
-			const description = new Uint8Array(64);
-			description[0] = 0x4f;
-			description[1] = 0x70;
-			description[2] = 0x75;
-			description[3] = 0x73;
-			description[4] = 0x48;
-			description[5] = 0x65;
-			description[6] = 0x61;
-			description[7] = 0x64;
+			// Opus description
+			const description = new Uint8Array([
+				79, 112, 117, 115, 72, 101, 97, 100, 1, 2, 56, 1, 68, 172, 0, 0, 0, 0, 0,
+			]);
 
 			await source.add(
 				new EncodedPacket(data, 'key', 0, 1),
 				{
 					decoderConfig: {
-						codec: buildAudioCodecString(codec, 2, 48000),
+						codec: buildAudioCodecString(codec, 2, 44100),
 						numberOfChannels: 2,
-						sampleRate: 48000,
+						sampleRate: 44100,
 						description,
 					},
 				},
@@ -387,4 +382,102 @@ test('Read and write metadata, WAVE', async () => {
 
 	expect(readTags.raw!['INAM']).toBe(songMetadata.title);
 	expect(readTags.raw!['IKEK']).toBe('RIFF INFO lowkey mid');
+});
+
+test('Conversion metadata tags, default case', async () => {
+	const output = new Output({
+		format: new Mp4OutputFormat(),
+		target: new BufferTarget(),
+	});
+
+	output.setMetadataTags(songMetadata);
+
+	const dummyTrack = createDummyAudioTrack('opus', output);
+
+	await output.start();
+	await dummyTrack.addPacket();
+	await output.finalize();
+
+	const input = new Input({
+		source: new BufferSource(output.target.buffer!),
+		formats: ALL_FORMATS,
+	});
+
+	const output2 = new Output({
+		format: new MkvOutputFormat(),
+		target: new BufferTarget(),
+	});
+
+	const conversion = await Conversion.init({ input, output: output2 });
+	await conversion.execute();
+
+	const input2 = new Input({
+		source: new BufferSource(output2.target.buffer!),
+		formats: ALL_FORMATS,
+	});
+
+	const readTags = await input2.getMetadataTags();
+
+	expect(readTags.title).toBe(songMetadata.title);
+	expect(readTags.description).toBe(songMetadata.description);
+	expect(readTags.artist).toBe(songMetadata.artist);
+	expect(readTags.album).toBe(songMetadata.album);
+	expect(readTags.albumArtist).toBe(songMetadata.albumArtist);
+	expect(readTags.comment).toBe(songMetadata.comment);
+	expect(readTags.lyrics).toBe(songMetadata.lyrics);
+	expect(readTags.trackNumber).toBe(songMetadata.trackNumber);
+	expect(readTags.tracksTotal).toBe(songMetadata.tracksTotal);
+	expect(readTags.discNumber).toBe(songMetadata.discNumber);
+	expect(readTags.discsTotal).toBe(songMetadata.discsTotal);
+	expect(readTags.date).toEqual(readTags.date);
+	expect(readTags.images).toHaveLength(1);
+	expect(readTags.images![0]!.data).toEqual(coverArt);
+});
+
+test('Conversion metadata tags, modified', async () => {
+	const output = new Output({
+		format: new Mp4OutputFormat(),
+		target: new BufferTarget(),
+	});
+
+	output.setMetadataTags(songMetadata);
+
+	const dummyTrack = createDummyAudioTrack('opus', output);
+
+	await output.start();
+	await dummyTrack.addPacket();
+	await output.finalize();
+
+	const input = new Input({
+		source: new BufferSource(output.target.buffer!),
+		formats: ALL_FORMATS,
+	});
+
+	const output2 = new Output({
+		format: new MkvOutputFormat(),
+		target: new BufferTarget(),
+	});
+
+	const conversion = await Conversion.init({
+		input,
+		output: output2,
+		tags: inputTags => ({
+			title: 'Blossom',
+			artist: inputTags.artist,
+			raw: inputTags.raw, // This should NOT be copied
+		}),
+	});
+	await conversion.execute();
+
+	const input2 = new Input({
+		source: new BufferSource(output2.target.buffer!),
+		formats: ALL_FORMATS,
+	});
+
+	const readTags = await input2.getMetadataTags();
+
+	expect(Object.keys(readTags).length).toBe(3);
+	expect(readTags.title).toBe('Blossom');
+	expect(readTags.artist).toBe(songMetadata.artist);
+	expect(Object.keys(readTags.raw!).length).toBe(2);
 });

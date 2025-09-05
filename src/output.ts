@@ -223,6 +223,8 @@ export class Output<
 	/**
 	 * Sets descriptive metadata tags about the media file, such as title, author, date, or cover art. When called
 	 * multiple times, only the metadata from the last call will be used.
+	 *
+	 * Must be called before output is started.
 	 */
 	setMetadataTags(tags: MetadataTags) {
 		validateMetadataTags(tags);

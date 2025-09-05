@@ -252,7 +252,12 @@ export class MatroskaDemuxer extends Demuxer {
 		// Load metadata tags from each segment lazily (only once)
 		for (const segment of this.segments) {
 			if (!segment.metadataTagsCollected) {
-				await this.loadSegmentMetadata(segment);
+				if (this.reader.fileSize !== null) {
+					await this.loadSegmentMetadata(segment);
+				} else {
+					// The seeking would be too crazy, let's not
+				}
+
 				segment.metadataTagsCollected = true;
 			}
 		}
