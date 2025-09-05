@@ -68,8 +68,8 @@ export const validateMediaMetadata = (metadata: MediaMetadata) => {
 	if (metadata.genre !== undefined && typeof metadata.genre !== 'string') {
 		throw new TypeError('metadata.genre, when provided, must be a string.');
 	}
-	if (metadata.date !== undefined && !(metadata.date instanceof Date)) {
-		throw new TypeError('metadata.date, when provided, must be a Date.');
+	if (metadata.date !== undefined && (!(metadata.date instanceof Date) || Number.isNaN(metadata.date.getTime()))) {
+		throw new TypeError('metadata.date, when provided, must be a valid Date.');
 	}
 	if (metadata.lyrics !== undefined && typeof metadata.lyrics !== 'string') {
 		throw new TypeError('metadata.lyrics, when provided, must be a string.');

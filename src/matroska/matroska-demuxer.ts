@@ -30,6 +30,7 @@ import {
 	InputVideoTrack,
 	InputVideoTrackBacking,
 } from '../input-track';
+import { MediaMetadata } from '../metadata';
 import { PacketRetrievalOptions } from '../media-sink';
 import {
 	assert,
@@ -76,6 +77,8 @@ type Segment = {
 	infoSeen: boolean;
 	tracksSeen: boolean;
 	cuesSeen: boolean;
+	attachmentsSeen: boolean;
+	tagsSeen: boolean;
 
 	timestampScale: number;
 	timestampFactor: number;
@@ -90,6 +93,9 @@ type Segment = {
 
 	clusters: Cluster[];
 	clusterLookupMutex: AsyncMutex;
+
+	metadata: MediaMetadata;
+	metadataCollected: boolean;
 };
 
 type SeekEntry = {
@@ -198,6 +204,14 @@ export class MatroskaDemuxer extends Demuxer {
 	currentCluster: Cluster | null = null;
 	currentBlock: ClusterBlock | null = null;
 	currentCueTime: number | null = null;
+	currentTagTargetIsMovie: boolean = true;
+	currentSimpleTagName: string | null = null;
+	currentAttachedFile: {
+		fileName: string | null;
+		fileMediaType: string | null;
+		fileData: Uint8Array | null;
+		fileDescription: string | null;
+	} | null = null;
 
 	isWebM = false;
 
@@ -230,6 +244,27 @@ export class MatroskaDemuxer extends Demuxer {
 			hasAudio: this.segments.some(segment => segment.tracks.some(x => x.info?.type === 'audio')),
 			codecStrings: codecStrings.filter(Boolean) as string[],
 		});
+	}
+
+	async getMetadata() {
+		await this.readMetadata();
+
+		// Load metadata from each segment lazily (only once)
+		for (const segment of this.segments) {
+			if (!segment.metadataCollected) {
+				await this.loadSegmentMetadata(segment);
+				segment.metadataCollected = true;
+			}
+		}
+
+		// This is kinda handwavy, and how we handle multiple segments isn't suuuuper well-defined anyway; so we just
+		// shallow-merge metadata from all (usually just one) segments.
+		let metadata: MediaMetadata = {};
+		for (const segment of this.segments) {
+			metadata = { ...metadata, ...segment.metadata };
+		}
+
+		return metadata;
 	}
 
 	readMetadata() {
@@ -311,6 +346,8 @@ export class MatroskaDemuxer extends Demuxer {
 			infoSeen: false,
 			tracksSeen: false,
 			cuesSeen: false,
+			tagsSeen: false,
+			attachmentsSeen: false,
 
 			timestampScale: -1,
 			timestampFactor: -1,
@@ -327,6 +364,9 @@ export class MatroskaDemuxer extends Demuxer {
 
 			clusters: [],
 			clusterLookupMutex: new AsyncMutex(),
+
+			metadata: {},
+			metadataCollected: false,
 		};
 		this.segments.push(this.currentSegment);
 
@@ -374,6 +414,22 @@ export class MatroskaDemuxer extends Demuxer {
 				if (slice) {
 					this.readContiguousElements(slice);
 				}
+			} else if (id === EBMLId.Tags || id === EBMLId.Attachments) {
+				// Metadata found at the beginning of the segment, great, let's parse it
+				if (id === EBMLId.Tags) {
+					this.currentSegment.tagsSeen = true;
+				} else {
+					this.currentSegment.attachmentsSeen = true;
+				}
+
+				assertDefinedSize(size);
+
+				let slice = this.reader.requestSlice(dataStartPos, size);
+				if (slice instanceof Promise) slice = await slice;
+
+				if (slice) {
+					this.readContiguousElements(slice);
+				}
 			} else if (id === EBMLId.Cluster) {
 				this.currentSegment.clusterSeekStartPos = elementStartPos;
 				break; // Stop at the first cluster
@@ -386,10 +442,10 @@ export class MatroskaDemuxer extends Demuxer {
 			}
 		}
 
-		if (this.reader.fileSize !== null) {
-			// Sort the seek entries by file position so reading them exhibits a sequential pattern
-			this.currentSegment.seekEntries.sort((a, b) => a.segmentPosition - b.segmentPosition);
+		// Sort the seek entries by file position so reading them exhibits a sequential pattern
+		this.currentSegment.seekEntries.sort((a, b) => a.segmentPosition - b.segmentPosition);
 
+		if (this.reader.fileSize !== null) {
 			// Use the seek head to read missing metadata elements
 			for (const seekEntry of this.currentSegment.seekEntries) {
 				const target = METADATA_ELEMENTS.find(x => x.id === seekEntry.id);
@@ -742,6 +798,50 @@ export class MatroskaDemuxer extends Demuxer {
 
 			blockIndex += frameCount; // Skip the blocks we just added
 			blockIndex--;
+		}
+	}
+
+	async loadSegmentMetadata(segment: Segment) {
+		for (const seekEntry of segment.seekEntries) {
+			if (seekEntry.id === EBMLId.Tags && !segment.tagsSeen) {
+				// We need to load the tags
+			} else if (seekEntry.id === EBMLId.Attachments && !segment.attachmentsSeen) {
+				// We need to load the attachments
+			} else {
+				continue;
+			}
+
+			let slice = this.reader.requestSliceRange(
+				segment.dataStartPos + seekEntry.segmentPosition,
+				MIN_HEADER_SIZE,
+				MAX_HEADER_SIZE,
+			);
+			if (slice instanceof Promise) slice = await slice;
+			if (!slice) continue;
+
+			const header = readElementHeader(slice);
+			if (!header || header.id !== seekEntry.id) continue;
+
+			const { size } = header;
+			assertDefinedSize(size);
+
+			assert(!this.currentSegment);
+			this.currentSegment = segment;
+
+			let dataSlice = this.reader.requestSlice(slice.filePos, size);
+			if (dataSlice instanceof Promise) dataSlice = await dataSlice;
+			if (dataSlice) {
+				this.readContiguousElements(dataSlice);
+			}
+
+			this.currentSegment = null;
+
+			// Mark as seen
+			if (seekEntry.id === EBMLId.Tags) {
+				segment.tagsSeen = true;
+			} else if (seekEntry.id === EBMLId.Attachments) {
+				segment.attachmentsSeen = true;
+			}
 		}
 	}
 
@@ -1251,10 +1351,200 @@ export class MatroskaDemuxer extends Demuxer {
 				// We'll offset this by the block's timestamp later
 				this.currentBlock.referencedTimestamps.push(relativeTimestamp);
 			}; break;
+
+			case EBMLId.Tag: {
+				this.currentTagTargetIsMovie = true;
+				this.readContiguousElements(slice.slice(dataStartPos, size));
+			}; break;
+
+			case EBMLId.Targets: {
+				this.readContiguousElements(slice.slice(dataStartPos, size));
+			}; break;
+
+			case EBMLId.TargetTypeValue: {
+				const targetTypeValue = readUnsignedInt(slice, size);
+				if (targetTypeValue !== 50) {
+					this.currentTagTargetIsMovie = false;
+				}
+			}; break;
+
+			case EBMLId.TagTrackUID:
+			case EBMLId.TagEditionUID:
+			case EBMLId.TagChapterUID:
+			case EBMLId.TagAttachmentUID: {
+				this.currentTagTargetIsMovie = false;
+			}; break;
+
+			case EBMLId.SimpleTag: {
+				if (!this.currentTagTargetIsMovie) break;
+
+				this.currentSimpleTagName = null;
+				this.readContiguousElements(slice.slice(dataStartPos, size));
+			}; break;
+
+			case EBMLId.TagName: {
+				this.currentSimpleTagName = readUnicodeString(slice, size);
+			}; break;
+
+			case EBMLId.TagString: {
+				if (!this.currentSimpleTagName) break;
+
+				const value = readUnicodeString(slice, size);
+				this.processTagValue(this.currentSimpleTagName, value);
+			}; break;
+
+			case EBMLId.TagBinary: {
+				if (!this.currentSimpleTagName) break;
+
+				const value = readBytes(slice, size);
+				this.processTagValue(this.currentSimpleTagName, value);
+			}; break;
+
+			case EBMLId.AttachedFile: {
+				if (!this.currentSegment) break;
+
+				this.currentAttachedFile = {
+					fileName: null,
+					fileMediaType: null,
+					fileData: null,
+					fileDescription: null,
+				};
+
+				this.readContiguousElements(slice.slice(dataStartPos, size));
+
+				// Only process image attachments
+				if (this.currentAttachedFile.fileMediaType?.startsWith('image/') && this.currentAttachedFile.fileData) {
+					const fileName = this.currentAttachedFile.fileName;
+					let kind: 'coverFront' | 'coverBack' | 'unknown' = 'unknown';
+
+					if (fileName) {
+						const lowerName = fileName.toLowerCase();
+						if (lowerName.startsWith('cover.')) {
+							kind = 'coverFront';
+						} else if (lowerName.startsWith('back.')) {
+							kind = 'coverBack';
+						}
+					}
+
+					this.currentSegment.metadata.images ??= [];
+					this.currentSegment.metadata.images.push({
+						data: this.currentAttachedFile.fileData,
+						mimeType: this.currentAttachedFile.fileMediaType,
+						kind,
+						name: this.currentAttachedFile.fileName ?? undefined,
+						description: this.currentAttachedFile.fileDescription ?? undefined,
+					});
+				}
+
+				this.currentAttachedFile = null;
+			}; break;
+
+			case EBMLId.FileName: {
+				if (!this.currentAttachedFile) break;
+
+				this.currentAttachedFile.fileName = readUnicodeString(slice, size);
+			}; break;
+
+			case EBMLId.FileMediaType: {
+				if (!this.currentAttachedFile) break;
+
+				this.currentAttachedFile.fileMediaType = readAsciiString(slice, size);
+			}; break;
+
+			case EBMLId.FileData: {
+				if (!this.currentAttachedFile) break;
+
+				this.currentAttachedFile.fileData = readBytes(slice, size);
+			}; break;
+
+			case EBMLId.FileDescription: {
+				if (!this.currentAttachedFile) break;
+
+				this.currentAttachedFile.fileDescription = readUnicodeString(slice, size);
+			}; break;
 		}
 
 		slice.filePos = dataStartPos + size;
 		return true;
+	}
+
+	processTagValue(name: string, value: string | Uint8Array) {
+		if (!this.currentSegment?.metadata) return;
+
+		const metadata = this.currentSegment.metadata;
+		metadata.raw ??= {};
+		metadata.raw[name] = value;
+
+		if (typeof value === 'string') {
+			switch (name.toLowerCase()) {
+				case 'title': {
+					metadata.title ??= value;
+				}; break;
+
+				case 'description': {
+					metadata.description ??= value;
+				}; break;
+
+				case 'artist': {
+					metadata.artist ??= value;
+				}; break;
+
+				case 'album': {
+					metadata.album ??= value;
+				}; break;
+
+				case 'album_artist': {
+					metadata.albumArtist ??= value;
+				}; break;
+
+				case 'genre': {
+					metadata.genre ??= value;
+				}; break;
+
+				case 'comment': {
+					metadata.comment ??= value;
+				}; break;
+
+				case 'lyrics': {
+					metadata.lyrics ??= value;
+				}; break;
+
+				case 'date': {
+					const date = new Date(value);
+					if (!Number.isNaN(date.getTime())) {
+						metadata.date ??= date;
+					}
+				}; break;
+
+				case 'track_number':
+				case 'part_number': {
+					const parts = value.split('/');
+					const trackNum = Number.parseInt(parts[0]!, 10);
+					const trackNumMax = parts[1] && Number.parseInt(parts[1], 10);
+
+					if (Number.isInteger(trackNum) && trackNum > 0) {
+						metadata.trackNumber ??= trackNum;
+					}
+					if (trackNumMax && Number.isInteger(trackNumMax) && trackNumMax > 0) {
+						metadata.trackNumberMax ??= trackNumMax;
+					}
+				}; break;
+
+				case 'disc_number':
+				case 'disc': {
+					const discParts = value.split('/');
+					const discNum = Number.parseInt(discParts[0]!, 10);
+					const discNumMax = discParts[1] && Number.parseInt(discParts[1], 10);
+
+					if (Number.isInteger(discNum) && discNum > 0) {
+						metadata.discNumber ??= discNum;
+					}
+					if (discNumMax && Number.isInteger(discNumMax) && discNumMax > 0) {
+						metadata.discNumberMax ??= discNumMax;
+					}
+				}; break;
+			}
+		}
 	}
 }
 

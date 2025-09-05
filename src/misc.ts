@@ -675,3 +675,30 @@ export const keyValueIterator = function* <T extends Record<string, unknown>>(ob
 		yield { key, value } as KeyValuePair<T>;
 	}
 };
+
+export const imageMimeTypeToExtension = (mimeType: string) => {
+	switch (mimeType.toLowerCase()) {
+		case 'image/jpeg':
+		case 'image/jpg':
+			return '.jpg';
+		case 'image/png':
+			return '.png';
+		case 'image/gif':
+			return '.gif';
+		case 'image/webp':
+			return '.webp';
+		case 'image/bmp':
+			return '.bmp';
+		case 'image/svg+xml':
+			return '.svg';
+		case 'image/tiff':
+			return '.tiff';
+		case 'image/avif':
+			return '.avif';
+		case 'image/x-icon':
+		case 'image/vnd.microsoft.icon':
+			return '.ico';
+		default:
+			return null;
+	}
+};
