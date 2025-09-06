@@ -723,7 +723,7 @@ export class Conversion {
 				await tempOutput.start();
 
 				const sink = new VideoSampleSink(track);
-				const firstSample = await sink.getSample(this._startTimestamp);
+				const firstSample = await sink.getSample(firstTimestamp); // Let's just use the first sample
 
 				if (firstSample) {
 					try {

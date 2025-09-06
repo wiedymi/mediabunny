@@ -14,12 +14,22 @@
 			source: new Mediabunny.BlobSource(file),
 		});
 
-		const audioTrack = await input.getPrimaryAudioTrack();
-		const sink = new Mediabunny.EncodedPacketSink(audioTrack);
+		const videoTrack = await input.getPrimaryVideoTrack();
+		const sink = new Mediabunny.VideoSampleSink(videoTrack);
 
-		console.log(await audioTrack.getDecoderConfig())
-		console.log(await sink.getFirstPacket());
+		console.log(await sink.getSample(await videoTrack.getFirstTimestamp()))
 
+		/*
+		for await (const sample of sink.samples(0.99)) {
+			console.log(sample);
+
+			if (sample.timestamp >= 2) {
+				break;
+			}
+			
+		}
+		*/
+		//console.log(await sink.getSample(1))
 
 		/*
 		const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
