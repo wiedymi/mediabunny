@@ -534,9 +534,14 @@ export class Conversion {
 		if (this.onProgress) {
 			this._computeProgress = true;
 			this._totalDuration = Math.min(
-				await this.input.computeDuration() - this._startTimestamp,
+				(await this.input.computeDuration()) - this._startTimestamp,
 				this._endTimestamp - this._startTimestamp,
 			);
+
+			for (const track of this.utilizedTracks) {
+				this._maxTimestamps.set(track.id, 0);
+			}
+
 			this.onProgress?.(0);
 		}
 
@@ -1160,7 +1165,10 @@ export class Conversion {
 		}
 		assert(this._totalDuration !== null);
 
-		this._maxTimestamps.set(trackId, Math.max(endTimestamp, this._maxTimestamps.get(trackId) ?? -Infinity));
+		this._maxTimestamps.set(
+			trackId,
+			Math.max(endTimestamp, this._maxTimestamps.get(trackId)!),
+		);
 
 		const minTimestamp = Math.min(...this._maxTimestamps.values());
 		const newProgress = clamp(minTimestamp / this._totalDuration, 0, 1);
