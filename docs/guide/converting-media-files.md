@@ -11,6 +11,7 @@ It has the following features:
 - Trimming
 - Video resizing & fitting
 - Video rotation
+- Video cropping
 - Video frame rate adjustment
 - Audio resampling
 - Audio up/downmixing
