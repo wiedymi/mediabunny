@@ -60,6 +60,12 @@ await input.computeDuration(); // => 1905.4615
 ```
 More specifically, the duration is defined as the maximum end timestamp across all tracks.
 
+Mediabunny also lets you read descriptive metadata tags from media files, such as title, artist, or cover art:
+```ts
+await input.getMetadataTags(); // => MetadataTags
+```
+For more info, see [`MetadataTags`](../api/MetadataTags).
+
 ## Reading track metadata
 
 You can extract the list of all media tracks in the file like so:
