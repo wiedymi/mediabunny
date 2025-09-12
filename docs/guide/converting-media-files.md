@@ -157,7 +157,7 @@ In the rare case that the input video changes size over time, the `fit` field ca
 
 ### Cropping video
 
-`crop` can be used to extract a rectangular region from the original video before any rotation or resizing is applied. The rectangle is specified using `left`, `top`, `width` and `height` in the coordinate system of the unrotated frame. Areas outside the input frame are filled with black.
+`crop` can be used to extract a rectangular region from the original video. The rectangle is specified using `left`, `top`, `width` and `height` and is clamped to the dimensions of the video. Cropping is applied after rotation but before resizing.
 
 ### Adjusting frame rate
 
