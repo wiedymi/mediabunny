@@ -330,16 +330,14 @@ const sink = new CanvasSink(videoTrack, options);
 Here, `options` has the following type:
 ```ts
 type CanvasSinkOptions = {
-	crop?: { left: number; top: number; width: number; height: number };
 	width?: number;
 	height?: number;
 	fit?: 'fill' | 'contain' | 'cover';
 	rotation?: 0 | 90 | 180 | 270;
+	crop?: { left: number; top: number; width: number; height: number };
 	poolSize?: number;
 };
 ```
-- `crop`\
-	Crops the source frame to the specified rectangle before any rotation or resizing is applied. Portions outside the original frame are filled with black.
 - `width`\
 	The width of the output canvas in pixels. When omitted but `height` is set, the width will be calculated automatically to maintain the original aspect ratio. Otherwise, the width will be set to the original width of the video.
 - `height`\
@@ -350,7 +348,9 @@ type CanvasSinkOptions = {
 	- `'contain'` will contain the entire image within the box while preserving aspect ratio. This may lead to letterboxing.
 	- `'cover'` will scale the image until the entire box is filled, while preserving aspect ratio.
 - `rotation`\
-	The clockwise rotation by which to rotate the raw video frame. Defaults to the rotation set in the file metadata. Rotation is applied after cropping and before resizing.
+	The clockwise rotation by which to rotate the raw video frame. Defaults to the rotation set in the file metadata. Rotation is applied before cropping and resizing.
+- `crop`\
+	Specifies the rectangular region of the input video to crop to. The crop region will automatically be clamped to the dimensions of the input video track. Cropping is performed after rotation but before resizing.
 - `poolSize`\
 	See [Canvas pool](#canvas-pool).
 

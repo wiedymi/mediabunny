@@ -29,7 +29,7 @@ import {
 } from './misc';
 import { EncodedPacket } from './packet';
 import { fromAlaw, fromUlaw } from './pcm';
-import { AudioSample, VideoSample } from './sample';
+import { AudioSample, clampCropRectangle, CropRectangle, validateCropRectangle, VideoSample } from './sample';
 
 /**
  * Additional options for controlling packet retrieval.
@@ -1029,12 +1029,6 @@ export type WrappedCanvas = {
  */
 export type CanvasSinkOptions = {
 	/**
-	 * Specifies a rectangular region of the original video frame to crop to, in the coordinate system of the
-	 * unrotated source frame. Parts of the crop rectangle that extend beyond the source frame will be filled with
-	 * black. Cropping is performed before rotation and resizing.
-	 */
-	crop?: { left: number; top: number; width: number; height: number };
-	/**
 	 * The width of the output canvas in pixels, defaulting to the display width of the video track. If height is not
 	 * set, it will be deduced automatically based on aspect ratio.
 	 */
@@ -1058,6 +1052,11 @@ export type CanvasSinkOptions = {
 	 * Rotation is applied before resizing.
 	 */
 	rotation?: Rotation;
+	/**
+	 * Specifies the rectangular region of the input video to crop to. The crop region will automatically be clamped to
+	 * the dimensions of the input video track. Cropping is performed after rotation but before resizing.
+	 */
+	crop?: CropRectangle;
 	/**
 	 * When set, specifies the number of canvases in the pool. These canvases will be reused in a ring buffer /
 	 * round-robin type fashion. This keeps the amount of allocated VRAM constant and relieves the browser from
@@ -1111,24 +1110,6 @@ export class CanvasSink {
 		if (options.height !== undefined && (!Number.isInteger(options.height) || options.height <= 0)) {
 			throw new TypeError('options.height, when defined, must be a positive integer.');
 		}
-		if (options.crop !== undefined) {
-			if (typeof options.crop !== 'object') {
-				throw new TypeError('options.crop, when provided, must be an object.');
-			}
-			const { left, top, width, height } = options.crop;
-			if (!Number.isInteger(left)) {
-				throw new TypeError('options.crop.left must be an integer.');
-			}
-			if (!Number.isInteger(top)) {
-				throw new TypeError('options.crop.top must be an integer.');
-			}
-			if (!Number.isInteger(width) || width <= 0) {
-				throw new TypeError('options.crop.width must be a positive integer.');
-			}
-			if (!Number.isInteger(height) || height <= 0) {
-				throw new TypeError('options.crop.height must be a positive integer.');
-			}
-		}
 		if (options.fit !== undefined && !['fill', 'contain', 'cover'].includes(options.fit)) {
 			throw new TypeError('options.fit, when provided, must be one of "fill", "contain", or "cover".');
 		}
@@ -1144,6 +1125,9 @@ export class CanvasSink {
 		if (options.rotation !== undefined && ![0, 90, 180, 270].includes(options.rotation)) {
 			throw new TypeError('options.rotation, when provided, must be 0, 90, 180 or 270.');
 		}
+		if (options.crop !== undefined) {
+			validateCropRectangle(options.crop);
+		}
 		if (
 			options.poolSize !== undefined
 			&& (typeof options.poolSize !== 'number' || !Number.isInteger(options.poolSize) || options.poolSize < 0)
@@ -1152,13 +1136,19 @@ export class CanvasSink {
 		}
 
 		const rotation = options.rotation ?? videoTrack.rotation;
+
+		const [rotatedWidth, rotatedHeight] = rotation % 180 === 0
+			? [videoTrack.codedWidth, videoTrack.codedHeight]
+			: [videoTrack.codedHeight, videoTrack.codedWidth];
+
 		const crop = options.crop;
-		const [croppedWidth, croppedHeight] = crop
+		if (crop) {
+			clampCropRectangle(crop, rotatedWidth, rotatedHeight);
+		}
+
+		let [width, height] = crop
 			? [crop.width, crop.height]
-			: [videoTrack.codedWidth, videoTrack.codedHeight];
-		let [width, height] = rotation % 180 === 0
-			? [croppedWidth, croppedHeight]
-			: [croppedHeight, croppedWidth];
+			: [rotatedWidth, rotatedHeight];
 		const originalAspectRatio = width / height;
 
 		// If width and height aren't defined together, deduce the missing value using the aspect ratio
@@ -1219,42 +1209,18 @@ export class CanvasSink {
 			context.clearRect(0, 0, this._width, this._height);
 		}
 
-		let sampleToDraw: VideoSample = sample;
-
-		if (this._crop) {
-			const { left, top, width: cWidth, height: cHeight } = this._crop;
-			const cropCanvas = typeof document !== 'undefined'
-				? document.createElement('canvas')
-				: new OffscreenCanvas(cWidth, cHeight);
-			cropCanvas.width = cWidth;
-			cropCanvas.height = cHeight;
-			const cropCtx = cropCanvas.getContext('2d', { alpha: false }) as
-                                CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
-			assert(cropCtx);
-			cropCtx.fillStyle = '#000';
-			cropCtx.fillRect(0, 0, cWidth, cHeight);
-			cropCtx.drawImage(sample.toCanvasImageSource(), -left, -top);
-
-			sampleToDraw = new VideoSample(cropCanvas, {
-				timestamp: sample.timestamp,
-				duration: sample.duration,
-			});
-		}
-
-		sampleToDraw.drawWithFit(context, {
+		sample.drawWithFit(context, {
 			fit: this._fit,
 			rotation: this._rotation,
+			crop: this._crop,
 		});
 
 		const result = {
 			canvas,
-			timestamp: sampleToDraw.timestamp,
-			duration: sampleToDraw.duration,
+			timestamp: sample.timestamp,
+			duration: sample.duration,
 		};
 
-		if (sampleToDraw !== sample) {
-			sampleToDraw.close();
-		}
 		sample.close();
 		return result;
 	}

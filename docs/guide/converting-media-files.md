@@ -105,11 +105,11 @@ You can set the `video` property in the conversion options to configure the conv
 ```ts
 type ConversionVideoOptions = {
 	discard?: boolean;
-	crop?: { left: number; top: number; width: number; height: number };
 	width?: number;
 	height?: number;
 	fit?: 'fill' | 'contain' | 'cover';
 	rotate?: 0 | 90 | 180 | 270;
+	crop?: { left: number; top: number; width: number; height: number };
 	frameRate?: number;
 	codec?: VideoCodec;
 	bitrate?: number | Quality;
@@ -138,22 +138,26 @@ The provided configuration will apply equally to all video tracks of the input. 
 
 If you want to get rid of the video track, use `discard: true`.
 
-### Cropping/resizing/rotating video
-
-`crop` can be used to extract a rectangular region from the original video before any rotation or resizing is applied. The rectangle is specified using `left`, `top`, `width` and `height` in the coordinate system of the unrotated frame. Areas outside the input frame are filled with black.
+### Resizing video
 
 The `width`, `height` and `fit` properties control how the video is resized. If only `width` or `height` is provided, the other value is deduced automatically to preserve the video's original aspect ratio. If both are used, `fit` must be set to control the fitting algorithm:
 - `'fill'` will stretch the image to fill the entire box, potentially altering aspect ratio.
 - `'contain'` will contain the entire image within the box while preserving aspect ratio. This may lead to letterboxing.
 - `'cover'` will scale the image until the entire box is filled, while preserving aspect ratio.
 
-`rotation` rotates the video by the specified number of degrees clockwise. This rotation is applied on top of any rotation metadata in the original input file and happens after cropping.
-
-If `width` or `height` is used in conjunction with `rotation`, they control the post-rotation dimensions.
+If `width` or `height` is used in conjunction with `rotation` or `crop`, they control the post-rotation, post-crop dimensions.
 
 If you want to apply max/min constraints to a video's dimensions, check out [track-specific options](#track-specific-options).
 
 In the rare case that the input video changes size over time, the `fit` field can be used to control the size change behavior (see [`VideoEncodingConfig`](./media-sources#video-encoding-config)). When unset, the behavior is `'passThrough'`.
+
+### Rotating video
+
+`rotation` rotates the video by the specified number of degrees clockwise. This rotation is applied on top of any rotation metadata in the original input file and happens before cropping and resizing.
+
+### Cropping video
+
+`crop` can be used to extract a rectangular region from the original video before any rotation or resizing is applied. The rectangle is specified using `left`, `top`, `width` and `height` in the coordinate system of the unrotated frame. Areas outside the input frame are filled with black.
 
 ### Adjusting frame rate
 
