@@ -1126,7 +1126,7 @@ export class CanvasSink {
 			throw new TypeError('options.rotation, when provided, must be 0, 90, 180 or 270.');
 		}
 		if (options.crop !== undefined) {
-			validateCropRectangle(options.crop);
+			validateCropRectangle(options.crop, 'options.');
 		}
 		if (
 			options.poolSize !== undefined

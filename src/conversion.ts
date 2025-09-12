@@ -228,7 +228,7 @@ const validateVideoOptions = (videoOptions: ConversionVideoOptions | undefined) 
 		throw new TypeError('options.video.rotate, when provided, must be 0, 90, 180 or 270.');
 	}
 	if (videoOptions?.crop !== undefined) {
-		validateCropRectangle(videoOptions.crop);
+		validateCropRectangle(videoOptions.crop, 'options.video.');
 	}
 	if (
 		videoOptions?.frameRate !== undefined

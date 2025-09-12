@@ -580,7 +580,7 @@ export class VideoSample {
 			throw new TypeError('options.rotation, when provided, must be 0, 90, 180, or 270.');
 		}
 		if (options.crop !== undefined) {
-			validateCropRectangle(options.crop);
+			validateCropRectangle(options.crop, 'options.');
 		}
 
 		const canvasWidth = context.canvas.width;
@@ -754,21 +754,21 @@ export const clampCropRectangle = (crop: CropRectangle, outerWidth: number, oute
 	assert(crop.height >= 0);
 };
 
-export const validateCropRectangle = (crop: CropRectangle) => {
+export const validateCropRectangle = (crop: CropRectangle, prefix: string) => {
 	if (!crop || typeof crop !== 'object') {
-		throw new TypeError('crop, when provided, must be an object.');
+		throw new TypeError(prefix + 'crop, when provided, must be an object.');
 	}
 	if (!Number.isInteger(crop.left) || crop.left < 0) {
-		throw new TypeError('crop.left must be a non-negative integer.');
+		throw new TypeError(prefix + 'crop.left must be a non-negative integer.');
 	}
 	if (!Number.isInteger(crop.top) || crop.top < 0) {
-		throw new TypeError('crop.top must be a non-negative integer.');
+		throw new TypeError(prefix + 'crop.top must be a non-negative integer.');
 	}
 	if (!Number.isInteger(crop.width) || crop.width < 0) {
-		throw new TypeError('crop.width must be a non-negative integer.');
+		throw new TypeError(prefix + 'crop.width must be a non-negative integer.');
 	}
 	if (!Number.isInteger(crop.height) || crop.height < 0) {
-		throw new TypeError('crop.height must be a non-negative integer.');
+		throw new TypeError(prefix + 'crop.height must be a non-negative integer.');
 	}
 };
 
