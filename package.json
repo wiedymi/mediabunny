@@ -22,6 +22,10 @@
     "dist",
     "src"
   ],
+  "browser": {
+    "./dist/modules/src/node.js": false,
+		"./src/node.ts": false
+  },
   "sideEffects": false,
   "scripts": {
     "build": "./build.sh",
