@@ -2323,7 +2323,7 @@ export class IsobmffDemuxer extends Demuxer {
 						}; break;
 
 						case 'trkn': {
-							if (data instanceof Uint8Array) {
+							if (data instanceof Uint8Array && data.length >= 6) {
 								const view = toDataView(data);
 
 								const trackNumber = view.getUint16(2, false);
@@ -2340,7 +2340,7 @@ export class IsobmffDemuxer extends Demuxer {
 
 						case 'disc':
 						case 'disk': {
-							if (data instanceof Uint8Array) {
+							if (data instanceof Uint8Array && data.length >= 6) {
 								const view = toDataView(data);
 
 								const discNumber = view.getUint16(2, false);

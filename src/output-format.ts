@@ -141,6 +141,18 @@ export type IsobmffOutputFormatOptions = {
 	minimumFragmentDuration?: number;
 
 	/**
+	 * The metadata format to use for writing metadata tags.
+	 *
+	 * - `'auto'` (default): Behaves like `'mdir'` for MP4 and like `'udta'` for QuickTime, matching FFmpeg's default
+	 * behavior.
+	 * - `'mdir'`: Write tags into `moov/udta/meta` using the 'mdir' handler format.
+	 * - `'mdta'`: Write tags into `moov/udta/meta` using the 'mdta' handler format, equivalent to FFmpeg's
+	 * `use_metadata_tags` flag. This allows for custom keys of arbitrary length.
+	 * - `'udta'`: Write tags directly into `moov/udta`.
+	 */
+	metadataFormat?: 'auto' | 'mdir' | 'mdta' | 'udta';
+
+	/**
 	 * Will be called once the ftyp (File Type) box of the output file has been written.
 	 *
 	 * @param data - The raw bytes.
@@ -215,6 +227,14 @@ export abstract class IsobmffOutputFormat extends OutputFormat {
 		}
 		if (options.onMoof !== undefined && typeof options.onMoof !== 'function') {
 			throw new TypeError('options.onMoof, when provided, must be a function.');
+		}
+		if (
+			options.metadataFormat !== undefined
+			&& !['mdir', 'mdta', 'udta', 'auto'].includes(options.metadataFormat)
+		) {
+			throw new TypeError(
+				'options.metadataFormat, when provided, must be either \'auto\', \'mdir\', \'mdta\', or \'udta\'.',
+			);
 		}
 
 		super();
