@@ -22,6 +22,7 @@ import {
 	roundToMultiple,
 	textEncoder,
 	toUint8Array,
+	uint8ArraysAreEqual,
 	writeBits,
 } from '../misc';
 import {
@@ -62,6 +63,7 @@ import { Muxer } from '../muxer';
 import { Writer } from '../writer';
 import { EncodedPacket } from '../packet';
 import { parseOpusIdentificationHeader } from '../codec-data';
+import { AttachedFile } from '../tags';
 
 const MIN_CLUSTER_TIMESTAMP_MS = -(2 ** 15);
 const MAX_CLUSTER_TIMESTAMP_MS = 2 ** 15 - 1;
@@ -537,13 +539,12 @@ export class MatroskaMuxer extends Muxer {
 
 	private maybeCreateAttachments() {
 		const metadataTags = this.output._metadataTags;
-		if (!metadataTags.images || metadataTags.images.length === 0) {
-			return;
-		}
+		const elements: EBMLElement[] = [];
 
 		const existingFileUids = new Set<number>();
+		const images = metadataTags.images ?? [];
 
-		this.attachmentsElement = { id: EBMLId.Attachments, data: metadataTags.images.map((image): EBMLElement => {
+		for (const image of images) {
 			let imageName = image.name;
 			if (imageName === undefined) {
 				const baseName = image.kind === 'coverFront' ? 'cover' : image.kind === 'coverBack' ? 'back' : 'image';
@@ -561,7 +562,7 @@ export class MatroskaMuxer extends Muxer {
 
 			existingFileUids.add(fileUid);
 
-			return {
+			elements.push({
 				id: EBMLId.AttachedFile,
 				data: [
 					image.description !== undefined
@@ -572,8 +573,45 @@ export class MatroskaMuxer extends Muxer {
 					{ id: EBMLId.FileData, data: image.data },
 					{ id: EBMLId.FileUID, data: fileUid },
 				],
-			};
-		}) };
+			});
+		}
+
+		// Add all AttachedFiles from the raw metadata
+		for (const [key, value] of Object.entries(metadataTags.raw ?? {})) {
+			if (!(value instanceof AttachedFile)) {
+				continue;
+			}
+
+			const keyIsNumeric = /^\d+$/.test(key);
+			if (!keyIsNumeric) {
+				continue;
+			}
+
+			if (images.find(x => x.mimeType === value.mimeType && uint8ArraysAreEqual(x.data, value.data))) {
+				// This attached file has very likely already been added as an image above
+				// (happens when remuxing Matroska)
+				continue;
+			}
+
+			elements.push({
+				id: EBMLId.AttachedFile,
+				data: [
+					value.description !== undefined
+						? { id: EBMLId.FileDescription, data: new EBMLUnicodeString(value.description) }
+						: null,
+					{ id: EBMLId.FileName, data: new EBMLUnicodeString(value.name ?? '') },
+					{ id: EBMLId.FileMediaType, data: value.mimeType ?? '' },
+					{ id: EBMLId.FileData, data: value.data },
+					{ id: EBMLId.FileUID, data: BigInt(key) },
+				],
+			});
+		}
+
+		if (elements.length === 0) {
+			return;
+		}
+
+		this.attachmentsElement = { id: EBMLId.Attachments, data: elements };
 	}
 
 	private createSegment() {
