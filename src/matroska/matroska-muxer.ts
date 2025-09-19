@@ -541,7 +541,7 @@ export class MatroskaMuxer extends Muxer {
 		const metadataTags = this.output._metadataTags;
 		const elements: EBMLElement[] = [];
 
-		const existingFileUids = new Set<number>();
+		const existingFileUids = new Set<bigint>();
 		const images = metadataTags.images ?? [];
 
 		for (const image of images) {
@@ -551,11 +551,16 @@ export class MatroskaMuxer extends Muxer {
 				imageName = baseName + (imageMimeTypeToExtension(image.mimeType) ?? '');
 			}
 
-			let fileUid: number;
+			let fileUid: bigint;
 			while (true) {
-				fileUid = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
+				// Generate a random 64-bit unsigned integer
+				fileUid = 0n;
+				for (let i = 0; i < 8; i++) {
+					fileUid <<= 8n;
+					fileUid |= BigInt(Math.floor(Math.random() * 256));
+				}
 
-				if (fileUid !== 0 && !existingFileUids.has(fileUid)) {
+				if (fileUid !== 0n && !existingFileUids.has(fileUid)) {
 					break;
 				}
 			}
