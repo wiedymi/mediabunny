@@ -531,6 +531,9 @@ export type FilePathSourceOptions = {
 
 /**
  * A source backed by a path to a file. Intended for server-side usage in Node, Bun, or Deno.
+ *
+ * Make sure to call `.dispose()` on the corresponding {@link Input} when done to explicitly free the internal file
+ * handle acquired by this source.
  * @group Input sources
  * @public
  */
