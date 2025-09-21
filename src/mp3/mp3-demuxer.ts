@@ -64,7 +64,7 @@ export class Mp3Demuxer extends Demuxer {
 				throw new Error('No valid MP3 frame found.');
 			}
 
-			this.tracks = [new InputAudioTrack(new Mp3AudioTrackBacking(this))];
+			this.tracks = [new InputAudioTrack(this.input, new Mp3AudioTrackBacking(this))];
 		})();
 	}
 

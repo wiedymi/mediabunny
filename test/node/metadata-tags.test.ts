@@ -107,7 +107,7 @@ test('Read and write metadata, MP4', async () => {
 	await dummyTrack.addPacket();
 	await output.finalize();
 
-	const input = new Input({
+	using input = new Input({
 		source: new BufferSource(output.target.buffer!),
 		formats: ALL_FORMATS,
 	});
@@ -156,7 +156,7 @@ test('Read and write metadata, QuickTime', async () => {
 	await dummyTrack.addPacket();
 	await output.finalize();
 
-	const input = new Input({
+	using input = new Input({
 		source: new BufferSource(output.target.buffer!),
 		formats: ALL_FORMATS,
 	});
@@ -187,7 +187,7 @@ test('Read and write metadata, QuickTime', async () => {
 });
 
 test('Read MOV metadata tags, ilst with keys', async () => {
-	const input = new Input({
+	using input = new Input({
 		source: new FilePathSource(path.join(__dirname, '../public/trunc-buck-bunny.mov')),
 		formats: ALL_FORMATS,
 	});
@@ -231,7 +231,7 @@ test('Read and write metadata, Matroska', async () => {
 	await dummyTrack.addPacket();
 	await output.finalize();
 
-	const input = new Input({
+	using input = new Input({
 		source: new BufferSource(output.target.buffer!),
 		formats: ALL_FORMATS,
 	});
@@ -294,7 +294,7 @@ test('Read and write metadata, MP3', async () => {
 	await dummyTrack.addPacket();
 	await output.finalize();
 
-	const input = new Input({
+	using input = new Input({
 		source: new BufferSource(output.target.buffer!),
 		formats: ALL_FORMATS,
 	});
@@ -346,7 +346,7 @@ test('Read and write metadata, Ogg', async () => {
 	await dummyTrack.addPacket();
 	await output.finalize();
 
-	const input = new Input({
+	using input = new Input({
 		source: new BufferSource(output.target.buffer!),
 		formats: ALL_FORMATS,
 	});
@@ -396,7 +396,7 @@ test('Read and write metadata, FLAC', async () => {
 	await dummyTrack.addPacket();
 	await output.finalize();
 
-	const input = new Input({
+	using input = new Input({
 		source: new BufferSource(output.target.buffer!),
 		formats: ALL_FORMATS,
 	});
@@ -445,7 +445,7 @@ test('Read and write metadata, WAVE', async () => {
 	await dummyTrack.addPacket();
 	await output.finalize();
 
-	const input = new Input({
+	using input = new Input({
 		source: new BufferSource(output.target.buffer!),
 		formats: ALL_FORMATS,
 	});
@@ -484,7 +484,7 @@ test('Conversion metadata tags, default case', async () => {
 	await dummyTrack.addPacket();
 	await output.finalize();
 
-	const input = new Input({
+	using input = new Input({
 		source: new BufferSource(output.target.buffer!),
 		formats: ALL_FORMATS,
 	});
@@ -534,7 +534,7 @@ test('Conversion metadata tags, modified', async () => {
 	await dummyTrack.addPacket();
 	await output.finalize();
 
-	const input = new Input({
+	using input = new Input({
 		source: new BufferSource(output.target.buffer!),
 		formats: ALL_FORMATS,
 	});

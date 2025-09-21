@@ -19,6 +19,7 @@ import {
 	toUint8Array,
 } from './misc';
 import * as nodeAlias from './node';
+import { InputDisposedError } from './input';
 
 const node = nodeAlias; // Aliasing it prevents some bundler warnings
 
@@ -40,7 +41,9 @@ export abstract class Source {
 	/** @internal */
 	abstract _read(start: number, end: number): MaybePromise<ReadResult | null>;
 	/** @internal */
-	abstract get _supportsRandomAccess(): boolean;
+	abstract _dispose(): void;
+	/** @internal */
+	_disposed = false;
 
 	/** @internal */
 	private _sizePromise: Promise<number | null> | null = null;
@@ -52,6 +55,10 @@ export abstract class Source {
 	 * Returns null if the source is unsized.
 	 */
 	async getSizeOrNull() {
+		if (this._disposed) {
+			throw new InputDisposedError();
+		}
+
 		return this._sizePromise ??= Promise.resolve(this._retrieveSize());
 	}
 
@@ -62,6 +69,10 @@ export abstract class Source {
 	 * Throws an error if the source is unsized.
 	 */
 	async getSize() {
+		if (this._disposed) {
+			throw new InputDisposedError();
+		}
+
 		const result = await this.getSizeOrNull();
 		if (result === null) {
 			throw new Error('Cannot determine the size of an unsized source.');
@@ -120,9 +131,7 @@ export class BufferSource extends Source {
 	}
 
 	/** @internal */
-	get _supportsRandomAccess() {
-		return true;
-	}
+	_dispose() {}
 }
 
 /**
@@ -222,8 +231,8 @@ export class BlobSource extends Source {
 	}
 
 	/** @internal */
-	get _supportsRandomAccess() {
-		return true;
+	_dispose() {
+		this._orchestrator.dispose();
 	}
 }
 
@@ -431,6 +440,13 @@ export class UrlSource extends Source {
 			const reader = response.body.getReader();
 
 			while (true) {
+				if (worker.currentPos >= worker.targetPos || worker.aborted) {
+					abortController.abort();
+					worker.running = false;
+
+					return;
+				}
+
 				let readResult: ReadableStreamReadResult<Uint8Array>;
 
 				try {
@@ -464,13 +480,6 @@ export class UrlSource extends Source {
 
 				this.onread?.(worker.currentPos, worker.currentPos + value.length);
 				this._orchestrator.supplyWorkerData(worker, value);
-
-				if (worker.currentPos >= worker.targetPos || worker.aborted) {
-					abortController.abort();
-
-					worker.running = false;
-					return;
-				}
 			}
 		}
 
@@ -505,8 +514,8 @@ export class UrlSource extends Source {
 	}
 
 	/** @internal */
-	get _supportsRandomAccess() {
-		return true;
+	_dispose() {
+		this._orchestrator.dispose();
 	}
 }
 
@@ -528,6 +537,8 @@ export type FilePathSourceOptions = {
 export class FilePathSource extends Source {
 	/** @internal */
 	_streamSource: StreamSource;
+	/** @internal */
+	_fileHandle: FileHandle | null = null;
 
 	/** Creates a new {@link FilePathSource} backed by the file at the specified file path. */
 	constructor(filePath: string, options: BlobSourceOptions = {}) {
@@ -546,21 +557,19 @@ export class FilePathSource extends Source {
 
 		super();
 
-		let fileHandle: FileHandle | null = null;
-
 		// Let's back this source with a StreamSource, makes the implementation very simple
 		this._streamSource = new StreamSource({
 			getSize: async () => {
-				fileHandle = await node.fs.open(filePath, 'r');
+				this._fileHandle = await node.fs.open(filePath, 'r');
 
-				const stats = await fileHandle.stat();
+				const stats = await this._fileHandle.stat();
 				return stats.size;
 			},
 			read: async (start, end) => {
-				assert(fileHandle);
+				assert(this._fileHandle);
 
 				const buffer = new Uint8Array(end - start);
-				await fileHandle.read(buffer, 0, end - start, start);
+				await this._fileHandle.read(buffer, 0, end - start, start);
 
 				return buffer;
 			},
@@ -580,8 +589,10 @@ export class FilePathSource extends Source {
 	}
 
 	/** @internal */
-	get _supportsRandomAccess() {
-		return true;
+	_dispose() {
+		this._streamSource._dispose();
+		void this._fileHandle?.close();
+		this._fileHandle = null;
 	}
 }
 
@@ -602,6 +613,11 @@ export type StreamSourceOptions = {
 	 * that yields these bytes.
 	 */
 	read: (start: number, end: number) => MaybePromise<Uint8Array | ReadableStream<Uint8Array>>;
+
+	/**
+	 * Called when the {@link Input} driven by this source is disposed.
+	 */
+	dispose?: () => unknown;
 
 	/** The maximum number of bytes the cache is allowed to hold in memory. Defaults to 8 MiB. */
 	maxCacheSize?: number;
@@ -636,11 +652,14 @@ export class StreamSource extends Source {
 		if (!options || typeof options !== 'object') {
 			throw new TypeError('options must be an object.');
 		}
+		if (typeof options.getSize !== 'function') {
+			throw new TypeError('options.getSize must be a function.');
+		}
 		if (typeof options.read !== 'function') {
 			throw new TypeError('options.read must be a function.');
 		}
-		if (typeof options.getSize !== 'function') {
-			throw new TypeError('options.getSize must be a function.');
+		if (options.dispose !== undefined && typeof options.dispose !== 'function') {
+			throw new TypeError('options.dispose, when provided, must be a function.');
 		}
 		if (
 			options.maxCacheSize !== undefined
@@ -718,7 +737,7 @@ export class StreamSource extends Source {
 			} else if (data instanceof ReadableStream) {
 				const reader = data.getReader();
 
-				while (true) {
+				while (worker.currentPos < originalTargetPos && !worker.aborted) {
 					const { done, value } = await reader.read();
 					if (done) {
 						if (worker.currentPos < originalTargetPos) {
@@ -740,10 +759,6 @@ export class StreamSource extends Source {
 
 					this.onread?.(worker.currentPos, worker.currentPos + value.length);
 					this._orchestrator.supplyWorkerData(worker, value);
-
-					if (worker.currentPos >= originalTargetPos || worker.aborted) {
-						break;
-					}
 				}
 			} else {
 				throw new TypeError('options.read must return or resolve to a Uint8Array or a ReadableStream.');
@@ -754,8 +769,9 @@ export class StreamSource extends Source {
 	}
 
 	/** @internal */
-	get _supportsRandomAccess() {
-		return true;
+	_dispose() {
+		this._orchestrator.dispose();
+		this._options.dispose?.();
 	}
 }
 
@@ -949,7 +965,7 @@ export class ReadableStreamSource extends Source {
 
 		// This is the loop that keeps pulling data from the stream until a target index is reached, filling requests
 		// in the process
-		while (this._currentIndex < this._targetIndex) {
+		while (this._currentIndex < this._targetIndex && !this._disposed) {
 			const { done, value } = await this._reader.read();
 			if (done) {
 				for (const pendingSlice of this._pendingSlices) {
@@ -1018,8 +1034,9 @@ export class ReadableStreamSource extends Source {
 	}
 
 	/** @internal */
-	get _supportsRandomAccess() {
-		return false;
+	_dispose() {
+		this._pendingSlices.length = 0;
+		this._cache.length = 0;
 	}
 }
 
@@ -1541,5 +1558,14 @@ class ReadOrchestrator {
 			this.cache.splice(oldestIndex, 1);
 			this.currentCacheSize -= oldestEntry.bytes.length;
 		}
+	}
+
+	dispose() {
+		for (const worker of this.workers) {
+			worker.aborted = true;
+		}
+
+		this.workers.length = 0;
+		this.cache.length = 0;
 	}
 }
