@@ -492,6 +492,9 @@ type UrlSourceOptions = {
 	// The maximum number of bytes the cache is allowed to hold
 	// in memory. Defaults to 8 MiB.
 	maxCacheSize?: number;
+
+	// Used to provide a custom fetch function
+	fetchFn?: typeof fetch;
 };
 ```
 
@@ -515,6 +518,25 @@ const source = new UrlSource('https://example.com/bigbuckbunny.mp4', {
 ```
 
 Not setting `getRetryDelay` will default to an infinite, capped exponential backoff pattern.
+
+---
+
+Use `fetchFn` to provide a custom fetch function, usually for polyfill reasons. For example, React Native's `fetch` does not support streamable response bodies, a feature that `UrlSource` requires. In this case, you could use [Expo's `fetch` function](https://docs.expo.dev/versions/latest/sdk/expo/#expofetch-api) instead:
+```ts
+import { UrlSource } from 'mediabunny';
+import { fetch } from 'expo/fetch';
+
+const source = new UrlSource('https://example.com/bigbuckbunny.mp4', {
+	fetchFn: (input, init) => {
+		if (typeof input !== 'string') {
+			// Expo requires string URLs
+			throw new Error('Expected a string URL.');
+		}
+
+		return fetch(input, init);
+	},
+});
+```
 
 ### `FilePathSource`
 

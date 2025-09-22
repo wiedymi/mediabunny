@@ -200,31 +200,45 @@ export class BlobSource extends Source {
 	}
 
 	/** @internal */
-	_readers = new WeakMap<ReadWorker, ReadableStreamDefaultReader<Uint8Array>>();
+	_readers = new WeakMap<ReadWorker, ReadableStreamDefaultReader<Uint8Array> | null>();
 
 	/** @internal */
 	private async _runWorker(worker: ReadWorker) {
 		let reader = this._readers.get(worker);
-		if (!reader) {
-			// Get a reader of the blob starting at the required offset, and then keep it around
-			reader = this._blob.slice(worker.currentPos).stream().getReader();
+		if (reader === undefined) {
+			if ('stream' in this._blob) {
+				// Get a reader of the blob starting at the required offset, and then keep it around
+				const slice = this._blob.slice(worker.currentPos);
+				reader = slice.stream().getReader();
+			} else {
+				// We'll need to use more primitive ways
+				reader = null;
+			}
+
 			this._readers.set(worker, reader);
 		}
 
 		while (worker.currentPos < worker.targetPos && !worker.aborted) {
-			const { done, value } = await reader.read();
-			if (done) {
-				this._orchestrator.forgetWorker(worker);
+			if (reader) {
+				const { done, value } = await reader.read();
+				if (done) {
+					this._orchestrator.forgetWorker(worker);
 
-				if (worker.currentPos < worker.targetPos) { // I think this `if` should always hit?
-					throw new Error('Blob reader stopped unexpectedly before all requested data was read.');
+					if (worker.currentPos < worker.targetPos) { // I think this `if` should always hit?
+						throw new Error('Blob reader stopped unexpectedly before all requested data was read.');
+					}
+
+					break;
 				}
 
-				break;
-			}
+				this.onread?.(worker.currentPos, worker.currentPos + value.length);
+				this._orchestrator.supplyWorkerData(worker, value);
+			} else {
+				const data = await this._blob.slice(worker.currentPos, worker.targetPos).arrayBuffer();
 
-			this.onread?.(worker.currentPos, worker.currentPos + value.length);
-			this._orchestrator.supplyWorkerData(worker, value);
+				this.onread?.(worker.currentPos, worker.currentPos + data.byteLength);
+				this._orchestrator.supplyWorkerData(worker, new Uint8Array(data));
+			}
 		}
 
 		worker.running = false;
@@ -237,6 +251,8 @@ export class BlobSource extends Source {
 }
 
 const URL_SOURCE_MIN_LOAD_AMOUNT = 0.5 * 2 ** 20; // 0.5 MiB
+const DEFAULT_RETRY_DELAY
+	= (previousAttempts => Math.min(2 ** (previousAttempts - 2), 16)) satisfies UrlSourceOptions['getRetryDelay'];
 
 /**
  * Options for {@link UrlSource}.
@@ -252,14 +268,21 @@ export type UrlSourceOptions = {
 
 	/**
 	 * A function that returns the delay (in seconds) before retrying a failed request. The function is called
-	 * with the number of previous, unsuccessful attempts. If the function returns `null`, no more retries will be made.
+	 * with the number of previous, unsuccessful attempts, as well as with the error with which the previous request
+	 * failed. If the function returns `null`, no more retries will be made.
 	 *
 	 * By default, it uses an exponential backoff algorithm that never fully gives up.
 	 */
-	getRetryDelay?: (previousAttempts: number) => number | null;
+	getRetryDelay?: (previousAttempts: number, error: unknown) => number | null;
 
 	/** The maximum number of bytes the cache is allowed to hold in memory. Defaults to 64 MiB. */
 	maxCacheSize?: number;
+
+	/**
+	 * A WHATWG-compatible fetch function. You can use this field to polyfill the `fetch` function, add missing
+	 * features, or use a custom implementation.
+	 */
+	fetchFn?: typeof fetch;
 };
 
 /**
@@ -270,9 +293,9 @@ export type UrlSourceOptions = {
  */
 export class UrlSource extends Source {
 	/** @internal */
-	_url: URL;
+	_url: string | URL | Request;
 	/** @internal */
-	_getRetryDelay: (previousAttempts: number) => number | null;
+	_getRetryDelay: (previousAttempts: number, error: unknown) => number | null;
 	/** @internal */
 	_options: UrlSourceOptions;
 	/** @internal */
@@ -285,11 +308,15 @@ export class UrlSource extends Source {
 
 	/** Creates a new {@link UrlSource} backed by the resource at the specified URL. */
 	constructor(
-		url: string | URL,
+		url: string | URL | Request,
 		options: UrlSourceOptions = {},
 	) {
-		if (typeof url !== 'string' && !(url instanceof URL)) {
-			throw new TypeError('url must be a string or URL.');
+		if (
+			typeof url !== 'string'
+			&& !(url instanceof URL)
+			&& !(typeof Request !== 'undefined' && url instanceof Request)
+		) {
+			throw new TypeError('url must be a string, URL or Request.');
 		}
 		if (!options || typeof options !== 'object') {
 			throw new TypeError('options must be an object.');
@@ -306,14 +333,16 @@ export class UrlSource extends Source {
 		) {
 			throw new TypeError('options.maxCacheSize, when provided, must be a non-negative integer.');
 		}
+		if (options.fetchFn !== undefined && typeof options.fetchFn !== 'function') {
+			throw new TypeError('options.fetchFn, when provided, must be a function.');
+			// Won't bother validating this function beyond this
+		}
 
 		super();
 
-		this._url = url instanceof URL
-			? url
-			: new URL(url, typeof location !== 'undefined' ? location.href : undefined);
+		this._url = url;
 		this._options = options;
-		this._getRetryDelay = options.getRetryDelay ?? (previousAttempts => Math.min(2 ** (previousAttempts - 2), 8));
+		this._getRetryDelay = options.getRetryDelay ?? DEFAULT_RETRY_DELAY;
 
 		this._orchestrator = new ReadOrchestrator({
 			maxCacheSize: options.maxCacheSize ?? (64 * 2 ** 20 /* 64 MiB */),
@@ -334,6 +363,7 @@ export class UrlSource extends Source {
 
 		const abortController = new AbortController();
 		const response = await retriedFetch(
+			this._options.fetchFn ?? fetch,
 			this._url,
 			mergeRequestInit(this._options.requestInit ?? {}, {
 				headers: {
@@ -347,7 +377,8 @@ export class UrlSource extends Source {
 		);
 
 		if (!response.ok) {
-			throw new Error(`Error fetching ${this._url}: ${response.status} ${response.statusText}`);
+			// eslint-disable-next-line @typescript-eslint/no-base-to-string
+			throw new Error(`Error fetching ${String(this._url)}: ${response.status} ${response.statusText}`);
 		}
 
 		let worker: ReadWorker;
@@ -401,6 +432,7 @@ export class UrlSource extends Source {
 			if (!abortController) {
 				abortController = new AbortController();
 				response = await retriedFetch(
+					this._options.fetchFn ?? fetch,
 					this._url,
 					mergeRequestInit(this._options.requestInit ?? {}, {
 						headers: {
@@ -415,7 +447,8 @@ export class UrlSource extends Source {
 			assert(response);
 
 			if (!response.ok) {
-				throw new Error(`Error fetching ${this._url}: ${response.status} ${response.statusText}`);
+				// eslint-disable-next-line @typescript-eslint/no-base-to-string
+				throw new Error(`Error fetching ${String(this._url)}: ${response.status} ${response.statusText}`);
 			}
 
 			if (worker.currentPos > 0 && response.status !== 206) {
@@ -434,7 +467,10 @@ export class UrlSource extends Source {
 			}
 
 			if (!response.body) {
-				throw new Error('Missing HTTP response body.');
+				throw new Error(
+					'Missing HTTP response body stream. The used fetch function must provide the response body as a'
+					+ ' ReadableStream.',
+				);
 			}
 
 			const reader = response.body.getReader();
@@ -452,7 +488,7 @@ export class UrlSource extends Source {
 				try {
 					readResult = await reader.read();
 				} catch (error) {
-					const retryDelayInSeconds = this._getRetryDelay(1);
+					const retryDelayInSeconds = this._getRetryDelay(1, error);
 					if (retryDelayInSeconds !== null) {
 						console.error('Error while reading response stream. Attempting to resume.', error);
 						await new Promise(resolve => setTimeout(resolve, 1000 * retryDelayInSeconds));
