@@ -780,3 +780,9 @@ export const uint8ArraysAreEqual = (a: Uint8Array, b: Uint8Array) => {
 
 	return true;
 };
+
+export const polyfillSymbolDispose = () => {
+	// https://www.typescriptlang.org/docs/handbook/release-notes/typescript-5-2.html
+	// @ts-expect-error Readonly
+	Symbol.dispose ??= Symbol('Symbol.dispose');
+};
