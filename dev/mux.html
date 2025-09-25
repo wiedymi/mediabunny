@@ -34,8 +34,8 @@
 	}
 
 	const canvas = document.createElement('canvas');
-	canvas.width = 1920;
-	canvas.height = 1080;
+	canvas.width = 640;
+	canvas.height = 480;
 	const context = canvas.getContext('2d');
 
 	let format = new Mediabunny.MkvOutputFormat({ streamable: false });
@@ -47,7 +47,7 @@
 	format = new Mediabunny.MkvOutputFormat();
 	format = new Mediabunny.MovOutputFormat();
 	format = new Mediabunny.Mp4OutputFormat({ fastStart: 'reserve' });
-	format = new Mediabunny.MkvOutputFormat();
+	format = new Mediabunny.WebMOutputFormat();
 	let target = new Mediabunny.BufferTarget();
 
 	/*
