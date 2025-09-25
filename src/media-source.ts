@@ -380,8 +380,8 @@ class VideoEncoderWrapper {
 						}
 
 						if (this.splitter) {
-							const alphaFrame = this.splitter.extractAlpha(videoFrame);
 							const colorFrame = this.splitter.extractColor(videoFrame);
+							const alphaFrame = this.splitter.extractAlpha(videoFrame);
 
 							this.alphaFrameQueue.push(alphaFrame);
 							this.encoder.encode(colorFrame, finalEncodeOptions);
@@ -910,13 +910,17 @@ class ColorAlphaSplitter {
 		assert(yuv[width * height] === 128); // Where chroma data starts
 		assert(yuv[yuv.length - 1] === 128); // Assert the YUV data has been fully written
 
-		return new VideoFrame(yuv, {
-			format: 'I420',
+		// Defining this separately because TypeScript doesn't know `transfer` and I can't be bothered to do declaration
+		// merging right now
+		const init = {
+			format: 'I420' as const,
 			codedWidth: width,
 			codedHeight: height,
 			timestamp: sourceFrame.timestamp,
 			duration: sourceFrame.duration ?? undefined,
-		});
+			transfer: [yuv.buffer],
+		};
+		return new VideoFrame(yuv, init);
 	}
 
 	close() {
