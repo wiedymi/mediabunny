@@ -24,7 +24,7 @@
 			chunked: true,
 			chunkSize: 2**20
 		});
-		const outputFormat = new Mediabunny.Mp3OutputFormat({});
+		const outputFormat = new Mediabunny.WebMOutputFormat({});
 
 		const button = document.createElement('button');
 		button.textContent = 'Cancel';
@@ -92,6 +92,8 @@
 			},
 			*/
 			video: () => ({
+				alpha: 'keep',
+				width: 320,
 				//discard: true,
 				//discard: true,
 				//crop: {

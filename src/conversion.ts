@@ -153,6 +153,12 @@ export type ConversionVideoOptions = {
 	codec?: VideoCodec;
 	/** The desired bitrate of the output video. */
 	bitrate?: number | Quality;
+	/**
+	 * Whether to discard or keep the transparency information of the input video. The default is `'discard'`. Note that
+	 * for `'keep'` to produce a transparent video, you must use an output config that supports it, such as WebM with
+	 * VP9.
+	 */
+	alpha?: 'discard' | 'keep';
 	/** When `true`, video will always be re-encoded instead of directly copying over the encoded samples. */
 	forceTranscode?: boolean;
 };
@@ -212,7 +218,7 @@ const validateVideoOptions = (videoOptions: ConversionVideoOptions | undefined) 
 		throw new TypeError('options.video.height, when provided, must be a positive integer.');
 	}
 	if (videoOptions?.fit !== undefined && !['fill', 'contain', 'cover'].includes(videoOptions.fit)) {
-		throw new TypeError('options.video.fit, when provided, must be one of "fill", "contain", or "cover".');
+		throw new TypeError('options.video.fit, when provided, must be one of \'fill\', \'contain\', or \'cover\'.');
 	}
 	if (
 		videoOptions?.width !== undefined
@@ -235,6 +241,9 @@ const validateVideoOptions = (videoOptions: ConversionVideoOptions | undefined) 
 		&& (!Number.isFinite(videoOptions.frameRate) || videoOptions.frameRate <= 0)
 	) {
 		throw new TypeError('options.video.frameRate, when provided, must be a finite positive number.');
+	}
+	if (videoOptions?.alpha !== undefined && !['discard', 'keep'].includes(videoOptions.alpha)) {
+		throw new TypeError('options.video.alpha, when provided, must be either \'discard\' or \'keep\'.');
 	}
 };
 
@@ -672,6 +681,8 @@ export class Conversion {
 			|| (totalRotation !== 0 && !outputSupportsRotation)
 			|| !!crop;
 
+		const alpha = trackOptions.alpha ?? 'discard';
+
 		let videoCodecs = this.output.format.getSupportedVideoCodecs();
 		if (
 			!needsTranscode
@@ -702,6 +713,12 @@ export class Conversion {
 
 					if (this._canceled) {
 						return;
+					}
+
+					if (alpha === 'discard') {
+						// Feels hacky given that the rest of the packet is readonly. But, works for now.
+						delete packet.sideData.alpha;
+						delete packet.sideData.alphaByteLength;
 					}
 
 					await source.add(packet, meta);
@@ -742,6 +759,7 @@ export class Conversion {
 				codec: encodableCodec,
 				bitrate,
 				sizeChangeBehavior: trackOptions.fit ?? 'passThrough',
+				alpha,
 				onEncodedPacket: sample => this._reportProgress(track.id, sample.timestamp + sample.duration),
 			};
 
@@ -796,6 +814,7 @@ export class Conversion {
 						rotation: totalRotation, // Bake the rotation into the output
 						crop: trackOptions.crop,
 						poolSize: 1,
+						alpha: alpha === 'keep',
 					});
 					const iterator = sink.canvases(this._startTimestamp, this._endTimestamp);
 					const frameRate = trackOptions.frameRate;

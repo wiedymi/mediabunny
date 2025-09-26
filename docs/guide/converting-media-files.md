@@ -114,6 +114,7 @@ type ConversionVideoOptions = {
 	frameRate?: number;
 	codec?: VideoCodec;
 	bitrate?: number | Quality;
+	alpha?: 'discard' | 'keep'; // Defaults to 'discard'
 	forceTranscode?: boolean;
 };
 ```
