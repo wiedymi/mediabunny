@@ -4,7 +4,7 @@
 <script src="../packages/mp3-encoder/dist/bundles/mediabunny-mp3-encoder.js"></script>
 
 <script type="module">
-	MediabunnyMp3Encoder.registerMp3Encoder();
+	//MediabunnyMp3Encoder.registerMp3Encoder();
 
 	const fileInput = document.createElement('input');
 	fileInput.type = 'file';
@@ -24,7 +24,7 @@
 			chunked: true,
 			chunkSize: 2**20
 		});
-		const outputFormat = new Mediabunny.WebMOutputFormat({});
+		const outputFormat = new Mediabunny.Mp3OutputFormat({});
 
 		const button = document.createElement('button');
 		button.textContent = 'Cancel';
@@ -92,8 +92,8 @@
 			},
 			*/
 			video: () => ({
-				alpha: 'keep',
-				width: 320,
+				//alpha: 'keep',
+				//width: 320,
 				//discard: true,
 				//discard: true,
 				//crop: {
@@ -146,7 +146,7 @@
 				}
 			},
 			trim: {
-				//start: 10,
+				start: 10,
 				//end: 20
 			},
 		});

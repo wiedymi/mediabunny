@@ -96,6 +96,13 @@ export type ConversionOptions = {
 	 * If no function is set, the input's metadata tags will be copied to the output.
 	 */
 	tags?: MetadataTags | ((inputTags: MetadataTags) => MaybePromise<MetadataTags>);
+
+	/**
+	 * Whether to show potential console warnings about discarded tracks after calling `Conversion.init()`, defaults to
+	 * `true`. Set this to `false` if you're properly handling the `discardedTracks` and `isValid` fields already and
+	 * want to keep the console output clean.
+	 */
+	showWarnings?: boolean;
 };
 
 /**
@@ -380,6 +387,11 @@ export class Conversion {
 	/** @internal */
 	_lastProgress = 0;
 
+	/**
+	 * Whether this conversion, as it has been configured, is valid and can be executed. If this field is `false`, check
+	 * the `discardedTracks` field for reasons.
+	 */
+	isValid = false;
 	/** The list of tracks that are included in the output file. */
 	readonly utilizedTracks: InputTrack[] = [];
 	/** The list of tracks from the input file that have been discarded, alongside the discard reason. */
@@ -448,6 +460,9 @@ export class Conversion {
 		}
 		if (typeof options.tags === 'object') {
 			validateMetadataTags(options.tags);
+		}
+		if (options.showWarnings !== undefined && typeof options.showWarnings !== 'boolean') {
+			throw new TypeError('options.showWarnings, when provided, must be a boolean.');
 		}
 
 		this._options = options;
@@ -527,12 +542,6 @@ export class Conversion {
 			}
 		}
 
-		const unintentionallyDiscardedTracks = this.discardedTracks.filter(x => x.reason !== 'discarded_by_user');
-		if (unintentionallyDiscardedTracks.length > 0) {
-			// Let's give the user a notice/warning about discarded tracks so they aren't confused
-			console.warn('Some tracks had to be discarded from the conversion:', unintentionallyDiscardedTracks);
-		}
-
 		// Now, let's deal with metadata tags
 
 		const inputTags = await this.input.getMetadataTags();
@@ -560,14 +569,105 @@ export class Conversion {
 		}
 
 		this.output.setMetadataTags(outputTags);
+
+		// Let's check if the conversion can actually be executed
+		this.isValid = this._totalTrackCount >= outputTrackCounts.total.min
+			&& this._addedCounts.video >= outputTrackCounts.video.min
+			&& this._addedCounts.audio >= outputTrackCounts.audio.min
+			&& this._addedCounts.subtitle >= outputTrackCounts.subtitle.min;
+
+		if (this._options.showWarnings ?? true) {
+			const warnElements: unknown[] = [];
+
+			const unintentionallyDiscardedTracks = this.discardedTracks.filter(x => x.reason !== 'discarded_by_user');
+			if (unintentionallyDiscardedTracks.length > 0) {
+				// Let's give the user a notice/warning about discarded tracks so they aren't confused
+				warnElements.push(
+					'Some tracks had to be discarded from the conversion:', unintentionallyDiscardedTracks,
+				);
+			}
+
+			if (!this.isValid) {
+				warnElements.push('\n\n' + this._getInvalidityExplanation().join(''));
+			}
+
+			if (warnElements.length > 0) {
+				console.warn(...warnElements);
+			}
+		}
 	}
 
-	/** Executes the conversion process. Resolves once conversion is complete. */
+	/** @internal */
+	_getInvalidityExplanation() {
+		const elements: string[] = [];
+
+		if (this.discardedTracks.length === 0) {
+			elements.push(
+				'Due to missing tracks, this conversion cannot be executed.',
+			);
+		} else {
+			const encodabilityIsTheProblem = this.discardedTracks.every(x =>
+				x.reason === 'discarded_by_user' || x.reason === 'no_encodable_target_codec',
+			);
+
+			elements.push(
+				'Due to discarded tracks, this conversion cannot be executed.',
+			);
+
+			if (encodabilityIsTheProblem) {
+				const codecs = this.discardedTracks.flatMap((x) => {
+					if (x.reason === 'discarded_by_user') return [];
+
+					if (x.track.type === 'video') {
+						return this.output.format.getSupportedVideoCodecs();
+					} else if (x.track.type === 'audio') {
+						return this.output.format.getSupportedAudioCodecs();
+					} else {
+						return this.output.format.getSupportedSubtitleCodecs();
+					}
+				});
+
+				if (codecs.length === 1) {
+					elements.push(
+						`\nTracks were discarded because your environment is not able to encode '${codecs[0]}'.`,
+					);
+				} else {
+					elements.push(
+						'\nTracks were discarded because your environment is not able to encode any of the following'
+						+ ` codecs: ${codecs.map(x => `'${x}'`).join(', ')}.`,
+					);
+				}
+
+				if (codecs.includes('mp3')) {
+					elements.push(
+						`\nThe @mediabunny/mp3-encoder extension package provides support for encoding MP3.`,
+					);
+				}
+			} else {
+				elements.push('\nCheck the discardedTracks field for more info.');
+			}
+		}
+
+		return elements;
+	}
+
+	/**
+	 * Executes the conversion process. Resolves once conversion is complete.
+	 *
+	 * Will throw if `isValid` is `false`.
+	 */
 	async execute() {
+		if (!this.isValid) {
+			throw new Error(
+				'Cannot execute this conversion because its output configuration is invalid. Make sure to always check'
+				+ ' the isValid field before executing a conversion.\n'
+				+ this._getInvalidityExplanation().join(''),
+			);
+		}
+
 		if (this._executed) {
 			throw new Error('Conversion cannot be executed twice.');
 		}
-
 		this._executed = true;
 
 		if (this.onProgress) {
