@@ -7,3 +7,8 @@ node_modules
 *.tsbuildinfo
 
 packages/mp3-encoder/dist
+
+# agents
+CLAUDE.md
+AGENTS.md
+CRUSH.md

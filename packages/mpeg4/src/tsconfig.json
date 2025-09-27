@@ -1,0 +1,24 @@
+{
+	"extends": "../../../tsconfig.json",
+	"compilerOptions": {
+		"outDir": "../dist/modules",
+		"declaration": true,
+		"declarationMap": true,
+		"stripInternal": true,
+		"noEmit": false,
+		"moduleResolution": "nodenext",
+		"module": "nodenext",
+		"allowJs": true,
+		"skipLibCheck": true,
+		"paths": {
+			"mediabunny": ["../../../src/index.ts"],
+			"*.worker": ["./worker-stub.d.ts"]
+		}
+	},
+	"include": [
+		"**/*"
+	],
+	"references": [
+		{ "path": "../../../src" }
+	]
+}

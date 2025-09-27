@@ -37,6 +37,7 @@ export const VIDEO_CODECS = [
 	'vp9',
 	'av1',
 	'vp8',
+	'mpeg4',
 ] as const;
 /**
  * List of known PCM (uncompressed) audio codecs, ordered by encoding preference.
@@ -70,6 +71,8 @@ export const NON_PCM_AUDIO_CODECS = [
 	'mp3',
 	'vorbis',
 	'flac',
+	'ac3',
+	'eac3',
 ] as const;
 /**
  * List of known audio codecs, ordered by encoding preference.
@@ -562,6 +565,10 @@ export const extractAudioCodecString = (trackInfo: {
 		return 'vorbis';
 	} else if (codec === 'flac') {
 		return 'flac';
+	} else if (codec === 'ac3') {
+		return 'ac3';
+	} else if (codec === 'eac3') {
+		return 'ec-3';
 	} else if (codec && (PCM_AUDIO_CODECS as readonly string[]).includes(codec)) {
 		return codec;
 	}
