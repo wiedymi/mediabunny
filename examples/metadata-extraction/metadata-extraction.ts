@@ -1,4 +1,9 @@
 import { Input, ALL_FORMATS, BlobSource, UrlSource } from 'mediabunny';
+import { registerMpeg4Decoder } from '@mediabunny/mpeg4';
+import { registerEac3Decoder } from '@mediabunny/eac3';
+
+registerMpeg4Decoder();
+registerEac3Decoder();
 
 import SampleFileUrl from '../../docs/assets/big-buck-bunny-trimmed.mp4';
 (document.querySelector('#sample-file-download') as HTMLAnchorElement).href = SampleFileUrl;
@@ -63,8 +68,8 @@ const extractMetadata = (resource: File | string) => {
 							'Sample rate': `${track.sampleRate} Hz`,
 						}
 					: {}),
-			'Packet statistics': shortDelay().then(() => track.computePacketStats()).then(stats => ({
-				'Packet count': stats.packetCount,
+			'Packet statistics': shortDelay().then(() => track.computePacketStats(1000)).then(stats => ({
+				'Packet count': `${stats.packetCount} (sampled from first 1000 packets)`,
 				'Average packet rate': `${stats.averagePacketRate} Hz${track.isVideoTrack() ? ' (FPS)' : ''}`,
 				'Average bitrate': `${stats.averageBitrate} bps`,
 			})),
