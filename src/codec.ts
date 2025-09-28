@@ -274,6 +274,8 @@ export const buildVideoCodecString = (codec: VideoCodec, width: number, height: 
 		const bitDepth = '08'; // 8-bit
 
 		return `av01.${profile}.${level}${levelInfo.tier}.${bitDepth}`;
+	} else if (codec === 'mpeg4') {
+		return 'mp4v.20.9';
 	}
 
 	// eslint-disable-next-line @typescript-eslint/restrict-template-expressions

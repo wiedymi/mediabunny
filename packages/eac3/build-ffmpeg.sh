@@ -113,36 +113,13 @@ fi
 echo "Copying header files..."
 mkdir -p "$ORIGINAL_DIR/lib"
 
-cp "$INSTALL_DIR/include/libavcodec/avcodec.h" "$ORIGINAL_DIR/lib/"
-cp "$INSTALL_DIR/include/libavcodec/bsf.h" "$ORIGINAL_DIR/lib/"
-cp "$INSTALL_DIR/include/libavcodec/codec.h" "$ORIGINAL_DIR/lib/"
-cp "$INSTALL_DIR/include/libavcodec/codec_desc.h" "$ORIGINAL_DIR/lib/"
-cp "$INSTALL_DIR/include/libavcodec/codec_id.h" "$ORIGINAL_DIR/lib/"
-cp "$INSTALL_DIR/include/libavcodec/codec_par.h" "$ORIGINAL_DIR/lib/"
-cp "$INSTALL_DIR/include/libavcodec/defs.h" "$ORIGINAL_DIR/lib/"
-cp "$INSTALL_DIR/include/libavcodec/packet.h" "$ORIGINAL_DIR/lib/"
-cp "$INSTALL_DIR/include/libavcodec/version.h" "$ORIGINAL_DIR/lib/"
-cp "$INSTALL_DIR/include/libavcodec/version_major.h" "$ORIGINAL_DIR/lib/"
+# Copy all libavcodec headers
+echo "Copying libavcodec headers..."
+cp "$INSTALL_DIR/include/libavcodec/"*.h "$ORIGINAL_DIR/lib/" 2>/dev/null || true
 
-cp "$INSTALL_DIR/include/libavutil/attributes.h" "$ORIGINAL_DIR/lib/"
-cp "$INSTALL_DIR/include/libavutil/avconfig.h" "$ORIGINAL_DIR/lib/"
-cp "$INSTALL_DIR/include/libavutil/avutil.h" "$ORIGINAL_DIR/lib/"
-cp "$INSTALL_DIR/include/libavutil/buffer.h" "$ORIGINAL_DIR/lib/"
-cp "$INSTALL_DIR/include/libavutil/channel_layout.h" "$ORIGINAL_DIR/lib/"
-cp "$INSTALL_DIR/include/libavutil/common.h" "$ORIGINAL_DIR/lib/"
-cp "$INSTALL_DIR/include/libavutil/cpu.h" "$ORIGINAL_DIR/lib/"
-cp "$INSTALL_DIR/include/libavutil/dict.h" "$ORIGINAL_DIR/lib/"
-cp "$INSTALL_DIR/include/libavutil/error.h" "$ORIGINAL_DIR/lib/"
-cp "$INSTALL_DIR/include/libavutil/frame.h" "$ORIGINAL_DIR/lib/"
-cp "$INSTALL_DIR/include/libavutil/intfloat.h" "$ORIGINAL_DIR/lib/"
-cp "$INSTALL_DIR/include/libavutil/log.h" "$ORIGINAL_DIR/lib/"
-cp "$INSTALL_DIR/include/libavutil/macros.h" "$ORIGINAL_DIR/lib/"
-cp "$INSTALL_DIR/include/libavutil/mathematics.h" "$ORIGINAL_DIR/lib/"
-cp "$INSTALL_DIR/include/libavutil/mem.h" "$ORIGINAL_DIR/lib/"
-cp "$INSTALL_DIR/include/libavutil/pixfmt.h" "$ORIGINAL_DIR/lib/"
-cp "$INSTALL_DIR/include/libavutil/rational.h" "$ORIGINAL_DIR/lib/"
-cp "$INSTALL_DIR/include/libavutil/samplefmt.h" "$ORIGINAL_DIR/lib/"
-cp "$INSTALL_DIR/include/libavutil/version.h" "$ORIGINAL_DIR/lib/"
+# Copy all libavutil headers
+echo "Copying libavutil headers..."
+cp "$INSTALL_DIR/include/libavutil/"*.h "$ORIGINAL_DIR/lib/" 2>/dev/null || true
 
 echo ""
 echo "Contents of lib directory:"

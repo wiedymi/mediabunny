@@ -2,7 +2,6 @@ import { expect, test, beforeAll } from 'vitest';
 import { Input } from '../../src/input.js';
 import { UrlSource } from '../../src/source.js';
 import { ALL_FORMATS, MP4, QTFF, MATROSKA, AVI } from '../../src/input-format.js';
-import { assert } from '../../src/misc.js';
 import { registerMpeg4Decoder, registerMpeg4Encoder } from '../../packages/mpeg4/src/index.js';
 import { registerEac3Decoder, registerEac3Encoder } from '../../packages/eac3/src/index.js';
 

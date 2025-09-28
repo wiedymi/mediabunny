@@ -35,7 +35,7 @@ let closeDecoder: (state: DecoderState) => void;
 let inputSlice: Slice | null = null;
 let outputSlice: Slice | null = null;
 
-const init = async (sr: number, ch: number, isEac3: boolean) => {
+const init = async (sr: number, ch: number, codec: 'eac3' | 'ac3') => {
 	sampleRate = sr;
 	channels = ch;
 
@@ -46,7 +46,7 @@ const init = async (sr: number, ch: number, isEac3: boolean) => {
 	flushDecoder = module.cwrap('flush_decoder', null, ['number']);
 	closeDecoder = module.cwrap('close_decoder', null, ['number']);
 
-	const codecId = isEac3 ? AV_CODEC_ID_EAC3 : AV_CODEC_ID_AC3;
+	const codecId = codec === 'eac3' ? AV_CODEC_ID_EAC3 : AV_CODEC_ID_AC3;
 	decoderState = initDecoder(codecId, sampleRate, channels);
 
 	if (!decoderState) {
@@ -90,6 +90,11 @@ const decode = (packetData: ArrayBuffer) => {
 	}
 
 	if (numberOfFrames <= 0) {
+		return null;
+	}
+
+	// Validate the output parameters
+	if (outSampleRate <= 0 || outChannels <= 0) {
 		return null;
 	}
 
@@ -140,8 +145,7 @@ const onMessage = async (data: { id: number; command: DecoderCommand }) => {
 		const { command } = data;
 
 		if (command.type === 'init') {
-			const isEac3 = true;
-			await init(command.data.sampleRate, command.data.channels, isEac3);
+			await init(command.data.sampleRate, command.data.channels, command.data.codec);
 			responseData = null;
 		} else if (command.type === 'decode') {
 			responseData = decode(command.data.packetData);

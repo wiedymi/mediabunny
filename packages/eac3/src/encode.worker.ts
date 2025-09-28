@@ -32,14 +32,14 @@ let closeEncoder: (state: EncoderState) => void;
 let inputSlice: Slice | null = null;
 let outputSlice: Slice | null = null;
 
-const init = async (sampleRate: number, channels: number, bitrate: number, isEac3: boolean) => {
+const init = async (sampleRate: number, channels: number, bitrate: number, codec: 'eac3' | 'ac3') => {
 	module = await getEac3Module();
 
 	initEncoder = module.cwrap('init_encoder', 'number', ['number', 'number', 'number', 'number']);
 	encodeSamples = module.cwrap('encode_samples', 'number', ['number', 'number', 'number', 'number', 'number']);
 	closeEncoder = module.cwrap('close_encoder', null, ['number']);
 
-	const codecId = isEac3 ? AV_CODEC_ID_EAC3 : AV_CODEC_ID_AC3;
+	const codecId = codec === 'eac3' ? AV_CODEC_ID_EAC3 : AV_CODEC_ID_AC3;
 	encoderState = initEncoder(codecId, sampleRate, channels, bitrate);
 
 	if (!encoderState) {
@@ -107,8 +107,7 @@ const onMessage = async (data: { id: number; command: EncoderCommand }) => {
 		const { command } = data;
 
 		if (command.type === 'init') {
-			const isEac3 = true;
-			await init(command.data.sampleRate, command.data.channels, command.data.bitrate, isEac3);
+			await init(command.data.sampleRate, command.data.channels, command.data.bitrate, command.data.codec);
 			responseData = null;
 		} else if (command.type === 'encode') {
 			responseData = encode(command.data.pcmData, command.data.numberOfFrames);

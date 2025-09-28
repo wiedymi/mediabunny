@@ -6,13 +6,13 @@
   ],
   "version": "1.21.0",
   "description": "MPEG-4 Part 2 (XVID/DIVX) decoder extension for Mediabunny.",
-  "main": "./dist/bundles/mediabunny-mpeg4-decoder.mjs",
-  "module": "./dist/bundles/mediabunny-mpeg4-decoder.mjs",
+  "main": "./dist/bundles/mediabunny-mpeg4.mjs",
+  "module": "./dist/bundles/mediabunny-mpeg4.mjs",
   "types": "./dist/modules/src/index.d.ts",
   "exports": {
     "types": "./dist/modules/src/index.d.ts",
-    "import": "./dist/bundles/mediabunny-mpeg4-decoder.mjs",
-    "require": "./dist/bundles/mediabunny-mpeg4-decoder.mjs"
+    "import": "./dist/bundles/mediabunny-mpeg4.mjs",
+    "require": "./dist/bundles/mediabunny-mpeg4.mjs"
   },
   "files": [
     "README.md",

@@ -219,6 +219,18 @@ class Mpeg4Encoder extends CustomVideoEncoder {
 }
 
 /**
+ * The MPEG-4 Part 2 decoder class.
+ * @internal
+ */
+export { Mpeg4Decoder };
+
+/**
+ * The MPEG-4 Part 2 encoder class.
+ * @internal
+ */
+export { Mpeg4Encoder };
+
+/**
  * Registers the MPEG-4 Part 2 (Xvid) decoder, which Mediabunny will then use automatically when applicable.
  * Make sure to call this function before starting any decoding task.
  *

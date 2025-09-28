@@ -53,6 +53,7 @@ class Eac3Decoder extends CustomAudioDecoder {
 			data: {
 				sampleRate: this.config.sampleRate,
 				channels: this.config.numberOfChannels,
+				codec: this.codec as 'eac3' | 'ac3',
 			},
 		});
 	}
@@ -150,6 +151,7 @@ class Eac3Encoder extends CustomAudioEncoder {
 				sampleRate: this.config.sampleRate,
 				channels: this.config.numberOfChannels,
 				bitrate: this.config.bitrate,
+				codec: this.codec as 'eac3' | 'ac3',
 			},
 		});
 

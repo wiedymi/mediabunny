@@ -6,13 +6,13 @@
   ],
   "version": "1.21.0",
   "description": "E-AC-3 (Dolby Digital Plus) and AC-3 decoder/encoder for Mediabunny, based on FFmpeg.",
-  "main": "./dist/bundles/mediabunny-eac3-codec.mjs",
-  "module": "./dist/bundles/mediabunny-eac3-codec.mjs",
+  "main": "./dist/bundles/mediabunny-eac3.mjs",
+  "module": "./dist/bundles/mediabunny-eac3.mjs",
   "types": "./dist/modules/src/index.d.ts",
   "exports": {
     "types": "./dist/modules/src/index.d.ts",
-    "import": "./dist/bundles/mediabunny-eac3-codec.mjs",
-    "require": "./dist/bundles/mediabunny-eac3-codec.mjs"
+    "import": "./dist/bundles/mediabunny-eac3.mjs",
+    "require": "./dist/bundles/mediabunny-eac3.mjs"
   },
   "files": [
     "README.md",

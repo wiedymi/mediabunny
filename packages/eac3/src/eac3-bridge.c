@@ -28,7 +28,9 @@ typedef struct {
 EMSCRIPTEN_KEEPALIVE
 decoder_state* init_decoder(int codec_id, int sample_rate, int channels) {
 	const AVCodec *codec = avcodec_find_decoder(codec_id);
-	if (!codec) return NULL;
+	if (!codec) {
+		return NULL;
+	}
 
 	decoder_state *state = malloc(sizeof(decoder_state));
 	state->ctx = avcodec_alloc_context3(codec);
@@ -62,13 +64,27 @@ int decode_packet(
 	state->packet->size = input_size;
 
 	int ret = avcodec_send_packet(state->ctx, state->packet);
-	if (ret < 0) return ret;
+	if (ret < 0) {
+		return ret;
+	}
 
 	ret = avcodec_receive_frame(state->ctx, state->frame);
-	if (ret < 0) return ret;
+	if (ret < 0) {
+		return ret;
+	}
 
 	int frames = state->frame->nb_samples;
 	int channels = state->frame->ch_layout.nb_channels;
+
+	// Use codec context values if frame values are not set
+	int sample_rate = state->frame->sample_rate;
+	if (sample_rate == 0) {
+		sample_rate = state->ctx->sample_rate;
+	}
+	if (channels == 0) {
+		channels = state->ctx->ch_layout.nb_channels;
+	}
+
 
 	for (int i = 0; i < frames; i++) {
 		for (int ch = 0; ch < channels; ch++) {
@@ -78,7 +94,7 @@ int decode_packet(
 	}
 
 	*out_frames = frames;
-	*out_sample_rate = state->frame->sample_rate;
+	*out_sample_rate = sample_rate;
 	*out_channels = channels;
 
 	av_frame_unref(state->frame);
