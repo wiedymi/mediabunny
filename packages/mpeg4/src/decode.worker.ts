@@ -6,12 +6,8 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-import createModule from '../build/xvid.js';
+import { getXvidModule, type ExtendedEmscriptenModule } from './xvid-loader';
 import type { WorkerCommand, WorkerResponse, WorkerResponseData } from './shared';
-
-type ExtendedEmscriptenModule = EmscriptenModule & {
-	cwrap: typeof cwrap;
-};
 
 type DecoderState = number;
 
@@ -39,7 +35,7 @@ const init = async (w: number, h: number) => {
 	width = w;
 	height = h;
 
-	module = (await createModule()) as ExtendedEmscriptenModule;
+	module = await getXvidModule();
 
 	initDecoder = module.cwrap('init_decoder', 'number', ['number', 'number']);
 	decodeFrame = module.cwrap('decode_frame', 'number', ['number', 'number', 'number', 'number', 'number', 'number', 'number']);

@@ -2,6 +2,7 @@
 
 set -e
 
+ORIGINAL_DIR="$(pwd)"
 FFMPEG_VERSION="7.1.2"
 BUILD_DIR="ffmpeg-build"
 INSTALL_DIR="$(pwd)/eac3-build"
@@ -84,12 +85,67 @@ emmake make install
 echo "Build complete! Libraries installed in $INSTALL_DIR"
 echo "Static libraries:"
 ls -la "$INSTALL_DIR/lib/"*.a
+echo ""
+echo "Copying to lib directory..."
+mkdir -p "$ORIGINAL_DIR/lib"
+if [ -d "$ORIGINAL_DIR/lib" ]; then
+    echo "Directory created: $ORIGINAL_DIR/lib"
+else
+    echo "Failed to create directory: $ORIGINAL_DIR/lib"
+fi
+
+echo "Copying $INSTALL_DIR/lib/libavcodec.a to $ORIGINAL_DIR/lib/libavcodec.a"
+cp "$INSTALL_DIR/lib/libavcodec.a" "$ORIGINAL_DIR/lib/libavcodec.a"
+if [ -f "$ORIGINAL_DIR/lib/libavcodec.a" ]; then
+    echo "Success: libavcodec.a copied successfully."
+else
+    echo "Error: Failed to copy libavcodec.a."
+fi
+
+echo "Copying $INSTALL_DIR/lib/libavutil.a to $ORIGINAL_DIR/lib/libavutil.a"
+cp "$INSTALL_DIR/lib/libavutil.a" "$ORIGINAL_DIR/lib/libavutil.a"
+if [ -f "$ORIGINAL_DIR/lib/libavutil.a" ]; then
+    echo "Success: libavutil.a copied successfully."
+else
+    echo "Error: Failed to copy libavutil.a."
+fi
+
+echo "Copying header files..."
+mkdir -p "$ORIGINAL_DIR/lib"
+
+cp "$INSTALL_DIR/include/libavcodec/avcodec.h" "$ORIGINAL_DIR/lib/"
+cp "$INSTALL_DIR/include/libavcodec/bsf.h" "$ORIGINAL_DIR/lib/"
+cp "$INSTALL_DIR/include/libavcodec/codec.h" "$ORIGINAL_DIR/lib/"
+cp "$INSTALL_DIR/include/libavcodec/codec_desc.h" "$ORIGINAL_DIR/lib/"
+cp "$INSTALL_DIR/include/libavcodec/codec_id.h" "$ORIGINAL_DIR/lib/"
+cp "$INSTALL_DIR/include/libavcodec/codec_par.h" "$ORIGINAL_DIR/lib/"
+cp "$INSTALL_DIR/include/libavcodec/defs.h" "$ORIGINAL_DIR/lib/"
+cp "$INSTALL_DIR/include/libavcodec/packet.h" "$ORIGINAL_DIR/lib/"
+cp "$INSTALL_DIR/include/libavcodec/version.h" "$ORIGINAL_DIR/lib/"
+cp "$INSTALL_DIR/include/libavcodec/version_major.h" "$ORIGINAL_DIR/lib/"
+
+cp "$INSTALL_DIR/include/libavutil/attributes.h" "$ORIGINAL_DIR/lib/"
+cp "$INSTALL_DIR/include/libavutil/avconfig.h" "$ORIGINAL_DIR/lib/"
+cp "$INSTALL_DIR/include/libavutil/avutil.h" "$ORIGINAL_DIR/lib/"
+cp "$INSTALL_DIR/include/libavutil/buffer.h" "$ORIGINAL_DIR/lib/"
+cp "$INSTALL_DIR/include/libavutil/channel_layout.h" "$ORIGINAL_DIR/lib/"
+cp "$INSTALL_DIR/include/libavutil/common.h" "$ORIGINAL_DIR/lib/"
+cp "$INSTALL_DIR/include/libavutil/cpu.h" "$ORIGINAL_DIR/lib/"
+cp "$INSTALL_DIR/include/libavutil/dict.h" "$ORIGINAL_DIR/lib/"
+cp "$INSTALL_DIR/include/libavutil/error.h" "$ORIGINAL_DIR/lib/"
+cp "$INSTALL_DIR/include/libavutil/frame.h" "$ORIGINAL_DIR/lib/"
+cp "$INSTALL_DIR/include/libavutil/intfloat.h" "$ORIGINAL_DIR/lib/"
+cp "$INSTALL_DIR/include/libavutil/log.h" "$ORIGINAL_DIR/lib/"
+cp "$INSTALL_DIR/include/libavutil/macros.h" "$ORIGINAL_DIR/lib/"
+cp "$INSTALL_DIR/include/libavutil/mathematics.h" "$ORIGINAL_DIR/lib/"
+cp "$INSTALL_DIR/include/libavutil/mem.h" "$ORIGINAL_DIR/lib/"
+cp "$INSTALL_DIR/include/libavutil/pixfmt.h" "$ORIGINAL_DIR/lib/"
+cp "$INSTALL_DIR/include/libavutil/rational.h" "$ORIGINAL_DIR/lib/"
+cp "$INSTALL_DIR/include/libavutil/samplefmt.h" "$ORIGINAL_DIR/lib/"
+cp "$INSTALL_DIR/include/libavutil/version.h" "$ORIGINAL_DIR/lib/"
 
 echo ""
-echo "Copying to build directory..."
-cp "$INSTALL_DIR/lib/libavcodec.a" ../build/
-cp "$INSTALL_DIR/lib/libavutil.a" ../build/
-cp "$INSTALL_DIR/include/libavcodec"/*.h ../lib/
-cp "$INSTALL_DIR/include/libavutil"/*.h ../lib/
+echo "Contents of lib directory:"
+ls -la "$ORIGINAL_DIR/lib/"
 
-echo "Done! Libraries ready in packages/eac3-codec/build/"
+echo "Done! Libraries ready in packages/eac3/lib/"

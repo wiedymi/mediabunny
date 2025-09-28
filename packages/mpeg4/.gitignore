@@ -1,2 +1,2 @@
 dist
-*.a
+/buidl/*.a

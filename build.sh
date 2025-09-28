@@ -29,6 +29,10 @@ npm run fix-build-import-paths
 # Creates bundles for all packages
 tsx scripts/bundle.ts
 
+# Copy WASM files to bundle directories for ESM usage
+cp packages/mpeg4/build/*.wasm packages/mpeg4/dist/bundles/ 2>/dev/null || true
+cp packages/eac3/build/*.wasm packages/eac3/dist/bundles/ 2>/dev/null || true
+
 # Declaration file rollup and checks
 api-extractor run
 api-extractor run -c packages/mp3-encoder/api-extractor.json

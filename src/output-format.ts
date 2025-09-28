@@ -919,8 +919,8 @@ export type AviOutputFormatOptions = {
  * AVI file format, based on RIFF.
  *
  * **Note:** MPEG-4 and E-AC-3/AC-3 codecs require their respective extensions
- * ([@mediabunny/mpeg4](https://www.npmjs.com/package/@mediabunny/mpeg4),
- * [@mediabunny/eac3](https://www.npmjs.com/package/@mediabunny/eac3)) to be registered.
+ * ([\@mediabunny/mpeg4](https://www.npmjs.com/package/\@mediabunny/mpeg4),
+ * [\@mediabunny/eac3](https://www.npmjs.com/package/\@mediabunny/eac3)) to be registered.
  *
  * @group Output formats
  * @public
@@ -978,9 +978,9 @@ export class AviOutputFormat extends OutputFormat {
 
 	getSupportedCodecs(): MediaCodec[] {
 		return [
-			...VIDEO_CODECS.filter(codec => ['avc', 'hevc', 'vp8', 'vp9', 'av1'].includes(codec)),
+			...VIDEO_CODECS.filter(codec => ['avc', 'hevc', 'vp8', 'vp9', 'av1', 'mpeg4'].includes(codec)),
 			...AUDIO_CODECS.filter(codec =>
-				['mp3', 'aac', 'pcm-s16', 'pcm-s24', 'pcm-s32', 'pcm-f32', 'pcm-u8', 'ulaw', 'alaw'].includes(codec)
+				['mp3', 'aac', 'vorbis', 'flac', 'ac3', 'pcm-s16', 'pcm-s24', 'pcm-s32', 'pcm-f32', 'pcm-u8', 'ulaw', 'alaw'].includes(codec)
 			),
 		];
 	}

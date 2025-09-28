@@ -1032,6 +1032,9 @@ export class MatroskaDemuxer extends Demuxer {
 							this.currentTrack.info.codec = 'vp9';
 						} else if (codecIdWithoutSuffix === CODEC_STRING_MAP.av1) {
 							this.currentTrack.info.codec = 'av1';
+						} else if (this.currentTrack.codecId === CODEC_STRING_MAP.mpeg4) {
+							this.currentTrack.info.codec = 'mpeg4';
+							this.currentTrack.info.codecDescription = this.currentTrack.codecPrivate;
 						}
 
 						const videoTrack = this.currentTrack as InternalVideoTrack;
@@ -1063,8 +1066,10 @@ export class MatroskaDemuxer extends Demuxer {
 							this.currentTrack.info.codecDescription = this.currentTrack.codecPrivate;
 						} else if (codecIdWithoutSuffix === CODEC_STRING_MAP.ac3) {
 							this.currentTrack.info.codec = 'ac3';
+							this.currentTrack.info.codecDescription = this.currentTrack.codecPrivate;
 						} else if (codecIdWithoutSuffix === CODEC_STRING_MAP.eac3) {
 							this.currentTrack.info.codec = 'eac3';
+							this.currentTrack.info.codecDescription = this.currentTrack.codecPrivate;
 						} else if (this.currentTrack.codecId === 'A_PCM/INT/LIT') {
 							if (this.currentTrack.info.bitDepth === 8) {
 								this.currentTrack.info.codec = 'pcm-u8';

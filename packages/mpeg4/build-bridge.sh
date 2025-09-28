@@ -2,7 +2,7 @@
 
 set -e
 
-emcc src/xvid-bridge.c build/libxvidcore.a \
+emcc src/xvid-bridge.c lib/libxvidcore.a \
 	-o build/xvid.js \
 	-s EXPORTED_FUNCTIONS='["_init_decoder","_decode_frame","_close_decoder","_malloc","_free"]' \
 	-s EXPORTED_RUNTIME_METHODS='["cwrap","HEAPU8"]' \

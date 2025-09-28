@@ -1,5 +1,5 @@
 /*!
- * Copyright (c) 2025-present, Vanilagy and contributors (Wiedy Mi)
+ * Copyright (c) 2025-present, Vanilagy and contributors
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -269,7 +269,11 @@ class AviVideoTrackBacking extends AviTrackBacking implements InputVideoTrackBac
 
 	override getCodec(): VideoCodec | null {
 		const format = this.streamInfo.format as AVIBitmapInfoHeader;
-		return aviVideoFourccToCodec(format.compression);
+		let codec = aviVideoFourccToCodec(format.compression);
+		if (!codec || format.compression.trim() === '') {
+			codec = aviVideoFourccToCodec(this.streamInfo.header.fccHandler);
+		}
+		return codec;
 	}
 
 	getCodedWidth(): number {
@@ -525,9 +529,7 @@ export class AVIDemuxer extends Demuxer {
 	private async parseStreamList(position: number, size: number): Promise<void> {
 		const endPos = position + size;
 		let currentPos = position;
-		const streamInfo: StreamInfo = {
-			header: {} as AVIStreamHeader,
-			format: {} as AVIBitmapInfoHeader | AVIWaveFormatEx,
+		const streamInfo: Partial<StreamInfo> & { packets: PacketInfo[]; index: number } = {
 			packets: [],
 			index: this.streams.length
 		};
@@ -564,7 +566,13 @@ export class AVIDemuxer extends Demuxer {
 		}
 
 		if (streamInfo.header && streamInfo.format) {
-			this.streams.push(streamInfo);
+			const completeStream: StreamInfo = {
+				header: streamInfo.header,
+				format: streamInfo.format,
+				packets: streamInfo.packets,
+				index: streamInfo.index
+			};
+			this.streams.push(completeStream);
 		}
 	}
 
@@ -605,7 +613,10 @@ export class AVIDemuxer extends Demuxer {
 
 			if (header.fccType === 'vids' && 'compression' in format) {
 				const bmpInfo = format as AVIBitmapInfoHeader;
-				const codec = aviVideoFourccToCodec(bmpInfo.compression);
+				let codec = aviVideoFourccToCodec(bmpInfo.compression);
+				if (!codec || bmpInfo.compression.trim() === '') {
+					codec = aviVideoFourccToCodec(header.fccHandler);
+				}
 
 				if (codec) {
 					const backing = new AviVideoTrackBacking(this, stream);

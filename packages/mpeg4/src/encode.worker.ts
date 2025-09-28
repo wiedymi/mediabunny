@@ -6,11 +6,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-import createModule from '../build/xvid.js';
-
-type ExtendedEmscriptenModule = EmscriptenModule & {
-	cwrap: typeof cwrap;
-};
+import { getXvidModule, type ExtendedEmscriptenModule } from './xvid-loader';
 
 type EncoderState = number;
 
@@ -36,7 +32,7 @@ const init = async (w: number, h: number, bitrate: number, fpsNum: number, fpsDe
 	width = w;
 	height = h;
 
-	module = (await createModule()) as ExtendedEmscriptenModule;
+	module = await getXvidModule();
 
 	initEncoder = module.cwrap('init_encoder', 'number', ['number', 'number', 'number', 'number', 'number']);
 	encodeFrame = module.cwrap('encode_frame', 'number', ['number', 'number', 'number', 'number', 'number']);

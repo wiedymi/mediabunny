@@ -6,12 +6,8 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-import createModule from '../build/eac3.js';
+import { getEac3Module, type ExtendedEmscriptenModule } from './eac3-loader';
 import type { DecoderCommand, DecoderResponseData, WorkerResponse } from './shared';
-
-type ExtendedEmscriptenModule = EmscriptenModule & {
-	cwrap: typeof cwrap;
-};
 
 type DecoderState = number;
 
@@ -43,7 +39,7 @@ const init = async (sr: number, ch: number, isEac3: boolean) => {
 	sampleRate = sr;
 	channels = ch;
 
-	module = (await createModule()) as ExtendedEmscriptenModule;
+	module = await getEac3Module();
 
 	initDecoder = module.cwrap('init_decoder', 'number', ['number', 'number', 'number']);
 	decodePacket = module.cwrap('decode_packet', 'number', ['number', 'number', 'number', 'number', 'number', 'number', 'number']);

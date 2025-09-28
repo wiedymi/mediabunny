@@ -1,7 +1,9 @@
 {
 	"extends": "../../../tsconfig.json",
 	"compilerOptions": {
+		"rootDir": "..",
 		"outDir": "../dist/modules",
+		"composite": true,
 		"declaration": true,
 		"declarationMap": true,
 		"stripInternal": true,
@@ -12,11 +14,12 @@
 		"skipLibCheck": true,
 		"paths": {
 			"mediabunny": ["../../../src/index.ts"],
-			"*.worker": ["./worker-stub.d.ts"]
+			"*.worker?url": ["./worker-stub.d.ts"]
 		}
 	},
 	"include": [
-		"**/*"
+		"**/*",
+		"../build/**/*"
 	],
 	"references": [
 		{ "path": "../../../src" }

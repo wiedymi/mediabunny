@@ -19,7 +19,8 @@
     "package.json",
     "LICENSE",
     "dist",
-    "src"
+    "src",
+    "dist/bundles/*.wasm"
   ],
   "sideEffects": false,
   "license": "MPL-2.0",

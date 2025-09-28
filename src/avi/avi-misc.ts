@@ -1,5 +1,5 @@
 /*!
- * Copyright (c) 2025-present, Vanilagy and contributors (Wiedy Mi)
+ * Copyright (c) 2025-present, Vanilagy and contributors
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -84,7 +84,10 @@ const VIDEO_FOURCC_TO_CODEC: Record<string, VideoCodec> = {
 	'h264': 'avc',
 	'AVC1': 'avc',
 	'avc1': 'avc',
+	'H265': 'hevc',
+	'h265': 'hevc',
 	'HEVC': 'hevc',
+	'hevc': 'hevc',
 	'hev1': 'hevc',
 	'hvc1': 'hevc',
 	'VP80': 'vp8',
@@ -110,6 +113,7 @@ const AUDIO_FORMAT_TAG_TO_CODEC: Record<number, AudioCodec> = {
 	0x0092: 'ac3',
 	0x00FF: 'aac',
 	0x2000: 'aac',
+	0x566F: 'vorbis',
 	0x674F: 'vorbis',
 	0xF1AC: 'flac',
 };
@@ -124,7 +128,19 @@ export function aviAudioFormatTagToCodec(formatTag: number): AudioCodec | null {
 	return codec as AudioCodec || null;
 }
 
+const CODEC_TO_PREFERRED_FOURCC: Partial<Record<VideoCodec, string>> = {
+	'avc': 'H264',
+	'hevc': 'H265',
+	'vp8': 'VP80',
+	'vp9': 'VP90',
+	'av1': 'AV01',
+	'mpeg4': 'XVID',
+};
+
 export function aviVideoCodecToFourcc(codec: VideoCodec): string | null {
+	const preferred = CODEC_TO_PREFERRED_FOURCC[codec];
+	if (preferred) return preferred;
+
 	for (const [fourccStr, codecId] of Object.entries(VIDEO_FOURCC_TO_CODEC)) {
 		if (codecId === codec) {
 			return fourccStr;

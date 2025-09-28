@@ -539,8 +539,8 @@ export const FLAC = new FlacInputFormat();
  * Do not instantiate this class; use the {@link AVI} singleton instead.
  *
  * **Note:** MPEG-4 and E-AC-3/AC-3 codecs require their respective extensions
- * ([@mediabunny/mpeg4](https://www.npmjs.com/package/@mediabunny/mpeg4),
- * [@mediabunny/eac3](https://www.npmjs.com/package/@mediabunny/eac3)) to be registered.
+ * ([\@mediabunny/mpeg4](https://www.npmjs.com/package/\@mediabunny/mpeg4),
+ * [\@mediabunny/eac3](https://www.npmjs.com/package/\@mediabunny/eac3)) to be registered.
  *
  * @group Input formats
  * @public

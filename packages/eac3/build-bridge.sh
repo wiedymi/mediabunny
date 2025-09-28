@@ -2,7 +2,7 @@
 
 set -e
 
-emcc src/eac3-bridge.c build/libavcodec.a build/libavutil.a \
+emcc src/eac3-bridge.c lib/libavcodec.a lib/libavutil.a \
 	-o build/eac3.js \
 	-s EXPORTED_FUNCTIONS='["_init_decoder","_decode_packet","_flush_decoder","_close_decoder","_init_encoder","_encode_samples","_close_encoder","_malloc","_free"]' \
 	-s EXPORTED_RUNTIME_METHODS='["cwrap","HEAPU8","HEAPF32"]' \
