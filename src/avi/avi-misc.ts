@@ -107,8 +107,11 @@ const AUDIO_FORMAT_TAG_TO_CODEC: Record<number, AudioCodec> = {
 	0x0006: 'alaw',
 	0x0007: 'ulaw',
 	0x0055: 'mp3',
+	0x0092: 'ac3',
 	0x00FF: 'aac',
 	0x2000: 'aac',
+	0x674F: 'vorbis',
+	0xF1AC: 'flac',
 };
 
 export function aviVideoFourccToCodec(fourccStr: string): VideoCodec | null {
