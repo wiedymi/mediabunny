@@ -917,6 +917,11 @@ export type AviOutputFormatOptions = {
 
 /**
  * AVI file format, based on RIFF.
+ *
+ * **Note:** MPEG-4 and E-AC-3/AC-3 codecs require their respective extensions
+ * ([@mediabunny/mpeg4](https://www.npmjs.com/package/@mediabunny/mpeg4),
+ * [@mediabunny/eac3](https://www.npmjs.com/package/@mediabunny/eac3)) to be registered.
+ *
  * @group Output formats
  * @public
  */

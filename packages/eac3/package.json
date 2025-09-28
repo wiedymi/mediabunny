@@ -1,6 +1,9 @@
 {
   "name": "@mediabunny/eac3",
-  "author": "Vanilagy",
+  "author": "Vanilagy and contributors",
+  "contributors": [
+    "Wiedy Mi <https://github.com/wiedymi>"
+  ],
   "version": "1.21.0",
   "description": "E-AC-3 (Dolby Digital Plus) and AC-3 decoder/encoder for Mediabunny, based on FFmpeg.",
   "main": "./dist/bundles/mediabunny-eac3-codec.mjs",

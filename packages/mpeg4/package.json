@@ -1,6 +1,9 @@
 {
   "name": "@mediabunny/mpeg4",
-  "author": "Vanilagy",
+  "author": "Vanilagy and contributors",
+  "contributors": [
+    "Wiedy Mi <https://github.com/wiedymi>"
+  ],
   "version": "1.21.0",
   "description": "MPEG-4 Part 2 (XVID/DIVX) decoder extension for Mediabunny.",
   "main": "./dist/bundles/mediabunny-mpeg4-decoder.mjs",
