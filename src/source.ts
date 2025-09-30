@@ -306,7 +306,7 @@ export type UrlSourceOptions = {
 	 * failed. If the function returns `null`, no more retries will be made.
 	 *
 	 * By default, it uses an exponential backoff algorithm that never gives up unless
-	 * a CORS error is suspected (`fetch()` did reject even though `navigator.onLine` is true)
+	 * a CORS error is suspected (`fetch()` did reject, `navigator.onLine` is true and origin is different)
 	 */
 	getRetryDelay?: (previousAttempts: number, error: unknown, url: string | URL | Request) => number | null;
 
