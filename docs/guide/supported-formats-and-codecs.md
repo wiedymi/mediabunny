@@ -41,6 +41,8 @@ Mediabunny ships with built-in decoders and encoders for all audio PCM codecs, m
 - `'mp3'` - MP3
 - `'vorbis'` - Vorbis
 - `'flac'` - Free Lossless Audio Codec (FLAC)
+- `'eac3'` - Enhanced AC-3 (E-AC-3) / Dolby Digital Plus (requires [@mediabunny/eac3](https://www.npmjs.com/package/@mediabunny/eac3) extension)
+- `'ac3'` - AC-3 / Dolby Digital (requires [@mediabunny/eac3](https://www.npmjs.com/package/@mediabunny/eac3) extension)
 - `'pcm-u8'` - 8-bit unsigned PCM
 - `'pcm-s8'` - 8-bit signed PCM
 - `'pcm-s16'` - 16-bit little-endian signed PCM
@@ -77,6 +79,8 @@ Not all codecs can be used with all containers. The following table specifies th
 | `'mp3'`        |    ✓     |   ✓   |   ✓   |           |   ✓   |       |   ✓   |       |       |       |
 | `'vorbis'`     |    ✓     |   ✓   |   ✓   |     ✓     |   ✓   |   ✓   |       |       |       |       |
 | `'flac'`       |    ✓     |   ✓   |   ✓   |           |   ✓   |       |       |       |       |   ✓   |
+| `'eac3'`       |    ✓     |   ✓   |   ✓   |           |       |       |       |       |       |       |
+| `'ac3'`        |    ✓     |   ✓   |   ✓   |           |   ✓   |       |       |       |       |       |
 | `'pcm-u8'`     |          |   ✓   |   ✓   |           |       |       |       |   ✓   |       |       |
 | `'pcm-s8'`     |          |   ✓   |       |           |       |       |       |       |       |       |
 | `'pcm-s16'`    |    ✓     |   ✓   |   ✓   |           |   ✓   |       |       |   ✓   |       |       |

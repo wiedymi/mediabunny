@@ -9,8 +9,10 @@ import {
 	WrappedCanvas,
 } from 'mediabunny';
 import { registerMpeg4Decoder } from '@mediabunny/mpeg4';
+import { registerEac3Decoder } from '@mediabunny/eac3';
 
 registerMpeg4Decoder();
+registerEac3Decoder();
 
 import SampleFileUrl from '../../docs/assets/big-buck-bunny-trimmed.mp4';
 (document.querySelector('#sample-file-download') as HTMLAnchorElement).href = SampleFileUrl;

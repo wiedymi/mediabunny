@@ -968,6 +968,10 @@ export class IsobmffDemuxer extends Demuxer {
 							track.info.codec = 'ulaw';
 						} else if (lowercaseBoxName === 'alaw') {
 							track.info.codec = 'alaw';
+						} else if (lowercaseBoxName === 'ac-3') {
+							track.info.codec = 'ac3';
+						} else if (lowercaseBoxName === 'ec-3') {
+							track.info.codec = 'eac3';
 						} else {
 							console.warn(`Unsupported audio codec (sample entry type '${sampleBoxInfo.name}').`);
 						}

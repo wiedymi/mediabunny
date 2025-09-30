@@ -9,10 +9,13 @@ import { ALL_FORMATS, AVI, AviOutputFormat } from '../../src/index.js';
 import { EncodedVideoPacketSource, EncodedAudioPacketSource } from '../../src/index.js';
 import { EncodedPacket } from '../../src/index.js';
 import { registerMpeg4Decoder, registerMpeg4Encoder } from '../../packages/mpeg4/src/index.js';
+import { registerEac3Decoder, registerEac3Encoder } from '../../packages/eac3/src/index.js';
 
 beforeAll(() => {
 	registerMpeg4Decoder();
 	registerMpeg4Encoder();
+	registerEac3Decoder();
+	registerEac3Encoder();
 });
 
 test('Should be able to detect AVI format', async () => {
@@ -148,6 +151,7 @@ test('Should properly handle AVI codec mappings', async () => {
 	expect(supportedAudioCodecs).toContain('aac');
 	expect(supportedAudioCodecs).toContain('vorbis');
 	expect(supportedAudioCodecs).toContain('flac');
+	expect(supportedAudioCodecs).toContain('ac3');
 	expect(supportedAudioCodecs).toContain('pcm-s16');
 	expect(supportedAudioCodecs).toContain('pcm-f32');
 	expect(supportedAudioCodecs).toContain('ulaw');
