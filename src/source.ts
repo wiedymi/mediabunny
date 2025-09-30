@@ -254,7 +254,6 @@ export class BlobSource extends Source {
 }
 
 const URL_SOURCE_MIN_LOAD_AMOUNT = 0.5 * 2 ** 20; // 0.5 MiB
-
 const DEFAULT_RETRY_DELAY
 	= ((previousAttempts, error) => {
 		// Check if this could be a CORS error. If so, we cannot recover from it and
