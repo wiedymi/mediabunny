@@ -7,4 +7,3 @@ node_modules
 *.tsbuildinfo
 
 packages/mp3-encoder/dist
-packages/mpeg4/dist
