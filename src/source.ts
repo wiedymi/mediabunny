@@ -254,8 +254,25 @@ export class BlobSource extends Source {
 }
 
 const URL_SOURCE_MIN_LOAD_AMOUNT = 0.5 * 2 ** 20; // 0.5 MiB
+
 const DEFAULT_RETRY_DELAY
-	= (previousAttempts => Math.min(2 ** (previousAttempts - 2), 16)) satisfies UrlSourceOptions['getRetryDelay'];
+	= ((previousAttempts, error) => {
+		// Check if this could be a CORS error. If so, we cannot recover from it and
+		// should not attempt to retry.
+		// CORS errors are intentionally not opaque, so we need to rely on heuristics.
+		const couldBeCorsError = error instanceof Error && (
+			error.message.includes('Failed to fetch') // Chrome
+			|| error.message.includes('Load failed') // Safari
+			|| error.message.includes('NetworkError when attempting to fetch resource') // Firefox
+		);
+
+		// Being offline would lead to the same error, in that case it would not be a CORS error
+		if (couldBeCorsError && navigator.onLine) {
+			return null;
+		}
+
+		return Math.min(2 ** (previousAttempts - 2), 16);
+	}) satisfies UrlSourceOptions['getRetryDelay'];
 
 /**
  * Options for {@link UrlSource}.
@@ -274,7 +291,8 @@ export type UrlSourceOptions = {
 	 * with the number of previous, unsuccessful attempts, as well as with the error with which the previous request
 	 * failed. If the function returns `null`, no more retries will be made.
 	 *
-	 * By default, it uses an exponential backoff algorithm that never fully gives up.
+	 * By default, it uses an exponential backoff algorithm that never gives up unless
+	 * a CORS error is suspected (`fetch()` did reject even though `navigator.onLine` is true)
 	 */
 	getRetryDelay?: (previousAttempts: number, error: unknown) => number | null;
 
