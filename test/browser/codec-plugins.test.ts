@@ -3,10 +3,13 @@ import { Input } from '../../src/input.js';
 import { UrlSource } from '../../src/source.js';
 import { ALL_FORMATS, MP4, QTFF, MATROSKA, AVI } from '../../src/input-format.js';
 import { registerMpeg4Decoder, registerMpeg4Encoder } from '../../packages/mpeg4/src/index.js';
+import { registerEac3Decoder, registerEac3Encoder } from '../../packages/eac3/src/index.js';
 
 beforeAll(() => {
 	registerMpeg4Decoder();
 	registerMpeg4Encoder();
+	registerEac3Decoder();
+	registerEac3Encoder();
 });
 
 test('Can read MP4 with mpeg4 video codec', async () => {
@@ -93,4 +96,59 @@ test('Can read AVI with various video codecs', async () => {
 		expect(audioTracks.length).toBeGreaterThan(0);
 		expect(audioTracks[0]!.codec).toBe(audioCodec);
 	}
+});
+
+test('Can read MP4 with eac3 audio codec', async () => {
+	using input = new Input({
+		source: new UrlSource('/mp4/avc-eac3.mp4'),
+		formats: ALL_FORMATS,
+	});
+
+	expect(await input.getFormat()).toBe(MP4);
+
+	const videoTracks = await input.getVideoTracks();
+	expect(videoTracks[0]!.codec).toBe('avc');
+
+	const audioTracks = await input.getAudioTracks();
+	expect(audioTracks.length).toBeGreaterThan(0);
+	expect(audioTracks[0]!.codec).toBe('eac3');
+});
+
+test('Can read MP4 with ac3 audio codec', async () => {
+	using input = new Input({
+		source: new UrlSource('/mp4/avc-ac3.mp4'),
+		formats: ALL_FORMATS,
+	});
+
+	expect(await input.getFormat()).toBe(MP4);
+
+	const audioTracks = await input.getAudioTracks();
+	expect(audioTracks.length).toBeGreaterThan(0);
+	expect(audioTracks[0]!.codec).toBe('ac3');
+});
+
+test('Can read MOV with eac3 audio codec', async () => {
+	using input = new Input({
+		source: new UrlSource('/mov/avc-eac3.mov'),
+		formats: ALL_FORMATS,
+	});
+
+	expect(await input.getFormat()).toBe(QTFF);
+
+	const audioTracks = await input.getAudioTracks();
+	expect(audioTracks.length).toBeGreaterThan(0);
+	expect(audioTracks[0]!.codec).toBe('eac3');
+});
+
+test('Can read MKV with ac3 audio codec', async () => {
+	using input = new Input({
+		source: new UrlSource('/mkv/avc-ac3.mkv'),
+		formats: ALL_FORMATS,
+	});
+
+	expect(await input.getFormat()).toBe(MATROSKA);
+
+	const audioTracks = await input.getAudioTracks();
+	expect(audioTracks.length).toBeGreaterThan(0);
+	expect(audioTracks[0]!.codec).toBe('ac3');
 });

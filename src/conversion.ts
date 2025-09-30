@@ -648,6 +648,11 @@ export class Conversion {
 						`\nThe @mediabunny/mpeg4 extension package provides support for encoding and decoding MPEG-4 Part 2.`,
 					);
 				}
+				if (codecs.includes('ac3') || codecs.includes('eac3')) {
+					elements.push(
+						`\nThe @mediabunny/eac3 extension package provides support for encoding and decoding AC-3 and E-AC-3.`,
+					);
+				}
 			} else {
 				elements.push('\nCheck the discardedTracks field for more info.');
 			}

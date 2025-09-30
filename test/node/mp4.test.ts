@@ -5,10 +5,13 @@
 import { expect, test, beforeAll } from 'vitest';
 import { Input, ALL_FORMATS, MP4, Mp4OutputFormat } from '../../src/index.js';
 import { registerMpeg4Decoder, registerMpeg4Encoder } from '../../packages/mpeg4/src/index.js';
+import { registerEac3Decoder, registerEac3Encoder } from '../../packages/eac3/src/index.js';
 
 beforeAll(() => {
 	registerMpeg4Decoder();
 	registerMpeg4Encoder();
+	registerEac3Decoder();
+	registerEac3Encoder();
 });
 
 test('Should properly handle MP4 codec mappings', async () => {
@@ -28,14 +31,18 @@ test('Should properly handle MP4 codec mappings', async () => {
 	expect(supportedAudioCodecs).toContain('mp3');
 	expect(supportedAudioCodecs).toContain('vorbis');
 	expect(supportedAudioCodecs).toContain('flac');
+	expect(supportedAudioCodecs).toContain('eac3');
+	expect(supportedAudioCodecs).toContain('ac3');
 
 	expect(format.fileExtension).toBe('.mp4');
 	expect(format.mimeType).toBe('video/mp4');
 });
 
-test('Should read MP4 files with mpeg4 codec', async () => {
+test('Should read MP4 files with mpeg4 and ac3/eac3 codecs', async () => {
 	const testFiles = [
 		{ file: 'mpeg4-aac.mp4', expectedVideoCodec: 'mpeg4', expectedAudioCodec: 'aac' },
+		{ file: 'avc-eac3.mp4', expectedVideoCodec: 'avc', expectedAudioCodec: 'eac3' },
+		{ file: 'avc-ac3.mp4', expectedVideoCodec: 'avc', expectedAudioCodec: 'ac3' },
 	];
 
 	for (const { file, expectedVideoCodec, expectedAudioCodec } of testFiles) {

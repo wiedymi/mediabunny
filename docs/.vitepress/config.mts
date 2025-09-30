@@ -85,6 +85,7 @@ export default withMermaid({
 					items: [
 						{ text: 'mp3-encoder', link: '/guide/extensions/mp3-encoder' },
 						{ text: 'mpeg4', link: '/guide/extensions/mpeg4' },
+						{ text: 'eac3', link: '/guide/extensions/eac3' },
 					],
 				},
 			],
