@@ -181,9 +181,9 @@ Use the `codec` property to control the codec of the output track. This should b
 
 Use the `bitrate` property to control the bitrate of the output video. For example, you can use this field to compress the video track. Accepted values are the number of bits per second or a [subjective quality](./media-sources#subjective-qualities). If this property is set, transcoding will always happen. If this property is not set but transcoding is still required, `QUALITY_HIGH` will be used as the value.
 
-Use the `keyFrameInterval` property to control the interval in seconds between key frames in the output video.
+Use the `keyFrameInterval` property to control the maximum interval in seconds between key frames in the output video. Setting this fields forces a transcode.
 
-If you want to prevent direct copying of media data and force a transcoding step, use `forceTranscode: true`. Setting `keyFrameInterval` or `frameRate` will automatically force transcoding, even if `forceTranscode` is not explicitly set to `true`.
+If you want to prevent direct copying of media data and force a transcoding step, use `forceTranscode: true`.
 
 ## Audio options
 

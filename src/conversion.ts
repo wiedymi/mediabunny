@@ -167,8 +167,11 @@ export type ConversionVideoOptions = {
 	 */
 	alpha?: 'discard' | 'keep';
 	/**
-	 * The desired interval in seconds between key frames in the output video.
-	 * Setting this value will force transcoding (even if `forceTranscode` is not explicitly set to `true`).
+	 * The interval, in seconds, of how often frames are encoded as a key frame. The default is 5 seconds. Frequent key
+	 * frames improve seeking behavior but increase file size. When using multiple video tracks, you should give them
+	 * all the same key frame interval.
+	 *
+	 * Setting this fields forces a transcode.
 	 */
 	keyFrameInterval?: number;
 	/** When `true`, video will always be re-encoded instead of directly copying over the encoded samples. */
@@ -259,9 +262,9 @@ const validateVideoOptions = (videoOptions: ConversionVideoOptions | undefined) 
 	}
 	if (
 		videoOptions?.keyFrameInterval !== undefined
-		&& (!Number.isFinite(videoOptions.keyFrameInterval) || videoOptions.keyFrameInterval <= 0)
+		&& (!Number.isFinite(videoOptions.keyFrameInterval) || videoOptions.keyFrameInterval < 0)
 	) {
-		throw new TypeError('options.video.keyFrameInterval, when provided, must be a finite positive number.');
+		throw new TypeError('config.keyFrameInterval, when provided, must be a non-negative number.');
 	}
 };
 
