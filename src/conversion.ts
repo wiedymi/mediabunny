@@ -166,6 +166,11 @@ export type ConversionVideoOptions = {
 	 * VP9.
 	 */
 	alpha?: 'discard' | 'keep';
+	/**
+	 * The desired interval in seconds between key frames in the output video.
+	 * Setting this value will force transcoding (even if `forceTranscode` is not explicitly set to `true`).
+	 */
+	keyFrameInterval?: number;
 	/** When `true`, video will always be re-encoded instead of directly copying over the encoded samples. */
 	forceTranscode?: boolean;
 };
@@ -251,6 +256,12 @@ const validateVideoOptions = (videoOptions: ConversionVideoOptions | undefined) 
 	}
 	if (videoOptions?.alpha !== undefined && !['discard', 'keep'].includes(videoOptions.alpha)) {
 		throw new TypeError('options.video.alpha, when provided, must be either \'discard\' or \'keep\'.');
+	}
+	if (
+		videoOptions?.keyFrameInterval !== undefined
+		&& (!Number.isFinite(videoOptions.keyFrameInterval) || videoOptions.keyFrameInterval <= 0)
+	) {
+		throw new TypeError('options.video.keyFrameInterval, when provided, must be a finite positive number.');
 	}
 };
 
@@ -775,7 +786,8 @@ export class Conversion {
 		const needsTranscode = !!trackOptions.forceTranscode
 			|| this._startTimestamp > 0
 			|| firstTimestamp < 0
-			|| !!trackOptions.frameRate;
+			|| !!trackOptions.frameRate
+			|| trackOptions.keyFrameInterval !== undefined;
 		let needsRerender = width !== originalWidth
 			|| height !== originalHeight
 			|| (totalRotation !== 0 && !outputSupportsRotation)
@@ -858,6 +870,7 @@ export class Conversion {
 			const encodingConfig: VideoEncodingConfig = {
 				codec: encodableCodec,
 				bitrate,
+				keyFrameInterval: trackOptions.keyFrameInterval,
 				sizeChangeBehavior: trackOptions.fit ?? 'passThrough',
 				alpha,
 				onEncodedPacket: sample => this._reportProgress(track.id, sample.timestamp + sample.duration),
