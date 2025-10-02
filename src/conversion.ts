@@ -167,6 +167,14 @@ export type ConversionVideoOptions = {
 	 * VP9.
 	 */
 	alpha?: 'discard' | 'keep';
+	/**
+	 * The interval, in seconds, of how often frames are encoded as a key frame. The default is 5 seconds. Frequent key
+	 * frames improve seeking behavior but increase file size. When using multiple video tracks, you should give them
+	 * all the same key frame interval.
+	 *
+	 * Setting this fields forces a transcode.
+	 */
+	keyFrameInterval?: number;
 	/** When `true`, video will always be re-encoded instead of directly copying over the encoded samples. */
 	forceTranscode?: boolean;
 };
@@ -252,6 +260,12 @@ const validateVideoOptions = (videoOptions: ConversionVideoOptions | undefined) 
 	}
 	if (videoOptions?.alpha !== undefined && !['discard', 'keep'].includes(videoOptions.alpha)) {
 		throw new TypeError('options.video.alpha, when provided, must be either \'discard\' or \'keep\'.');
+	}
+	if (
+		videoOptions?.keyFrameInterval !== undefined
+		&& (!Number.isFinite(videoOptions.keyFrameInterval) || videoOptions.keyFrameInterval < 0)
+	) {
+		throw new TypeError('config.keyFrameInterval, when provided, must be a non-negative number.');
 	}
 };
 
@@ -853,7 +867,8 @@ export class Conversion {
 		const needsTranscode = !!trackOptions.forceTranscode
 			|| this._startTimestamp > 0
 			|| firstTimestamp < 0
-			|| !!trackOptions.frameRate;
+			|| !!trackOptions.frameRate
+			|| trackOptions.keyFrameInterval !== undefined;
 		let needsRerender = width !== originalWidth
 			|| height !== originalHeight
 			|| (totalRotation !== 0 && !outputSupportsRotation)
@@ -936,6 +951,7 @@ export class Conversion {
 			const encodingConfig: VideoEncodingConfig = {
 				codec: encodableCodec,
 				bitrate,
+				keyFrameInterval: trackOptions.keyFrameInterval,
 				sizeChangeBehavior: trackOptions.fit ?? 'passThrough',
 				alpha,
 				onEncodedPacket: sample => this._reportProgress(track.id, sample.timestamp + sample.duration),
