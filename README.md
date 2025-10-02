@@ -1,5 +1,5 @@
 > [!NOTE]
-> I'm on vacation until 18 October, so expect slow or no replies to issues during that time!
+> I'm on vacation until 18 October, so expect slow or no replies to issues during that time. 🏖️
 
 # Mediabunny - JavaScript media toolkit
 
