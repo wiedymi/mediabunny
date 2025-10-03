@@ -8,7 +8,6 @@ emcc src/eac3-bridge.c lib/libavcodec.a lib/libavutil.a \
 	-s EXPORTED_RUNTIME_METHODS='["cwrap","HEAPU8","HEAPF32"]' \
 	-s MODULARIZE=1 \
 	-s EXPORT_ES6=1 \
-	-s SINGLE_FILE=1 \
 	-s ALLOW_MEMORY_GROWTH=1 \
 	-s INITIAL_MEMORY=33554432 \
 	-s FILESYSTEM=0 \
