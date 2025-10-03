@@ -6,7 +6,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-import { getXvidModule, type ExtendedEmscriptenModule } from './xvid-loader.js';
+import { getXvidModule, type ExtendedEmscriptenModule } from './xvid-loader';
 
 type EncoderState = number;
 

@@ -8,21 +8,20 @@
   "version": "1.21.0",
   "description": "MPEG-4 Part 2 (XVID/DIVX) decoder extension for Mediabunny.",
   "main": "./dist/bundles/mediabunny-mpeg4.js",
-  "module": "./dist/modules/src/index.js",
+  "module": "./dist/bundles/mediabunny-mpeg4.mjs",
   "types": "./dist/modules/src/index.d.ts",
   "exports": {
     "types": "./dist/modules/src/index.d.ts",
-    "import": "./dist/modules/src/index.js",
+    "import": "./dist/bundles/mediabunny-mpeg4.mjs",
     "require": "./dist/bundles/mediabunny-mpeg4.js"
   },
   "files": [
     "README.md",
     "package.json",
     "LICENSE",
-    "dist",
-    "src",
-    "dist/bundles/*.wasm",
-    "dist/modules/src/*.wasm"
+    "dist/bundles",
+    "dist/modules/src/*.d.ts",
+    "src"
   ],
   "sideEffects": false,
   "license": "MPL-2.0",

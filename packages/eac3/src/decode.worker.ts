@@ -6,8 +6,8 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-import { getEac3Module, type ExtendedEmscriptenModule } from './eac3-loader.js';
-import type { DecoderCommand, DecoderResponseData, WorkerResponse } from './shared.js';
+import { getEac3Module, type ExtendedEmscriptenModule } from './eac3-loader';
+import type { DecoderCommand, DecoderResponseData, WorkerResponse } from './shared';
 
 type DecoderState = number;
 
