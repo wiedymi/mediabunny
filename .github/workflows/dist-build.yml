@@ -1,0 +1,73 @@
+name: Build and Deploy to Dist Branch
+
+on:
+  push:
+    branches:
+      - darkbunny
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout darkbunny branch
+        uses: actions/checkout@v4
+        with:
+          ref: darkbunny
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run build
+        run: npm run build
+
+      - name: Prepare dist branch content
+        run: |
+          # Create temporary directory for dist branch content
+          mkdir -p /tmp/dist-branch
+
+          # Copy root package dist and files
+          cp -r dist /tmp/dist-branch/
+          cp package.json /tmp/dist-branch/
+          cp README.md /tmp/dist-branch/
+          cp LICENSE /tmp/dist-branch/
+
+          # Copy workspace packages with their dist folders
+          mkdir -p /tmp/dist-branch/packages/mp3-encoder
+          mkdir -p /tmp/dist-branch/packages/mpeg4
+          mkdir -p /tmp/dist-branch/packages/eac3
+
+          cp -r packages/mp3-encoder/dist /tmp/dist-branch/packages/mp3-encoder/
+          cp packages/mp3-encoder/package.json /tmp/dist-branch/packages/mp3-encoder/
+          cp packages/mp3-encoder/README.md /tmp/dist-branch/packages/mp3-encoder/ 2>/dev/null || true
+          cp packages/mp3-encoder/LICENSE /tmp/dist-branch/packages/mp3-encoder/ 2>/dev/null || true
+
+          cp -r packages/mpeg4/dist /tmp/dist-branch/packages/mpeg4/
+          cp packages/mpeg4/package.json /tmp/dist-branch/packages/mpeg4/
+          cp packages/mpeg4/README.md /tmp/dist-branch/packages/mpeg4/ 2>/dev/null || true
+          cp packages/mpeg4/LICENSE /tmp/dist-branch/packages/mpeg4/ 2>/dev/null || true
+
+          cp -r packages/eac3/dist /tmp/dist-branch/packages/eac3/
+          cp packages/eac3/package.json /tmp/dist-branch/packages/eac3/
+          cp packages/eac3/README.md /tmp/dist-branch/packages/eac3/ 2>/dev/null || true
+          cp packages/eac3/LICENSE /tmp/dist-branch/packages/eac3/ 2>/dev/null || true
+
+      - name: Deploy to darkbunny-dist branch
+        run: |
+          cd /tmp/dist-branch
+          git init
+          git config user.name "${{ github.actor }}"
+          git config user.email "${{ github.actor }}@users.noreply.github.com"
+          git checkout -b darkbunny-dist
+          git add -A
+          git commit -m "Build from darkbunny@${{ github.sha }}"
+          git remote add origin https://darkbunny:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+          git push -f origin darkbunny-dist
