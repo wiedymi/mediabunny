@@ -15,9 +15,6 @@ const createWorker = (workerPath: string): Worker => {
 	return new Worker(url, { type: 'module' });
 };
 
-export const AV_CODEC_ID_AC3 = 0x15003;
-export const AV_CODEC_ID_EAC3 = 0x15028;
-
 class Eac3Decoder extends CustomAudioDecoder {
 	private worker: Worker | null = null;
 	private nextMessageId = 0;
