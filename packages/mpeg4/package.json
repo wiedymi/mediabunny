@@ -21,7 +21,8 @@
     "LICENSE",
     "dist",
     "src",
-    "dist/bundles/*.wasm"
+    "dist/bundles/*.wasm",
+    "dist/modules/src/*.wasm"
   ],
   "sideEffects": false,
   "license": "MPL-2.0",

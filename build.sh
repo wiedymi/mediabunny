@@ -20,7 +20,9 @@ tsc -p packages/eac3/src
 
 # Copy WASM files to dist (TypeScript doesn't copy non-TS/JS files)
 cp packages/mpeg4/build/*.wasm packages/mpeg4/dist/modules/build/ 2>/dev/null || true
+cp packages/mpeg4/build/*.wasm packages/mpeg4/dist/modules/src/ 2>/dev/null || true
 cp packages/eac3/build/*.wasm packages/eac3/dist/modules/build/ 2>/dev/null || true
+cp packages/eac3/build/*.wasm packages/eac3/dist/modules/src/ 2>/dev/null || true
 
 # So that the resulting files use valid ESM imports with file extension. This only runs for the core Mediabunny as only
 # it ships the individual files to npm (for tree shaking, because it's large)
