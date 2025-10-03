@@ -8,10 +8,10 @@
 
 import { CustomAudioDecoder, CustomAudioEncoder, AudioCodec, EncodedPacket, AudioSample, registerDecoder, registerEncoder } from 'mediabunny';
 import type { DecoderCommand, EncoderCommand, DecoderResponseData, EncoderResponseData, WorkerResponse } from './shared';
-import decodeWorkerUrl from './decode.worker?url';
-import encodeWorkerUrl from './encode.worker?url';
 
-const createWorker = (url: string): Worker => {
+const createWorker = (workerPath: string): Worker => {
+	// @ts-ignore - import.meta may not be available in all envs
+	const url = new URL(workerPath, import.meta.url).href;
 	return new Worker(url, { type: 'module' });
 };
 
@@ -31,7 +31,7 @@ class Eac3Decoder extends CustomAudioDecoder {
 	}
 
 	async init() {
-		this.worker = createWorker(decodeWorkerUrl);
+		this.worker = createWorker('./decode.worker.js');
 
 		const onMessage = (event: MessageEvent<WorkerResponse>) => {
 			const data = event.data;
@@ -127,7 +127,7 @@ class Eac3Encoder extends CustomAudioEncoder {
 	}
 
 	async init() {
-		this.worker = createWorker(encodeWorkerUrl);
+		this.worker = createWorker('./encode.worker.js');
 
 		const onMessage = (event: MessageEvent<WorkerResponse>) => {
 			const data = event.data;

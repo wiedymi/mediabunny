@@ -8,10 +8,10 @@
 
 import { CustomVideoDecoder, CustomVideoEncoder, VideoCodec, EncodedPacket, VideoSample, registerDecoder, registerEncoder } from 'mediabunny';
 import type { WorkerCommand, WorkerResponse, WorkerResponseData } from './shared';
-import decodeWorkerUrl from './decode.worker?url';
-import encodeWorkerUrl from './encode.worker?url';
 
-const createWorker = (url: string): Worker => {
+const createWorker = (workerPath: string): Worker => {
+	// @ts-ignore - import.meta may not be available in all envs
+	const url = new URL(workerPath, import.meta.url).href;
 	return new Worker(url, { type: 'module' });
 };
 
@@ -28,7 +28,7 @@ class Mpeg4Decoder extends CustomVideoDecoder {
 	}
 
 	async init() {
-		this.worker = createWorker(decodeWorkerUrl);
+		this.worker = createWorker('./decode.worker.js');
 
 		const onMessage = (event: MessageEvent<WorkerResponse>) => {
 			const data = event.data;
@@ -124,7 +124,7 @@ class Mpeg4Encoder extends CustomVideoEncoder {
 	}
 
 	async init() {
-		this.worker = createWorker(encodeWorkerUrl);
+		this.worker = createWorker('./encode.worker.js');
 
 		const onMessage = (event: MessageEvent<{ id: number; success: boolean; data: { encodedData: ArrayBuffer } | { closed: true } | null; error?: Error }>) => {
 			const data = event.data;
