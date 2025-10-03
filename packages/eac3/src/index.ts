@@ -7,7 +7,7 @@
  */
 
 import { CustomAudioDecoder, CustomAudioEncoder, AudioCodec, EncodedPacket, AudioSample, registerDecoder, registerEncoder } from 'mediabunny';
-import type { DecoderCommand, EncoderCommand, DecoderResponseData, EncoderResponseData, WorkerResponse } from './shared';
+import type { DecoderCommand, EncoderCommand, DecoderResponseData, EncoderResponseData, WorkerResponse } from './shared.js';
 
 const createWorker = (workerPath: string): Worker => {
 	// @ts-ignore - import.meta may not be available in all envs
@@ -15,8 +15,8 @@ const createWorker = (workerPath: string): Worker => {
 	return new Worker(url, { type: 'module' });
 };
 
-const AV_CODEC_ID_AC3 = 0x15003;
-const AV_CODEC_ID_EAC3 = 0x15028;
+export const AV_CODEC_ID_AC3 = 0x15003;
+export const AV_CODEC_ID_EAC3 = 0x15028;
 
 class Eac3Decoder extends CustomAudioDecoder {
 	private worker: Worker | null = null;

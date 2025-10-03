@@ -7,7 +7,7 @@
  */
 
 import { CustomVideoDecoder, CustomVideoEncoder, VideoCodec, EncodedPacket, VideoSample, registerDecoder, registerEncoder } from 'mediabunny';
-import type { WorkerCommand, WorkerResponse, WorkerResponseData } from './shared';
+import type { WorkerCommand, WorkerResponse, WorkerResponseData } from './shared.js';
 
 const createWorker = (workerPath: string): Worker => {
 	// @ts-ignore - import.meta may not be available in all envs
