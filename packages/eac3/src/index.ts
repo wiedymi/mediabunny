@@ -7,7 +7,7 @@
  */
 
 import { CustomAudioDecoder, CustomAudioEncoder, AudioCodec, EncodedPacket, AudioSample, registerDecoder, registerEncoder } from 'mediabunny';
-import type { DecoderCommand, EncoderCommand, DecoderResponseData, EncoderResponseData, WorkerResponse } from './shared';
+import type { DecoderCommand, EncoderCommand, DecoderResponseData, EncoderResponseData, WorkerResponse } from './shared.js';
 
 const createWorker = (workerPath: string): Worker => {
 	// @ts-ignore - import.meta may not be available in all envs

@@ -1,5 +1,6 @@
 {
   "name": "@mediabunny/mpeg4",
+  "type": "module",
   "author": "Vanilagy and contributors",
   "contributors": [
     "Wiedy Mi <https://github.com/wiedymi>"
