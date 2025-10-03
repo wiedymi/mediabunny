@@ -188,6 +188,7 @@ export {
 	ConversionOptions,
 	ConversionVideoOptions,
 	ConversionAudioOptions,
+	ConversionSubtitleOptions,
 	DiscardedTrack,
 } from './conversion';
 export {
