@@ -16,7 +16,22 @@ let cachedModule: ExtendedEmscriptenModule | null = null;
 
 export async function getXvidModule(): Promise<ExtendedEmscriptenModule> {
 	if (!cachedModule) {
-		cachedModule = (await createModule()) as ExtendedEmscriptenModule;
+		cachedModule = (await createModule({
+			locateFile: (path: string) => {
+				if (path.endsWith('.wasm')) {
+					// For bundles, WASM is in the same directory
+					// For modules, use relative path
+					try {
+						// @ts-ignore - import.meta may not be available in all envs
+						return new URL('xvid.wasm', import.meta.url).href;
+					} catch {
+						// Fallback for non-ESM environments
+						return path;
+					}
+				}
+				return path;
+			},
+		})) as ExtendedEmscriptenModule;
 	}
 	return cachedModule;
 }
