@@ -6,6 +6,8 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
+import type { SubtitleCodec } from './codec.js';
+
 /**
  * Represents a single subtitle cue with timing and text.
  * @group Media sources
@@ -47,7 +49,7 @@ export type SubtitleMetadata = {
 };
 
 type SubtitleParserOptions = {
-	codec: 'webvtt' | 'srt' | 'ass' | 'ssa';
+	codec: SubtitleCodec;
 	output: (cue: SubtitleCue, metadata: SubtitleMetadata) => unknown;
 };
 
