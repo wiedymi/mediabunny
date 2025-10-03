@@ -69,6 +69,10 @@ export class SubtitleParser {
 			this.parseSrt(text);
 		} else if (this.options.codec === 'ass' || this.options.codec === 'ssa') {
 			this.parseAss(text);
+		} else if (this.options.codec === 'tx3g') {
+			this.parseTx3g(text);
+		} else if (this.options.codec === 'ttml') {
+			this.parseTtml(text);
 		} else {
 			this.parseWebVTT(text);
 		}
@@ -159,6 +163,43 @@ export class SubtitleParser {
 				};
 				this.preambleEmitted = true;
 			}
+
+			this.options.output(cue, meta);
+		}
+	}
+
+	private parseTx3g(text: string) {
+		// tx3g (3GPP Timed Text) samples are usually already plain text
+		// For now, treat as plain text cue - timing comes from container
+		const meta: SubtitleMetadata = { config: { description: '' } };
+		const cue: SubtitleCue = {
+			timestamp: 0,
+			duration: 0,
+			text: text.trim(),
+		};
+		this.options.output(cue, meta);
+	}
+
+	private parseTtml(text: string) {
+		// Basic TTML parsing - extract text content from <p> elements
+		// TODO: Full TTML/IMSC parser with styling support
+		const pRegex = /<p[^>]*>(.*?)<\/p>/gs;
+		const matches = [...text.matchAll(pRegex)];
+
+		for (let i = 0; i < matches.length; i++) {
+			const match = matches[i]!;
+			const content = match[1]?.replace(/<[^>]+>/g, '') || ''; // Strip inner tags
+
+			const meta: SubtitleMetadata = {};
+			if (i === 0) {
+				meta.config = { description: '' };
+			}
+
+			const cue: SubtitleCue = {
+				timestamp: 0,
+				duration: 0,
+				text: content.trim(),
+			};
 
 			this.options.output(cue, meta);
 		}
