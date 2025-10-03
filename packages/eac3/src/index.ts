@@ -119,7 +119,7 @@ class Eac3Encoder extends CustomAudioEncoder {
 	private currentTimestamp = 0;
 	private chunkMetadata: EncodedAudioChunkMetadata = {};
 
-	static override supports(codec: AudioCodec, config: AudioDecoderConfig): boolean {
+	static override supports(codec: AudioCodec, config: AudioEncoderConfig): boolean {
 		return codec === 'eac3' || codec === 'ac3';
 	}
 
