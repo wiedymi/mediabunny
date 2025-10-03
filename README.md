@@ -1,3 +1,6 @@
+> [!NOTE]
+> I'm on vacation until 18 October, so expect slow or no replies to issues during that time. 🏖️
+
 # Mediabunny - JavaScript media toolkit
 
 [![](https://img.shields.io/npm/v/mediabunny)](https://www.npmjs.com/package/mediabunny)
@@ -16,31 +19,39 @@ Mediabunny is a JavaScript library for reading, writing, and converting media fi
 ### Gold sponsors
 
 <div align="center">
-  <a href="https://remotion.dev/" target="_blank">
+  <a href="https://remotion.dev/" target="_blank" rel="sponsored">
     <img src="./docs/public/sponsors/remotion.png" width="60" height="60" alt="Remotion">
   </a>
   &nbsp;&nbsp;&nbsp;&nbsp;
-  <a href="https://www.gling.ai/" target="_blank">
+  <a href="https://www.gling.ai/" target="_blank" rel="sponsored">
     <img src="./docs/public/sponsors/gling.svg" width="60" height="60" alt="Gling AI">
   </a>
   &nbsp;&nbsp;&nbsp;&nbsp;
-  <a href="https://diffusion.studio/" target="_blank">
+  <a href="https://diffusion.studio/" target="_blank" rel="sponsored">
     <img src="./docs/public/sponsors/diffusionstudio.png" width="60" height="60" alt="Diffusion Studio">
   </a>
   &nbsp;&nbsp;&nbsp;&nbsp;
-  <a href="https://kino.ai/" target="_blank">
+  <a href="https://kino.ai/" target="_blank" rel="sponsored">
     <img src="./docs/public/sponsors/kino.jpg" width="60" height="60" alt="Kino">
+  </a>
+</div>
+
+### Silver sponsors
+
+<div align="center">
+  <a href="https://pqina.nl/pintura/" target="_blank" rel="sponsored">
+    <img src="./docs/public/sponsors/pintura-labs.png" width="50" height="50" alt="Pintura Labs">
   </a>
 </div>
 
 ### Bronze sponsors
 
 <div align="center">
-  <a href="https://www.reactvideoeditor.com/" target="_blank">
+  <a href="https://www.reactvideoeditor.com/" target="_blank" rel="sponsored">
     <img src="./docs/public/sponsors/rve.svg" width="40" height="40" alt="React Video Editor">
   </a>
   &nbsp;&nbsp;&nbsp;&nbsp;
-  <a href="https://www.mux.com/" target="_blank">
+  <a href="https://www.mux.com/" target="_blank" rel="sponsored">
     <img src="./docs/public/sponsors/mux.jpg" width="40" height="40" alt="Mux">
   </a>
 </div>
