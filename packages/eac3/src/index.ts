@@ -8,8 +8,11 @@
 
 import { CustomAudioDecoder, CustomAudioEncoder, AudioCodec, EncodedPacket, AudioSample, registerDecoder, registerEncoder } from 'mediabunny';
 import type { DecoderCommand, EncoderCommand, DecoderResponseData, EncoderResponseData, WorkerResponse } from './shared.js';
-import { createWorker } from '../../../shared/worker-loader.js';
 import { setEac3WasmUrl } from './eac3-loader.js';
+// @ts-expect-error - esbuild inline worker plugin handles this
+import createDecodeWorker from './decode.worker.ts';
+// @ts-expect-error - esbuild inline worker plugin handles this
+import createEncodeWorker from './encode.worker.ts';
 
 class Eac3Decoder extends CustomAudioDecoder {
 	private worker: Worker | null = null;
@@ -24,7 +27,7 @@ class Eac3Decoder extends CustomAudioDecoder {
 	}
 
 	async init() {
-		this.worker = createWorker('./decode.worker.js');
+		this.worker = (await createDecodeWorker()) as Worker;
 
 		const onMessage = (event: MessageEvent<WorkerResponse>) => {
 			const data = event.data;
@@ -120,7 +123,7 @@ class Eac3Encoder extends CustomAudioEncoder {
 	}
 
 	async init() {
-		this.worker = createWorker('./encode.worker.js');
+		this.worker = (await createEncodeWorker()) as Worker;
 
 		const onMessage = (event: MessageEvent<WorkerResponse>) => {
 			const data = event.data;

@@ -9,7 +9,8 @@
 import { CustomAudioEncoder, AudioCodec, AudioSample, EncodedPacket, registerEncoder } from 'mediabunny';
 import { FRAME_HEADER_SIZE, readFrameHeader, SAMPLING_RATES } from '../../../shared/mp3-misc';
 import type { WorkerCommand, WorkerResponse, WorkerResponseData } from './shared';
-import { createWorker } from '../../../shared/worker-loader.js';
+// @ts-expect-error - esbuild inline worker plugin handles this
+import createWorker from './encode.worker.ts';
 
 class Mp3Encoder extends CustomAudioEncoder {
 	private worker: Worker | null = null;
@@ -33,7 +34,7 @@ class Mp3Encoder extends CustomAudioEncoder {
 	}
 
 	async init() {
-		this.worker = createWorker('./encode.worker.js'); // The actual encoding takes place in this worker
+		this.worker = (await createWorker()) as Worker; // The actual encoding takes place in this worker
 
 		const onMessage = (data: WorkerResponse) => {
 			const pending = this.pendingMessages.get(data.id);

@@ -95,10 +95,24 @@ const mp3EncoderVariants = await createVariants(
 			PluginExternalGlobal.externalGlobalPlugin({
 				mediabunny: 'Mediabunny',
 			}),
+			inlineWorkerPlugin({
+				define: {
+					'import.meta.url': '""',
+				},
+				legalComments: 'none',
+			}),
 		],
 	},
 	{
 		external: ['mediabunny'],
+		plugins: [
+			inlineWorkerPlugin({
+				define: {
+					'import.meta.url': '""',
+				},
+				legalComments: 'none',
+			}),
+		],
 	},
 );
 
@@ -112,10 +126,24 @@ const mpeg4Variants = await createVariants(
 			PluginExternalGlobal.externalGlobalPlugin({
 				mediabunny: 'Mediabunny',
 			}),
+			inlineWorkerPlugin({
+				define: {
+					'import.meta.url': '""',
+				},
+				legalComments: 'none',
+			}),
 		],
 	},
 	{
 		external: ['mediabunny'],
+		plugins: [
+			inlineWorkerPlugin({
+				define: {
+					'import.meta.url': '""',
+				},
+				legalComments: 'none',
+			}),
+		],
 	},
 );
 
@@ -129,59 +157,26 @@ const eac3Variants = await createVariants(
 			PluginExternalGlobal.externalGlobalPlugin({
 				mediabunny: 'Mediabunny',
 			}),
+			inlineWorkerPlugin({
+				define: {
+					'import.meta.url': '""',
+				},
+				legalComments: 'none',
+			}),
 		],
 	},
 	{
 		external: ['mediabunny'],
+		plugins: [
+			inlineWorkerPlugin({
+				define: {
+					'import.meta.url': '""',
+				},
+				legalComments: 'none',
+			}),
+		],
 	},
 );
-
-// Bundle worker files separately for ESM/CJS usage
-const workerBuildConfigs: esbuild.BuildOptions[] = [
-	// MP3-Encoder worker
-	{
-		entryPoints: ['packages/mp3-encoder/dist/modules/src/encode.worker.js'],
-		bundle: true,
-		format: 'esm',
-		platform: 'browser',
-		outfile: 'packages/mp3-encoder/dist/bundles/encode.worker.js',
-		logLevel: 'info',
-	},
-	// MPEG4 workers
-	{
-		entryPoints: ['packages/mpeg4/dist/modules/src/decode.worker.js'],
-		bundle: true,
-		format: 'esm',
-		platform: 'browser',
-		outfile: 'packages/mpeg4/dist/bundles/decode.worker.js',
-		logLevel: 'info',
-	},
-	{
-		entryPoints: ['packages/mpeg4/dist/modules/src/encode.worker.js'],
-		bundle: true,
-		format: 'esm',
-		platform: 'browser',
-		outfile: 'packages/mpeg4/dist/bundles/encode.worker.js',
-		logLevel: 'info',
-	},
-	// EAC3 workers
-	{
-		entryPoints: ['packages/eac3/dist/modules/src/decode.worker.js'],
-		bundle: true,
-		format: 'esm',
-		platform: 'browser',
-		outfile: 'packages/eac3/dist/bundles/decode.worker.js',
-		logLevel: 'info',
-	},
-	{
-		entryPoints: ['packages/eac3/dist/modules/src/encode.worker.js'],
-		bundle: true,
-		format: 'esm',
-		platform: 'browser',
-		outfile: 'packages/eac3/dist/bundles/encode.worker.js',
-		logLevel: 'info',
-	},
-];
 
 const contexts = [
 	...mediabunnyVariants,
@@ -193,15 +188,8 @@ const contexts = [
 if (process.argv[2] === '--watch') {
 	await Promise.all(contexts.map(ctx => ctx.watch()));
 } else {
-	// Build main bundles
 	for (const ctx of contexts) {
 		await ctx.rebuild();
 		await ctx.dispose();
-	}
-
-	// Build worker bundles (after TypeScript compilation)
-	console.log('Building worker bundles...');
-	for (const config of workerBuildConfigs) {
-		await esbuild.build(config);
 	}
 }

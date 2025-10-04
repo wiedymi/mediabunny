@@ -8,8 +8,11 @@
 
 import { CustomVideoDecoder, CustomVideoEncoder, VideoCodec, EncodedPacket, VideoSample, registerDecoder, registerEncoder } from 'mediabunny';
 import type { WorkerCommand, WorkerResponse, WorkerResponseData } from './shared.js';
-import { createWorker } from '../../../shared/worker-loader.js';
 import { setMpeg4WasmUrl } from './xvid-loader.js';
+// @ts-expect-error - esbuild inline worker plugin handles this
+import createDecodeWorker from './decode.worker.ts';
+// @ts-expect-error - esbuild inline worker plugin handles this
+import createEncodeWorker from './encode.worker.ts';
 
 class Mpeg4Decoder extends CustomVideoDecoder {
 	private worker: Worker | null = null;
@@ -24,7 +27,7 @@ class Mpeg4Decoder extends CustomVideoDecoder {
 	}
 
 	async init() {
-		this.worker = createWorker('./decode.worker.js');
+		this.worker = (await createDecodeWorker()) as Worker;
 
 		const onMessage = (event: MessageEvent<WorkerResponse>) => {
 			const data = event.data;
@@ -120,7 +123,7 @@ class Mpeg4Encoder extends CustomVideoEncoder {
 	}
 
 	async init() {
-		this.worker = createWorker('./encode.worker.js');
+		this.worker = (await createEncodeWorker()) as Worker;
 
 		const onMessage = (event: MessageEvent<{ id: number; success: boolean; data: { encodedData: ArrayBuffer } | { closed: true } | null; error?: Error }>) => {
 			const data = event.data;
