@@ -6,7 +6,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-import { getXvidModule, type ExtendedEmscriptenModule } from './xvid-loader.js';
+import { getXvidModule, type ExtendedEmscriptenModule, setMpeg4WasmUrl } from './xvid-loader.js';
 import type { WorkerCommand, WorkerResponse, WorkerResponseData } from './shared.js';
 
 type DecoderState = number;
@@ -31,9 +31,13 @@ let closeDecoder: (state: DecoderState) => void;
 let inputSlice: Slice | null = null;
 let outputSlice: Slice | null = null;
 
-const init = async (w: number, h: number) => {
+const init = async (w: number, h: number, wasmUrl?: string) => {
 	width = w;
 	height = h;
+
+	if (wasmUrl) {
+		setMpeg4WasmUrl(wasmUrl);
+	}
 
 	module = await getXvidModule();
 
@@ -139,7 +143,7 @@ const onMessage = async (data: { id: number; command: WorkerCommand }) => {
 		const { command } = data;
 
 		if (command.type === 'init') {
-			await init(command.data.width, command.data.height);
+			await init(command.data.width, command.data.height, command.data.wasmUrl);
 			responseData = null;
 		} else if (command.type === 'decode') {
 			responseData = decode(command.data.frameData);

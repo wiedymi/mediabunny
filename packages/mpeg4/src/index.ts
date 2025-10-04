@@ -8,7 +8,7 @@
 
 import { CustomVideoDecoder, CustomVideoEncoder, VideoCodec, EncodedPacket, VideoSample, registerDecoder, registerEncoder } from 'mediabunny';
 import type { WorkerCommand, WorkerResponse, WorkerResponseData } from './shared.js';
-import { setMpeg4WasmUrl } from './xvid-loader.js';
+import { setMpeg4WasmUrl, getCustomWasmUrl as getCustomMpeg4WasmUrl } from './xvid-loader.js';
 // @ts-expect-error - esbuild inline worker plugin handles this
 import createDecodeWorker from './decode.worker.ts';
 // @ts-expect-error - esbuild inline worker plugin handles this
@@ -49,6 +49,7 @@ class Mpeg4Decoder extends CustomVideoDecoder {
 			data: {
 				width: this.config.codedWidth!,
 				height: this.config.codedHeight!,
+				wasmUrl: getCustomMpeg4WasmUrl() ?? undefined,
 			},
 		});
 	}
@@ -151,6 +152,7 @@ class Mpeg4Encoder extends CustomVideoEncoder {
 				bitrate: this.config.bitrate ?? 2000000,
 				fpsNum,
 				fpsDen,
+				wasmUrl: getCustomMpeg4WasmUrl() ?? undefined,
 			},
 		});
 	}
@@ -202,7 +204,7 @@ class Mpeg4Encoder extends CustomVideoEncoder {
 	}
 
 	private sendCommand(
-		command: { type: 'init'; data: { width: number; height: number; bitrate: number; fpsNum: number; fpsDen: number } } | { type: 'encode'; data: { yuvData: ArrayBuffer; forceKeyframe: boolean } } | { type: 'close' },
+		command: { type: 'init'; data: { width: number; height: number; bitrate: number; fpsNum: number; fpsDen: number; wasmUrl?: string } } | { type: 'encode'; data: { yuvData: ArrayBuffer; forceKeyframe: boolean } } | { type: 'close' },
 		transferables?: Transferable[],
 	) {
 		return new Promise<{ encodedData: ArrayBuffer } | { closed: true } | null>((resolve, reject) => {

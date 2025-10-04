@@ -7,13 +7,13 @@
  */
 
 export type DecoderCommand =
-	| { type: 'init'; data: { sampleRate: number; channels: number; codec: 'eac3' | 'ac3' } }
+	| { type: 'init'; data: { sampleRate: number; channels: number; codec: 'eac3' | 'ac3'; wasmUrl?: string } }
 	| { type: 'decode'; data: { packetData: ArrayBuffer } }
 	| { type: 'flush' }
 	| { type: 'close' };
 
 export type EncoderCommand =
-	| { type: 'init'; data: { sampleRate: number; channels: number; bitrate: number; codec: 'eac3' | 'ac3' } }
+	| { type: 'init'; data: { sampleRate: number; channels: number; bitrate: number; codec: 'eac3' | 'ac3'; wasmUrl?: string } }
 	| { type: 'encode'; data: { pcmData: ArrayBuffer; numberOfFrames: number } }
 	| { type: 'flush' }
 	| { type: 'close' };

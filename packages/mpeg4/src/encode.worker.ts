@@ -6,7 +6,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-import { getXvidModule, type ExtendedEmscriptenModule } from './xvid-loader.js';
+import { getXvidModule, type ExtendedEmscriptenModule, setMpeg4WasmUrl } from './xvid-loader.js';
 
 type EncoderState = number;
 
@@ -28,9 +28,13 @@ let closeEncoder: (state: EncoderState) => void;
 let inputSlice: Slice | null = null;
 let outputSlice: Slice | null = null;
 
-const init = async (w: number, h: number, bitrate: number, fpsNum: number, fpsDen: number) => {
+const init = async (w: number, h: number, bitrate: number, fpsNum: number, fpsDen: number, wasmUrl?: string) => {
 	width = w;
 	height = h;
+
+	if (wasmUrl) {
+		setMpeg4WasmUrl(wasmUrl);
+	}
 
 	module = await getXvidModule();
 
@@ -96,7 +100,7 @@ const maybeGrowSlice = (slice: Slice | null, requiredSize: number) => {
 };
 
 type WorkerCommand =
-	| { type: 'init'; data: { width: number; height: number; bitrate: number; fpsNum: number; fpsDen: number } }
+	| { type: 'init'; data: { width: number; height: number; bitrate: number; fpsNum: number; fpsDen: number; wasmUrl?: string } }
 	| { type: 'encode'; data: { yuvData: ArrayBuffer; forceKeyframe: boolean } }
 	| { type: 'close' };
 
@@ -121,7 +125,7 @@ const onMessage = async (data: { id: number; command: WorkerCommand }) => {
 		const { command } = data;
 
 		if (command.type === 'init') {
-			await init(command.data.width, command.data.height, command.data.bitrate, command.data.fpsNum, command.data.fpsDen);
+			await init(command.data.width, command.data.height, command.data.bitrate, command.data.fpsNum, command.data.fpsDen, command.data.wasmUrl);
 			responseData = null;
 		} else if (command.type === 'encode') {
 			responseData = encode(command.data.yuvData, command.data.forceKeyframe);

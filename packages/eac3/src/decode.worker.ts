@@ -6,7 +6,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-import { getEac3Module, type ExtendedEmscriptenModule } from './eac3-loader.js';
+import { getEac3Module, type ExtendedEmscriptenModule, setEac3WasmUrl } from './eac3-loader.js';
 import type { DecoderCommand, DecoderResponseData, WorkerResponse } from './shared.js';
 
 type DecoderState = number;
@@ -35,9 +35,14 @@ let closeDecoder: (state: DecoderState) => void;
 let inputSlice: Slice | null = null;
 let outputSlice: Slice | null = null;
 
-const init = async (sr: number, ch: number, codec: 'eac3' | 'ac3') => {
+const init = async (sr: number, ch: number, codec: 'eac3' | 'ac3', wasmUrl?: string) => {
 	sampleRate = sr;
 	channels = ch;
+
+	// Set custom WASM URL if provided
+	if (wasmUrl) {
+		setEac3WasmUrl(wasmUrl);
+	}
 
 	module = await getEac3Module();
 
@@ -145,7 +150,7 @@ const onMessage = async (data: { id: number; command: DecoderCommand }) => {
 		const { command } = data;
 
 		if (command.type === 'init') {
-			await init(command.data.sampleRate, command.data.channels, command.data.codec);
+			await init(command.data.sampleRate, command.data.channels, command.data.codec, command.data.wasmUrl);
 			responseData = null;
 		} else if (command.type === 'decode') {
 			responseData = decode(command.data.packetData);

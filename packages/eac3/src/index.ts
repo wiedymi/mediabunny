@@ -8,7 +8,7 @@
 
 import { CustomAudioDecoder, CustomAudioEncoder, AudioCodec, EncodedPacket, AudioSample, registerDecoder, registerEncoder } from 'mediabunny';
 import type { DecoderCommand, EncoderCommand, DecoderResponseData, EncoderResponseData, WorkerResponse } from './shared.js';
-import { setEac3WasmUrl } from './eac3-loader.js';
+import { setEac3WasmUrl, getCustomWasmUrl as getCustomEac3WasmUrl } from './eac3-loader.js';
 // @ts-expect-error - esbuild inline worker plugin handles this
 import createDecodeWorker from './decode.worker.ts';
 // @ts-expect-error - esbuild inline worker plugin handles this
@@ -50,6 +50,7 @@ class Eac3Decoder extends CustomAudioDecoder {
 				sampleRate: this.config.sampleRate,
 				channels: this.config.numberOfChannels,
 				codec: this.codec as 'eac3' | 'ac3',
+				wasmUrl: getCustomEac3WasmUrl() ?? undefined,
 			},
 		});
 	}
@@ -149,6 +150,7 @@ class Eac3Encoder extends CustomAudioEncoder {
 				channels: this.config.numberOfChannels,
 				bitrate: this.config.bitrate,
 				codec: this.codec as 'eac3' | 'ac3',
+				wasmUrl: getCustomEac3WasmUrl() ?? undefined,
 			},
 		});
 

@@ -6,7 +6,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-import { getEac3Module, type ExtendedEmscriptenModule } from './eac3-loader.js';
+import { getEac3Module, type ExtendedEmscriptenModule, setEac3WasmUrl } from './eac3-loader.js';
 import type { EncoderCommand, EncoderResponseData, WorkerResponse } from './shared.js';
 
 type EncoderState = number;
@@ -32,7 +32,12 @@ let closeEncoder: (state: EncoderState) => void;
 let inputSlice: Slice | null = null;
 let outputSlice: Slice | null = null;
 
-const init = async (sampleRate: number, channels: number, bitrate: number, codec: 'eac3' | 'ac3') => {
+const init = async (sampleRate: number, channels: number, bitrate: number, codec: 'eac3' | 'ac3', wasmUrl?: string) => {
+	// Set custom WASM URL if provided
+	if (wasmUrl) {
+		setEac3WasmUrl(wasmUrl);
+	}
+
 	module = await getEac3Module();
 
 	initEncoder = module.cwrap('init_encoder', 'number', ['number', 'number', 'number', 'number']);
@@ -107,7 +112,7 @@ const onMessage = async (data: { id: number; command: EncoderCommand }) => {
 		const { command } = data;
 
 		if (command.type === 'init') {
-			await init(command.data.sampleRate, command.data.channels, command.data.bitrate, command.data.codec);
+			await init(command.data.sampleRate, command.data.channels, command.data.bitrate, command.data.codec, command.data.wasmUrl);
 			responseData = null;
 		} else if (command.type === 'encode') {
 			responseData = encode(command.data.pcmData, command.data.numberOfFrames);

@@ -7,7 +7,7 @@
  */
 
 export type WorkerCommand =
-	| { type: 'init'; data: { width: number; height: number } }
+	| { type: 'init'; data: { width: number; height: number; wasmUrl?: string } }
 	| { type: 'decode'; data: { frameData: ArrayBuffer } }
 	| { type: 'flush' }
 	| { type: 'close' };

@@ -30,6 +30,11 @@ export function setMpeg4WasmUrl(url: string): void {
 	customWasmUrl = url;
 }
 
+/** @internal */
+export function getCustomWasmUrl(): string | null {
+	return customWasmUrl;
+}
+
 function locateWasmFile(): string {
 	// User-provided custom URL - skip all auto-detection
 	if (customWasmUrl) {
