@@ -238,10 +238,12 @@ export { Mpeg4Encoder };
  * Registers the MPEG-4 Part 2 (Xvid) decoder, which Mediabunny will then use automatically when applicable.
  * Make sure to call this function before starting any decoding task.
  *
+ * @param wasmUrl - Optional custom URL for xvid.wasm file (e.g., CDN URL)
  * @group \@mediabunny/mpeg4
  * @public
  */
-export const registerMpeg4Decoder = () => {
+export const registerMpeg4Decoder = (wasmUrl?: string) => {
+	if (wasmUrl) setMpeg4WasmUrl(wasmUrl);
 	registerDecoder(Mpeg4Decoder);
 };
 
@@ -249,10 +251,12 @@ export const registerMpeg4Decoder = () => {
  * Registers the MPEG-4 Part 2 (Xvid) encoder, which Mediabunny will then use automatically when applicable.
  * Make sure to call this function before starting any encoding task.
  *
+ * @param wasmUrl - Optional custom URL for xvid.wasm file (e.g., CDN URL)
  * @group \@mediabunny/mpeg4
  * @public
  */
-export const registerMpeg4Encoder = () => {
+export const registerMpeg4Encoder = (wasmUrl?: string) => {
+	if (wasmUrl) setMpeg4WasmUrl(wasmUrl);
 	registerEncoder(Mpeg4Encoder);
 };
 
