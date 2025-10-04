@@ -31,12 +31,12 @@ export function setMpeg4WasmUrl(url: string): void {
 }
 
 function locateWasmFile(): string {
-	// User-provided custom URL takes highest priority
+	// User-provided custom URL - skip all auto-detection
 	if (customWasmUrl) {
 		return customWasmUrl;
 	}
 
-	// Browser with ESM support
+	// Auto-detect: Browser with ESM support
 	if (typeof document !== 'undefined' && typeof URL !== 'undefined') {
 		try {
 			if (typeof import.meta !== 'undefined' && import.meta.url) {
@@ -45,7 +45,7 @@ function locateWasmFile(): string {
 		} catch {}
 	}
 
-	// Node.js environment
+	// Auto-detect: Node.js environment
 	if (typeof process !== 'undefined' && process.versions?.node) {
 		try {
 			const path = typeof require !== 'undefined' ? require('path') : null;
@@ -71,7 +71,7 @@ function locateWasmFile(): string {
 		} catch {}
 	}
 
-	// Final fallback - just return the filename and hope it resolves
+	// Final fallback
 	return 'xvid.wasm';
 }
 
