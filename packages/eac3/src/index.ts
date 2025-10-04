@@ -8,12 +8,8 @@
 
 import { CustomAudioDecoder, CustomAudioEncoder, AudioCodec, EncodedPacket, AudioSample, registerDecoder, registerEncoder } from 'mediabunny';
 import type { DecoderCommand, EncoderCommand, DecoderResponseData, EncoderResponseData, WorkerResponse } from './shared.js';
-import decodeWorkerUrl from './decode.worker?url';
-import encodeWorkerUrl from './encode.worker?url';
-
-const createWorker = (url: string): Worker => {
-	return new Worker(url, { type: 'module' });
-};
+import { createWorker } from '../../../shared/worker-loader.js';
+import { setEac3WasmUrl } from './eac3-loader.js';
 
 class Eac3Decoder extends CustomAudioDecoder {
 	private worker: Worker | null = null;
@@ -28,7 +24,7 @@ class Eac3Decoder extends CustomAudioDecoder {
 	}
 
 	async init() {
-		this.worker = createWorker(decodeWorkerUrl);
+		this.worker = createWorker('./decode.worker.js');
 
 		const onMessage = (event: MessageEvent<WorkerResponse>) => {
 			const data = event.data;
@@ -124,7 +120,7 @@ class Eac3Encoder extends CustomAudioEncoder {
 	}
 
 	async init() {
-		this.worker = createWorker(encodeWorkerUrl);
+		this.worker = createWorker('./encode.worker.js');
 
 		const onMessage = (event: MessageEvent<WorkerResponse>) => {
 			const data = event.data;
@@ -240,10 +236,12 @@ class Eac3Encoder extends CustomAudioEncoder {
  * Registers the E-AC-3/AC-3 decoder, which Mediabunny will then use automatically when applicable.
  * Make sure to call this function before starting any decoding task.
  *
+ * @param wasmUrl - Optional custom URL for eac3.wasm file (e.g., CDN URL)
  * @group \@mediabunny/eac3
  * @public
  */
-export const registerEac3Decoder = () => {
+export const registerEac3Decoder = (wasmUrl?: string) => {
+	if (wasmUrl) setEac3WasmUrl(wasmUrl);
 	registerDecoder(Eac3Decoder);
 };
 
@@ -251,12 +249,16 @@ export const registerEac3Decoder = () => {
  * Registers the E-AC-3/AC-3 encoder, which Mediabunny will then use automatically when applicable.
  * Make sure to call this function before starting any encoding task.
  *
+ * @param wasmUrl - Optional custom URL for eac3.wasm file (e.g., CDN URL)
  * @group \@mediabunny/eac3
  * @public
  */
-export const registerEac3Encoder = () => {
+export const registerEac3Encoder = (wasmUrl?: string) => {
+	if (wasmUrl) setEac3WasmUrl(wasmUrl);
 	registerEncoder(Eac3Encoder);
 };
+
+export { setEac3WasmUrl } from './eac3-loader.js';
 
 function assert(x: unknown): asserts x {
 	if (!x) {

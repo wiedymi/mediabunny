@@ -8,12 +8,8 @@
 
 import { CustomVideoDecoder, CustomVideoEncoder, VideoCodec, EncodedPacket, VideoSample, registerDecoder, registerEncoder } from 'mediabunny';
 import type { WorkerCommand, WorkerResponse, WorkerResponseData } from './shared.js';
-import decodeWorkerUrl from './decode.worker?url';
-import encodeWorkerUrl from './encode.worker?url';
-
-const createWorker = (url: string): Worker => {
-	return new Worker(url, { type: 'module' });
-};
+import { createWorker } from '../../../shared/worker-loader.js';
+import { setMpeg4WasmUrl } from './xvid-loader.js';
 
 class Mpeg4Decoder extends CustomVideoDecoder {
 	private worker: Worker | null = null;
@@ -28,7 +24,7 @@ class Mpeg4Decoder extends CustomVideoDecoder {
 	}
 
 	async init() {
-		this.worker = createWorker(decodeWorkerUrl);
+		this.worker = createWorker('./decode.worker.js');
 
 		const onMessage = (event: MessageEvent<WorkerResponse>) => {
 			const data = event.data;
@@ -124,7 +120,7 @@ class Mpeg4Encoder extends CustomVideoEncoder {
 	}
 
 	async init() {
-		this.worker = createWorker(encodeWorkerUrl);
+		this.worker = createWorker('./encode.worker.js');
 
 		const onMessage = (event: MessageEvent<{ id: number; success: boolean; data: { encodedData: ArrayBuffer } | { closed: true } | null; error?: Error }>) => {
 			const data = event.data;
@@ -254,6 +250,8 @@ export const registerMpeg4Decoder = () => {
 export const registerMpeg4Encoder = () => {
 	registerEncoder(Mpeg4Encoder);
 };
+
+export { setMpeg4WasmUrl } from './xvid-loader.js';
 
 function assert(x: unknown): asserts x {
 	if (!x) {

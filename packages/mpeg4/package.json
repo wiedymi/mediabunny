@@ -19,9 +19,11 @@
     "README.md",
     "package.json",
     "LICENSE",
-    "dist/bundles",
-    "dist/modules/src/*.d.ts",
-    "src"
+    "dist/bundles/*.js",
+    "dist/bundles/*.mjs",
+    "dist/bundles/*.wasm",
+    "dist/mediabunny-mpeg4.d.ts",
+    "build/xvid.wasm"
   ],
   "sideEffects": false,
   "license": "MPL-2.0",

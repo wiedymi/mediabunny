@@ -19,7 +19,8 @@
 	},
 	"include": [
 		"**/*",
-		"../build/**/*"
+		"../build/**/*",
+		"../../../shared/**/*"
 	],
 	"references": [
 		{ "path": "../../../src" }

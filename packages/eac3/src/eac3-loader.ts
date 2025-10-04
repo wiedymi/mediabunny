@@ -14,20 +14,73 @@ export type ExtendedEmscriptenModule = EmscriptenModule & {
 
 let cachedModule: ExtendedEmscriptenModule | null = null;
 
+// Allow users to override the WASM URL (useful for CDN hosting)
+let customWasmUrl: string | null = null;
+
+/**
+ * Set custom URL for E-AC-3 WASM file.
+ * Useful for loading from CDN or custom hosting.
+ * Must be called before any decoder/encoder initialization.
+ *
+ * @param url - Direct URL to eac3.wasm file
+ * @group \@mediabunny/eac3
+ * @public
+ */
+export function setEac3WasmUrl(url: string): void {
+	customWasmUrl = url;
+}
+
+function locateWasmFile(): string {
+	// User-provided custom URL takes highest priority
+	if (customWasmUrl) {
+		return customWasmUrl;
+	}
+
+	// Browser with ESM support
+	if (typeof document !== 'undefined' && typeof URL !== 'undefined') {
+		try {
+			if (typeof import.meta !== 'undefined' && import.meta.url) {
+				return new URL('eac3.wasm', import.meta.url).href;
+			}
+		} catch {}
+	}
+
+	// Node.js environment
+	if (typeof process !== 'undefined' && process.versions?.node) {
+		try {
+			const path = typeof require !== 'undefined' ? require('path') : null;
+			const fs = typeof require !== 'undefined' ? require('fs') : null;
+
+			if (path && fs) {
+				// Try relative to bundle (for dist/bundles/)
+				if (typeof __dirname !== 'undefined') {
+					const bundlePath = path.join(__dirname, 'eac3.wasm');
+					if (fs.existsSync(bundlePath)) {
+						return bundlePath;
+					}
+				}
+
+				// Try using import.meta.url in ESM
+				if (typeof import.meta !== 'undefined' && import.meta.url) {
+					const url = typeof require !== 'undefined' ? require('url') : null;
+					if (url) {
+						return url.fileURLToPath(new URL('eac3.wasm', import.meta.url));
+					}
+				}
+			}
+		} catch {}
+	}
+
+	// Final fallback - just return the filename and hope it resolves
+	return 'eac3.wasm';
+}
+
 export async function getEac3Module(): Promise<ExtendedEmscriptenModule> {
 	if (!cachedModule) {
 		cachedModule = (await createModule({
 			locateFile: (path: string) => {
 				if (path.endsWith('.wasm')) {
-					// For bundles, WASM is in the same directory
-					// For modules, use relative path
-					try {
-						// @ts-ignore - import.meta may not be available in all envs
-						return new URL('eac3.wasm', import.meta.url).href;
-					} catch {
-						// Fallback for non-ESM environments
-						return path;
-					}
+					return locateWasmFile();
 				}
 				return path;
 			},

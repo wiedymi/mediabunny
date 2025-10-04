@@ -9,8 +9,7 @@
 import { CustomAudioEncoder, AudioCodec, AudioSample, EncodedPacket, registerEncoder } from 'mediabunny';
 import { FRAME_HEADER_SIZE, readFrameHeader, SAMPLING_RATES } from '../../../shared/mp3-misc';
 import type { WorkerCommand, WorkerResponse, WorkerResponseData } from './shared';
-// @ts-expect-error An esbuild plugin handles this, TypeScript doesn't need to understand
-import createWorker from './encode.worker';
+import { createWorker } from '../../../shared/worker-loader.js';
 
 class Mp3Encoder extends CustomAudioEncoder {
 	private worker: Worker | null = null;
@@ -34,8 +33,7 @@ class Mp3Encoder extends CustomAudioEncoder {
 	}
 
 	async init() {
-		// eslint-disable-next-line @typescript-eslint/no-unsafe-call
-		this.worker = (await createWorker()) as Worker; // The actual encoding takes place in this worker
+		this.worker = createWorker('./encode.worker.js'); // The actual encoding takes place in this worker
 
 		const onMessage = (data: WorkerResponse) => {
 			const pending = this.pendingMessages.get(data.id);

@@ -19,19 +19,12 @@ describe('Advanced ASS Features', () => {
 		const track = (await input.subtitleTracks)[0]!;
 		expect(track.codec).toBe('ass');
 
-		const codecPrivate = (track as any)._backing.getCodecPrivate();
-		console.log('\n=== CodecPrivate has Comment? ===', codecPrivate?.includes('Comment:'));
-
 		const cues = [];
 		for await (const cue of track.getCues()) {
 			cues.push(cue);
 		}
-		console.log('Total cues:', cues.length);
-		console.log('First cue text:', cues[0]?.text);
 
 		const assText = await track.exportToText('ass');
-
-		console.log('\n=== Exported has Comment? ===', assText.includes('Comment:'));
 
 		// Should preserve Comment line from CodecPrivate
 		expect(assText).toContain('Comment:');
@@ -107,8 +100,6 @@ describe('Advanced ASS Features', () => {
 				sections.push(line);
 			}
 		}
-
-		console.log('Section order:', sections);
 
 		// Expected order: [Script Info], [V4+ Styles], [Events], [Fonts], [Graphics]
 		expect(sections[0]).toBe('[Script Info]');
