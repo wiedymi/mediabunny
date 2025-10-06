@@ -653,40 +653,22 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
 		const startTime = formatAssTimestamp(cue.timestamp);
 		const endTime = formatAssTimestamp(cue.timestamp + cue.duration);
 
-		const hasReadOrder = fieldMap?.has('ReadOrder') ?? false;
-		const hasLayer = fieldMap?.has('Layer') ?? false;
-		const hasStart = fieldMap?.has('Start') ?? false;
-		const hasEnd = fieldMap?.has('End') ?? false;
-		let textIndex = fieldMap?.get('Text');
-
-		// MKV blocks don't include Start/End fields (in container), adjust textIndex
-		if (textIndex !== undefined && hasStart && hasEnd) {
-			textIndex = textIndex - 2;
-		}
-
 		let layer: string;
 		let restFields: string[];
 
-		if (textIndex !== undefined && textIndex >= 0) {
-			if (hasReadOrder && parts.length > textIndex) {
-				layer = parts[1] || '0';
-				restFields = parts.slice(2);
-			} else if (hasLayer && parts.length > textIndex) {
-				layer = parts[0] || '0';
-				restFields = parts.slice(1);
-			} else {
-				return `${prefix} 0,${startTime},${endTime},Default,,0,0,0,,${cue.text}`;
-			}
+		// Detect ReadOrder format from actual block data first
+		// MKV blocks: ReadOrder,Layer,Style,... (9+ fields, first two numeric) OR Layer,Style,... (8+ fields, first numeric)
+		const blockHasReadOrder = parts.length >= 9 && !isNaN(parseInt(parts[0]!)) && !isNaN(parseInt(parts[1]!));
+		const blockHasLayer = parts.length >= 8 && !isNaN(parseInt(parts[0]!));
+
+		if (blockHasReadOrder) {
+			layer = parts[1] || '0';
+			restFields = parts.slice(2);
+		} else if (blockHasLayer) {
+			layer = parts[0] || '0';
+			restFields = parts.slice(1);
 		} else {
-			if (parts.length >= 9 && !isNaN(parseInt(parts[0]!)) && !isNaN(parseInt(parts[1]!))) {
-				layer = parts[1] || '0';
-				restFields = parts.slice(2);
-			} else if (parts.length >= 8 && !isNaN(parseInt(parts[0]!))) {
-				layer = parts[0] || '0';
-				restFields = parts.slice(1);
-			} else {
-				return `${prefix} 0,${startTime},${endTime},Default,,0,0,0,,${cue.text}`;
-			}
+			return `${prefix} 0,${startTime},${endTime},Default,,0,0,0,,${cue.text}`;
 		}
 
 		return `${prefix} ${layer},${startTime},${endTime},${restFields.join(',')}`;

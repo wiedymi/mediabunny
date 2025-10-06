@@ -455,6 +455,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
 		// Both should have proper timestamps
 		expect(dialogueLines[0]).toMatch(/Dialogue: 0,0:00:01\.00,0:00:03\.00/);
 		expect(dialogueLines[1]).toMatch(/Dialogue: 0,0:00:04\.00,0:00:06\.00/);
+
+		// Should not have extra field between End and Style
+		expect(dialogueLines[0]).toMatch(/Dialogue: 0,0:00:01\.00,0:00:03\.00,Default,,0,0,0,,/);
+		expect(dialogueLines[1]).toMatch(/Dialogue: 0,0:00:04\.00,0:00:06\.00,Default,,0,0,0,,/);
+		expect(dialogueLines[0]).not.toMatch(/End,\d+,Default/);
+		expect(dialogueLines[1]).not.toMatch(/End,\d+,Default/);
 	});
 
 	it('should not create extra commas when text is empty', async () => {
