@@ -679,10 +679,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
 			}
 		} else {
 			if (parts.length >= 9 && !isNaN(parseInt(parts[0]!)) && !isNaN(parseInt(parts[1]!))) {
-				layer = parts[1];
+				layer = parts[1] || '0';
 				restFields = parts.slice(2);
 			} else if (parts.length >= 8 && !isNaN(parseInt(parts[0]!))) {
-				layer = parts[0];
+				layer = parts[0] || '0';
 				restFields = parts.slice(1);
 			} else {
 				return `${prefix} 0,${startTime},${endTime},Default,,0,0,0,,${cue.text}`;
